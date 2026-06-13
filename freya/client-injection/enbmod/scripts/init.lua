@@ -1,3 +1,7 @@
+-- SPDX-License-Identifier: MIT
+-- Part of the Earth & Beyond emulator preservation project -- Freya (MIT).
+-- License: LICENSES/Freya
+--
 -- init.lua -- loaded by enbmod.dll on startup, hot-reloaded when this file changes.
 --
 -- The C++ core gives you:
@@ -91,20 +95,6 @@ end)
 --   enb.draw.rrect_grad(x, y, w, h, radius, rgbTop, rgbBottom [, alpha])
 --   enb.draw.image(path, x, y [, w, h [, alpha0_255]])   -- PNG/TGA/BMP/JPG via stb_image
 -- ---------------------------------------------------------------------------
--- Small dev status box (top-left). Comment out for a clean HUD; it proves the
--- overlay path is alive before calibration.
-enb.on_tick(function()
-    enb.draw.rrect(20, 20, 220, 56, 8, 0x00FF88, 200, false)
-    enb.draw.text(28, 26, "enbmod overlay", 0x00FF88)
-    local me = enb.self()
-    if me.base ~= 0 then
-        enb.draw.text(28, 46, ("hull %s  shield %s  energy %s"):format(
-            tostring(me.hull), tostring(me.shield), tostring(me.energy)), 0xFFFFFF)
-    else
-        enb.draw.text(28, 46, "self() not calibrated", 0xFF5555)
-    end
-end)
-
 -- ---------------------------------------------------------------------------
 -- ACTIONS -- triggering things.
 --
@@ -130,15 +120,36 @@ end
 -- correct (this in ECX, args ordered, ESP balanced); the *arguments* are your responsibility.
 
 -- ---------------------------------------------------------------------------
--- XP bars HUD: draws "<level> <pct>%" to the LEFT of the Combat/Exploration/
--- Trade bars in the bottom-left. Shows "L? ?%" until offsets are calibrated.
+-- FREYA HUD (Phase AS): the Earth & Beyond cockpit-glass HUD. Three pieces, all
+-- visibility-gated on enb.state() (space + station only; hotbar hidden in
+-- station). See freya_hud.lua (shared toolkit), xp_overlay.lua (discipline
+-- card, bottom-left) and freya_ui.lua (player card + action hotbar).
 -- ---------------------------------------------------------------------------
 require("xp_overlay")
+require("freya_ui")
 
 -- ---------------------------------------------------------------------------
--- FREYA UI (Phase AS): replacement bottom-center HUD -- covers the native six
--- circular hotkey buttons + the warp control + native stat bars, draws a
--- 12-button action bar (1..9 0 - =) and three stacked stat bars, and swallows
--- mouse input over the covered region. See freya_ui.lua.
+-- HIDE THE NATIVE WIDGETS WE REPLACE (opt-in; OFF by default).
+--
+-- The glass cards are translucent, so the native in-space stat bars / xp bars /
+-- skill buttons show THROUGH them unless we suppress the routines that draw
+-- them. enb.patch_ret(addr [, pop]) overwrites a function entry with a `ret` so
+-- it returns immediately (pop = callee stack-cleanup bytes: 0 for caller-clean,
+-- the exact arg-byte count for stdcall/thiscall/fastcall -- a wrong pop corrupts
+-- the stack). The candidate entry points are in the address book (enb.addr.*):
+--
+--   enb.addr.VitalsBars  -- reactor/shield/hull bars   (player-card replaces)
+--   enb.addr.EnergyBar   -- the per-frame vitals updater/render
+--   enb.addr.XpBars      -- combat/trade/explore xp bars (disc card replaces)
+--   enb.addr.SkillButton -- the hotbar skill gadget buttons (hotbar replaces)
+--
+-- This is left OFF because it CANNOT be validated from the headless harness:
+-- the correct pop per function, and that an early `ret` hides the widget without
+-- breaking gameplay, are only knowable against the real client. Each is tracked
+-- in plans/29-client-verification.md (CV-AS-HIDE-*). Once the owner confirms an
+-- (addr, pop) there, uncomment the matching line:
+--
+-- enb.patch_ret(enb.addr.VitalsBars)        -- CV-AS-HIDE-VITALS
+-- enb.patch_ret(enb.addr.XpBars)            -- CV-AS-HIDE-XP
+-- enb.patch_ret(enb.addr.SkillButton)       -- CV-AS-HIDE-SKILL
 -- ---------------------------------------------------------------------------
-require("freya_ui")

@@ -12,6 +12,7 @@
 --
 -- PROTOCOL (one command per stdin line; whitespace-separated ints):
 --   screen <w> <h>            set enb.screen() (defaults to the bg size)
+--   state <name>              set enb.state() (space/station/login/charsel/load)
 --   self cal | self uncal     toggle a demo player object (stat/xp values)
 --   input <msg> <wp> <lp>     dispatch one Win32 message -> on_input handler;
 --                             replies one line:  SWALLOW <0|1>
@@ -35,6 +36,7 @@ require("freya_ui")
 -- viewable without a live game. Values mirror screenshots_spec scenario 02.
 local DEMO = {
     base = 0x05000000,
+    name = "JETHREE",
     hull = 750, hull_max = 1000,
     shield = 400, shield_max = 1000,
     energy = 900, energy_max = 1000,
@@ -64,6 +66,10 @@ for line in io.lines() do
         local w, h = rest:match("^(%d+)%s+(%d+)")
         if w then mock.set_screen(tonumber(w), tonumber(h)); reply("OK")
         else reply("ERR bad screen args") end
+    elseif cmd == "state" then
+        local name = rest:match("^(%S+)")
+        if name then mock.set_game_state(name); reply("OK")
+        else reply("ERR bad state arg") end
     elseif cmd == "self" then
         if rest:match("cal") and not rest:match("uncal") then mock.set_self(DEMO)
         else mock.set_self{ base = 0 } end

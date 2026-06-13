@@ -101,12 +101,22 @@ per-vertex gradient quads + rounded corners from triangle fans, not PNGs.
   ~165px wide, y~935-975, ~20px apart). Anchor from `enb.screen()` bottom
   instead of hardcoded 1280x768-era constants.
 
-### AS-6 Tier B research: true native-widget hide  `[ ]`
+### AS-6 Tier B: true native-widget hide  `[~]`  (mechanism shipped, OFF by default)
 
-- `[ ]` Locate the client UI widget tree / per-widget visibility from the
-  static anchors (XpBars 0x0058c450, LevelText 0x00548d60) + calib scans.
-- `[ ]` `enb.ui.hide(kind)` once a safe flag is proven. Replaces the cover
-  panels; until then Tier A stands.
+- `[x]` Suppression primitive: `enb.patch_ret(addr [,pop])` (lua_api.cpp
+  `l_patch_ret`) overwrites a function entry with `ret` (0xC3, or 0xC2 imm16
+  for callee-cleanup) under VirtualProtect + FlushInstructionCache. Refuses
+  addrs below the image base; logs each patch. Mock records calls headless.
+- `[x]` Candidate entry points documented in init.lua's (commented, OFF) HIDE
+  block off the address book: VitalsBars/EnergyBar, XpBars, SkillButton.
+- `[!]` Cannot validate headless: the correct `pop` per function and "an early
+  ret hides the widget without breaking gameplay" are real-client-only.
+  Tracked as **CV-AS-HIDE-VITALS / -XP / -SKILL** in plans/29; owner enables
+  one line at a time. Until confirmed, the native widgets show through the
+  translucent glass (honest: NOT hidden yet).
+- Note: the earlier "Tier A cover panel" approach is GONE -- the design is
+  translucent glass, so an opaque cover would defeat the look. Suppression
+  (patch_ret) is the only path to a clean result, and it is gated on CV.
 
 ### AS-7 Build + docs  `[x]`
 
@@ -137,6 +147,43 @@ screenshots.
   Fixed: clamp to x=2, label overlaps the bar's left edge
   (value-on-the-bar style). Owner may veto placement at the CV pass.
 
+### AS-9 Port the "Earth & Beyond HUD" design  `[x]`  (added 2026-06-12, owner ask)
+
+Owner: "implement this as the ui overlay" (the Claude `Earth & Beyond HUD.html`
+design) -- "only show it when in space. not login screen, not character select,
+not load screen. show in station but hide skill buttons at bottom. Draw mouse
+pointer on top not under" + "implement this fully ... hide the ui elements we
+replaced ... once your ui matches claude design and you confirm accuracy vs
+screenshots commit and push".
+
+- `[x]` `scripts/freya_hud.lua` -- shared toolkit: the design palette (hull
+  #e8453c / shield #3d8bff / reactor #37d27a / combat teal / explore blue /
+  trade purple), the `H.glass()` panel (vertical-gradient body + gloss sheen +
+  hairline border + cyan corner ticks), outlined text (`H.otext`: 4 dark offset
+  copies + 1 fill, since the overlay font is single flat RGB), and `H.vis()`
+  visibility gating.
+- `[x]` `freya_ui.lua` rewritten to the design PlayerCard (name + LV header,
+  three vitals as track+vertical-gradient fill with cur/max inside + pct) and a
+  glass hotbar (12 rounded slots, gloss, cyan armed glow) anchored above the
+  card.
+- `[x]` `xp_overlay.lua` rewritten to the design DiscCard (titleless bottom-left
+  glass, three rows: colored C/E/T letter + xp bar + "LV n" badge).
+- `[x]` Visibility gating (AS-6's `enb.state()`): space = cards+hotbar, station
+  = cards only, login/charsel/load = nothing. CV-AS-STATE.
+- `[x]` Cursor on top: `enb.cursor(on)` draws a procedural arrow after the
+  display list in the Present hook; freya_ui toggles it with HUD visibility.
+  CV-AS-CURSOR.
+- `[x]` Specs rewritten to the new geometry/colors/gating (freya_ui 20,
+  xp_overlay 8, init 4, screenshots 6 incl. station + login). Headless
+  previewer (`preview_server.py`) gained a space/station/login state selector.
+- `[x]` Visual check vs design: `build/tests/shots/0{1,2,5}_*.png` rendered and
+  compared -- player card, discipline card, glass hotbar, station-drops-hotbar
+  all match the design intent. Fidelity gaps (documented in freya_hud.lua):
+  ONE ~14px overlay font (no per-element sizing / Michroma), no real backdrop
+  blur, single-stop shape alpha.
+- Font + draw-order + the native-widget hide still need the real client
+  (CV-AS-STATE / -CURSOR / -HIDE-*).
+
 ## Status
 
 | Item | State |
@@ -146,6 +193,7 @@ screenshots.
 | AS-3 calibration | partial -- scaffolding done (`scripts/autocalib.lua` find/probe/save, `scripts/.gitignore` for `calib_data.lua`, init.lua loads it via pcall). Live offset VALUES still need owner in-game session |
 | AS-4 freya_ui.lua | done -- `scripts/freya_ui.lua`: cover panel + swallow, 12-button action bar (1..9 0 - =) with click->`enb.tap`/keypress-lit, 3 stacked stat bars (gray until AS-3) |
 | AS-5 xp_overlay fix | done -- `scripts/xp_overlay.lua` rewritten: labels right-aligned LEFT of each bar, screen-bottom-anchored via `enb.screen()` |
-| AS-6 Tier B hide | research, later |
+| AS-6 Tier B hide | mechanism shipped, OFF by default -- `enb.patch_ret(addr,pop)` + commented init.lua HIDE block; correctness gated on CV-AS-HIDE-VITALS/-XP/-SKILL (real-client-only) |
 | AS-7 build+docs | done -- `make clean && make` clean (zero -Wall -Wextra warnings); README API table + AS section updated |
-| AS-8 headless test suite | done -- 41 tests green + 4 rendered screenshot scenarios; caught + fixed the xp_overlay off-screen label bug. `make test` |
+| AS-8 headless test suite | done -- 43 tests green + 5 rendered screenshot scenarios (incl. station); `make test` |
+| AS-9 design port | done -- freya_hud/freya_ui/xp_overlay ported to the `Earth & Beyond HUD.html` glass design; state-gated (space/station/login); cursor-on-top; specs + screenshots rewritten. Real-client checks: CV-AS-STATE/-CURSOR/-HIDE-* |

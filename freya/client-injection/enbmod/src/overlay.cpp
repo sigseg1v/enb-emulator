@@ -59,6 +59,11 @@ static IDirect3DTexture8* g_white = nullptr;     // 1x1 white: untextured prims
 // without the device pointer changing). Read from the tick thread via screen_size.
 static std::atomic<int> g_screen_w{0}, g_screen_h{0};
 
+// Our own pointer, drawn on top of the display list. Toggled from Lua
+// (set_cursor); g_cursor_hwnd maps the screen-space cursor into client coords.
+static std::atomic<bool> g_cursor_on{false};
+static std::atomic<void*> g_cursor_hwnd{nullptr};
+
 // ---- font atlas (chars 32..126, GDI-rendered once into a managed texture) ----
 struct Glyph { float u0, v0, u1, v1; int w, h; };
 static IDirect3DTexture8* g_fontTex = nullptr;
@@ -348,6 +353,37 @@ static void draw_rrect_cmd(IDirect3DDevice8* dev, const Cmd& c) {
     }
 }
 
+// Classic arrow pointer, hotspot at the tip. The outline polygon is star-shaped
+// from the tip, so a triangle fan from vertex 0 fills it; a closed line strip in
+// dark ink outlines it. Drawn last in the scene so nothing overdraws it.
+static void draw_cursor(IDirect3DDevice8* dev) {
+    void* hw = g_cursor_hwnd.load(std::memory_order_relaxed);
+    POINT p;
+    if (!GetCursorPos(&p)) return;
+    if (hw) ScreenToClient((HWND)hw, &p);
+
+    // arrow outline (tip first), in pixels relative to the hotspot
+    static const float ax[] = { 0, 0, 3.5f, 6, 8.5f, 6, 11 };
+    static const float ay[] = { 0, 16, 12.5f, 18, 17, 11.5f, 11 };
+    const int N = 7;
+    float fx = (float)p.x, fy = (float)p.y;
+
+    const D3DCOLOR fill = argb(0xFFFFFF, 255), edge = argb(0x000000, 235);
+    dev->SetTexture(0, g_white);
+
+    Vtx fan[N + 1];
+    for (int i = 0; i < N; ++i)
+        fan[i] = { fx + ax[i] - 0.5f, fy + ay[i] - 0.5f, 0, 1, fill, 0, 0 };
+    fan[N] = fan[1];   // close the fan back to the first rim vertex
+    dev->DrawPrimitiveUP(D3DPT_TRIANGLEFAN, N - 1, fan, sizeof(Vtx));
+
+    Vtx out[N + 1];
+    for (int i = 0; i < N; ++i)
+        out[i] = { fx + ax[i] - 0.5f, fy + ay[i] - 0.5f, 0, 1, edge, 0, 0 };
+    out[N] = out[0];
+    dev->DrawPrimitiveUP(D3DPT_LINESTRIP, N, out, sizeof(Vtx));
+}
+
 static void draw_text(IDirect3DDevice8* dev, int x, int y,
                       const std::string& s, D3DCOLOR c) {
     float cx = (float)x;
@@ -370,7 +406,8 @@ static void draw_text(IDirect3DDevice8* dev, int x, int y,
 static void draw_frame(IDirect3DDevice8* dev) {
     std::vector<Cmd> frame;
     { std::lock_guard<std::mutex> lk(g_list_mx); frame = g_render; }
-    if (frame.empty()) return;
+    const bool want_cursor = g_cursor_on.load(std::memory_order_relaxed);
+    if (frame.empty() && !want_cursor) return;
     if (!ensure_caches(dev)) return;
 
     // Snapshot the device state, draw, then restore -- the game's renderer
@@ -457,6 +494,8 @@ static void draw_frame(IDirect3DDevice8* dev) {
         }
         }
     }
+
+    if (want_cursor) draw_cursor(dev);   // last -> on top of the whole HUD
 
     if (scene) dev->EndScene();
     if (sb) { dev->ApplyStateBlock(sb); dev->DeleteStateBlock(sb); }
@@ -602,6 +641,11 @@ void rrect_grad(int x, int y, int w, int h, int radius,
 }
 void image(const std::string& path, int x, int y, int w, int h, int alpha) {
     g_staging.push_back({K_IMAGE, x, y, w, h, 0, false, alpha, path, 0, 0});
+}
+
+void set_cursor(bool on, void* hwnd) {
+    g_cursor_hwnd.store(hwnd, std::memory_order_relaxed);
+    g_cursor_on.store(on, std::memory_order_relaxed);
 }
 
 }} // namespace enb::overlay

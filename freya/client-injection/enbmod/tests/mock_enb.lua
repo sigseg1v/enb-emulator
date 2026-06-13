@@ -55,6 +55,9 @@ function M.reset()
         screen_w = 1280, screen_h = 992,
         self_tbl = { base = 0 },
         target_tbl = nil,
+        state = "unknown",       -- enb.state(): space/station/login/charsel/load/unknown
+        cursor = false,          -- last enb.cursor(on) value
+
         offsets = {},            -- accumulated enb.calibrate{} fields
         ticks = {},              -- registered on_tick fns, in order
         input_fn = nil, input_mask = 0,
@@ -62,6 +65,7 @@ function M.reset()
         taps = {}, keys = {}, chars = {},   -- synthesized-input records
         logs = {},
         calls = {},              -- enb.call / call_cdecl records
+        patches = {},            -- enb.patch_ret records
         mem = {},                -- fake address space: [addr] = u32 (4-aligned)
         tick_errors = {},        -- errors raised by tick callbacks (pcall'd like C++)
     }
@@ -70,6 +74,7 @@ end
 function M.state() return S end
 function M.set_screen(w, h) S.screen_w, S.screen_h = w, h end
 function M.set_self(t) S.self_tbl = t end
+function M.set_game_state(s) S.state = s end
 function M.set_target(t) S.target_tbl = t end
 function M.mem_set_u32(addr, v) S.mem[addr] = v end
 
@@ -163,6 +168,12 @@ function M.install(opts)
 
         self = function() return S.self_tbl end,
         target = function() return S.target_tbl end,
+        state = function() return S.state end,
+        cursor = function(on) S.cursor = not not on end,
+        patch_ret = function(addr, pop)   -- no-op headless; records the request
+            S.patches[#S.patches + 1] = { addr = addr, pop = pop or 0 }
+            return true
+        end,
         calibrate = function(t)
             for k, v in pairs(t) do S.offsets[k] = v end
         end,

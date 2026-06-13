@@ -88,8 +88,11 @@ render API) with `WINEDLLOVERRIDES=d3d8=n,b`; or piggyback the Net-7 launcher.
 | `enb.mem.write_u32/write_f32(a,v)` | bool (false if not writable) |
 | `enb.calibrate{ … }` | set offsets at runtime (hot-reloadable) |
 | `enb.offsets()` | current offsets table |
-| `enb.self()` | `{ base, hull, shield, energy, combat_lvl, x,y,z, … }`; uncalibrated fields absent, `base==0` if no `player_ptr_addr` |
+| `enb.self()` | `{ base, name, hull, shield, energy, combat_lvl, x,y,z, … }`; uncalibrated fields absent, `base==0` if no `player_ptr_addr` |
 | `enb.target()` | `{ base, name, distance, … }` or `nil` |
+| `enb.state()` | game-state name: `"space"`/`"station"`/`"login"`/`"charsel"`/`"load"`/`"unknown"` (calibration-driven; `"unknown"` until `game_state_addr` is set → HUD shows) |
+| `enb.cursor(on)` | draw our procedural mouse arrow ON TOP of the overlay (the native cursor renders under the HUD); `on=false` stops it |
+| `enb.patch_ret(addr[,pop])` | overwrite a function entry with `ret` to suppress a native draw routine. `pop` = callee stack-cleanup bytes (`0`→`0xC3`, `N`→`0xC2 imm16`). DANGEROUS: real-client-verified `(addr,pop)` only |
 | `enb.on_tick(fn)` | fn runs every pump iteration (game thread) |
 | `enb.on_skill(fn)` / `enb.on_chat(fn)` | event-hook callbacks (need `enable_event_hooks`) |
 | `enb.enable_event_hooks()` | install the game-fn hooks (off by default) |
@@ -123,26 +126,34 @@ resources survive a device `Reset`, so no Reset hook is needed); all GPU caches 
 device pointer ever changes. The one-shot `overlay: Present hook FIRED` log line in
 `enbmod.log` confirms the hook is live in-game.
 
-### UI overhaul -- `scripts/freya_ui.lua` (Phase AS)
-A replacement bottom-center HUD that **removes** native widgets without reversing the client's
-UI code. Two tiers:
+### UI overhaul -- the Freya cockpit-glass HUD (Phase AS)
+A replacement HUD that ports the `Earth & Beyond HUD.html` design. Three scripts share
+`scripts/freya_hud.lua` (palette, the `H.glass()` panel = gradient body + gloss + hairline
+border + cyan corner ticks, outlined text, and visibility gating):
 
-- **Tier A (shipped): cover + swallow.** The overlay renders *after* the game's frame, so an
-  opaque panel drawn over a native widget always wins. To make the hidden widget unclickable,
-  `enb.on_input` turns any mouse message landing on the cover panel into `WM_NULL` inside the
-  `PeekMessageA` hook (PM_REMOVE path) before the game's window proc sees it -- a complete input
-  kill. The widget still exists; it is invisible and inert. `freya_ui.lua` covers the six circular
-  hotkey buttons + the circular warp control + the native stat bars, draws a **12-button action
-  bar** (`1 2 3 4 5 6 7 8 9 0 - =`, VKs `0x31..0x39,0x30,0xBD,0xBB`) where a click taps the matching
-  key (`enb.tap`) and a physical keypress lights the same button (key messages are observed but
-  **not** swallowed -- the game still needs them for the bind), and three equal-length stacked stat
-  bars (hull/shield/energy) fed by `enb.self()` (gray skeleton until calibrated). Buttons/panels are
-  procedural `rrect_grad` -- **no binary assets** (repo rule). All geometry derives from
-  `enb.screen()`, so it bottom-anchors at any resolution; the pixel constants in `CFG` are tuned for
-  1280x992 and want an in-game nudge.
-- **Tier B (later, AS-6): true hide.** Find the client's widget visibility flags from the static
-  anchors and skip the native draw outright. Strictly better (no overdraw, resize-proof) but needs
-  in-game reversing; Tier A ships the user-visible result without it.
+- **`freya_ui.lua`** -- the **PlayerCard** (name + LV header, three vitals as a track +
+  vertical-gradient fill with cur/max printed inside + percent) and a **glass hotbar** of twelve
+  rounded slots (`1 2 3 4 5 6 7 8 9 0 - =`, VKs `0x31..0x39,0x30,0xBD,0xBB`): a click taps the
+  matching key (`enb.tap`) and a physical keypress lights the slot (key messages observed but
+  **not** swallowed -- the game still needs the bind). Mouse over the cards is swallowed to
+  `WM_NULL`.
+- **`xp_overlay.lua`** -- the bottom-left **DiscCard**: three rows (C/E/T colored letter + xp bar
+  + "LV n" badge), fed by `enb.self()` (gray skeleton until calibrated).
+
+All shapes are procedural `rrect_grad`/`rrect`/`line` -- **no binary assets** (repo rule). Geometry
+derives from `enb.screen()` (bottom-anchored at any resolution).
+
+**Visibility** is gated on `enb.state()` via `freya_hud.vis()`: **space** = cards + hotbar,
+**station** = cards only (hotbar hidden, owner ask), **login/charsel/load** = nothing. `enb.cursor()`
+draws our pointer on top of it all. Both need real-client calibration/confirmation
+(CV-AS-STATE / CV-AS-CURSOR in `plans/29`).
+
+**Hiding the native widgets we replace** (AS-6): the glass is translucent, so the native stat/xp/
+skill widgets bleed through. `enb.patch_ret(addr[,pop])` suppresses the drawing routine (init.lua
+has a commented, **OFF-by-default** HIDE block off the address book). It ships disabled because the
+correct `pop` and "does an early ret break gameplay" are only knowable against the real client
+(CV-AS-HIDE-VITALS/-XP/-SKILL). Until enabled, the native widgets remain visible behind the glass --
+honest status, not hidden yet.
 
 **Fail-open is load-bearing:** `on_input` runs Lua via `lua_pcall`, and any error returns *false*
 (do not swallow), so a script bug can never wedge the user's keyboard/mouse.

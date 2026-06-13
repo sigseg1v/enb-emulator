@@ -40,11 +40,13 @@ class LuaHost:
         self.proc.stdin.flush()
         return self.proc.stdout.readline().rstrip("\n")
 
-    def frame(self, events, screen=None, self_state=None):
+    def frame(self, events, screen=None, self_state=None, game_state=None):
         """Apply state + events, then tick. Returns (frame_dict, swallowed[], taps)."""
         with self.lock:
             if screen:
                 self._cmd(f"screen {int(screen[0])} {int(screen[1])}")
+            if game_state in ("space", "station", "login", "charsel", "load", "unknown"):
+                self._cmd(f"state {game_state}")
             if self_state in ("cal", "uncal"):
                 self._cmd(f"self {self_state}")
             swallowed = []
@@ -80,6 +82,7 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
   #ctl label{display:block;margin:2px 0}
   #ctl button{font:12px sans-serif;margin:2px 2px 2px 0;background:#1c232c;color:#cfd6e4;
               border:1px solid #3a4654;border-radius:5px;padding:3px 8px;cursor:pointer}
+  #ctl button.on{background:#2d4a6e;border-color:#78e1ff;color:#eaf4ff}
   .sw{color:#ff7070} .nosw{color:#74d18a}
 </style></head><body>
 <div id="wrap"><canvas id="cv"></canvas></div>
@@ -87,6 +90,12 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
 <div id="ctl">
   <label><input type="checkbox" id="cal" checked> calibrated stats</label>
   <label><input type="checkbox" id="bg" checked> background</label>
+  <div>state:
+    <button data-s="space" class="on">space</button>
+    <button data-s="station">station</button>
+    <button data-s="login">login</button>
+    <button data-s="unknown">unknown</button>
+  </div>
   <div>resolution:
     <button data-r="1280x960">1280x960 (bg)</button>
     <button data-r="1280x992">1280x992</button>
@@ -99,7 +108,7 @@ const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
 const hud = document.getElementById('hud');
 let SW = 1280, SH = 960;
 let bgImg = new Image(); bgImg.src = 'bg.png';
-let showBg = true, calibrated = true;
+let showBg = true, calibrated = true, gameState = 'space';
 let queue = [];                 // pending input events -> server
 let lastSwallow = null, lastTaps = 0, mouse = {x:0,y:0};
 
@@ -147,8 +156,12 @@ window.addEventListener('keyup', e=>{ const vk=vkOf(e); if(vk===null) return;
 // ---- controls ----
 document.getElementById('cal').addEventListener('change', e=>calibrated=e.target.checked);
 document.getElementById('bg').addEventListener('change', e=>showBg=e.target.checked);
-document.querySelectorAll('#ctl button').forEach(b=>b.addEventListener('click', ()=>{
+document.querySelectorAll('#ctl button[data-r]').forEach(b=>b.addEventListener('click', ()=>{
   const [w,h] = b.dataset.r.split('x').map(Number); SW=w; SH=h; resizeCanvas();
+}));
+document.querySelectorAll('#ctl button[data-s]').forEach(b=>b.addEventListener('click', ()=>{
+  gameState = b.dataset.s;
+  document.querySelectorAll('#ctl button[data-s]').forEach(o=>o.classList.toggle('on', o===b));
 }));
 
 // ---- draw the returned command list ----
@@ -205,7 +218,7 @@ async function loop(){
   const events = queue; queue = [];
   try{
     const res = await fetch('frame', {method:'POST', body: JSON.stringify({
-      events, screen:[SW,SH], self: calibrated?'cal':'uncal'})});
+      events, screen:[SW,SH], self: calibrated?'cal':'uncal', state: gameState})});
     const data = await res.json();
     if(data.taps!=null) lastTaps = data.taps;
     render(data.frame, data.swallowed);
@@ -256,7 +269,7 @@ class Handler(BaseHTTPRequestHandler):
             req = {}
         events = [(e[0], e[1], e[2]) for e in req.get("events", [])]
         frame, swallowed, taps = self.host.frame(
-            events, req.get("screen"), req.get("self"))
+            events, req.get("screen"), req.get("self"), req.get("state"))
         self._send(200, json.dumps(
             {"frame": frame, "swallowed": swallowed, "taps": taps}),
             "application/json")

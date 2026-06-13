@@ -46,4 +46,10 @@ void rrect_grad(int x, int y, int w, int h, int radius,
 // Cached by path after first load. alpha 0..255 scales overall opacity.
 void image(const std::string& path, int x, int y, int w, int h, int alpha);
 
+// Draw our own mouse pointer on TOP of the display list (the native cursor
+// renders underneath the HUD). `on` toggles it; `hwnd` is the game window, used
+// to map the screen-space cursor into client coords. A procedural arrow (no
+// binary asset, per the repo rule). Safe to call every tick.
+void set_cursor(bool on, void* hwnd);
+
 }} // namespace enb::overlay

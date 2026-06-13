@@ -91,6 +91,23 @@ struct Offsets {
     int pos_y       = -1;
     int pos_z       = -1;
 
+    // player display name (player-card header): offset to a char* or inline cstr.
+    int name        = -1;
+    int name_is_ptr = 1;    // 1: field holds char*; 0: field is inline string
+    int name_wide   = 0;    // 1: UTF-16
+
+    // game-state machine: an address holding the int state/screen code, plus the
+    // code value for each screen. enb.state() reads the int and maps it to a name
+    // so the HUD can gate itself (in-space-only; station hides the hotbar). With
+    // game_state_addr == 0 (or no code matches) enb.state() returns "unknown",
+    // which the HUD treats as "show everything" -- the pre-calibration default.
+    uintptr_t game_state_addr = 0;
+    int state_space   = -1;
+    int state_station = -1;
+    int state_login   = -1;
+    int state_charsel = -1;
+    int state_load    = -1;
+
     // target object: address of the pointer to the current target, + fields within it.
     uintptr_t target_ptr_addr = 0;
     int tgt_name    = -1;   // offset to a char* or inline cstr

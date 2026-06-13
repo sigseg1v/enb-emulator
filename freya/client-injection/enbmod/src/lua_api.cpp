@@ -10,6 +10,8 @@
 #include <deque>
 #include <mutex>
 #include <string>
+#include <cstring>
+#include <windows.h>
 
 extern "C" {
 #include "lua.h"
@@ -103,6 +105,10 @@ static int l_calibrate(lua_State* L){
     SET_INT(combat_pct); SET_INT(trade_pct); SET_INT(explore_pct);
     SET_INT(skill_points);
     SET_INT(pos_x); SET_INT(pos_y); SET_INT(pos_z);
+    SET_INT(name); SET_INT(name_is_ptr); SET_INT(name_wide);
+    SET_PTR(game_state_addr);
+    SET_INT(state_space); SET_INT(state_station); SET_INT(state_login);
+    SET_INT(state_charsel); SET_INT(state_load);
     SET_PTR(target_ptr_addr);
     SET_INT(tgt_name); SET_INT(tgt_name_is_ptr); SET_INT(tgt_name_wide);
     SET_INT(tgt_hull); SET_INT(tgt_pos_x); SET_INT(tgt_pos_y); SET_INT(tgt_pos_z);
@@ -120,6 +126,9 @@ static int l_offsets(lua_State* L){
     PUT(combat_lvl);PUT(trade_lvl);PUT(explore_lvl);
     PUT(combat_pct);PUT(trade_pct);PUT(explore_pct);PUT(skill_points);
     PUT(pos_x);PUT(pos_y);PUT(pos_z);
+    PUT(name);PUT(name_is_ptr);PUT(name_wide);
+    PUT(game_state_addr);
+    PUT(state_space);PUT(state_station);PUT(state_login);PUT(state_charsel);PUT(state_load);
     PUT(target_ptr_addr);PUT(tgt_name);PUT(tgt_name_is_ptr);PUT(tgt_name_wide);
     PUT(tgt_hull);PUT(tgt_pos_x);PUT(tgt_pos_y);PUT(tgt_pos_z);
     #undef PUT
@@ -170,6 +179,83 @@ static int l_self(lua_State* L){
     push_flt_field(L,"x",          b,o.pos_x);
     push_flt_field(L,"y",          b,o.pos_y);
     push_flt_field(L,"z",          b,o.pos_z);
+    if (o.name >= 0) {
+        uintptr_t namep = o.name_is_ptr ? mem::ptr(b + o.name) : (b + o.name);
+        std::string nm = o.name_wide ? mem::wstr(namep) : mem::cstr(namep);
+        lua_pushlstring(L, nm.data(), nm.size()); lua_setfield(L,-2,"name");
+    }
+    return 1;
+}
+
+// enb.state() -> "space" | "station" | "login" | "charsel" | "load" | "unknown".
+// Reads the calibrated game-state code and maps it to a name; "unknown" when
+// game_state_addr is unset or no calibrated code matches (HUD then shows -- the
+// pre-calibration default).
+static int l_state(lua_State* L){
+    Offsets& o = offs();
+    const char* name = "unknown";
+    if (o.game_state_addr) {
+        int s = mem::i32(o.game_state_addr);
+        if      (o.state_space   >= 0 && s == o.state_space)   name = "space";
+        else if (o.state_station >= 0 && s == o.state_station) name = "station";
+        else if (o.state_login   >= 0 && s == o.state_login)   name = "login";
+        else if (o.state_charsel >= 0 && s == o.state_charsel) name = "charsel";
+        else if (o.state_load    >= 0 && s == o.state_load)    name = "load";
+    }
+    lua_pushstring(L, name);
+    return 1;
+}
+
+// enb.cursor(on) -- draw our own pointer ON TOP of the overlay (the native
+// cursor renders under the HUD). on=false stops drawing it.
+static int l_cursor(lua_State* L){
+    bool on = lua_toboolean(L, 1);
+    overlay::set_cursor(on, actions::game_hwnd());
+    return 0;
+}
+
+// enb.patch_ret(addr [, pop_bytes]) -- overwrite a function's entry with a
+// `ret` so it returns immediately. This is how the HUD suppresses a native
+// draw routine whose pixels we replace (the in-space stat/xp/skill widgets).
+//
+// pop_bytes is the callee stack cleanup at that ret:
+//   0 (default) -> 0xC3        (cdecl / caller-cleanup -- safe for any arg count)
+//   N > 0       -> 0xC2 imm16  (stdcall/thiscall/fastcall callee-cleanup -- N is
+//                               the EXACT stack-arg byte count; wrong N corrupts
+//                               the stack on return)
+// DANGEROUS and unverifiable from the headless harness: only call with an
+// (addr, pop) pair confirmed against the real client (see the plans/29 CV
+// entries). Nothing calls this unless a script explicitly opts in -- the HUD
+// ships with native-widget suppression OFF. Returns true on success.
+static int l_patch_ret(lua_State* L){
+    uintptr_t addr = (uintptr_t)luaL_checkinteger(L, 1);
+    int pop = (int)luaL_optinteger(L, 2, 0);
+    if (addr < kImageBase) {
+        logf("patch_ret: refusing addr %p below image base", (void*)addr);
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    unsigned char bytes[3];
+    int n;
+    if (pop <= 0) {
+        bytes[0] = 0xC3; n = 1;
+    } else {
+        bytes[0] = 0xC2;
+        bytes[1] = (unsigned char)(pop & 0xFF);
+        bytes[2] = (unsigned char)((pop >> 8) & 0xFF);
+        n = 3;
+    }
+    DWORD old = 0;
+    if (!VirtualProtect((void*)addr, (SIZE_T)n, PAGE_EXECUTE_READWRITE, &old)) {
+        logf("patch_ret: VirtualProtect failed @ %p", (void*)addr);
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    memcpy((void*)addr, bytes, (size_t)n);
+    VirtualProtect((void*)addr, (SIZE_T)n, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), (void*)addr, (SIZE_T)n);
+    logf("patch_ret: %p -> ret %d", (void*)addr, pop);
+    lua_pushboolean(L, 1);
     return 1;
 }
 
@@ -413,6 +499,9 @@ void open(lua_State* L){
         {"offsets", l_offsets},
         {"self", l_self},
         {"target", l_target},
+        {"state", l_state},
+        {"cursor", l_cursor},
+        {"patch_ret", l_patch_ret},
         {"on_tick", l_on_tick},
         {"on_skill", l_on_skill},
         {"on_chat", l_on_chat},

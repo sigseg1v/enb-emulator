@@ -1,178 +1,194 @@
--- freya_ui.lua -- replacement bottom-center HUD (Phase AS).
+-- SPDX-License-Identifier: MIT
+-- Part of the Earth & Beyond emulator preservation project -- Freya (MIT).
+-- License: LICENSES/Freya
+--
+-- freya_ui.lua -- the player card + action hotbar of the Freya HUD (Phase AS).
 --
 -- require("freya_ui") from init.lua. Registers its own on_tick (draw) and
--- on_input (Tier A "cover + swallow").
+-- on_input (click-to-tap + mouse-swallow over our cards).
 --
--- WHAT IT DOES
---   * Draws an opaque panel over the native bottom-center cluster (the six
---     circular hotkey buttons + the circular warp control + the native stat
---     bars) and SWALLOWS mouse input landing on that panel, so the hidden
---     native widgets are unclickable. This removes them WITHOUT reversing the
---     client's widget code (Tier A). Tier B (a true per-widget hide) is AS-6.
---   * Draws a 12-button action bar (1 2 3 4 5 6 7 8 9 0 - =) of square shiny
---     rounded buttons. Click a button -> taps the matching key (enb.tap), so
---     it triggers whatever that key is bound to. A physical keypress lights the
---     same button. Key messages are NOT swallowed -- the game still needs them.
---   * Draws three equal-length stacked stat bars (hull / shield / energy) fed
---     by enb.self(); until the offsets are calibrated (AS-3) they render as a
---     gray skeleton, same convention as xp_overlay.
+-- Ports the "Earth & Beyond HUD" design:
+--   * PlayerCard -- a glass panel anchored above the hotbar's left edge, with a
+--     name + level header and three vitals (hull / shield / reactor). Each vital
+--     is a track with a vertical-gradient fill, the current/max printed INSIDE
+--     the bar (right-aligned, white, outlined) and the percentage to its right.
+--   * Hotbar -- twelve square glass slots for keys 1 2 3 4 5 6 7 8 9 0 - =, with
+--     the design's small radius + gloss + hairline border and a cyan armed glow.
+--     Click a slot -> taps its key (enb.tap); a physical keypress lights it.
 --
--- ALL geometry derives from enb.screen() so it bottom-anchors at any resolution.
--- The pixel constants are tuned for the owner's 1280x992 window; they will need
--- an in-game nudge against the real client (that pass is the AS plan's CV gate).
+-- VISIBILITY (owner ask): the HUD draws only in space and station; nothing on
+-- the login / character-select / load screens. In station the hotbar is hidden
+-- (skill buttons off) but the cards stay. Gating is enb.state()-driven via
+-- freya_hud.vis(); until calibrated it reads "unknown" -> shows everything, so
+-- dev / the headless previewer still render the full HUD.
+--
+-- This script owns the replacement pixels + input, and swallows mouse input over
+-- the cards so anything behind them is never clickable. The native widgets these
+-- cards replace can be suppressed via enb.patch_ret (see init.lua's opt-in HIDE
+-- block); that is OFF by default and needs real-client verification, so until
+-- the owner enables it the native widgets remain visible through the glass.
 
--- ---- virtual-key codes for the twelve action-bar keys ----------------------
+local H = require("freya_hud")
+
+-- ---- the twelve action-bar keys --------------------------------------------
 local KEYS = {
     { label = "1", vk = 0x31 }, { label = "2", vk = 0x32 }, { label = "3", vk = 0x33 },
     { label = "4", vk = 0x34 }, { label = "5", vk = 0x35 }, { label = "6", vk = 0x36 },
     { label = "7", vk = 0x37 }, { label = "8", vk = 0x38 }, { label = "9", vk = 0x39 },
     { label = "0", vk = 0x30 }, { label = "-", vk = 0xBD }, { label = "=", vk = 0xBB },
 }
--- reverse map vk -> index, so a physical keypress lights its button
 local VK_TO_IDX = {}
 for i, k in ipairs(KEYS) do VK_TO_IDX[k.vk] = i end
 
--- ---- stat bars (top -> bottom) ---------------------------------------------
-local STATS = {
-    { key = "hull",   label = "HULL",   rgb = 0x33DD55 },  -- green
-    { key = "shield", label = "SHIELD", rgb = 0x3399FF },  -- blue
-    { key = "energy", label = "ENERGY", rgb = 0xFF4444 },  -- red
+-- ---- the three vitals (top -> bottom: hull, shield, reactor) ----------------
+local VITALS = {
+    { key = "hull",   max = "hull_max",   rgb = H.HULL },
+    { key = "shield", max = "shield_max", rgb = H.SHIELD },
+    { key = "energy", max = "energy_max", rgb = H.REACTOR },   -- reactor
 }
 
 local CFG = {
-    BTN            = 44,    -- action-button square edge
-    GAP            = 6,     -- gap between buttons
-    BTN_RADIUS     = 7,     -- rounded-corner radius
-    BOTTOM_MARGIN  = 14,    -- gap from screen bottom to the button row
+    SLOT          = 46,    -- hotbar slot square edge
+    GAP           = 6,     -- gap between slots
+    BOTTOM        = 18,    -- gap from screen bottom to the hotbar (design bottom:18)
 
-    PANEL_W_FRAC   = 0.62,  -- cover panel width as a fraction of the screen
-    PANEL_RADIUS   = 12,
-    PANEL_ALPHA    = 236,   -- near-opaque so the native cluster never shows
+    PC_W          = 224,   -- player-card width (design)
+    PC_PAD_X      = 7,
+    PC_PAD_Y      = 5,
+    HEAD_H        = 16,    -- name/level header row
+    VITAL_H       = 16,    -- vital bar height (tall enough for the inside value text)
+    VITAL_GAP     = 3,
+    PCT_W         = 34,    -- percentage column to the right of each vital bar
+    VAL_PAD       = 4,     -- inset of the inside value text from the bar's right edge
+    PC_GAP        = 24,    -- gap between the player card's bottom and the hotbar top
 
-    STAT_W         = 230,   -- stat-bar track width (all three equal)
-    STAT_H         = 12,
-    STAT_GAP       = 6,     -- vertical gap between stat bars
-    STAT_LABEL_PAD = 8,     -- gap between a stat label and its bar
+    FLASH_TICKS   = 10,    -- click-feedback (armed) glow duration in ticks
 
-    FLASH_TICKS    = 12,    -- click-feedback highlight duration (ticks)
-
-    -- colors
-    PANEL_TOP      = 0x202832,
-    PANEL_BOT      = 0x10151c,
-    BTN_TOP        = 0x3a4654,
-    BTN_BOT        = 0x1c232c,
-    BTN_LIT_TOP    = 0x6fa8ff,
-    BTN_LIT_BOT    = 0x2c4870,
-    BTN_BORDER     = 0x55657a,
-    BTN_LABEL      = 0xE8EEF6,
-    TRACK          = 0x0c1014,
-    UNCAL          = 0x666f7a,
+    SLOT_TOP      = 0x223044,
+    SLOT_BOT      = 0x0c121b,
+    SLOT_LIT_TOP  = 0x2f4a6e,
+    SLOT_LIT_BOT  = 0x132338,
+    KEY_INK       = 0xcfe0f2,
 }
 
--- per-button live state: held (physical key down) + flash (click countdown)
+-- per-slot live state: held (physical key down) + flash (click countdown)
 local state = {}
 for i = 1, #KEYS do state[i] = { held = false, flash = 0 } end
 
--- ---- layout: recomputed each frame from the current screen size ------------
+-- ---- layout (recomputed each frame from enb.screen()) ----------------------
 local function layout()
     local sw, sh = enb.screen()
     if sw == 0 or sh == 0 then sw, sh = 1280, 992 end  -- pre-first-present fallback
 
-    local bar_w = #KEYS * CFG.BTN + (#KEYS - 1) * CFG.GAP
+    local bar_w = #KEYS * CFG.SLOT + (#KEYS - 1) * CFG.GAP
     local bar_x = math.floor((sw - bar_w) / 2)
-    local bar_y = sh - CFG.BTN - CFG.BOTTOM_MARGIN
+    local bar_y = sh - CFG.SLOT - CFG.BOTTOM
 
-    -- stat block sits just above the button row
-    local stat_block_h = #STATS * CFG.STAT_H + (#STATS - 1) * CFG.STAT_GAP
-    local stat_top = bar_y - 12 - stat_block_h
+    local pc_h = CFG.PC_PAD_Y + CFG.HEAD_H + CFG.VITAL_GAP
+               + #VITALS * CFG.VITAL_H + (#VITALS - 1) * CFG.VITAL_GAP + CFG.PC_PAD_Y
+    local pc = { x = bar_x, y = bar_y - CFG.PC_GAP - pc_h, w = CFG.PC_W, h = pc_h }
 
-    local panel_w = math.floor(sw * CFG.PANEL_W_FRAC)
-    local panel_x = math.floor((sw - panel_w) / 2)
-    local panel_y = stat_top - 12
-    local panel_h = sh - panel_y
-
-    return {
-        sw = sw, sh = sh,
-        bar_x = bar_x, bar_y = bar_y, bar_w = bar_w,
-        stat_top = stat_top,
-        panel = { x = panel_x, y = panel_y, w = panel_w, h = panel_h },
-    }
+    return { sw = sw, sh = sh, bar_x = bar_x, bar_y = bar_y, bar_w = bar_w, pc = pc }
 end
 
--- button i screen rect
-local function btn_rect(L, i)
-    local x = L.bar_x + (i - 1) * (CFG.BTN + CFG.GAP)
-    return x, L.bar_y, CFG.BTN, CFG.BTN
+local function slot_rect(L, i)
+    return L.bar_x + (i - 1) * (CFG.SLOT + CFG.GAP), L.bar_y, CFG.SLOT, CFG.SLOT
 end
-
 local function point_in(px, py, x, y, w, h)
     return px >= x and px < x + w and py >= y and py < y + h
 end
 
--- ---- text centering (enb.measure falls back to an estimate pre-atlas) ------
-local function text_centered(s, cx, cy, rgb)
-    local w, h = enb.measure(s)
-    if w == 0 then w = #s * 7; h = 14 end
-    enb.draw.text(math.floor(cx - w / 2), math.floor(cy - h / 2), s, rgb)
+-- ---- player card -----------------------------------------------------------
+local function draw_player_card(L)
+    local me = enb.self()
+    local cal = me.base ~= 0
+    local p = L.pc
+    H.glass(p.x, p.y, p.w, p.h)
+
+    -- header: NAME (left) + LV n (right)
+    local name = (cal and me.name and me.name ~= "" and me.name) or "PILOT"
+    H.otext(p.x + CFG.PC_PAD_X, p.y + CFG.PC_PAD_Y, name:upper(), cal and H.INK or H.UNCAL)
+    local lv = "LV --"
+    if cal then
+        lv = "LV " .. math.max(me.combat_lvl or 0, me.explore_lvl or 0, me.trade_lvl or 0)
+    end
+    local lw = H.measure(lv)
+    H.otext(p.x + p.w - CFG.PC_PAD_X - lw, p.y + CFG.PC_PAD_Y, lv,
+            cal and H.INK_DIM or H.UNCAL)
+
+    -- vitals
+    local track_x = p.x + CFG.PC_PAD_X
+    local track_w = p.w - CFG.PC_PAD_X * 2 - CFG.PCT_W
+    local pct_right = p.x + p.w - CFG.PC_PAD_X
+    local vy = p.y + CFG.PC_PAD_Y + CFG.HEAD_H + CFG.VITAL_GAP
+    for _, v in ipairs(VITALS) do
+        local cur, max = me[v.key], me[v.max]
+        local frac = 0
+        if cal and cur and max and max > 0 then
+            frac = cur / max
+            if frac < 0 then frac = 0 elseif frac > 1 then frac = 1 end
+        end
+        -- track + fill + border
+        enb.draw.rrect(track_x, vy, track_w, CFG.VITAL_H, H.RADIUS, H.TRACK, 220, true)
+        if cal and frac > 0 then
+            local fw = math.floor(track_w * frac)
+            if fw > 0 then
+                enb.draw.rrect_grad(track_x, vy, fw, CFG.VITAL_H, H.RADIUS,
+                                    v.rgb, H.darker(v.rgb), 255)
+            end
+        end
+        enb.draw.rrect(track_x, vy, track_w, CFG.VITAL_H, H.RADIUS, H.LINE, 70, false)
+        -- inside value "cur / max", right-aligned + percentage to the right
+        if cal and cur and max then
+            local val = string.format("%d / %d", cur, max)
+            local vw, vh = H.measure(val)
+            local ty = vy + math.floor((CFG.VITAL_H - vh) / 2)
+            H.otext(track_x + track_w - CFG.VAL_PAD - vw, ty, val, 0xffffff)
+            local ps = math.floor(frac * 100 + 0.5) .. "%"
+            H.otext(pct_right - H.measure(ps), ty, ps, H.INK)
+        end
+        vy = vy + CFG.VITAL_H + CFG.VITAL_GAP
+    end
+end
+
+-- ---- hotbar ----------------------------------------------------------------
+local function draw_hotbar(L)
+    for i, k in ipairs(KEYS) do
+        local x, y, w, h = slot_rect(L, i)
+        local lit = state[i].held or state[i].flash > 0
+        local top = lit and CFG.SLOT_LIT_TOP or CFG.SLOT_TOP
+        local bot = lit and CFG.SLOT_LIT_BOT or CFG.SLOT_BOT
+        enb.draw.rrect_grad(x, y, w, h, H.RADIUS, top, bot, 235)
+        -- gloss sheen across the top
+        enb.draw.rrect_grad(x, y, w, math.floor(h * 0.46), H.RADIUS, 0xffffff, top,
+                            lit and 42 or 24)
+        -- border (cyan armed glow when lit)
+        enb.draw.rrect(x, y, w, h, H.RADIUS, lit and H.LINE_HOT or H.LINE,
+                       lit and 220 or 150, false)
+        -- key label, centered
+        local lw, lh = H.measure(k.label)
+        H.otext(x + math.floor((w - lw) / 2), y + math.floor((h - lh) / 2),
+                k.label, CFG.KEY_INK)
+        if state[i].flash > 0 then state[i].flash = state[i].flash - 1 end
+    end
 end
 
 -- ===========================================================================
 -- DRAW
 -- ===========================================================================
 enb.on_tick(function()
+    local show, show_hotbar = H.vis()
+    -- draw our cursor on TOP of the overlay whenever the HUD is up (owner ask:
+    -- "draw mouse pointer on top not under"); hide it when the HUD is hidden.
+    if enb.cursor then enb.cursor(show) end
+    if not show then return end
     local L = layout()
-    local p = L.panel
-
-    -- 1) cover panel over the native cluster (Tier A) -- near-opaque so the
-    --    hidden circles/warp/bars never bleed through.
-    enb.draw.rrect_grad(p.x, p.y, p.w, p.h, CFG.PANEL_RADIUS,
-                        CFG.PANEL_TOP, CFG.PANEL_BOT, CFG.PANEL_ALPHA)
-
-    -- 2) stat bars: three equal-length stacked bars. Labels to the LEFT.
-    local me = enb.self()
-    local calibrated = me.base ~= 0
-    local bar_x = p.x + math.floor((p.w - CFG.STAT_W) / 2) + 40  -- leave room for labels
-    for i, s in ipairs(STATS) do
-        local y = L.stat_top + (i - 1) * (CFG.STAT_H + CFG.STAT_GAP)
-        -- label, right-aligned against the bar's left edge
-        local lw, lh = enb.measure(s.label)
-        if lw == 0 then lw = #s.label * 7; lh = 14 end
-        local label_rgb = calibrated and s.rgb or CFG.UNCAL
-        enb.draw.text(bar_x - CFG.STAT_LABEL_PAD - lw,
-                      y + math.floor((CFG.STAT_H - lh) / 2), s.label, label_rgb)
-        -- track
-        enb.draw.rrect(bar_x, y, CFG.STAT_W, CFG.STAT_H, 4, CFG.TRACK, 255, true)
-        -- fill
-        local cur = me[s.key]
-        local max = me[s.key .. "_max"]
-        if calibrated and cur and max and max > 0 then
-            local frac = cur / max
-            if frac < 0 then frac = 0 elseif frac > 1 then frac = 1 end
-            local fw = math.floor(CFG.STAT_W * frac)
-            if fw > 0 then
-                enb.draw.rrect_grad(bar_x, y, fw, CFG.STAT_H, 4,
-                                    s.rgb, (s.rgb >> 1) & 0x7f7f7f, 255)
-            end
-        end
-        -- thin border
-        enb.draw.rrect(bar_x, y, CFG.STAT_W, CFG.STAT_H, 4, CFG.BTN_BORDER, 180, false)
-    end
-
-    -- 3) action bar: 12 square shiny rounded buttons
-    for i, k in ipairs(KEYS) do
-        local x, y, w, h = btn_rect(L, i)
-        local lit = state[i].held or state[i].flash > 0
-        local top = lit and CFG.BTN_LIT_TOP or CFG.BTN_TOP
-        local bot = lit and CFG.BTN_LIT_BOT or CFG.BTN_BOT
-        enb.draw.rrect_grad(x, y, w, h, CFG.BTN_RADIUS, top, bot, 250)
-        enb.draw.rrect(x, y, w, h, CFG.BTN_RADIUS, CFG.BTN_BORDER, 220, false)
-        text_centered(k.label, x + w / 2, y + h / 2, CFG.BTN_LABEL)
-        if state[i].flash > 0 then state[i].flash = state[i].flash - 1 end
-    end
+    draw_player_card(L)
+    if show_hotbar then draw_hotbar(L) end
 end)
 
 -- ===========================================================================
--- INPUT  (return true = swallow; fail-open is handled in C++)
+-- INPUT  (return true = swallow; fail-open handled in C++)
 -- ===========================================================================
 local function mouse_xy(lp)
     local x = lp & 0xFFFF
@@ -184,12 +200,14 @@ end
 
 enb.on_input(function(msg, wparam, lparam)
     local M = enb.msg
+    local show, show_hotbar = H.vis()
+    if not show then return false end   -- HUD hidden -> never touch input
 
-    -- physical key down/up: light the matching button. Do NOT swallow -- the
-    -- game still needs the key for the actual ability bind.
+    -- physical key down/up lights the matching slot (only meaningful when the
+    -- hotbar is up). Never swallow -- the game still needs the bind.
     if msg == M.KEYDOWN or msg == M.SYSKEYDOWN then
         local i = VK_TO_IDX[wparam]
-        if i then state[i].held = true end
+        if i and show_hotbar then state[i].held = true end
         return false
     elseif msg == M.KEYUP or msg == M.SYSKEYUP then
         local i = VK_TO_IDX[wparam]
@@ -197,7 +215,7 @@ enb.on_input(function(msg, wparam, lparam)
         return false
     end
 
-    -- mouse: act on / swallow within our UI region
+    -- mouse: act on / swallow within our cards
     if msg == M.MOUSEMOVE or msg == M.MOUSEWHEEL
        or msg == M.LBUTTONDOWN or msg == M.LBUTTONUP or msg == M.LBUTTONDBLCLK
        or msg == M.RBUTTONDOWN or msg == M.RBUTTONUP or msg == M.RBUTTONDBLCLK
@@ -205,10 +223,9 @@ enb.on_input(function(msg, wparam, lparam)
         local mx, my = mouse_xy(lparam)
         local L = layout()
 
-        -- left-click on an action button -> tap its key + flash
-        if msg == M.LBUTTONDOWN then
+        if show_hotbar and msg == M.LBUTTONDOWN then
             for i = 1, #KEYS do
-                local x, y, w, h = btn_rect(L, i)
+                local x, y, w, h = slot_rect(L, i)
                 if point_in(mx, my, x, y, w, h) then
                     enb.tap(KEYS[i].vk)
                     state[i].flash = CFG.FLASH_TICKS
@@ -217,10 +234,10 @@ enb.on_input(function(msg, wparam, lparam)
             end
         end
 
-        -- any mouse event inside the cover panel -> swallow, so clicks/hover
-        -- never reach the hidden native widgets underneath.
-        local p = L.panel
-        if point_in(mx, my, p.x, p.y, p.w, p.h) then
+        -- swallow mouse over the player card (always) and the hotbar (when up)
+        local p = L.pc
+        if point_in(mx, my, p.x, p.y, p.w, p.h) then return true end
+        if show_hotbar and point_in(mx, my, L.bar_x, L.bar_y, L.bar_w, CFG.SLOT) then
             return true
         end
     end

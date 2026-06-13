@@ -1164,3 +1164,71 @@ format & byte order", Trap 2).
   built bin/FreyaProxy.exe -- both sides must be the new binaries, since the
   wire struct width and the blank-reply contract changed together). The
   online deploy needs the same rebuild before the friend's hang is fixed.
+
+### [ ] CV-AS-STATE -- Freya HUD shows ONLY in space/station, never on login/charsel/load
+
+- **Change**: client-only (enbmod.dll, Freya/MIT -- no server/proxy wire
+  change). The HUD is now visibility-gated on a new `enb.state()` that reads a
+  calibration-driven game-state int (`game_state_addr` + `state_space/station/
+  login/charsel/load` in game.h, mapped to a name in lua_api.cpp `l_state`).
+  `freya_hud.vis()` maps: space -> cards+hotbar, station -> cards only (hotbar
+  hidden, owner ask), login/charsel/load -> nothing. Until `game_state_addr` is
+  calibrated `enb.state()` returns "unknown", which deliberately shows the full
+  HUD (so dev/headless still renders).
+- **Headless coverage**: `freya_ui_spec.lua` + `xp_overlay_spec.lua` pin the
+  gating against the mock (station drops the hotbar; login/charsel/load draw an
+  empty frame and pass input through). The mock cannot prove the REAL
+  game-state int address/values -- that is this entry.
+- **What to look for (real client)**: at the login screen and character select,
+  NO Freya cards/hotbar. On the load/zoning screen, nothing. In space, the full
+  HUD (player card + discipline card + hotbar). Docked in a station, the player
+  + discipline cards show but the bottom hotbar is gone. Requires calibrating
+  `game_state_addr` and the per-screen int values first (autocalib / memory
+  scan), then confirming each screen.
+- **Setup**: `just play-local` with `UseClientMods=true`; calibrate the
+  game-state address in-game, hot-reload, walk through login -> charsel -> load
+  -> space -> dock.
+
+### [ ] CV-AS-CURSOR -- Our mouse pointer draws ON TOP of the HUD, not under it
+
+- **Change**: client-only (enbmod.dll). `enb.cursor(on)` (lua_api.cpp
+  `l_cursor` -> overlay.cpp `set_cursor`/`draw_cursor`) draws a procedural arrow
+  (no binary asset) after the display list, inside the D3D8 Present hook, mapping
+  the screen cursor to client coords via GetCursorPos+ScreenToClient. freya_ui
+  toggles it with HUD visibility (on in space/station, off when hidden).
+- **Headless coverage**: `freya_ui_spec.lua` "cursor follows visibility" pins
+  the on/off toggle against the mock; it CANNOT prove the real draw order /
+  client-coord mapping.
+- **What to look for (real client)**: in space, the pointer renders above the
+  glass cards/hotbar (never hidden behind a panel), tracks the real cursor 1:1,
+  and disappears on the login/charsel/load screens.
+- **Setup**: `just play-local` with `UseClientMods=true`; move the mouse over
+  the player card and hotbar -- the arrow stays visible on top.
+
+### [ ] CV-AS-HIDE-VITALS / CV-AS-HIDE-XP / CV-AS-HIDE-SKILL -- native widgets suppressed cleanly behind the glass
+
+- **Change**: client-only (enbmod.dll). The glass cards are translucent, so the
+  native in-space stat bars / xp bars / skill buttons bleed through. `enb.patch_ret(addr [,pop])`
+  (lua_api.cpp `l_patch_ret`) overwrites a function entry with a `ret` (0xC3, or
+  0xC2 imm16 for callee-cleanup) to suppress the routine that draws each. Ships
+  **OFF**: init.lua's HIDE block is commented out, because the correct `pop` per
+  function and "an early ret hides the widget without breaking gameplay" are NOT
+  knowable from the headless harness -- only against the real client. Candidate
+  entry points (address book): VitalsBars 0x005dbfc0 / EnergyBar 0x005dc4a0,
+  XpBars 0x0058c450, SkillButton 0x00662dc0.
+- **Headless coverage**: the mock records `enb.patch_ret` calls but cannot
+  execute the patch; correctness is entirely this entry.
+- **What to look for (real client), PER widget** -- enable one line at a time:
+  - **VITALS**: `enb.patch_ret(enb.addr.VitalsBars)` (try pop=0 first; if the
+    stack corrupts, find the callee-cleanup byte count). The native reactor/
+    shield/hull bars vanish; the player card's bars remain; flight, targeting,
+    and stat updates still work; no crash on zone or undock.
+  - **XP**: `enb.patch_ret(enb.addr.XpBars)`. The native combat/trade/explore xp
+    bars vanish; the discipline card remains; leveling/xp still functions.
+  - **SKILL**: `enb.patch_ret(enb.addr.SkillButton)`. The native skill buttons
+    vanish; abilities still fire via the Freya hotbar (`enb.tap`) and the native
+    keybinds; no input deadlock.
+  Mark each sub-id independently; a wrong `pop` shows as an immediate crash on
+  the first call -- that sub-id stays `[!]` until the right value is found.
+- **Setup**: `just play-local` with `UseClientMods=true`; uncomment one HIDE
+  line in init.lua, hot-reload, verify, then move to the next.
