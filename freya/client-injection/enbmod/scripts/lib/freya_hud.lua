@@ -46,25 +46,33 @@ H.RADIUS   = 2           -- design corner radius
 
 -- ---- visibility off the game state -----------------------------------------
 -- enb.state() (C++) returns one of: "space","station","login","charsel",
--- "load","none","unknown". It is calibration-driven; until game_state_addr is
--- calibrated it returns "unknown", which we treat as "show nothing" (owner ask):
--- the HUD only renders once we positively know we are in space or a station.
+-- "load","none","unknown". It is calibration-driven: until game_state_addr is
+-- calibrated (it currently is NOT -- see game.h, game_state_addr == 0) it
+-- ALWAYS returns "unknown". So "unknown" CANNOT mean "hide" -- that would hide
+-- the HUD permanently in the real client. "unknown" is the pre-calibration
+-- default and SHOWS the HUD (matches the C++ l_state contract comment). Only
+-- the screens we can POSITIVELY identify as non-gameplay (login/charsel/load/
+-- none) hide it -- and those are only ever reported once state is calibrated.
 function H.state()
     return (enb.state and enb.state()) or "unknown"
 end
 
 -- returns: show_hud, show_hotbar
---   space   -> full HUD (cards + hotbar)
---   station -> cards, NO hotbar (owner ask: hide skill buttons in station)
---   everything else (login/charsel/load/none/unknown) -> nothing
+--   space            -> full HUD (cards + hotbar)
+--   station          -> cards, NO hotbar (owner ask: hide skill buttons in station)
+--   unknown          -> full HUD (pre-calibration default; we can't tell where we
+--                       are, so show the skeleton rather than hide forever)
+--   login/charsel/   -> nothing (positively-identified non-gameplay screens;
+--   load/none           only reported when game_state_addr is calibrated)
 function H.vis()
     local s = H.state()
-    if s == "space" then
-        return true, true
-    elseif s == "station" then
+    if s == "station" then
         return true, false
+    elseif s == "login" or s == "charsel" or s == "load" or s == "none" then
+        return false, false
     end
-    return false, false
+    -- "space" and the uncalibrated "unknown" default: full HUD.
+    return true, true
 end
 
 -- ---- text helpers ----------------------------------------------------------
