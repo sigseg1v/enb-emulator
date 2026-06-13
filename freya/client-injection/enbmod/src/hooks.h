@@ -24,11 +24,12 @@ void shutdown();
 void set_tick(std::function<void()> cb);
 
 // --- input interception (Tier A "swallow") ---
-// Set a handler called from the PeekMessageA hook (game thread) for each
-// message the game RETRIEVES with PM_REMOVE. It receives (msg, wparam, lparam);
-// returning true SWALLOWS the message -- the hook rewrites it to WM_NULL so the
-// game's window proc never sees it. This is how a Lua HUD claims clicks landing
-// on a cover panel without touching the client's widget code.
+// Set a handler called from the GetMessageA hook (game thread) for each message
+// the game RETRIEVES (the client pump removes + dispatches via GetMessageA, not
+// PeekMessageA -- see hooks.cpp). It receives (msg, wparam, lparam); returning
+// true SWALLOWS the message -- the hook rewrites it to WM_NULL so the game's
+// window proc never sees it. This is how a Lua HUD claims clicks landing on a
+// cover panel without touching the client's widget code.
 //
 // The handler runs Lua via lua_pcall; on ANY error it must report "do not
 // swallow" (fail-open), so a script bug can never lock the user out of input.

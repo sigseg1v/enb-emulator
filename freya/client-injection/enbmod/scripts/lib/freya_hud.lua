@@ -65,20 +65,25 @@ end
 
 -- returns: show_hud, show_hotbar
 --   space            -> full HUD (cards + hotbar)
---   station          -> cards, NO hotbar (owner ask: hide skill buttons in station)
---   unknown          -> full HUD (pre-calibration default; we can't tell where we
---                       are, so show the skeleton rather than hide forever)
---   login/charsel/   -> nothing (positively-identified non-gameplay screens;
---   load/none           only reported when game_state_addr is calibrated)
+--   station          -> cards, NO hotbar (owner ask: hide skill buttons in
+--                       station). Only reported once game_state_addr is
+--                       calibrated; today station reads as "unknown".
+--   anything else    -> nothing. The in-space heartbeat gives a RELIABLE
+--   (incl. unknown)     positive "space" signal, so "not space" means hide --
+--                       including "unknown" (= heartbeat not firing = we are not
+--                       in space: front-end, char select, load, or docked).
+-- This is the deliberate flip from the old "unknown -> show" default: that
+-- default existed only because enb.state() could never positively detect space.
+-- Now that it can, showing the HUD outside space is wrong.
 function H.vis()
     local s = H.state()
-    if s == "station" then
+    if s == "space" then
+        return true, true
+    elseif s == "station" then
         return true, false
-    elseif s == "login" or s == "charsel" or s == "load" or s == "none" then
-        return false, false
     end
-    -- "space" and the uncalibrated "unknown" default: full HUD.
-    return true, true
+    -- unknown / login / charsel / load / none: not in space -> hide.
+    return false, false
 end
 
 -- ---- text helpers ----------------------------------------------------------

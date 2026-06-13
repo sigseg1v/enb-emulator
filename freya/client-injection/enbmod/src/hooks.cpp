@@ -12,9 +12,23 @@ static std::function<bool(unsigned, unsigned, long)> g_on_input;
 static unsigned g_input_mask = 0;
 static bool g_event_hooks_on = false;
 
-// ---- PeekMessageA tick hook -------------------------------------------------
+// ---- message-pump hooks -----------------------------------------------------
+// The client's pump (verified across every loop in the client) is:
+//     while (PeekMessageA(&m, NULL, 0, 0, PM_NOREMOVE)) {
+//         GetMessageA(&m, NULL, 0, 0);   // <-- the ACTUAL retrieval + removal
+//         TranslateMessage(&m); DispatchMessageA(&m);
+//     }
+// So PeekMessageA is only a NON-removing poll -- it never carries PM_REMOVE, and
+// the message is really pulled off the queue (and dispatched to the wndproc) by
+// GetMessageA. Therefore:
+//   * the per-frame TICK rides PeekMessageA (the pump calls it every frame), and
+//   * INPUT interception must ride GetMessageA -- that is the only place a message
+//     is removed, so it is the only place we can both observe and SWALLOW it
+//     (rewriting the retrieved message to WM_NULL before Translate/Dispatch).
 typedef BOOL (WINAPI *PeekMessageA_t)(LPMSG, HWND, UINT, UINT, UINT);
+typedef BOOL (WINAPI *GetMessageA_t)(LPMSG, HWND, UINT, UINT);
 static PeekMessageA_t real_PeekMessageA = nullptr;
+static GetMessageA_t  real_GetMessageA  = nullptr;
 
 // Which WANT_* class (if any) does this window message belong to? 0 = none.
 static unsigned msg_class(UINT msg) {
@@ -34,21 +48,27 @@ static unsigned msg_class(UINT msg) {
 }
 
 static BOOL WINAPI hk_PeekMessageA(LPMSG m, HWND h, UINT min, UINT max, UINT rm) {
-    // g_tick runs Lua via lua_pcall (errors are caught Lua-side); the C++ path only enqueues,
-    // so nothing here throws. (mingw 32-bit has no SEH, so we can't __try around it anyway.)
+    // TICK ONLY. The pump calls PeekMessageA every frame (PM_NOREMOVE poll), so
+    // this is our frame heartbeat for Lua. Input is NOT handled here -- this peek
+    // does not remove the message, so swallowing it would not stick (GetMessageA
+    // re-reads it). g_tick runs Lua via lua_pcall (errors caught Lua-side); the
+    // C++ path only enqueues, so nothing here throws. (mingw 32-bit has no SEH.)
     if (g_tick) g_tick();
+    return real_PeekMessageA(m, h, min, max, rm);
+}
 
-    BOOL got = real_PeekMessageA(m, h, min, max, rm);
-
-    // Input interception: only on messages the game actually REMOVES from its
-    // queue (PM_REMOVE). A peek that leaves the message queued will be retrieved
-    // again later; swallowing it here would not stick and we'd double-dispatch.
-    if (got && m && (rm & PM_REMOVE) && g_on_input && g_input_mask) {
+static BOOL WINAPI hk_GetMessageA(LPMSG m, HWND h, UINT min, UINT max) {
+    BOOL r = real_GetMessageA(m, h, min, max);
+    // r == -1 is an error, 0 is WM_QUIT; only a positive return removed a real
+    // message. This is THE point input is taken off the queue and about to be
+    // dispatched to the wndproc, so it is where we observe and (optionally) drop
+    // it: rewriting to WM_NULL makes Translate/DispatchMessage harmless no-ops.
+    if (r > 0 && m && g_on_input && g_input_mask) {
         unsigned cls = msg_class(m->message);
         if (cls & g_input_mask) {
-            // g_on_input runs Lua via lua_pcall and is documented to FAIL OPEN:
-            // any error returns false (do not swallow), so a script bug cannot
-            // wedge the user's input. We only act on an explicit true.
+            // g_on_input runs Lua via lua_pcall and FAILS OPEN: any error returns
+            // false (do not swallow), so a script bug cannot wedge the user's
+            // input. We only swallow on an explicit true.
             if (g_on_input(m->message, (unsigned)m->wParam, (long)m->lParam)) {
                 m->message = WM_NULL;
                 m->wParam = 0;
@@ -56,7 +76,7 @@ static BOOL WINAPI hk_PeekMessageA(LPMSG m, HWND h, UINT min, UINT max, UINT rm)
             }
         }
     }
-    return got;
+    return r;
 }
 
 // ---- game __thiscall event hooks --------------------------------------------
@@ -153,13 +173,23 @@ bool init() {
     if (!mh_init()) return false;
 
     HMODULE u32 = GetModuleHandleA("user32.dll");
-    void* target = (void*)GetProcAddress(u32, "PeekMessageA");
-    if (!target) { logf("PeekMessageA not found"); return false; }
-    if (MH_CreateHook(target, (void*)&hk_PeekMessageA, (void**)&real_PeekMessageA) != MH_OK) {
+    void* peek = (void*)GetProcAddress(u32, "PeekMessageA");
+    if (!peek) { logf("PeekMessageA not found"); return false; }
+    if (MH_CreateHook(peek, (void*)&hk_PeekMessageA, (void**)&real_PeekMessageA) != MH_OK) {
         logf("CreateHook(PeekMessageA) failed"); return false;
     }
-    if (MH_EnableHook(target) != MH_OK) { logf("EnableHook(PeekMessageA) failed"); return false; }
+    if (MH_EnableHook(peek) != MH_OK) { logf("EnableHook(PeekMessageA) failed"); return false; }
     logf("tick hook installed on PeekMessageA");
+
+    // Input rides GetMessageA (see the pump note above). Non-fatal if it fails:
+    // the tick/HUD still work, only input interception is lost.
+    void* getm = (void*)GetProcAddress(u32, "GetMessageA");
+    if (getm && MH_CreateHook(getm, (void*)&hk_GetMessageA, (void**)&real_GetMessageA) == MH_OK
+             && MH_EnableHook(getm) == MH_OK) {
+        logf("input hook installed on GetMessageA");
+    } else {
+        logf("WARNING: GetMessageA hook failed -- HUD input (clicks/key highlight) disabled");
+    }
     return true;
 }
 
