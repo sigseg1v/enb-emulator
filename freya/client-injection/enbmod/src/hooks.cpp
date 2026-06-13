@@ -118,14 +118,23 @@ extern "C" {
 // args, so the naked thunk just preserves registers, calls notify, and tail-jmps
 // into MinHook's trampoline with ECX + the stack exactly as the game left them.
 static volatile unsigned long g_last_inspace_tick = 0;
+static volatile unsigned      g_vitals_ctrl = 0;   // ECX (this) of the vitals updater
 extern "C" {
     void* real_InSpace_tramp = nullptr;
-    void notify_inspace() { g_last_inspace_tick = GetTickCount(); }
+    // thisp = ECX = the vitals-controller gadget. From the known layout this is
+    // the root of the live hull/shield/energy chain (see autocalib), so capturing
+    // it each frame gives calibration tooling a live, valid root with no scanning.
+    void notify_inspace(unsigned thisp) {
+        g_last_inspace_tick = GetTickCount();
+        g_vitals_ctrl = thisp;
+    }
 }
 extern "C" __attribute__((naked)) void hk_InSpace() {
     __asm__ __volatile__(
         "pushal\n\t"
+        "pushl %ecx\n\t"            // this (vitals controller)
         "call _notify_inspace\n\t"
+        "addl $4, %esp\n\t"
         "popal\n\t"
         "jmp *_real_InSpace_tramp\n\t"
     );
@@ -246,5 +255,6 @@ bool enable_inspace_hook() {
 }
 
 unsigned long last_inspace_tick() { return g_last_inspace_tick; }
+unsigned vitals_ctrl() { return g_vitals_ctrl; }
 
 }} // namespace enb::hooks

@@ -212,6 +212,7 @@ function M.install(opts)
         enable_event_hooks = function() end,
         enable_inspace = function() return true end,
         inspace = function() return S.state == "space" end,
+        vitals_ctrl = function() return 0 end,   -- no live game memory headless
 
         tap  = function(vk) S.taps[#S.taps + 1] = vk; return true end,
         key  = function(vk, down) S.keys[#S.keys + 1] = { vk = vk, down = down }; return true end,

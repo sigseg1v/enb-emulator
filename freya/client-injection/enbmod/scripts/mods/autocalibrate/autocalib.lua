@@ -6,8 +6,15 @@
 -- this helper finds them at runtime and writes scripts/calib_data.lua (gitignored),
 -- which init.lua loads on the next start / hot-reload.
 --
--- USAGE (in-game, with the chat HUD visible so you can read your real stats):
+-- AUTOMATIC (preferred): just enter space. This mod auto-runs probe_vitals()
+-- ~1s after you enter space and dumps the live hull/shield/energy gadget chain
+-- (reached from the heartbeat-captured controller, no scanning) to enbmod.log
+-- with per-offset float/int/ptr annotations. Read the constant field offsets off
+-- that dump -- they are the same for every install of this client build.
+--
+-- MANUAL fallback (older flat-field scan, in-game with the chat HUD visible):
 --   local ac = require("autocalib")
+--   ac.probe_vitals()    -- re-run the automatic probe on demand
 --   ac.find(1000)        -- pass your CURRENT hull value; scans .data for the
 --                        -- pointer whose object holds that number. Prints
 --                        -- candidate player_ptr_addr lines to enbmod.log.
@@ -37,6 +44,97 @@ end
 -- Hex-dump a candidate object so you can read off field offsets.
 function M.probe(base, count)
     calib.dump(base, count or 64)
+end
+
+-- ---- automatic in-space vitals probe ---------------------------------------
+-- The vitals (hull/shield/energy) are NOT flat fields on a player struct: the
+-- client reads them through a named-property "auxdata" system. But the live
+-- vitals-controller gadget is captured every frame by the in-space heartbeat
+-- hook (enb.vitals_ctrl()), and the controller's layout is known:
+--   ctrl                         the vitals controller (this)
+--   [ctrl + 0x04]                its data object
+--   [[ctrl + 0x04] + 0x88]       the player ship ENTITY (source of the values)
+--   [ctrl + 0x1c]                ENERGY gadget (progress bar)
+--   [ctrl + 0x20]                SHIELD gadget
+--   [ctrl + 0x24]                HULL   gadget
+-- Each gadget is fed its current fraction via a SetValue vtable call, so after a
+-- frame the gadget stores a 0.0..1.0 float = the live bar fill. probe_vitals()
+-- walks this chain and dumps each object with float/int/ptr annotations and a
+-- "<= 0..1 (percent?)" flag, so the constant field offsets can be read off in ONE
+-- in-space run and baked into game.h -- no value-typing, no memory scan.
+local function annotate(a)
+    if not enb.mem.readable(a, 4) then return nil end
+    local u = enb.mem.u32(a)
+    local f = enb.mem.f32(a)
+    local note = ("%08x (%d)"):format(u, u)
+    if f == f and f > 0.0 and f <= 1.0001 then
+        note = note .. ("  <= %.4f  PERCENT?"):format(f)
+    elseif f == f and f ~= 0 and math.abs(f) > 1e-3 and math.abs(f) < 1e9 then
+        note = note .. ("  ~f=%.3f"):format(f)
+    end
+    if u >= 0x00400000 and u <= 0x01000000 and enb.mem.readable(u, 4) then
+        note = note .. "  ptr->code/data"
+    elseif u >= 0x01000000 and enb.mem.readable(u, 8) then
+        note = note .. "  ptr->heap"
+    end
+    return note
+end
+
+local function dump_obj(label, base, count)
+    if not base or base == 0 or not enb.mem.readable(base, 4) then
+        enb.log(("[probe] %s @%s -- not readable"):format(label, tostring(base and ("%08x"):format(base) or "nil")))
+        return
+    end
+    enb.log(("[probe] %s @%08x:"):format(label, base))
+    for i = 0, (count or 48) - 1 do
+        local n = annotate(base + i * 4)
+        if not n then break end
+        enb.log(("    +0x%03x: %s"):format(i * 4, n))
+    end
+end
+
+-- Scan an object for a pointer to a wide (UTF-16) string -- anchors the player
+-- entity by matching the on-screen character name.
+local function scan_for_name(label, base, count)
+    if not base or base == 0 then return end
+    for i = 0, (count or 64) - 1 do
+        local a = base + i * 4
+        if not enb.mem.readable(a, 4) then break end
+        local p = enb.mem.u32(a)
+        if p >= 0x00400000 and enb.mem.readable(p, 4) then
+            local w = enb.mem.wstr(p)
+            local c = enb.mem.str(p)
+            if w and #w >= 2 and #w <= 32 and w:match("^[%w%s%-_']+$") then
+                enb.log(("    +0x%03x -> wstr %q"):format(i * 4, w))
+            elseif c and #c >= 2 and #c <= 32 and c:match("^[%w%s%-_']+$") then
+                enb.log(("    +0x%03x -> cstr %q"):format(i * 4, c))
+            end
+        end
+    end
+end
+
+-- The fully-automatic probe. Pulls the live controller from the hook and dumps
+-- the whole known chain. Run it in space (init.lua auto-runs it once on first
+-- space entry; re-run by hand with `require("autocalib").probe_vitals()`).
+function M.probe_vitals()
+    local ctrl = enb.vitals_ctrl and enb.vitals_ctrl() or 0
+    enb.log(("[probe] ===== vitals probe; vitals_ctrl=%08x ====="):format(ctrl))
+    if ctrl == 0 then
+        enb.log("[probe] vitals_ctrl is 0 -- not in space yet, or heartbeat hook off. Aborting.")
+        return
+    end
+    dump_obj("controller", ctrl, 16)
+    local data = enb.mem.readable(ctrl + 4, 4) and enb.mem.u32(ctrl + 4) or 0
+    dump_obj("data [ctrl+4]", data, 48)
+    local entity = (data ~= 0 and enb.mem.readable(data + 0x88, 4)) and enb.mem.u32(data + 0x88) or 0
+    dump_obj("ENTITY [[ctrl+4]+0x88]", entity, 96)
+    enb.log("[probe] scanning ENTITY for name strings (match your character name):")
+    scan_for_name("entity", entity, 96)
+    for _, g in ipairs({ { "ENERGY", 0x1c }, { "SHIELD", 0x20 }, { "HULL", 0x24 } }) do
+        local gp = enb.mem.readable(ctrl + g[2], 4) and enb.mem.u32(ctrl + g[2]) or 0
+        dump_obj(("%s gadget [ctrl+0x%x]"):format(g[1], g[2]), gp, 48)
+    end
+    enb.log("[probe] ===== end vitals probe; copy the +0x.. PERCENT? offsets =====")
 end
 
 -- The fields autocalib knows how to persist (mirror of game.h Offsets).
@@ -77,6 +175,28 @@ function M.save(t)
     f:close()
     enb.log("autocalib: wrote " .. path)
     return true
+end
+
+-- Auto-run the vitals probe ONCE, ~1s after first entering space (gadgets need a
+-- few frames to populate). Fully automatic: enter space, read the annotated dump
+-- in enbmod.log. Re-run any time by hand with require("autocalib").probe_vitals().
+do
+    local done = false
+    local space_ticks = 0
+    enb.on_tick(function()
+        if done then return end
+        if enb.inspace and enb.inspace() then
+            space_ticks = space_ticks + 1
+            if space_ticks >= 60 then
+                done = true
+                local ok, err = pcall(M.probe_vitals)
+                if not ok then enb.log("[probe] error: " .. tostring(err)) end
+            end
+        else
+            space_ticks = 0
+        end
+    end)
+    enb.log("autocalib: armed -- auto-probe ~1s after entering space")
 end
 
 return M

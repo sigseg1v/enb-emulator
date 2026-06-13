@@ -359,6 +359,15 @@ static int l_inspace(lua_State* L){
     return 1;
 }
 
+// enb.vitals_ctrl() -> int. Live pointer to the vitals-controller gadget,
+// captured each frame by the in-space heartbeat hook (0 until seen in space).
+// It is the root of the hull/shield/energy chain -- autocalib walks it instead
+// of scanning memory.
+static int l_vitals_ctrl(lua_State* L){
+    lua_pushinteger(L, (lua_Integer)hooks::vitals_ctrl());
+    return 1;
+}
+
 // enb.on_input(fn [, mask])  -- fn(msg, wparam, lparam) -> truthy to SWALLOW.
 // Optional mask = bitwise-or of enb.WANT_KEY/WANT_CHAR/WANT_MOUSE; default all.
 // Registering nil clears the handler.
@@ -569,6 +578,7 @@ void open(lua_State* L){
         {"enable_event_hooks", l_enable_event_hooks},
         {"enable_inspace", l_enable_inspace},
         {"inspace", l_inspace},
+        {"vitals_ctrl", l_vitals_ctrl},
         {"tap", l_tap},
         {"key", l_key},
         {"char", l_char},

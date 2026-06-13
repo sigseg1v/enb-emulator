@@ -62,6 +62,11 @@ void disable_event_hooks();
 bool enable_inspace_hook();
 unsigned long last_inspace_tick();
 
+// ECX (this) captured from the most recent vitals-updater call: the live root of
+// the hull/shield/energy gadget chain. 0 until the hook has fired in space.
+// Calibration tooling (autocalib) uses this instead of scanning memory.
+unsigned vitals_ctrl();
+
 // Event sinks set by the Lua layer. Args are best-effort raw pointers/values.
 void set_on_skill(std::function<void(unsigned /*this*/, unsigned /*arg*/)> cb);
 void set_on_chat (std::function<void(unsigned /*this*/, unsigned /*arg*/)> cb);
