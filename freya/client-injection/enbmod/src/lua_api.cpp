@@ -377,7 +377,8 @@ static int l_draw_text(lua_State* L){
     int x=(int)luaL_checkinteger(L,1), y=(int)luaL_checkinteger(L,2);
     const char* s=luaL_checkstring(L,3);
     uint32_t rgb=(uint32_t)luaL_optinteger(L,4,0xFFFFFF);
-    overlay::text(x,y,s,rgb); return 0;
+    float scale=(float)luaL_optnumber(L,5,1.0);
+    overlay::text(x,y,s,rgb,scale); return 0;
 }
 static int l_draw_rect(lua_State* L){
     int x=(int)luaL_checkinteger(L,1), y=(int)luaL_checkinteger(L,2);

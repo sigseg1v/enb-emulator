@@ -47,24 +47,24 @@ H.RADIUS   = 2           -- design corner radius
 -- ---- visibility off the game state -----------------------------------------
 -- enb.state() (C++) returns one of: "space","station","login","charsel",
 -- "load","none","unknown". It is calibration-driven; until game_state_addr is
--- calibrated it returns "unknown", which we treat as "show everything" so the
--- HUD is visible in dev / the headless previewer before calibration.
+-- calibrated it returns "unknown", which we treat as "show nothing" (owner ask):
+-- the HUD only renders once we positively know we are in space or a station.
 function H.state()
     return (enb.state and enb.state()) or "unknown"
 end
 
 -- returns: show_hud, show_hotbar
---   space / unknown -> full HUD (cards + hotbar)
---   station         -> cards, NO hotbar (owner ask: hide skill buttons in station)
---   login/charsel/load/none -> nothing
+--   space   -> full HUD (cards + hotbar)
+--   station -> cards, NO hotbar (owner ask: hide skill buttons in station)
+--   everything else (login/charsel/load/none/unknown) -> nothing
 function H.vis()
     local s = H.state()
-    if s == "login" or s == "charsel" or s == "load" or s == "none" then
-        return false, false
+    if s == "space" then
+        return true, true
     elseif s == "station" then
         return true, false
     end
-    return true, true   -- "space" or "unknown"
+    return false, false
 end
 
 -- ---- text helpers ----------------------------------------------------------
@@ -76,14 +76,15 @@ end
 
 -- outlined text: 4 dark offset copies + 1 fill copy on top. The fill copy is
 -- drawn LAST and is the only one carrying `rgb` (the offsets are H.SHADOW), so
--- specs can match the single colored copy by (text, rgb).
-function H.otext(x, y, s, rgb)
+-- specs can match the single colored copy by (text, rgb). Optional `scale`
+-- (default 1.0) shrinks/grows the glyphs uniformly.
+function H.otext(x, y, s, rgb, scale)
     x = math.floor(x); y = math.floor(y)
-    enb.draw.text(x - 1, y,     s, H.SHADOW)
-    enb.draw.text(x + 1, y,     s, H.SHADOW)
-    enb.draw.text(x,     y - 1, s, H.SHADOW)
-    enb.draw.text(x,     y + 1, s, H.SHADOW)
-    enb.draw.text(x,     y,     s, rgb)
+    enb.draw.text(x - 1, y,     s, H.SHADOW, scale)
+    enb.draw.text(x + 1, y,     s, H.SHADOW, scale)
+    enb.draw.text(x,     y - 1, s, H.SHADOW, scale)
+    enb.draw.text(x,     y + 1, s, H.SHADOW, scale)
+    enb.draw.text(x,     y,     s, rgb, scale)
 end
 
 -- darker shade of an 0xRRGGBB color, for the bottom of a vertical-gradient fill

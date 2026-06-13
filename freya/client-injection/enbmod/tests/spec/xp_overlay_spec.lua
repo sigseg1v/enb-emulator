@@ -109,11 +109,11 @@ test("hidden on login / charsel / load", function()
         mock.set_game_state(s)
         eq(#mock.tick(), 0, s .. ": nothing drawn")
     end
-    mock.set_game_state("unknown")
+    mock.set_game_state("space")
 end)
 
 test("shown in station (discipline card stays)", function()
     mock.set_game_state("station")
     ok(body(mock.tick()), "panel drawn in station")
-    mock.set_game_state("unknown")
+    mock.set_game_state("space")
 end)

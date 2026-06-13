@@ -177,7 +177,7 @@ function render(frame, swallowed){
     ctx.globalAlpha = a;
     if(c.kind==='text'){
       ctx.globalAlpha=1; ctx.fillStyle=hex(c.rgb);
-      ctx.font='13px DejaVu Sans, sans-serif'; ctx.textBaseline='top';
+      ctx.font=Math.round(13*(c.scale||1))+'px DejaVu Sans, sans-serif'; ctx.textBaseline='top';
       ctx.fillText(c.text, c.x, c.y);
     } else if(c.kind==='rect'){
       ctx.fillStyle=hex(c.rgb);

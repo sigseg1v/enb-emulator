@@ -32,6 +32,7 @@ local CFG = {
     ROW_GAP   = 4,
     LETTER_W  = 14,    -- colored C/E/T column
     BADGE_W   = 40,    -- "LV n" column on the right
+    BADGE_SCALE = 0.8, -- "LV n" badge text 20% smaller than body text
     BAR_H     = 8,     -- xp bar height (design disc__bar)
 }
 
@@ -78,10 +79,11 @@ enb.on_tick(function()
         end
         enb.draw.rrect(bar_x, by, bar_w, CFG.BAR_H, H.RADIUS, H.LINE, 70, false)
 
-        -- "LV n" badge, right-aligned
+        -- "LV n" badge, right-aligned, 20% smaller than body text
         local badge = "LV " .. (cal and lvl and tostring(lvl) or "--")
-        local bw = H.measure(badge)
-        H.otext(x + CFG.W - CFG.PAD_X - bw, text_y, badge, cal and H.INK_DIM or H.UNCAL)
+        local bw = H.measure(badge) * CFG.BADGE_SCALE
+        H.otext(x + CFG.W - CFG.PAD_X - bw - 8, text_y + 3, badge,
+                cal and H.INK_DIM or H.UNCAL, CFG.BADGE_SCALE)
 
         ry = ry + CFG.ROW_H + CFG.ROW_GAP
     end

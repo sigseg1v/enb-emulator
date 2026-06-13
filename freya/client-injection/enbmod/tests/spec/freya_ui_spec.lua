@@ -197,7 +197,7 @@ test("station: cards drawn but hotbar hidden", function()
     local cx, cy = slot_center(3)
     mock.input(MSG.LBUTTONDOWN, 1, mock.xy_lparam(cx, cy))
     eq(#mock.state().taps, before, "no tap with hotbar hidden")
-    mock.set_game_state("unknown")
+    mock.set_game_state("space")
 end)
 
 test("login / charsel / load: nothing drawn, input untouched", function()
@@ -207,7 +207,7 @@ test("login / charsel / load: nothing drawn, input untouched", function()
         eq(mock.input(MSG.MOUSEMOVE, 0, mock.xy_lparam(PC_X + 10, PC_Y + 10)), false,
            s .. ": input passes through")
     end
-    mock.set_game_state("unknown")
+    mock.set_game_state("space")
 end)
 
 test("cursor follows visibility: on in space, off on login", function()
@@ -215,7 +215,7 @@ test("cursor follows visibility: on in space, off on login", function()
     eq(mock.state().cursor, true, "cursor on in space")
     mock.set_game_state("login"); mock.tick()
     eq(mock.state().cursor, false, "cursor off on login")
-    mock.set_game_state("unknown")
+    mock.set_game_state("space")
 end)
 
 test("layout adapts: 1024x768 and 1920x1080 keep the hotbar on-screen", function()

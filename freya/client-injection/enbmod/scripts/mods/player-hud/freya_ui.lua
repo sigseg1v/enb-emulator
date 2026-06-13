@@ -143,9 +143,9 @@ local function draw_player_card(L)
             local val = string.format("%d / %d", cur, max)
             local vw, vh = H.measure(val)
             local ty = vy + math.floor((CFG.VITAL_H - vh) / 2)
-            H.otext(track_x + track_w - CFG.VAL_PAD - vw, ty, val, 0xffffff)
+            H.otext(track_x + track_w - CFG.VAL_PAD - vw, ty + 2, val, 0xffffff)
             local ps = math.floor(frac * 100 + 0.5) .. "%"
-            H.otext(pct_right - H.measure(ps), ty, ps, H.INK)
+            H.otext(pct_right - H.measure(ps) - 8, ty + 2, ps, H.INK)
         end
         vy = vy + CFG.VITAL_H + CFG.VITAL_GAP
     end
@@ -165,10 +165,9 @@ local function draw_hotbar(L)
         -- border (cyan armed glow when lit)
         enb.draw.rrect(x, y, w, h, H.RADIUS, lit and H.LINE_HOT or H.LINE,
                        lit and 220 or 150, false)
-        -- key label, centered
+        -- key label, top-right corner
         local lw, lh = H.measure(k.label)
-        H.otext(x + math.floor((w - lw) / 2), y + math.floor((h - lh) / 2),
-                k.label, CFG.KEY_INK)
+        H.otext(x + w - lw - 5, y + 3, k.label, CFG.KEY_INK)
         if state[i].flash > 0 then state[i].flash = state[i].flash - 1 end
     end
 end

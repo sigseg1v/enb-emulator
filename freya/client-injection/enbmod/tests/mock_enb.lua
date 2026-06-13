@@ -55,7 +55,7 @@ function M.reset()
         screen_w = 1280, screen_h = 992,
         self_tbl = { base = 0 },
         target_tbl = nil,
-        state = "unknown",       -- enb.state(): space/station/login/charsel/load/unknown
+        state = "space",         -- enb.state(): space/station/login/charsel/load/unknown
         cursor = false,          -- last enb.cursor(on) value
 
         offsets = {},            -- accumulated enb.calibrate{} fields
@@ -135,7 +135,7 @@ function M.frame_json(frame)
         local parts = {}
         -- stable key order for diffable dumps
         for _, k in ipairs({"kind","x","y","w","h","x0","y0","x1","y1",
-                            "radius","rgb","rgb2","alpha","filled","text","path"}) do
+                            "radius","rgb","rgb2","alpha","filled","text","path","scale"}) do
             if c[k] ~= nil then parts[#parts + 1] = jstr(k) .. ":" .. jval(c[k]) end
         end
         out[#out + 1] = "{" .. table.concat(parts, ",") .. "}" .. (i < #frame and "," or "")
@@ -242,9 +242,9 @@ function M.install(opts)
         },
 
         draw = {
-            text = function(x, y, s, rgb)
+            text = function(x, y, s, rgb, scale)
                 S.frame[#S.frame + 1] = { kind = "text", x = x, y = y,
-                    text = tostring(s), rgb = rgb or 0xFFFFFF }
+                    text = tostring(s), rgb = rgb or 0xFFFFFF, scale = scale or 1.0 }
             end,
             rect = function(x, y, w, h, rgb, filled, alpha)
                 S.frame[#S.frame + 1] = { kind = "rect", x = x, y = y, w = w, h = h,

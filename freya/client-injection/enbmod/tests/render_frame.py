@@ -59,13 +59,18 @@ def render(frame, out_path):
     bg = gradient_layer(w, h, 0x0A0E18, 0x02030A, 255)
     base.paste(bg, (0, 0))
     font = load_font()
+    font_cache = {13: font}
 
     for c in frame["cmds"]:
         kind = c["kind"]
         if kind == "text":
+            sz = max(1, round(13 * c.get("scale", 1.0)))
+            f = font_cache.get(sz)
+            if f is None:
+                f = font_cache[sz] = load_font(sz)
             ov = Image.new("RGBA", (w, h), (0, 0, 0, 0))
             ImageDraw.Draw(ov).text((c["x"], c["y"]), c["text"],
-                                    font=font, fill=rgb_tuple(c["rgb"]) + (255,))
+                                    font=f, fill=rgb_tuple(c["rgb"]) + (255,))
             base = Image.alpha_composite(base, ov)
         elif kind == "rect":
             ov = Image.new("RGBA", (w, h), (0, 0, 0, 0))

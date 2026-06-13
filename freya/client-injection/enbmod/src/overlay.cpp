@@ -27,6 +27,7 @@ struct Cmd {
     std::string s;   // text, or image path
     uint32_t rgb2;   // gradient bottom color (K_RECT_GRAD / K_RRECT_GRAD)
     int radius;      // corner radius (K_RRECT / K_RRECT_GRAD)
+    float scale = 1.0f;  // glyph scale (K_TEXT; 1.0 = native atlas size)
 };
 static std::vector<Cmd> g_staging;     // built by Lua during tick
 static std::vector<Cmd> g_render;      // consumed by the Present hook
@@ -385,21 +386,23 @@ static void draw_cursor(IDirect3DDevice8* dev) {
 }
 
 static void draw_text(IDirect3DDevice8* dev, int x, int y,
-                      const std::string& s, D3DCOLOR c) {
+                      const std::string& s, D3DCOLOR c, float scale) {
+    if (scale <= 0.0f) scale = 1.0f;
     float cx = (float)x;
     dev->SetTexture(0, g_fontTex);
     for (char chs : s) {
         unsigned char ch = (unsigned char)chs;
         if (ch < 32 || ch > 126) ch = '?';
         const Glyph& g = g_glyphs[ch - 32];
+        float gw = g.w * scale, gh = g.h * scale;
         Vtx v[4] = {
-            { cx - 0.5f,       (float)y - 0.5f,       0, 1, c, g.u0, g.v0 },
-            { cx + g.w - 0.5f, (float)y - 0.5f,       0, 1, c, g.u1, g.v0 },
-            { cx - 0.5f,       (float)y + g.h - 0.5f, 0, 1, c, g.u0, g.v1 },
-            { cx + g.w - 0.5f, (float)y + g.h - 0.5f, 0, 1, c, g.u1, g.v1 },
+            { cx - 0.5f,      (float)y - 0.5f,      0, 1, c, g.u0, g.v0 },
+            { cx + gw - 0.5f, (float)y - 0.5f,      0, 1, c, g.u1, g.v0 },
+            { cx - 0.5f,      (float)y + gh - 0.5f, 0, 1, c, g.u0, g.v1 },
+            { cx + gw - 0.5f, (float)y + gh - 0.5f, 0, 1, c, g.u1, g.v1 },
         };
         dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(Vtx));
-        cx += g.w;
+        cx += gw;
     }
 }
 
@@ -447,7 +450,7 @@ static void draw_frame(IDirect3DDevice8* dev) {
     for (auto& c : frame) {
         switch (c.kind) {
         case K_TEXT:
-            draw_text(dev, c.x, c.y, c.s, argb(c.rgb, 255));
+            draw_text(dev, c.x, c.y, c.s, argb(c.rgb, 255), c.scale);
             break;
         case K_RECT: {
             D3DCOLOR col = argb(c.rgb, c.alpha);
@@ -620,8 +623,8 @@ void commit_frame() {
     g_render.swap(g_staging);
 }
 
-void text(int x, int y, const std::string& s, uint32_t rgb) {
-    g_staging.push_back({K_TEXT, x, y, 0, 0, rgb, false, 255, s, 0, 0});
+void text(int x, int y, const std::string& s, uint32_t rgb, float scale) {
+    g_staging.push_back({K_TEXT, x, y, 0, 0, rgb, false, 255, s, 0, 0, scale});
 }
 void rect(int x, int y, int w, int h, uint32_t rgb, bool filled, int alpha) {
     g_staging.push_back({K_RECT, x, y, w, h, rgb, filled, alpha, {}, 0, 0});
