@@ -699,6 +699,22 @@ void UDPClient::RequestResend(unsigned long packet_start, long packet_count)
 // ---------------------------------------------------------------------------
 void UDPClient::PumpPacketResend()
 {
+    // The timer pump exists ONLY to recover a lost tail of the post-login
+    // world-load burst (the 0x003A sector-entry data is the final traffic on
+    // the connection, so the arrival-driven path never re-fires). It must
+    // stay silent during a login handshake: a late datagram from the PREVIOUS
+    // sector session can land in the next session's reassembly window before
+    // its seq-0 reset, and a timer-driven bulk resend NACK built from that
+    // residue makes the server flood header-only blank-fills that race
+    // m_CurrentPacketNum PAST the new login's real stage packets -- they then
+    // drop as "already processed" and the second sector login hangs forever.
+    // m_LoginComplete is false from sector LOGIN (0x0002) until START_ACK
+    // (0x0006), exactly bracketing the handshake, so gate the pump on it. The
+    // arrival-driven recovery in SendPacketSequence still runs during login,
+    // matching pre-resend-fix behaviour.
+    if (!m_LoginComplete) {
+        return;
+    }
     if (!m_ConnectionActive || m_Packets.empty()) {
         return;
     }

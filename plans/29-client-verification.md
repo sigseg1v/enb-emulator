@@ -1165,6 +1165,43 @@ format & byte order", Trap 2).
   wire struct width and the blank-reply contract changed together). The
   online deploy needs the same rebuild before the friend's hang is fixed.
 
+### [ ] CV-24 -- Repeated zone in ONE session does not hang (CV-23 resend pump scoped to post-login)
+
+- **Change**: proxy only, a correctness fix to the CV-23 reliable-stream work
+  (regression repair, not new wire behaviour). CV-23 added the timer-driven
+  `PumpPacketResend` (SO_RCVTIMEO + ~300ms pump) so a lost tail of the
+  post-handoff 0x003A burst could recover when no further datagrams arrive. But
+  the pump ran unconditionally, so during the NEXT sector login on the same
+  single-client proxy it could build a bulk resend NACK from the PREVIOUS
+  session's leftover reassembly residue (a late datagram landing in the new
+  window before its seq-0 reset). The server then flooded header-only blank
+  fills that raced `m_CurrentPacketNum` past the new login's real stage packets,
+  which then dropped as "already processed" -- so the SECOND sector login in one
+  session hung on the load screen forever. Fix: gate `PumpPacketResend` on
+  `m_LoginComplete` (false from sector LOGIN 0x0002 until START_ACK 0x0006, i.e.
+  exactly the handshake window) so the timer pump is dormant during any login
+  and only runs in the established post-login steady state it was built for; the
+  arrival-driven recovery in `SendPacketSequence` still runs during login,
+  matching pre-CV-23 behaviour. Companion fix: reset `m_UDPClient`'s
+  `m_LoginComplete` at sector LOGIN in lockstep with `m_UDPConnection` /
+  `m_UDPGlobalClient` (it was the odd plane out -- set true at START but never
+  reset, leaving its pump gate stuck open across a re-join).
+  `proxy/UDPProxyToClient_linux.cpp` (the gate), `proxy/ClientToServer_linux_stubs.cpp`
+  (the reset).
+- **CLI byte-pin**: no new packet format -- the gate changes WHEN an existing
+  packet is emitted, not its bytes. Pinned behaviourally by the
+  `*HandoffFollow` integration tests, which each do a second full sector login
+  (follow re-join) on one proxy: `SectorUndockHandoffFollowTests`,
+  `SectorGateHandoffFollowTests`, and `SectorMvasMoveTests` (its follow leg).
+  All three pass on a fresh stack; before the fix the follow login hung.
+- **What to look for (real client)**: in ONE session (no relog), zone twice or
+  more -- e.g. undock, then gate, then gate again. Each subsequent zone must
+  complete; previously the second could stick on the load screen. The CV-23
+  long-idle and rapid-burst checks still apply.
+- **Setup**: `just play-local` (rebuilt proxy image + freshly built
+  bin/FreyaProxy.exe -- this is a proxy-only change, but both the docker proxy
+  and the WINE-side FreyaProxy.exe must be the new binary).
+
 ### [ ] CV-AS-STATE -- Freya HUD shows ONLY in space/station, never on login/charsel/load
 
 - **Change**: client-only (enbmod.dll, Freya/MIT -- no server/proxy wire

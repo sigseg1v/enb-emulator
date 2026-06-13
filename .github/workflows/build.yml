@@ -302,20 +302,20 @@ jobs:
   # new test can never silently fall outside CI.
   #
   # SHARD COUNT lives in two places that MUST agree: the matrix list
-  # `shard: [1, 2, 3]` and `SHARDS: "3"`. Bump both to rebalance.
+  # `shard: [1, 2, 3, 4]` and `SHARDS: "4"`. Bump both to rebalance.
   cli-integration-test:
-    name: cli-integration-test (shard ${{ matrix.shard }}/3)
+    name: cli-integration-test (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-24.04
-    # One shard runs ~1/3 of the suite (~8 min) + stack bring-up (~3 min)
-    # + the proxy-recycle self-heal. 25 min covers a shard with margin;
-    # the un-sharded job needed 45 and still timed out.
+    # One shard runs ~1/4 of the suite (~6 min) + stack bring-up (~3 min)
+    # + the periodic proactive proxy recycle. 25 min covers a shard with
+    # ample margin; the un-sharded job needed 45 and still timed out.
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
     env:
-      SHARDS: "3"
+      SHARDS: "4"
     steps:
       - uses: actions/checkout@v4
       - name: Install .NET 10 SDK
@@ -380,7 +380,7 @@ jobs:
           cmake -S freya/tests/server -B build/tests -G Ninja
           cmake --build build/tests --target handshake_live_test replay_test -j"$(nproc)"
           ctest --test-dir build/tests --output-on-failure -R 'Replay\.LivePostHandshakeReplay'
-      - name: Run integration suite (shard ${{ matrix.shard }}/3)
+      - name: Run integration suite (shard ${{ matrix.shard }}/4)
         env:
           # ServerFixture owns the lifecycle when we DON'T pass this.
           # We brought the stack up explicitly above so we DO set it --
@@ -438,4 +438,4 @@ jobs:
           dotnet test freya/tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
             --no-build --list-tests > /tmp/alltests.txt
           python3 tools/ci/integration_shard_filter.py \
-            --list-file /tmp/alltests.txt --shards 3 --check
+            --list-file /tmp/alltests.txt --shards 4 --check

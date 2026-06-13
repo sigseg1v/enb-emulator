@@ -465,6 +465,30 @@ just package   # build OCI image
 
 See `docs/08-build.md` and `docs/09-running-locally.md` for the details.
 
+## After every push: check CI and fix it if it is red (CRITICAL)
+
+Pushing is not "done." Every time you `git push`, you MUST immediately check
+the resulting CI run and, if it is failing, FIX it before considering the work
+complete -- do not move on, do not report success, do not wait to be told.
+
+1. After the push, find the run for the pushed SHA:
+   `gh run list --workflow build.yml --branch <branch> --limit 1`
+   (poll `gh run watch <id>` or re-list until it finishes).
+2. If it is green, you are done. If it is red, treat it exactly like any other
+   defect (see "Log warnings and errors are not noise"): get the real failure
+   -- failed job log, or download the TRX artifact
+   (`gh run download <id> -n cli-integration-trx-<shard>`) and read the actual
+   failing test + message -- find the root cause, fix it, push, and re-check.
+3. A red CI you caused (or that your branch carries) is YOUR problem to fix in
+   the same session, even if the failing job is not the code you touched. "It
+   was already broken" / "it's the integration suite, not my change" is a
+   diagnosis, not an exemption: still drive it to green.
+4. The integration suite (`cli-integration-test`) shards across parallel jobs
+   with a per-job `timeout-minutes`; a single hung test (per-test cancellation
+   token fires at its deadline) can push a shard over the job timeout and kill
+   it with no TRX. When a shard times out, suspect a newly-slow/hung test in
+   that shard's slice, not flakiness, until proven otherwise.
+
 ## Pointers
 
 - Architecture: `docs/02-architecture.md`

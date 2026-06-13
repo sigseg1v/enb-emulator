@@ -43,14 +43,27 @@ public sealed class ServerFixture : IAsyncLifetime
     // endpoints the CliClient.Core types connect to from the test
     // process — which lives on the docker host, not inside the
     // compose network.
-    public string LoginHost  { get; } = "127.0.0.1";
-    public int    LoginPort  { get; } = 4443;   // host-side remap of 443
-    public string GlobalHost { get; } = "127.0.0.1";
-    public int    GlobalPort { get; } = 3805;   // proxy GLOBAL_SERVER_PORT
-    public string MasterHost { get; } = "127.0.0.1";
-    public int    MasterPort { get; } = 3801;   // proxy MASTER_SERVER_PORT
-    public string SectorHost { get; } = "127.0.0.1";
-    public int    SectorPort { get; } = 3500;   // proxy SECTOR_SERVER_PORT
+    // Each port resolves from an env var first (so an isolated stack on
+    // remapped host ports can be targeted for local repro without disturbing a
+    // running default stack), then the docker-compose.yml default. CI sets none
+    // of these, so it keeps the exact published-port defaults.
+    private static int Port(string env, int dflt) =>
+        int.TryParse(Environment.GetEnvironmentVariable(env), out var p) ? p : dflt;
+    // Host defaults to 127.0.0.1; a local repro stack can bind a distinct
+    // loopback IP (e.g. 127.0.0.2) on the SAME default ports, so the
+    // server-emitted redirect port (always 3500) still matches SectorPort
+    // while avoiding a collision with a default stack on 127.0.0.1.
+    private static string Host(string env) =>
+        Environment.GetEnvironmentVariable(env) is { Length: > 0 } h ? h : "127.0.0.1";
+
+    public string LoginHost  { get; } = Host("CLI_INTEGRATION_LOGIN_HOST");
+    public int    LoginPort  { get; } = Port("CLI_INTEGRATION_LOGIN_PORT", 4443);   // host-side remap of 443
+    public string GlobalHost { get; } = Host("CLI_INTEGRATION_GLOBAL_HOST");
+    public int    GlobalPort { get; } = Port("CLI_INTEGRATION_GLOBAL_PORT", 3805);  // proxy GLOBAL_SERVER_PORT
+    public string MasterHost { get; } = Host("CLI_INTEGRATION_MASTER_HOST");
+    public int    MasterPort { get; } = Port("CLI_INTEGRATION_MASTER_PORT", 3801);  // proxy MASTER_SERVER_PORT
+    public string SectorHost { get; } = Host("CLI_INTEGRATION_SECTOR_HOST");
+    public int    SectorPort { get; } = Port("CLI_INTEGRATION_SECTOR_PORT", 3500);  // proxy SECTOR_SERVER_PORT
 
     // Host-side remap of postgres 5432. docker-compose.yml publishes
     // "${ENB_PG_HOST_PORT:-5434}:5432" and the justfile derives a PER-BRANCH
@@ -91,6 +104,22 @@ public sealed class ServerFixture : IAsyncLifetime
     private DateTime _lastProxyRestartUtc = DateTime.MinValue;
     private static readonly TimeSpan ProxyRestartDedupWindow =
         TimeSpan.FromSeconds(12);
+
+    // Proactive (vs. reactive) wedge avoidance. The reactive recycle above
+    // only fires once a handshake has ALREADY stalled, and only the ESTABLISH
+    // path detects that stall and recovers -- a post-establish operation (a
+    // handoff follow, a chat-reply wait) that hits the wedge has no in-line
+    // recovery and instead hangs to its full per-test cancellation deadline
+    // (the shard-3 CI timeouts: Mvas_DirectPositionFeed 150s, the chat reply
+    // 90s). The wedge needs ~40 accumulated sector logins to tip; counting
+    // establishes (each ~1-3 logins once a test's post-establish handoffs are
+    // included) and recycling every 10 keeps the running total well under that
+    // threshold, so the wedge never tips DURING a test in the first place --
+    // no hang, in any path. Every establish/reestablish funnels through
+    // SectorHandshake.WithProxyRecycleOnWedgeAsync, which calls
+    // MaybeProactiveRecycleAsync below before its first attempt.
+    private int _establishesSinceRecycle;
+    private const int ProactiveRecycleEveryEstablishes = 10;
 
     public ServerFixture()
     {
@@ -198,13 +227,41 @@ public sealed class ServerFixture : IAsyncLifetime
     /// compose CLI and the running stack, both present in CI.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// Called once per establish/reestablish (from
+    /// <c>SectorHandshake.WithProxyRecycleOnWedgeAsync</c>) BEFORE the
+    /// handshake runs. Every <see cref="ProactiveRecycleEveryEstablishes"/>th
+    /// call recycles the proxy so accumulated per-session proxy state never
+    /// reaches the single-client wedge threshold -- see the
+    /// <see cref="_establishesSinceRecycle"/> note. The recycle resets the
+    /// counter (in <see cref="RestartProxyAsync"/>), so this is a sliding
+    /// window, not a one-shot.
+    /// </summary>
+    public async Task MaybeProactiveRecycleAsync(CancellationToken ct = default)
+    {
+        if (Interlocked.Increment(ref _establishesSinceRecycle)
+            < ProactiveRecycleEveryEstablishes)
+            return;
+
+        Console.Error.WriteLine(
+            "[ServerFixture] proactively recycling the proxy after " +
+            $"{ProactiveRecycleEveryEstablishes} establishes to stay under the " +
+            "single-client session-accumulation wedge threshold.");
+        await RestartProxyAsync(ct);
+    }
+
     public async Task RestartProxyAsync(CancellationToken ct = default)
     {
         await _proxyRestartLock.WaitAsync(ct);
         try
         {
             if (DateTime.UtcNow - _lastProxyRestartUtc < ProxyRestartDedupWindow)
+            {
+                // A recent recycle already freshened the proxy; the
+                // accumulation window restarts from here too.
+                Interlocked.Exchange(ref _establishesSinceRecycle, 0);
                 return;
+            }
 
             Console.Error.WriteLine(
                 "[ServerFixture] recycling the proxy container to clear the " +
@@ -222,6 +279,8 @@ public sealed class ServerFixture : IAsyncLifetime
             await WaitForProxyBootCompleteAsync(TimeSpan.FromSeconds(30), ct);
 
             _lastProxyRestartUtc = DateTime.UtcNow;
+            // Fresh proxy: the accumulation window starts over.
+            Interlocked.Exchange(ref _establishesSinceRecycle, 0);
         }
         finally
         {

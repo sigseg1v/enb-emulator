@@ -36,7 +36,7 @@ namespace N7.CliClient.IntegrationTests.Net;
 public sealed class ProxyPositionFeed : IDisposable
 {
     // freya/client-injection/ClientPositionShared.h
-    private const int   PosPort = 3807;          // FREYA_CLIENT_POS_PORT
+    private const int   DefaultPosPort = 3807;    // FREYA_CLIENT_POS_PORT
     private const uint  Magic   = 0x4E37504Fu;   // FREYA_CLIENT_POS_MAGIC ('N7PO')
 
     private readonly UdpClient _udp;
@@ -45,10 +45,17 @@ public sealed class ProxyPositionFeed : IDisposable
 
     /// <param name="host">Host the proxy's 3807 intake is published on
     /// (ServerFixture.SectorHost == 127.0.0.1).</param>
-    public ProxyPositionFeed(string host)
+    /// <param name="port">Proxy position-feed intake port. Defaults to 3807;
+    /// override via <c>CLI_INTEGRATION_POS_PORT</c> for a port-remapped stack
+    /// (the same pattern ServerFixture uses for LOGIN/GLOBAL/MASTER/SECTOR).</param>
+    public ProxyPositionFeed(string host, int? port = null)
     {
+        int posPort = port
+            ?? (int.TryParse(
+                    Environment.GetEnvironmentVariable("CLI_INTEGRATION_POS_PORT"),
+                    out var p) ? p : DefaultPosPort);
         _udp = new UdpClient();
-        _dst = new IPEndPoint(IPAddress.Parse(host), PosPort);
+        _dst = new IPEndPoint(IPAddress.Parse(host), posPort);
     }
 
     /// <summary>
