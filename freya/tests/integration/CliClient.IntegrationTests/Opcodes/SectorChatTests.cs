@@ -67,7 +67,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
 {
     public SectorChatTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task GroupChat_WhenUngrouped_ReceivesNotInGroupErrorString()
     {
         var account = TestAccounts.New(_server);
@@ -288,7 +288,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s. Handshake ~2s; CHAT+REPLY round-trip is sub-second.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task GroupChat_WhenUngrouped_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -568,7 +568,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s. Handshake ~2s; CHAT+REPLY round-trip is sub-second.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashAuthlevel_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -799,7 +799,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s. Handshake ~2s; CHAT+REPLY round-trip is sub-second.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashNotells_OnAdminAccountFirstInvocation_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -1009,7 +1009,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashNoattack_OnAdminAccountFirstInvocation_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -1247,7 +1247,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s. Handshake ~2s; CHAT+REPLY round-trip is sub-second.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashPosition_OnFreshCharNoTarget_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -1489,7 +1489,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashLevelOutOfRange_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -1713,7 +1713,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashLevelMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -1929,7 +1929,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashBeon_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -2128,7 +2128,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashBeoff_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -2331,7 +2331,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashChjoinMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -2513,7 +2513,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashChleaveMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -2706,7 +2706,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashAdduserMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -2896,7 +2896,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashBanMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -3097,7 +3097,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashGmgetaccessMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -3304,7 +3304,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashGmsetaccessMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -3482,7 +3482,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashGmskillpointsMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -3659,7 +3659,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashGmenableskillsMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -3832,7 +3832,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashSetpasswordMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -4009,7 +4009,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashDMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -4207,7 +4207,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashRemovebaseoreMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -4407,7 +4407,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashEffectMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -4611,7 +4611,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashFormMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -4809,7 +4809,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashHtMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -5017,7 +5017,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashKickMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -5220,7 +5220,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashInviteMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -5426,7 +5426,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashMoveMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -5629,7 +5629,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashOrientationMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -5864,7 +5864,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashScriptMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -6097,7 +6097,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashTiltMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -6298,7 +6298,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashUitriggerMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -6523,7 +6523,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashWormholeMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -6756,7 +6756,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashWarpMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -6983,7 +6983,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashUpgradeMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -7233,7 +7233,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashTestmsgMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -7483,7 +7483,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashTerminateMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -7736,7 +7736,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashTradeMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -7959,7 +7959,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashOeulerMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -8161,7 +8161,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashOpenifMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -8358,7 +8358,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSoundsMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -8555,7 +8555,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashScaleMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -8745,7 +8745,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashShieldwarningsMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -8938,7 +8938,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSkillpointsMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -9133,7 +9133,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashStatMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -9325,7 +9325,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashScanMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -9543,7 +9543,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSignatureMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -9750,7 +9750,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashRotatexMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -9951,7 +9951,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashRotateyMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -10149,7 +10149,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashRotatezMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -10353,7 +10353,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashRsiMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -10528,7 +10528,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashRsaMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -10684,7 +10684,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashRsnMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -10845,7 +10845,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashPacketoptMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -10958,7 +10958,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashPanupMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -11057,7 +11057,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashPanxMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -11156,7 +11156,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashPanyMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -11255,7 +11255,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashPanzMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -11354,7 +11354,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashPlanetspinMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -11457,7 +11457,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashGmMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -11560,7 +11560,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashGwormholeMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -11663,7 +11663,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashGetstatMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -11765,7 +11765,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashGformMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -11873,7 +11873,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashBuffMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -11979,7 +11979,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashBassetMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -12086,7 +12086,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashCcameraMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -12194,7 +12194,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashChangepasswordMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -12303,7 +12303,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashDecoMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -12423,7 +12423,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashEffectoMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -12544,7 +12544,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashFindMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -12661,7 +12661,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashFradiusMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -12768,7 +12768,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashFtypeMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -12872,7 +12872,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashFlevelMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -12977,7 +12977,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashFcountMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -13089,7 +13089,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashFaddasteroidtypeMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -13196,7 +13196,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashFaddoretofieldMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -13302,7 +13302,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashFdelorefromfieldMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -13410,7 +13410,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashFaddoretosectorMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -13519,7 +13519,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashFdelorefromsectorMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -13625,7 +13625,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashMobaggroMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -13731,7 +13731,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashMusicMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -13842,7 +13842,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashAltnameMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -13952,7 +13952,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashAltweaponMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -14063,7 +14063,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashAddbaseoreMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -14174,7 +14174,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashBeMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -14296,7 +14296,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashHalloweenMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -14418,7 +14418,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashRestartcommsMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -14536,7 +14536,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashCountspMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -14659,7 +14659,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashDisplayplayerfactionMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -14800,7 +14800,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashDestroyobjectNotHijacking_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -14949,7 +14949,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashDoff_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -15094,7 +15094,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashAnon_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -15261,7 +15261,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashFace_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -15397,7 +15397,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashFaceme_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -15558,7 +15558,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashFactionoverride_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -15724,7 +15724,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashDebugmissionsOn_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -15871,7 +15871,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashLevelout_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -16033,7 +16033,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashDebugmissionsOff_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -16185,7 +16185,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashReffect_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -16342,7 +16342,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashRs_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -16514,7 +16514,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashRsd_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -16677,7 +16677,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashTest_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -16874,7 +16874,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashInvisible_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -17068,7 +17068,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashShieldwarningsLevel2_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -17260,7 +17260,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashFindsectorNoMatch_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -17453,7 +17453,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashGmon_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -17612,7 +17612,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashGmoff_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -17789,7 +17789,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashHelpedit_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -17962,7 +17962,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashHelpfield_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -18127,7 +18127,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashZzzzzz_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -18309,7 +18309,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashZzzzzz_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -18482,7 +18482,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashGmsetaccessOneArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -18670,7 +18670,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashGmskillpointsOneArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -18838,7 +18838,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashGmplayerlevelHighLevel_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -19008,7 +19008,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashGmupgradeUnknownPlayer_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -19176,7 +19176,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashOpenif_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -19348,7 +19348,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashPanup55_NoTarget_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -19516,7 +19516,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashTradeUnknownPlayer_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -19672,7 +19672,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashInviteUnknownPlayer_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -19845,7 +19845,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashBumpaccessUnknownPlayer_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -20019,7 +20019,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashRotatex75_NoTarget_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -20188,7 +20188,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashFactionoverride_FreshChar_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -20368,7 +20368,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashFlushinv_FreshChar_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -20544,7 +20544,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashMoveOnlyDelimiters_NoTarget_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -20747,7 +20747,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashFaceNoTarget_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -20908,7 +20908,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashDisplayPlayerFactionNoArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -21079,7 +21079,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashHalloweenNoArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -21284,7 +21284,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashSetpasswordOneArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -21447,7 +21447,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashAdduserTwoArgs_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -21603,7 +21603,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashEditfactionOutOfRange_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -21750,7 +21750,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashEditfactionStandingOutOfRange_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -21906,7 +21906,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashEditplayerfactionUnknownPlayer_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -22059,7 +22059,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashCountspTrailingSpace_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -22219,7 +22219,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashDestroyobjectFreshChar_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -22377,7 +22377,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashGmenableskillsOfflineTarget_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -22533,7 +22533,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashRespecOfflineTarget_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -22682,7 +22682,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashRespecMissingType_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -22827,7 +22827,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashBanTrailingSpace_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -22951,7 +22951,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashBanOfflineTarget_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -23077,7 +23077,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashGmgetaccessOfflineTarget_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -23218,7 +23218,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashGmsetaccessOfflineTarget_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -23356,7 +23356,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashReplaceshipTrailingSpace_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -23493,7 +23493,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashGmplayerlevelOfflineTarget_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -23630,7 +23630,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashGmskillpointsOfflineTarget_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -23774,7 +23774,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashGmupgradeTrailingSpace_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -23932,7 +23932,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashDisplayPlayerFactionOfflineTarget_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -24075,7 +24075,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashFindsectorNoMatch_OnAdminAccount_PinsHeaderFrameWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -24210,7 +24210,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashFindOfflineTarget_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -24375,7 +24375,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashAdduserTrailingSpace_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -24523,7 +24523,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashAdduserOneArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -24677,7 +24677,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashSetpasswordTrailingSpace_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -24838,7 +24838,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashBumpaccessTrailingSpace_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -25004,7 +25004,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashGmsetaccessTrailingSpace_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -25175,7 +25175,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashSlashBumpaccessOneArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -25299,7 +25299,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashEditfactionMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -25423,7 +25423,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashFindsectorMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -25543,7 +25543,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashEditplayerfactionMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -25677,7 +25677,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashBumpaccessMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -25807,7 +25807,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashGmplayerlevelMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -25937,7 +25937,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashGmupgradeMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -26069,7 +26069,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashReplaceshipMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -26198,7 +26198,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashRespecMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -26340,7 +26340,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashCreateitemMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -26470,7 +26470,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashCreatecreditsMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -26570,7 +26570,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// ONE emit. NINETIETH MatchOptWithParam ERROR pin.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashCreatemissionMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -26663,7 +26663,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// NINETY-FIRST MatchOptWithParam ERROR pin.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashCreatemobMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -26763,7 +26763,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// user-tier case-'c' option-name pin (6 bytes).
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashCreateMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -26863,7 +26863,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// MatchOptWithParam ERROR pin. LAST-ARM-OF-CASE pin.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashCustomizeshipMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -26962,7 +26962,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// SAME-LINE-AND-GUARD-DEV pin (after Wave 174 /d).
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashDialogMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -27060,7 +27060,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// MatchOptWithParam ERROR pin.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashDebugmissionsMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -27162,7 +27162,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// MatchOptWithParam ERROR pin.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashEffectsMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -27261,7 +27261,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// pin in case-'e' user-tier.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashExposedecosMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -27374,7 +27374,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// emit. NINETY-EIGHTH MatchOptWithParam ERROR pin.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashShieldbuffMissingArg_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -27565,7 +27565,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashUptime_OnAdminAccount_PinsExactReplyWirePrefix()
     {
         var account = TestAccounts.New(_server);
@@ -27766,7 +27766,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     /// </summary>
     private const string WarpLimitsLiteral = "Warp limits are between 1000 and 6000!";
 
-    [Fact]
+    [RetryFact]
     public async Task SlashWarpBelowMinimum_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -27981,7 +27981,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashWarpAboveMaximum_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -28179,7 +28179,7 @@ public sealed class SectorChatTests : SectorIntegrationTest
     ///
     /// <para>Budget: 90s.</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SlashWarpInRange_OnAdminAccount_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);

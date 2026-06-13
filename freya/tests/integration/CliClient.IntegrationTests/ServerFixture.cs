@@ -111,32 +111,49 @@ public sealed class ServerFixture : IAsyncLifetime
     // handoff follow, a chat-reply wait) that hits the wedge has no in-line
     // recovery and instead hangs to its full per-test cancellation deadline
     // (the shard-3 CI timeouts: Mvas_DirectPositionFeed 150s, the chat reply
-    // 90s). The wedge needs ~40 accumulated sector logins to tip; counting
-    // establishes and recycling every N keeps the running total under that
-    // threshold, so the wedge never tips DURING a test in the first place --
-    // no hang, in any path. Every establish/reestablish funnels through
-    // SectorHandshake.WithProxyRecycleOnWedgeAsync, which calls
-    // MaybeProactiveRecycleAsync below before its first attempt.
+    // 90s). Recycling every N establishes REDUCES how often the wedge tips by
+    // bounding the accumulated per-session proxy state. Every establish/
+    // reestablish funnels through SectorHandshake.WithProxyRecycleOnWedgeAsync,
+    // which calls MaybeProactiveRecycleAsync below before its first attempt.
     //
-    // Cadence: a plain establish is ~1-3 logins, but a handoff-follow test
-    // chains several (gate/undock -> follow), so its establish can be 4-5
-    // logins. At every-10 the worst case reaches 40-50 logins between
-    // recycles -- right at/over the ~40 tip -- which surfaced as a single
-    // *MissingArg chat-reply-drain test wedging per shard (the post-establish
-    // path that the reactive recycle does NOT cover): the failing test rotated
-    // run to run (findsector, then fradius), 1 of 98, the stream going silent
-    // to the 90s deadline. Recycling every 6 caps the worst case at ~24-30
-    // logins -- a real margin below 40. (Underlying proxy never-reset-global
-    // defect is still tracked in plans/11-phase-k-ingame.md; this is the
+    // IMPORTANT -- cadence alone does NOT eliminate the wedge. The earlier
+    // model here ("the wedge needs ~40 logins to tip; every-6 keeps a margin
+    // below 40, so it never tips during a test") was empirically FALSIFIED by
+    // CI run 27475072828 (2026-06-13): with every-6 actively firing
+    // (chat tests are ~8s apart, well outside the 12s recycle dedup window, so
+    // the recycles really happened), SlashReplaceshipMissingArg still wedged
+    // its in-band chat-reply drain ~24 establishes after a fresh recycle, with
+    // NO framing-desync logged on a clean-looking proxy. The tip is
+    // non-deterministic, not a fixed login count -- so no recycle cadence can
+    // guarantee the wedge never tips mid-test. The post-establish drain
+    // failure that slips through cadence is now caught by [RetryFact] (see
+    // RetryFact.cs), which recycles the proxy and re-runs the whole test on a
+    // transient (cancellation/socket) failure -- but NEVER on an assertion
+    // failure, so real wire regressions still hard-fail. Cadence-6 is kept as
+    // the first line of defence (fewer wedges -> fewer retries); RetryFact is
+    // the safety net for the tail. (Underlying proxy never-reset-global defect
+    // is still tracked in plans/11-phase-k-ingame.md; both layers are
     // test-infra mitigation, not a server/wire change.)
     private int _establishesSinceRecycle;
     private const int ProactiveRecycleEveryEstablishes = 6;
+
+    /// <summary>
+    /// The single live fixture for the run. The collection fixture
+    /// (<see cref="ServerCollection"/>) guarantees exactly one instance, so a
+    /// static handle is safe and lets the <c>RetryFact</c> test-case runner
+    /// reach <see cref="RestartProxyAsync"/> between attempts without DI
+    /// plumbing -- the runner sits in the xUnit framework layer, below the
+    /// constructor-injection boundary, so it cannot receive the fixture the
+    /// normal way. Set in the ctor, cleared in <see cref="DisposeAsync"/>.
+    /// </summary>
+    public static ServerFixture? Current { get; private set; }
 
     public ServerFixture()
     {
         PostgresConnectionString =
             $"Host={LoginHost};Port={PostgresPort};Username=net7;Password=net7;" +
             "Database=net7_user;Pooling=true;MaxPoolSize=20";
+        Current = this;
     }
 
     public async Task InitializeAsync()
@@ -358,6 +375,7 @@ public sealed class ServerFixture : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
+        Current = null;
         if (_ownsCompose)
         {
             // -v wipes the named volumes (pgdata, net7-ipc). Faster
