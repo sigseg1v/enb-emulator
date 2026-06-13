@@ -174,7 +174,8 @@ build-enbmod:
 # to not auto-open the browser. No client / WINE / D3D8 required.
 mock-ui:
     @# Kill any previewer already running (frees the port -- only one mock UI at a time).
-    @pkill -f 'tests/preview_server.py' 2>/dev/null && sleep 0.5 || true
+    @# Bracket on [p] so the pattern can't match this pkill's OWN command line.
+    @pkill -f 'tests/[p]review_server.py' 2>/dev/null && sleep 0.5 || true
     @lua=freya/client-injection/enbmod/build/tests/lua; \
     [ -x "$lua" ] || { echo ">>> native Lua not built yet -- building via the test suite"; \
         freya/client-injection/enbmod/tests/run_tests.sh >/dev/null; }
