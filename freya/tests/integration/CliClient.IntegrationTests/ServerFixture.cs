@@ -112,14 +112,25 @@ public sealed class ServerFixture : IAsyncLifetime
     // recovery and instead hangs to its full per-test cancellation deadline
     // (the shard-3 CI timeouts: Mvas_DirectPositionFeed 150s, the chat reply
     // 90s). The wedge needs ~40 accumulated sector logins to tip; counting
-    // establishes (each ~1-3 logins once a test's post-establish handoffs are
-    // included) and recycling every 10 keeps the running total well under that
+    // establishes and recycling every N keeps the running total under that
     // threshold, so the wedge never tips DURING a test in the first place --
     // no hang, in any path. Every establish/reestablish funnels through
     // SectorHandshake.WithProxyRecycleOnWedgeAsync, which calls
     // MaybeProactiveRecycleAsync below before its first attempt.
+    //
+    // Cadence: a plain establish is ~1-3 logins, but a handoff-follow test
+    // chains several (gate/undock -> follow), so its establish can be 4-5
+    // logins. At every-10 the worst case reaches 40-50 logins between
+    // recycles -- right at/over the ~40 tip -- which surfaced as a single
+    // *MissingArg chat-reply-drain test wedging per shard (the post-establish
+    // path that the reactive recycle does NOT cover): the failing test rotated
+    // run to run (findsector, then fradius), 1 of 98, the stream going silent
+    // to the 90s deadline. Recycling every 6 caps the worst case at ~24-30
+    // logins -- a real margin below 40. (Underlying proxy never-reset-global
+    // defect is still tracked in plans/11-phase-k-ingame.md; this is the
+    // test-infra mitigation, not a server/wire change.)
     private int _establishesSinceRecycle;
-    private const int ProactiveRecycleEveryEstablishes = 10;
+    private const int ProactiveRecycleEveryEstablishes = 6;
 
     public ServerFixture()
     {
