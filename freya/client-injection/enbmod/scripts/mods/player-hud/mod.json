@@ -1,0 +1,7 @@
+{
+  "id": "player-hud",
+  "name": "Player HUD",
+  "author": "Freya",
+  "description": "Cockpit-glass player card (hull / shield / energy) plus the 12-slot action hotbar. Visibility-gated on game state: shown in space, card-only in station, hidden on the login and char-select screens.",
+  "entrypoint": "freya_ui.lua"
+}

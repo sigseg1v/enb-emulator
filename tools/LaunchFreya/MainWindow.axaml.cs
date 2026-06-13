@@ -685,6 +685,7 @@ namespace LaunchFreya
             _setting.EnablePositionFeed = _user.UsePositionFeed;   // PB-2
             _user.UseClientMods         = c_CheckBox_LuaMods.IsChecked == true;
             _setting.EnableClientMods   = _user.UseClientMods;     // enbmod Lua mods
+            _setting.ModStates          = _user.ModStates;         // per-mod enable/disable
 
             // Persist (keep the raw typed value so the box redisplays it verbatim)
             _user.AuthenticationPort = c_TextBox_Port.Text;
@@ -829,6 +830,116 @@ namespace LaunchFreya
             RenderLogTab(tabs[0]);   // SelectionChanged does not fire for the initial index
 
             await dlg.ShowDialog(this);
+        }
+
+        // "Configure Mods..." -- a scrollable popup listing every enbmod mod found
+        // under the source scripts/mods/ tree. Each row is an enable/disable
+        // checkbox + the mod name + its author, with the mod description as a hover
+        // tooltip. Toggling a row records the state in _user.ModStates; a disabled
+        // mod is not staged next to the client and so is never loaded or injected.
+        async void OnConfigureModsClick(object sender, RoutedEventArgs e)
+        {
+            var mods = ModCatalog.Scan();
+
+            var list = new StackPanel { Spacing = 4, Margin = new Avalonia.Thickness(0) };
+            if (mods.Count == 0)
+            {
+                list.Children.Add(new TextBlock
+                {
+                    Text = "No mods found. Build them with `just build-enbmod`.",
+                    Foreground = new SolidColorBrush(Colors.Gray),
+                    Margin = new Avalonia.Thickness(4),
+                });
+            }
+
+            foreach (var m in mods)
+            {
+                var id = m.Id;
+                var cb = new CheckBox
+                {
+                    IsChecked = ModCatalog.IsEnabled(_user.ModStates, id),
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                };
+                cb.IsCheckedChanged += (_, __) => _user.ModStates[id] = cb.IsChecked == true;
+
+                var nameText = new TextBlock
+                {
+                    Text = m.Name,
+                    FontWeight = FontWeight.SemiBold,
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                };
+                var authorText = new TextBlock
+                {
+                    Text = "by " + m.Author,
+                    Foreground = new SolidColorBrush(Colors.Gray),
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                    Margin = new Avalonia.Thickness(8, 0, 0, 0),
+                };
+
+                var row = new StackPanel
+                {
+                    Orientation = Avalonia.Layout.Orientation.Horizontal,
+                    Spacing = 8,
+                    Margin = new Avalonia.Thickness(4, 2, 4, 2),
+                };
+                row.Children.Add(cb);
+                row.Children.Add(nameText);
+                row.Children.Add(authorText);
+
+                // Wrap so the whole row carries the description tooltip on hover.
+                var rowBorder = new Border
+                {
+                    Child = row,
+                    Background = Brushes.Transparent,  // makes the whole row hit-testable
+                    Padding = new Avalonia.Thickness(2),
+                };
+                if (!string.IsNullOrEmpty(m.Description))
+                    ToolTip.SetTip(rowBorder, m.Description);
+                list.Children.Add(rowBorder);
+            }
+
+            var scroller = new ScrollViewer
+            {
+                Content = list,
+                HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+                VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+            };
+
+            var closeBtn = new Button
+            {
+                Content = "Close",
+                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                Margin = new Avalonia.Thickness(0, 8, 0, 0),
+            };
+
+            var root = new DockPanel { Margin = new Avalonia.Thickness(10) };
+            var header = new TextBlock
+            {
+                Text = "Enable or disable individual Lua mods. Hover a row for its description.",
+                Foreground = new SolidColorBrush(Colors.Gray),
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Avalonia.Thickness(0, 0, 0, 8),
+            };
+            DockPanel.SetDock(header, Dock.Top);
+            DockPanel.SetDock(closeBtn, Dock.Bottom);
+            root.Children.Add(header);
+            root.Children.Add(closeBtn);
+            root.Children.Add(scroller);   // fills the rest
+
+            var dlg = new Window
+            {
+                Title = "Configure Mods",
+                Width = 480,
+                Height = 420,
+                Content = root,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            };
+            closeBtn.Click += (_, __) => dlg.Close();
+
+            await dlg.ShowDialog(this);
+
+            // Persist the choices so they survive across launches.
+            _user.Save();
         }
 
         // Render a tab: read its source, keep only the last `Lines` lines, and

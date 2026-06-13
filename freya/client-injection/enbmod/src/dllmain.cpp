@@ -95,9 +95,15 @@ DWORD WINAPI worker(LPVOID) {
     if (!g_L) { enb::logf("luaL_newstate failed"); return 1; }
     enb::lua::open(g_L);
 
-    // make package paths point at our scripts dir so require() works
+    // Expose the staged scripts dir and put it + its lib/ on package.path so
+    // require() resolves both top-level scripts and shared libs (lib/freya_hud,
+    // lib/modloader, lib/json, ...). The mod loader appends each mod's own dir.
     {
-        std::string lp = "package.path = [[" + g_mod_dir + "\\scripts\\?.lua]] .. ';' .. package.path";
+        std::string scripts = g_mod_dir + "\\scripts";
+        std::string lp =
+            "enb.script_dir = [[" + scripts + "]]\n"
+            "package.path = [[" + scripts + "\\?.lua]] .. ';' .. "
+                          "[[" + scripts + "\\lib\\?.lua]] .. ';' .. package.path";
         if (luaL_dostring(g_L, lp.c_str()) != LUA_OK) lua_pop(g_L,1);
     }
 

@@ -50,6 +50,11 @@ namespace LaunchFreya
         // client-side UI mods without patching the game. Experimental; opt-in.
         public bool   EnableClientMods         { get; set; }
 
+        // Per-mod enable state by mod id (scripts/mods/<id>). A mod absent from the
+        // map is enabled. StageClientMods stages only enabled mods. Mirrors
+        // UserSettings.ModStates; copied across in MainWindow before launch.
+        public System.Collections.Generic.Dictionary<string, bool> ModStates { get; set; } = new();
+
         public string EffectiveRegistrationHostname
             => string.IsNullOrEmpty(RegistrationHostname) ? Hostname : RegistrationHostname;
     }
@@ -732,14 +737,17 @@ namespace LaunchFreya
             var dos = StageDllNextToClient(dllSrc, "enbmod.dll", "Client mods");
             if (dos == null) return null;
 
-            // Copy the scripts/ tree beside the staged DLL. Missing scripts is not
-            // fatal -- enbmod just logs an init.lua error and keeps ticking -- but
-            // warn so the user knows why their mods aren't running.
+            // Copy the scripts/ tree beside the staged DLL, but stage only the
+            // ENABLED mods: disabled mod folders are skipped on copy AND pruned from
+            // a previous launch's staging, so a disabled mod is never present for
+            // init.lua to discover -- i.e. it is neither loaded nor injected. Missing
+            // scripts is not fatal -- enbmod just logs an init.lua error and keeps
+            // ticking -- but warn so the user knows why their mods aren't running.
             try
             {
                 var clientDir = Path.GetDirectoryName(_setting.ClientPath);
                 if (scriptsSrc != null && !string.IsNullOrEmpty(clientDir))
-                    CopyDirectory(scriptsSrc, Path.Combine(clientDir, "scripts"));
+                    StageScriptsWithEnabledMods(scriptsSrc, Path.Combine(clientDir, "scripts"));
                 else
                     _warn("Client mods: enbmod scripts/ folder not found; injecting the DLL with no scripts.");
             }
@@ -748,6 +756,63 @@ namespace LaunchFreya
                 _warn($"Client mods: could not stage scripts/: {ex.Message}. Injecting the DLL anyway.");
             }
             return dos;
+        }
+
+        // Stage scripts/ next to the client, honouring the per-mod enable state in
+        // _setting.ModStates. Everything outside mods/ (init.lua, lib/, and the
+        // runtime-generated calib_data.lua) is copied as-is; under mods/, only
+        // enabled mod folders are copied and any disabled folder lingering from a
+        // previous launch is deleted at the destination.
+        void StageScriptsWithEnabledMods(string scriptsSrc, string scriptsDst)
+        {
+            Directory.CreateDirectory(scriptsDst);
+
+            // Top-level files (init.lua, ...). Note: we never delete files at the
+            // destination root, so a runtime-written calib_data.lua survives re-staging.
+            foreach (var file in Directory.GetFiles(scriptsSrc))
+                File.Copy(file, Path.Combine(scriptsDst, Path.GetFileName(file)), overwrite: true);
+
+            // Non-mods subdirs (lib/, ...) copy wholesale.
+            foreach (var sub in Directory.GetDirectories(scriptsSrc))
+            {
+                var name = Path.GetFileName(sub);
+                if (string.Equals(name, "mods", StringComparison.OrdinalIgnoreCase)) continue;
+                CopyDirectory(sub, Path.Combine(scriptsDst, name));
+            }
+
+            var modsSrc = Path.Combine(scriptsSrc, "mods");
+            if (!Directory.Exists(modsSrc)) return;
+            var modsDst = Path.Combine(scriptsDst, "mods");
+            Directory.CreateDirectory(modsDst);
+
+            var states = _setting.ModStates;
+            int staged = 0, skipped = 0;
+            foreach (var modDir in Directory.GetDirectories(modsSrc))
+            {
+                var id = Path.GetFileName(modDir);
+                var destDir = Path.Combine(modsDst, id);
+                if (ModCatalog.IsEnabled(states, id))
+                {
+                    CopyDirectory(modDir, destDir);
+                    staged++;
+                }
+                else
+                {
+                    // Disabled: ensure no stale copy remains from a prior launch.
+                    if (Directory.Exists(destDir)) Directory.Delete(destDir, recursive: true);
+                    skipped++;
+                }
+            }
+
+            // Prune any destination mod folder that no longer exists in the source.
+            foreach (var destDir in Directory.GetDirectories(modsDst))
+            {
+                var id = Path.GetFileName(destDir);
+                if (!Directory.Exists(Path.Combine(modsSrc, id)))
+                    Directory.Delete(destDir, recursive: true);
+            }
+
+            _warn($"Client mods: staged {staged} mod(s), skipped {skipped} disabled.");
         }
 
         // Copy a DLL into the client release folder and return its DOS path, or null
@@ -847,6 +912,10 @@ namespace LaunchFreya
                 if (Directory.Exists(c)) return c;
             return null;
         }
+
+        // Public accessor for the source scripts/ dir, so ModCatalog (and the
+        // "Configure Mods" UI) reads the same tree StageClientMods stages from.
+        public static string LocateScriptsDir() => LocateEnbmodScripts();
 
         // `winepath -w <unix>` -> the DOS path WINE uses to open the file. On
         // native Windows there is no WINE and the path is already a DOS path, so

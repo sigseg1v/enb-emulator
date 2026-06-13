@@ -23,14 +23,24 @@ mkdir -p "$BUILD" "$SHOTS"
 # --- 1. native Lua interpreter (rebuild only if sources are newer) -----------
 if [ ! -x "$LUA" ] || [ -n "$(find "$LUA_SRC" -name '*.c' -newer "$LUA" 2>/dev/null | head -1)" ]; then
     echo ">>> building native Lua interpreter"
-    # luaconf.h picks the generic config (no _WIN32, no LUA_USE_LINUX): that is
-    # exactly the same language config the DLL ships, minus the OS glue.
+    # LUA_USE_POSIX adds OS glue only (io.popen, used by the mock's enb.list_dir
+    # to mirror the DLL's directory listing) -- the LANGUAGE config is unchanged
+    # from what the DLL ships. (Not full LUA_USE_LINUX: no dlopen/readline needed.)
     # shellcheck disable=SC2046
-    cc -O2 -o "$LUA" $(ls "$LUA_SRC"/*.c | grep -v '/luac\.c$') -lm || exit 1
+    cc -O2 -DLUA_USE_POSIX -o "$LUA" $(ls "$LUA_SRC"/*.c | grep -v '/luac\.c$') -lm || exit 1
 fi
 
 # --- 2. specs -----------------------------------------------------------------
-export LUA_PATH="$MOD/scripts/?.lua;$HERE/?.lua;;"
+# Resolve every place a require()'d module can live after the mod restructure:
+# scripts/ (init), scripts/lib/ (shared libs), and each scripts/mods/<id>/ folder
+# (mod entrypoints, required by short name in the per-mod specs). Globbed so new
+# mod folders are picked up automatically.
+LUA_PATH="$MOD/scripts/?.lua;$MOD/scripts/lib/?.lua;$HERE/?.lua"
+for d in "$MOD"/scripts/mods/*/; do
+    [ -d "$d" ] && LUA_PATH="$LUA_PATH;${d}?.lua"
+done
+export LUA_PATH="$LUA_PATH;;"
+export SCRIPTS_DIR="$MOD/scripts"
 export FIXTURES="$HERE/fixtures"
 export SHOT_DIR="$SHOTS"
 

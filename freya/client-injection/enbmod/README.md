@@ -18,11 +18,38 @@ enbmod/
     dllmain.cpp       DllMain -> worker thread: Lua init, script load, hot-reload
   inject/inject.cpp   CreateRemoteThread/LoadLibraryA injector
   scripts/
-    init.lua          loaded on startup, hot-reloaded on change
-    calib.lua         runtime helpers to FIND the offsets (dump/scan/watch)
+    init.lua          bootstrap: applies calib_data, runs the mod loader
+    lib/              shared libraries (require'd by short name)
+      modloader.lua   discovers + runs the mods staged under mods/
+      json.lua        tiny JSON decoder (parses mod.json)
+      freya_hud.lua   shared HUD toolkit (palette, glass panels, text)
+      calib.lua       runtime helpers to FIND the offsets (dump/scan/watch)
+    mods/             one folder per mod, each with a mod.json manifest
+      player-hud/     PlayerCard + action hotbar       (freya_ui.lua)
+      discipline-card/ bottom-left DiscCard            (xp_overlay.lua)
+      native-hud-hide/ ret-patch the stock stat/xp bars (native_hud_hide.lua)
+      autocalibrate/  find offsets, write calib_data.lua (autocalib.lua)
   third_party/lua     Lua 5.4.7 (static)
   third_party/minhook MinHook (static)
 ```
+
+### Mods, mod.json, and the loader
+Each mod is a folder under `scripts/mods/<id>/` with a `mod.json` manifest:
+
+```json
+{ "id": "player-hud", "name": "Player HUD", "author": "Freya",
+  "description": "...", "entrypoint": "freya_ui.lua" }
+```
+
+`init.lua` requires `lib/modloader.lua`, which lists `scripts/mods/` (via the C++
+`enb.list_dir`), parses each `mod.json` (via `lib/json.lua`), and `dofile`s each
+mod's `entrypoint`. Discovery only ever sees the mods that are physically present,
+so **disabling a mod = not staging its folder** -- it is never discovered, loaded,
+or injected. The Freya launcher's **"Configure Mods..."** window (enabled when
+"Enable Lua Mods" is checked) writes the per-mod enable state; the launcher stages
+only the enabled mod folders next to the client and prunes any disabled folder left
+from a prior launch. A mod's `entrypoint` and `lib/` are on `package.path`, so mods
+`require("freya_hud")` etc. by short name.
 
 ## Build
 
@@ -127,18 +154,19 @@ device pointer ever changes. The one-shot `overlay: Present hook FIRED` log line
 `enbmod.log` confirms the hook is live in-game.
 
 ### UI overhaul -- the Freya cockpit-glass HUD (Phase AS)
-A replacement HUD that ports the `Earth & Beyond HUD.html` design. Three scripts share
-`scripts/freya_hud.lua` (palette, the `H.glass()` panel = gradient body + gloss + hairline
-border + cyan corner ticks, outlined text, and visibility gating):
+A replacement HUD that ports the `Earth & Beyond HUD.html` design, split into mods that share
+`lib/freya_hud.lua` (palette, the `H.glass()` panel = gradient body + gloss + hairline border +
+cyan corner ticks, outlined text, and visibility gating):
 
-- **`freya_ui.lua`** -- the **PlayerCard** (name + LV header, three vitals as a track +
-  vertical-gradient fill with cur/max printed inside + percent) and a **glass hotbar** of twelve
-  rounded slots (`1 2 3 4 5 6 7 8 9 0 - =`, VKs `0x31..0x39,0x30,0xBD,0xBB`): a click taps the
-  matching key (`enb.tap`) and a physical keypress lights the slot (key messages observed but
-  **not** swallowed -- the game still needs the bind). Mouse over the cards is swallowed to
-  `WM_NULL`.
-- **`xp_overlay.lua`** -- the bottom-left **DiscCard**: three rows (C/E/T colored letter + xp bar
-  + "LV n" badge), fed by `enb.self()` (gray skeleton until calibrated).
+- **`player-hud`** mod (`mods/player-hud/freya_ui.lua`) -- the **PlayerCard** (name + LV header,
+  three vitals as a track + vertical-gradient fill with cur/max printed inside + percent) and a
+  **glass hotbar** of twelve rounded slots (`1 2 3 4 5 6 7 8 9 0 - =`, VKs
+  `0x31..0x39,0x30,0xBD,0xBB`): a click taps the matching key (`enb.tap`) and a physical keypress
+  lights the slot (key messages observed but **not** swallowed -- the game still needs the bind).
+  Mouse over the cards is swallowed to `WM_NULL`.
+- **`discipline-card`** mod (`mods/discipline-card/xp_overlay.lua`) -- the bottom-left **DiscCard**:
+  three rows (C/E/T colored letter + xp bar + "LV n" badge), fed by `enb.self()` (gray skeleton
+  until calibrated).
 
 All shapes are procedural `rrect_grad`/`rrect`/`line` -- **no binary assets** (repo rule). Geometry
 derives from `enb.screen()` (bottom-anchored at any resolution).
@@ -148,18 +176,19 @@ derives from `enb.screen()` (bottom-anchored at any resolution).
 draws our pointer on top of it all. Both need real-client calibration/confirmation
 (CV-AS-STATE / CV-AS-CURSOR in `plans/29`).
 
-**Hiding the native widgets we replace** (AS-6): the glass is translucent, so the native stat/xp/
-skill widgets bleed through. `enb.patch_ret(addr[,pop])` neuters a widget's per-frame PAINT routine
-with an early `ret`. init.lua's HIDE block is **ON by default** (owner-directed 2026-06-13) for the
-two pinned paint targets: `enb.addr.VitalsPaint` (0x005dcae0) and `enb.addr.XpPaint` (0x0058cf60) --
-both `void __fastcall`, pop 0, pure paint (they only check each gadget's visible flag and call the
-paint primitive), so an early ret hides them without touching state. The `*Bars`/`EnergyBar`/
-`SkillButton` entries are the constructors/updater and are NEVER patched. The skill buttons have no
-standalone pure-paint entry, so they still need a runtime per-gadget visible-flag write instead of a
-static patch (left off). **Caveat:** this is ON ahead of real-client confirmation -- the addresses
-are pinned by behavioural analysis but "does an early ret break gameplay" is only provable on the
-real client (CV-AS-HIDE-VITALS/-XP). If the client crashes on load, comment the two `patch_ret`
-lines in init.lua.
+**Hiding the native widgets we replace** is the **`native-hud-hide`** mod (AS-6): the glass is
+translucent, so the native stat/xp/skill widgets bleed through. `enb.patch_ret(addr[,pop])` neuters
+a widget's per-frame PAINT routine with an early `ret`. The mod is **enabled by default**
+(owner-directed 2026-06-13) and patches the two pinned paint targets: `enb.addr.VitalsPaint`
+(0x005dcae0) and `enb.addr.XpPaint` (0x0058cf60) -- both `void __fastcall`, pop 0, pure paint (they
+only check each gadget's visible flag and call the paint primitive), so an early ret hides them
+without touching state. The `*Bars`/`EnergyBar`/`SkillButton` entries are the constructors/updater
+and are NEVER patched. The skill buttons have no standalone pure-paint entry, so they still need a
+runtime per-gadget visible-flag write instead of a static patch (left off). **Caveat:** this is on
+ahead of real-client confirmation -- the addresses are pinned by behavioural analysis but "does an
+early ret break gameplay" is only provable on the real client (CV-AS-HIDE-VITALS/-XP). If the
+client crashes on load, **disable the `native-hud-hide` mod** in the launcher's Configure Mods
+window.
 
 **Fail-open is load-bearing:** `on_input` runs Lua via `lua_pcall`, and any error returns *false*
 (do not swallow), so a script bug can never wedge the user's keyboard/mouse.
@@ -230,15 +259,16 @@ D3D8 path. The suite verifies *logic and layout*; the in-game CV pass still owns
 is deliberate: the static map gives stable function addresses and AuxData *keys*, not C++ field
 layouts. You supply the offsets:
 
-1. Run the game. Use `scripts/calib.lua` from `init.lua`:
+1. Run the game with the **`autocalibrate`** mod enabled. It uses `lib/calib.lua`:
    - `calib.find_ptr_to_value(currentHull, hullOffsetGuess)` -- scan `.data` for the pointer that
      leads to your ship object.
    - `calib.dump(base, 64)` -- hex-dump the object; eyeball which `+0x..` holds hull/shield/energy
      (look for the float/int that matches the HUD).
    - `calib.watch(addr,"hull")` + `calib.pump_watches()` -- confirm a field by watching it change.
    (A memory scanner/debugger works too; same goal -- find `player_ptr_addr` and the field offsets.)
-2. Put the numbers in `enb.calibrate{ player_ptr_addr=…, hull=…, shield=…, … }` in `init.lua`.
-3. Save -- hot-reload applies it without restarting the game.
+2. The mod's `autocalib.save{ player_ptr_addr=…, hull=…, shield=…, … }` calls `enb.calibrate`
+   live AND writes `scripts/calib_data.lua` (gitignored, install-specific).
+3. `init.lua` applies `calib_data.lua` on every startup/hot-reload, so calibration persists.
 
 The cleaner long-term path (see `INJECTION-MAP.md §1`) is to resolve the generic **`AuxData::Get`**
 accessor and read every stat by key instead of by raw offset. That replaces the offsets table

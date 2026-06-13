@@ -460,6 +460,28 @@ static int l_call_cdecl(lua_State* L){
 }
 static int l_hwnd(lua_State* L){ lua_pushinteger(L,(lua_Integer)(uintptr_t)actions::game_hwnd()); return 1; }
 
+// enb.list_dir(path) -> { name, name, ... }
+// Directory entry names (files + subdirs, excluding "." and ".."). Used by the
+// Lua mod loader to discover the mod folders staged under scripts/mods/. Returns
+// an empty table if the path does not exist or cannot be opened.
+static int l_list_dir(lua_State* L){
+    const char* path = luaL_checkstring(L,1);
+    std::string pat = std::string(path) + "\\*";
+    lua_newtable(L);
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pat.c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return 1;
+    int i = 0;
+    do {
+        const char* n = fd.cFileName;
+        if (std::strcmp(n,".") == 0 || std::strcmp(n,"..") == 0) continue;
+        lua_pushstring(L, n);
+        lua_rawseti(L, -2, ++i);
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    return 1;
+}
+
 // =====================================================================================
 // registration
 // =====================================================================================
@@ -515,6 +537,7 @@ void open(lua_State* L){
         {"call", l_call},
         {"call_cdecl", l_call_cdecl},
         {"hwnd", l_hwnd},
+        {"list_dir", l_list_dir},
         {nullptr,nullptr}
     };
     luaL_setfuncs(L, fns, 0);

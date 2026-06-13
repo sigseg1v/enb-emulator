@@ -158,6 +158,23 @@ function M.install(opts)
 
     local enb = {
         base = 0x00400000,
+        -- absolute path of the scripts/ dir, mirrors what dllmain sets. The test
+        -- runner exports SCRIPTS_DIR so the mod loader can discover real folders.
+        script_dir = os.getenv("SCRIPTS_DIR") or "scripts",
+        -- mirror of l_list_dir: directory entry names (no "." / ".."). Backed by
+        -- the real filesystem here so init.lua exercises the real mod loader.
+        list_dir = function(p)
+            local names = {}
+            local cmd = "ls -1 '" .. tostring(p):gsub("'", "'\\''") .. "' 2>/dev/null"
+            local f = io.popen(cmd)
+            if f then
+                for line in f:lines() do
+                    if line ~= "" then names[#names + 1] = line end
+                end
+                f:close()
+            end
+            return names
+        end,
         -- mirror the real enb.addr entries the scripts reference (see src/game.h)
         addr = {
             VitalsBars   = 0x005dbfc0,  -- ctor (NOT a hide target)

@@ -1,0 +1,7 @@
+{
+  "id": "discipline-card",
+  "name": "Discipline Card",
+  "author": "Freya",
+  "description": "Bottom-left glass card showing the three discipline levels (combat / trade / explore) and current XP. Visibility-gated on game state, same as the player HUD.",
+  "entrypoint": "xp_overlay.lua"
+}

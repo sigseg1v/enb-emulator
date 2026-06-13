@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 
@@ -29,6 +30,13 @@ namespace LaunchFreya.Config
         // field absent from an older settings file reads as false, which is the
         // intended default, so no migration is needed.
         public bool UseClientMods { get; set; } = false;
+        // Per-mod enable/disable state for the enbmod Lua mods, keyed by mod id
+        // (the scripts/mods/<id> folder name). A mod absent from this map is
+        // treated as ENABLED -- so a freshly added mod is on by default and the
+        // map only needs to record explicit user opt-outs. The "Configure Mods"
+        // window writes this; StageClientMods stages only the enabled mods, so a
+        // disabled mod is neither copied next to the client nor loaded by init.lua.
+        public Dictionary<string, bool> ModStates { get; set; } = new();
         public string LastEmulatorName { get; set; } = "";
         public string LastServerName { get; set; } = "";
         public string AuthenticationPort { get; set; } = "";

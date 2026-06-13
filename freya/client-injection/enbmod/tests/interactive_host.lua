@@ -23,8 +23,14 @@
 -- Unknown lines reply:  ERR <text>.  Errors never crash the host (fail-open).
 
 local here = arg[1] or "."          -- tests/ dir, for require paths
+-- After the mod restructure the HUD scripts live under scripts/lib (shared) and
+-- scripts/mods/<id>/ (entrypoints), so resolve all three.
+local scripts = here .. "/../scripts"
 package.path = here .. "/?.lua;" ..
-               here .. "/../scripts/?.lua;" .. package.path
+               scripts .. "/?.lua;" ..
+               scripts .. "/lib/?.lua;" ..
+               scripts .. "/mods/player-hud/?.lua;" ..
+               scripts .. "/mods/discipline-card/?.lua;" .. package.path
 
 local mock = require("mock_enb")
 mock.install{ screen = { 1280, 960 } }   -- match enb-mod-bg.png by default
