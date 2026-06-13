@@ -66,6 +66,20 @@ struct EnbUdpHeader
     int32_t packet_sequence;
 } ATTRIB_PACKED;
 
+// 0x2017 RESEND_PACKET_SEQUENCE payload: the proxy's NACK on the reliable
+// sector stream, asking the server to resend `packet_count` consecutive
+// 0x2016 datagrams starting at sequence `packet_start`. int32_t for the same
+// reason as EnbUdpHeader: the proxy's old private `struct ReSend {long;long;}`
+// was 16 bytes on LP64 Linux builds vs the 8-byte wire format the Win32 build
+// (and the server's parse) always used. Server-side acceptance of the legacy
+// 16-byte form lives in Player::ReSendOpcodes; the CLI mirror is
+// CliClient.Core/Opcodes/Outbound/ResendPacketSequenceCodec.cs.
+struct ReSendRequest
+{
+    int32_t packet_start;
+    int32_t packet_count;
+} ATTRIB_PACKED;
+
 // Phase AH (AH-8): per-packet C->S auth wrapper for the proxy<->server UDP leg.
 //
 // When DTLS is active, the proxy prepends this fixed 17-byte wrapper to every

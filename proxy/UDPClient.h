@@ -169,6 +169,16 @@ private:
     bool    SendClientPacketSequence(char *msg);
     void    SendPacketSequence  (char *msg, EnbUdpHeader *header, bool continuation = false);
 	void	SendLoginPacketSequence (char *msg, EnbUdpHeader *header);
+    // Reliable-stream recovery (see UDPProxyToClient_linux.cpp):
+    // RequestResend emits a 0x2017 NACK (canonical 8-byte ReSendRequest) and
+    // stamps m_PacketResendTimer; DrainReadyPackets forwards every in-order
+    // packet now ready; PumpPacketResend is the timer-driven retry called
+    // from RecvThread's recv timeout, so a hole at the TAIL of the stream
+    // (e.g. a lost sector-handoff burst packet) still recovers when no
+    // further datagrams arrive to re-drive the arrival path.
+    void    RequestResend       (unsigned long packet_start, long packet_count);
+    void    DrainReadyPackets   (bool continuation);
+    void    PumpPacketResend    ();
     void    SendCachedGalaxyMap ();
     void    StartProspecting    (char *msg, u8* packet, short &index);
     void    TractorOre          (char *msg, u8* packet, short &index);
@@ -239,6 +249,8 @@ private:
     // socket == one transport, multiplexing a DTLS association per server
     // (ip,port) this socket talks to.
     net7::DtlsTransport *m_Dtls;
+    // GetNet7TickCount() at the last 0x2017 NACK we sent; paces
+    // PumpPacketResend's retry cadence.
 	unsigned long m_PacketResendTimer;
 
     // MVAS idle-keepalive (Linux): started once per session on the sector
@@ -293,12 +305,6 @@ private:
 
 	ServerHandoff m_Server_handoff;
     Connection *m_ServerTCP;
-
-    struct ReSend
-    {
-        long packet_start;    
-        long packet_count;
-    };
 };
 
 

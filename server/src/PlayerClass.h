@@ -48,7 +48,13 @@
 #define MAX_FRIEND_LIST		100
 #define MAX_IGNORE_LIST		100
 
-#define RESEND_ELEMENTS		20
+// Reliable-UDP resend ring depth (0x2016 datagrams kept for 0x2017 NACKs).
+// 20 was shallow enough that a sector-handoff burst evicted entries before
+// the proxy's resend request arrived, stranding the client on the load
+// screen. 64 covers the largest observed zone-out burst with headroom; the
+// backing CircularBuffer (m_ReSendBuffer) detects overwritten entries via
+// the st_resend.message first-dword check, so depth is bounded by RAM only.
+#define RESEND_ELEMENTS		64
 
 #define PLAYER_NODE_AVAILABLE -1
 
@@ -940,8 +946,7 @@ private:
     long        BuildCachePacket();
     long        BuildCachePacket(long index);
     short       ReadBuffer(u8 *buff, long &read_ptr_index);
-    void        ReSendOpcodes(unsigned char *data);                         // opcode 0x2017
-	void		ReSendLoginOpcode(long packet_num);							// opcode 0x2020
+    void        ReSendOpcodes(unsigned char *data, short bytes);            // opcode 0x2017
 
 	void		AddFriend(char *name);
 	void		RemoveFriend(char *name);

@@ -662,6 +662,94 @@ void UDPClient::SendClientDataFile(char *msg, EnbUdpHeader *header)
 #define PACKET_DONE          ((char *) -1)
 #define PACKET_RE_REQUESTED  ((char *) -2)
 
+// Minimum ms between timer-driven 0x2017 retries (PumpPacketResend). The
+// arrival-driven path is not paced -- it fires at most once per hole.
+#define PACKET_RESEND_INTERVAL_MS 300
+
+// ---------------------------------------------------------------------------
+// RequestResend -- emit a 0x2017 RESEND_PACKET_SEQUENCE NACK asking the
+// server for `packet_count` reliable datagrams starting at `packet_start`,
+// and stamp the retry timer. The payload is the canonical 8-byte
+// ReSendRequest (common/include/net7/PacketStructures.h). The old private
+// `struct ReSend {long;long;}` was 16 bytes on LP64 Linux builds, which the
+// server misparsed; the shared int32_t struct pins the wire width on both
+// proxy build targets.
+// ---------------------------------------------------------------------------
+void UDPClient::RequestResend(unsigned long packet_start, long packet_count)
+{
+    ReSendRequest resend;
+    resend.packet_start = (int32_t) packet_start;
+    resend.packet_count = (int32_t) packet_count;
+    if (g_ServerMgr && g_ServerMgr->m_UDPConnection) {
+        g_ServerMgr->m_UDPConnection->ForwardClientOpcode(
+            ENB_OPCODE_2017_RESEND_PACKET_SEQUENCE,
+            sizeof(ReSendRequest), (char *) &resend);
+    }
+    m_PacketResendTimer = GetNet7TickCount();
+}
+
+// ---------------------------------------------------------------------------
+// PumpPacketResend -- timer-driven retry for the reliable stream, called
+// from RecvThread every time recv() times out (SO_RCVTIMEO). The
+// arrival-driven path in SendPacketSequence sends ONE 0x2017 per hole and
+// otherwise recovers only when MORE datagrams arrive (the skip-pesky
+// counter needs 10 further arrivals). After a sector handoff the 0x003A
+// burst is the FINAL traffic on the connection, so a lost tail packet
+// meant no retry ever fired and the client sat on the load screen forever.
+// ---------------------------------------------------------------------------
+void UDPClient::PumpPacketResend()
+{
+    if (!m_ConnectionActive || m_Packets.empty()) {
+        return;
+    }
+
+    // Pending recovery exists only when a sequence NEWER than the head has
+    // arrived; a missing head with nothing beyond it is just an idle stream.
+    unsigned long newest = m_Packets.rbegin()->first;
+    if (newest <= (unsigned long) m_CurrentPacketNum) {
+        return;
+    }
+
+    char *head = m_Packets[m_CurrentPacketNum];
+    if (head != PACKET_BLANK && head != PACKET_RE_REQUESTED) {
+        // A ready packet is parked at the head (left by a skip-pesky /
+        // early-return path) with no further arrivals to re-drive the
+        // drain. Flush it.
+        DrainReadyPackets(false);
+        return;
+    }
+
+    unsigned long now = GetNet7TickCount();
+    if (now - m_PacketResendTimer < PACKET_RESEND_INTERVAL_MS) {
+        return;
+    }
+
+    m_PacketTimeout++;
+    if (m_PacketTimeout > 10) {
+        // Same give-up rule as the arrival path: skip the pesky packet.
+        LogVMessage("UDPClient(Linux): skipping pesky packet %ld (timer)\n",
+                    (long) m_CurrentPacketNum);
+        m_CurrentPacketNum++;
+        m_PacketTimeout = 0;
+        DrainReadyPackets(false);
+        return;
+    }
+
+    // Re-request the whole contiguous hole up to the next stored sequence;
+    // the server resends what its ring still holds and answers header-only
+    // blanks for what it evicted, so every slot gets unstuck either way.
+    PacketList::iterator next =
+        m_Packets.upper_bound((unsigned long) m_CurrentPacketNum);
+    long count = (next != m_Packets.end())
+        ? (long) (next->first - (unsigned long) m_CurrentPacketNum)
+        : 1;
+    LogVMessage("UDPClient(Linux): >> re-request resend of %ld x%ld (timer)\n",
+                (long) m_CurrentPacketNum, count);
+    m_Packets[m_CurrentPacketNum] = PACKET_RE_REQUESTED;
+    m_PacketDropThisSession++;
+    RequestResend((unsigned long) m_CurrentPacketNum, count);
+}
+
 // ---------------------------------------------------------------------------
 // SendPacketSequence -- reliable-delivery reassembly for opcode 0x2016
 // (PACKET_SEQUENCE) and 0x201A (PACKET_C_SEQUENCE -- continuation of a
@@ -673,13 +761,6 @@ void UDPClient::SendClientDataFile(char *msg, EnbUdpHeader *header)
 // ---------------------------------------------------------------------------
 void UDPClient::SendPacketSequence(char *msg, EnbUdpHeader *header, bool continuation)
 {
-    ReSend resend;
-    long header_size = 512;
-
-    if (g_Packet_Opt_requested) {
-        header_size = 1400;
-    }
-
     check_memory();
     if (header->packet_sequence == 0) {
         LogVMessage("UDPClient(Linux): packet header num reset\n");
@@ -731,9 +812,6 @@ void UDPClient::SendPacketSequence(char *msg, EnbUdpHeader *header, bool continu
         // Packet arrived early or there is a hole -- try to fill the hole.
         m_PacketTimeout++;
         if (m_Packets[m_CurrentPacketNum] == PACKET_BLANK) {
-            resend.packet_start = m_CurrentPacketNum;
-            resend.packet_count = 1;
-
             if (m_PacketTimeout > 10) {
                 m_CurrentPacketNum++;
                 m_PacketTimeout = 0;
@@ -742,17 +820,10 @@ void UDPClient::SendPacketSequence(char *msg, EnbUdpHeader *header, bool continu
                 return;
             }
 
-            unsigned long tick = GetNet7TickCount();
-
             LogVMessage("UDPClient(Linux): >> request resend of packet %ld\n",
                         (long) m_CurrentPacketNum);
             m_Packets[m_CurrentPacketNum] = PACKET_RE_REQUESTED;
-            if (g_ServerMgr && g_ServerMgr->m_UDPConnection) {
-                g_ServerMgr->m_UDPConnection->ForwardClientOpcode(
-                    ENB_OPCODE_2017_RESEND_PACKET_SEQUENCE,
-                    sizeof(ReSend), (char *) &resend);
-            }
-            m_PacketResendTimer = tick;
+            RequestResend((unsigned long) m_CurrentPacketNum, 1);
             m_PacketDropThisSession++;
             if (m_PacketDropThisSession > 40)  m_PacketTimer = 500;
             if (m_PacketDropThisSession > 500) {
@@ -773,7 +844,24 @@ void UDPClient::SendPacketSequence(char *msg, EnbUdpHeader *header, bool continu
 
     check_memory();
 
-    // Drain any in-order packets that are now ready.
+    DrainReadyPackets(continuation);
+}
+
+// ---------------------------------------------------------------------------
+// DrainReadyPackets -- forward every in-order packet that is now ready.
+// Factored out of SendPacketSequence so PumpPacketResend can also re-drive
+// the drain when a ready packet is parked at the head with no further
+// arrivals coming. `continuation` carries the triggering datagram's
+// 0x201A-ness, matching the Win32 call-level convention; timer-driven
+// calls pass false.
+// ---------------------------------------------------------------------------
+void UDPClient::DrainReadyPackets(bool continuation)
+{
+    long header_size = 512;
+
+    if (g_Packet_Opt_requested) {
+        header_size = 1400;
+    }
     while (m_Packets[m_CurrentPacketNum] != PACKET_BLANK &&
            m_Packets[m_CurrentPacketNum] != PACKET_DONE &&
            m_Packets[m_CurrentPacketNum] != PACKET_RE_REQUESTED)
@@ -788,7 +876,23 @@ void UDPClient::SendPacketSequence(char *msg, EnbUdpHeader *header, bool continu
             usleep(1000);
         }
 
-        if (m_SplitPacketLength == 0) {
+        EnbUdpHeader *stored_hdr = (EnbUdpHeader *) message;
+        if (stored_hdr->size <= (short) sizeof(EnbUdpHeader)) {
+            // Header-only blank: the server's answer to a 0x2017 NACK for a
+            // packet already evicted from its resend ring. There is no
+            // payload to walk -- inspecting the first inner opcode would
+            // read past the end of this 12-byte heap copy. Count the
+            // sequence number as processed and move on. If it was a chunk
+            // of an in-flight split packet, that split can never complete;
+            // abandon the partial reassembly rather than feed it the next
+            // unrelated packets.
+            LogVMessage("UDPClient(Linux): blank fill for evicted packet %ld\n",
+                        (long) m_CurrentPacketNum);
+            if (m_SplitPacketLength != 0) {
+                LogMessage("UDPClient(Linux): blank fill mid-split; abandoning split reassembly\n");
+                m_SplitPacketLength = 0;
+            }
+        } else if (m_SplitPacketLength == 0) {
             // Inspect the first inner opcode to detect a split packet.
             char *ptr = message + sizeof(EnbUdpHeader);
             unsigned short length = *((unsigned short *) &ptr[0]);
@@ -860,14 +964,14 @@ void UDPClient::SendPacketSequence(char *msg, EnbUdpHeader *header, bool continu
                     }
                     LogVMessage("UDPClient(Linux): >> request resend %lu..%ld\n",
                                 m_SplitPacketStart, (long) m_CurrentPacketNum);
-                    resend.packet_start = m_SplitPacketStart;
-                    resend.packet_count = m_CurrentPacketNum - m_SplitPacketStart;
-                    m_CurrentPacketNum  = m_SplitPacketStart;
-                    if (g_ServerMgr && g_ServerMgr->m_UDPConnection) {
-                        g_ServerMgr->m_UDPConnection->ForwardClientOpcode(
-                            ENB_OPCODE_2017_RESEND_PACKET_SEQUENCE,
-                            sizeof(ReSend), (char *) &resend);
-                    }
+                    // Count is INCLUSIVE of the current (final, failed)
+                    // chunk: the old `current - start` left the last chunk
+                    // un-requested. Harmless while the server ignored the
+                    // count field; wrong now that it honours it.
+                    long resend_count = m_CurrentPacketNum
+                                        - (long) m_SplitPacketStart + 1;
+                    m_CurrentPacketNum = m_SplitPacketStart;
+                    RequestResend(m_SplitPacketStart, resend_count);
                     return;
                 }
             }
@@ -882,6 +986,22 @@ void UDPClient::SendPacketSequence(char *msg, EnbUdpHeader *header, bool continu
         } else {
             m_Packets[m_CurrentPacketNum] = PACKET_BLANK;
         }
+    }
+
+    // Prune the processed tail. Keep a 64-sequence window for retransmit
+    // dedup (matching the server's RESEND_ELEMENTS ring depth); anything
+    // older can never be referenced again. Without this the map grew one
+    // PACKET_DONE entry per reliable datagram for the life of the session.
+    while (!m_Packets.empty() &&
+           m_Packets.begin()->first + 64 < (unsigned long) m_CurrentPacketNum)
+    {
+        char *old = m_Packets.begin()->second;
+        if (old != PACKET_BLANK && old != PACKET_DONE &&
+            old != PACKET_RE_REQUESTED)
+        {
+            delete[] old;
+        }
+        m_Packets.erase(m_Packets.begin());
     }
 
     check_memory();

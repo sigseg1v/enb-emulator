@@ -1124,3 +1124,43 @@ format & byte order", Trap 2).
   solo (not grouped).
 - **Setup**: `just play-cli` (or `play-local`) with at least two characters in
   the same sector, grouped via `group invite <player>` + `group accept`.
+
+### [ ] CV-23 -- Long-idle session can still zone (reliable-UDP resend protocol fix)
+
+- **Change**: server + proxy, the 0x2016/0x2017 reliable-stream recovery path
+  (proxy<->server control band; the client never sees these opcodes, but a
+  failed recovery strands the client on the sector load screen). Server
+  `Player::ReSendOpcodes` (server/src/PlayerConnection.cpp) previously parsed
+  the 0x2017 request with SIGNED SHORT reads, so any request for a sequence
+  number above 32767 (a few hours of play) went negative, matched nothing, and
+  -- because the no-match path sent NO reply -- the proxy waited forever. Fixed
+  to parse the canonical 8-byte `ReSendRequest {int32 packet_start, int32
+  packet_count}` (now in common/include/net7/PacketStructures.h, with
+  legacy 16-byte LP64-proxy tolerance), honour the count, and answer EVERY
+  requested sequence: the cached datagram when the resend ring still holds it,
+  a header-only blank when evicted. Ring deepened RESEND_ELEMENTS 20 -> 64
+  (zone-out bursts evicted entries before the NACK arrived). Proxy side:
+  emits the shared 8-byte struct (its old private `{long;long}` was 16 bytes
+  on LP64 builds), guards header-only blank fills in the reassembly drain
+  (previously a heap overread), prunes the reassembly map (previously grew
+  unbounded all session), and -- the load-bearing half -- retries
+  timer-driven via SO_RCVTIMEO + `PumpPacketResend` every ~300ms, because the
+  old retry only ran on ARRIVAL of further datagrams and the post-handoff
+  0x003A burst is the FINAL traffic on a zone-out, so one lost tail packet
+  could never recover.
+- **CLI byte-pin**: `ResendPacketSequenceCodecTests` in
+  `freya/cli-client/tests/CliClient.UnitTests/Opcodes/` pins the 8-byte
+  encode, both decode forms, and the >32767 sequence case; codec is
+  `CliClient.Core/Opcodes/Outbound/ResendPacketSequenceCodec.cs`.
+- **What to look for (real client)**: the long-session zone-out. Stay logged
+  in for several hours (idle in a sector is fine -- sequence numbers accrue
+  past 32768), then gate or undock. Previously this was the "stuck on load
+  screen after sitting a while" hang (also reported on the online deploy);
+  now the zone must complete. Also do a burst of rapid back-to-back gate
+  jumps on a fresh session -- no load-screen stall. Watch the proxy log for
+  "re-request ... (timer)" lines recovering lost packets and "blank fill for
+  evicted packet" lines unsticking evicted ones.
+- **Setup**: `just play-local` (rebuilt server + proxy images and a freshly
+  built bin/FreyaProxy.exe -- both sides must be the new binaries, since the
+  wire struct width and the blank-reply contract changed together). The
+  online deploy needs the same rebuild before the friend's hang is fixed.
