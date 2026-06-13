@@ -126,11 +126,11 @@ CC-BY-NC-SA source (a port/transcription of `server/`, `proxy/`,
 If you think any file would violate the MIT premise, **STOP and flag it to the
 project owner to decide** (leave CC, clean-room rewrite, or owner-directed MIT)
 -- do NOT silently stamp MIT on a Net-7 derivative, and do NOT silently leave a
-genuine `freya/` original under CC. The crypto handshake files
-(`freya/cli-client/src/CliClient.Core/Net/WestwoodRSA.cs`, `WestwoodRC4.cs`,
-`RsaHandshake.cs`) are the precedent: their licensing was ambiguous (textbook
-RC4/RSA but originally written as ports), so by owner decision they carry **no
-SPDX/license header at all** rather than a claimed license.
+genuine `freya/` original under CC. When a file is a genuine Net-7 derivative
+that nonetheless needs to be consumed by `freya/` code, keep it OUT of the
+`freya/` tree in its own assembly under the CC-licensed source and have the
+`freya/` project reference it (e.g. `proxy/WestwoodCrypto/`, the Westwood
+RSA/RC4 handshake primitives the CLI links against).
 
 ## Coding rules
 
