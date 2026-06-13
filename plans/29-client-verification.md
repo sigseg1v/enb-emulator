@@ -1210,10 +1210,13 @@ format & byte order", Trap 2).
 - **Change**: client-only (enbmod.dll). The glass cards are translucent, so the
   native in-space stat bars / xp bars / skill buttons bleed through. `enb.patch_ret(addr [,pop])`
   (lua_api.cpp `l_patch_ret`) overwrites a function entry with a `ret` (0xC3, or
-  0xC2 imm16 for callee-cleanup) to suppress the routine that draws each. Ships
-  **OFF**: init.lua's HIDE block is commented out, because "an early ret hides
-  the widget without breaking gameplay" is only confirmable against the real
-  client.
+  0xC2 imm16 for callee-cleanup) to suppress the routine that draws each.
+  **Turned ON by default (owner-directed 2026-06-13)** for the two pinned paint
+  targets -- init.lua runs `enb.patch_ret(VitalsPaint)` + `enb.patch_ret(XpPaint)`
+  at startup. This is ON ahead of confirmation: "an early ret hides the widget
+  without breaking gameplay" is only provable against the real client, so this CV
+  stays open and is the load-bearing check. If the client crashes on load,
+  comment the two patch_ret lines in init.lua.
 - **Addresses pinned by behavioural analysis (2026-06-13).** The hide targets
   are each widget's per-frame PAINT routine, NOT the constructor/updater. A
   painter is a small `void __fastcall(ECX)` that, per child bar, checks the
@@ -1228,17 +1231,19 @@ format & byte order", Trap 2).
   leaves uninitialised pointers / frozen state and crashes -- do not.
 - **Headless coverage**: the mock records `enb.patch_ret` calls but cannot
   execute the patch; correctness is entirely this entry.
-- **What to look for (real client), PER widget** -- enable one line at a time:
-  - **VITALS**: `enb.patch_ret(enb.addr.VitalsPaint)`. The native reactor/shield/
-    hull bars vanish; the player card's bars remain; flight, targeting, and stat
-    updates still work; no crash on zone or undock.
-  - **XP**: `enb.patch_ret(enb.addr.XpPaint)`. The native combat/trade/explore xp
-    bars vanish; the discipline card remains; leveling/xp still functions.
+- **What to look for (real client), PER widget** -- both are ON at startup, so
+  this is a confirm-or-revert check, not an enable step:
+  - **VITALS** (`VitalsPaint` patched): the native reactor/shield/hull bars are
+    gone; the player card's bars remain; flight, targeting, and stat updates
+    still work; no crash on load, zone, or undock.
+  - **XP** (`XpPaint` patched): the native combat/trade/explore xp bars are gone;
+    the discipline card remains; leveling/xp still functions.
   - **SKILL**: no clean ret-patch exists -- the skill gadget's render is fused
     with state mutation, so there is no standalone pure-paint entry. Hiding it
     needs a runtime per-gadget visible-flag write (clear the byte at gadget+0x60
     on the skill gadget once its live pointer is known), not a static patch. This
     sub-id stays open pending that runtime path; the constructor 0x00662dc0 must
     NOT be ret-patched.
-- **Setup**: `just play-local` with `UseClientMods=true`; uncomment one HIDE
-  line in init.lua, hot-reload, verify, then move to the next.
+- **Setup**: `just play-local` with `UseClientMods=true`. The vitals+xp hides
+  apply automatically at startup. If the client crashes on load, comment the two
+  `patch_ret` lines in init.lua and re-launch to bisect.

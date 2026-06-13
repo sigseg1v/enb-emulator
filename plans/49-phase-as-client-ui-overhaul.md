@@ -101,7 +101,7 @@ per-vertex gradient quads + rounded corners from triangle fans, not PNGs.
   ~165px wide, y~935-975, ~20px apart). Anchor from `enb.screen()` bottom
   instead of hardcoded 1280x768-era constants.
 
-### AS-6 Tier B: true native-widget hide  `[~]`  (mechanism shipped, OFF by default)
+### AS-6 Tier B: true native-widget hide  `[~]`  (vitals+xp ON by default 2026-06-13; skill open)
 
 - `[x]` Suppression primitive: `enb.patch_ret(addr [,pop])` (lua_api.cpp
   `l_patch_ret`) overwrites a function entry with `ret` (0xC3, or 0xC2 imm16
@@ -121,11 +121,15 @@ per-vertex gradient quads + rounded corners from triangle fans, not PNGs.
 - `[!]` Skill buttons have NO standalone pure-paint entry (render is fused with
   state mutation); hiding them needs a runtime per-gadget visible-flag write
   (clear gadget+0x60 once the live pointer is known), not a static patch. Open.
-- `[!]` Vitals/xp hides cannot be validated headless: "an early ret hides the
-  widget without breaking gameplay" is real-client-only. Tracked as
-  **CV-AS-HIDE-VITALS / -XP / -SKILL** in plans/29; owner enables one line at a
-  time. Until confirmed, the native widgets show through the translucent glass
-  (honest: NOT hidden yet).
+- `[x]` Vitals + xp hides turned **ON by default** (owner-directed 2026-06-13):
+  init.lua's HIDE block now runs `enb.patch_ret(VitalsPaint)` +
+  `enb.patch_ret(XpPaint)` at startup. init_spec asserts both paint entries are
+  ret-patched (pop 0) and that the ctor/updater addrs are NOT.
+- `[!]` ON ahead of real-client confirmation: "an early ret hides the widget
+  without breaking gameplay" is still real-client-only. **CV-AS-HIDE-VITALS /
+  -XP** in plans/29 remain open; if the client crashes on load, comment the two
+  patch_ret lines. **CV-AS-HIDE-SKILL** stays open (no clean paint entry; needs
+  the runtime visible-flag path).
 - Note: the earlier "Tier A cover panel" approach is GONE -- the design is
   translucent glass, so an opaque cover would defeat the look. Suppression
   (patch_ret) is the only path to a clean result, and it is gated on CV.

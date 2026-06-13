@@ -158,7 +158,13 @@ function M.install(opts)
 
     local enb = {
         base = 0x00400000,
-        addr = {},
+        -- mirror the real enb.addr entries the scripts reference (see src/game.h)
+        addr = {
+            VitalsBars   = 0x005dbfc0,  -- ctor (NOT a hide target)
+            VitalsPaint  = 0x005dcae0,  -- vitals per-frame paint (hide target)
+            XpPaint      = 0x0058cf60,  -- xp per-frame paint (hide target)
+            SkillLifecycle = 0x0060f1a0,
+        },
         WANT_KEY = M.WANT_KEY, WANT_CHAR = M.WANT_CHAR, WANT_MOUSE = M.WANT_MOUSE,
         msg = MSG,
 

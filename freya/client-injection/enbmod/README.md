@@ -150,15 +150,16 @@ draws our pointer on top of it all. Both need real-client calibration/confirmati
 
 **Hiding the native widgets we replace** (AS-6): the glass is translucent, so the native stat/xp/
 skill widgets bleed through. `enb.patch_ret(addr[,pop])` neuters a widget's per-frame PAINT routine
-with an early `ret` (init.lua has a commented, **OFF-by-default** HIDE block). The paint targets are
-pinned: `enb.addr.VitalsPaint` (0x005dcae0) and `enb.addr.XpPaint` (0x0058cf60) -- both `void
-__fastcall`, pop 0, pure paint (they only check each gadget's visible flag and call the paint
-primitive), so an early ret hides them without touching state. The `*Bars`/`EnergyBar`/`SkillButton`
-entries are the constructors/updater and must NOT be patched. The skill buttons have no standalone
-pure-paint entry, so they need a runtime per-gadget visible-flag write instead of a static patch.
-Ships disabled because "does an early ret break gameplay" is only confirmable on the real client
-(CV-AS-HIDE-VITALS/-XP/-SKILL). Until enabled, the native widgets remain visible behind the glass --
-honest status, not hidden yet.
+with an early `ret`. init.lua's HIDE block is **ON by default** (owner-directed 2026-06-13) for the
+two pinned paint targets: `enb.addr.VitalsPaint` (0x005dcae0) and `enb.addr.XpPaint` (0x0058cf60) --
+both `void __fastcall`, pop 0, pure paint (they only check each gadget's visible flag and call the
+paint primitive), so an early ret hides them without touching state. The `*Bars`/`EnergyBar`/
+`SkillButton` entries are the constructors/updater and are NEVER patched. The skill buttons have no
+standalone pure-paint entry, so they still need a runtime per-gadget visible-flag write instead of a
+static patch (left off). **Caveat:** this is ON ahead of real-client confirmation -- the addresses
+are pinned by behavioural analysis but "does an early ret break gameplay" is only provable on the
+real client (CV-AS-HIDE-VITALS/-XP). If the client crashes on load, comment the two `patch_ret`
+lines in init.lua.
 
 **Fail-open is load-bearing:** `on_input` runs Lua via `lua_pcall`, and any error returns *false*
 (do not swallow), so a script bug can never wedge the user's keyboard/mouse.

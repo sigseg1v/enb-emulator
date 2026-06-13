@@ -35,6 +35,17 @@ test("all HUD modules registered their tick callbacks", function()
     eq(#mock.state().tick_errors, 0, "no tick errors")
 end)
 
+test("init.lua hides the vitals + xp native widgets via patch_ret", function()
+    local patched = {}
+    for _, p in ipairs(mock.state().patches) do patched[p.addr] = p.pop end
+    eq(patched[0x005dcae0], 0, "VitalsPaint ret-patched, pop 0")
+    eq(patched[0x0058cf60], 0, "XpPaint ret-patched, pop 0")
+    -- the ctor/updater entries must NEVER be patched (would crash the client)
+    ok(patched[0x005dbfc0] == nil, "VitalsBars ctor NOT patched")
+    ok(patched[0x0058c450] == nil, "XpBars ctor NOT patched")
+    ok(patched[0x00662dc0] == nil, "SkillButton ctor NOT patched")
+end)
+
 test("freya_ui input handler is live after init", function()
     ok(mock.state().input_fn ~= nil, "input handler registered")
     eq(mock.state().input_mask, enb.WANT_KEY | enb.WANT_MOUSE, "KEY|MOUSE mask")
