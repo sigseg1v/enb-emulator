@@ -36,12 +36,14 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 ///   <c>UndockCommand</c> uses.</item>
 ///   <item>Feed the re-join handshake frames + a short post-START fanout drain
 ///   into a <see cref="SectorWorld"/> and assert the space sector announced
-///   live mob spawns (Luna 1015 is a Needlenose newbie field). Mob ship
-///   spawns are open-space-only -- a station-docked sector fans out furniture
-///   and lounge NPCs, never NPC ships -- so their presence proves the
-///   handoff-follow landed in OPEN SPACE, not back in the station. (Asteroids
-///   are NOT asserted: 1015 is a mob/nav sector, not a resource field; mining
-///   means gating on to a resource sector, a separate step.)</item>
+///   its navigation skeleton including STARGATES. Nav/gate fan-out is
+///   open-space-only (the server gates SendNavigation on AppearsInRadar; a
+///   station-docked interior fans out furniture and lounge NPCs, never navs
+///   or gates), so stargate presence proves the handoff-follow landed in
+///   OPEN SPACE, not back in the station. (Mobs/asteroids are NOT asserted:
+///   mob CREATEs are range-gated against the avatar's live position and
+///   nothing spawns at the undock point, and 1015 carries no resource
+///   field -- both counters stay as diagnostics.)</item>
 /// </list>
 ///
 /// <para>
@@ -71,7 +73,7 @@ public sealed class SectorUndockHandoffFollowTests : SectorIntegrationTest
     }
 
     [Fact]
-    public async Task Undock_FollowsHandoff_LandsInSpaceWithAsteroids()
+    public async Task Undock_FollowsHandoff_LandsInOpenSpace()
     {
         var account = TestAccounts.New(_server);
         const int slot = 0;
@@ -104,15 +106,17 @@ public sealed class SectorUndockHandoffFollowTests : SectorIntegrationTest
                 Packet.ForOpcode(OpcodeId.Known.StarbaseRequest.Value, launch), cts.Token);
 
             int toSectorId = -1;
+            int fromSectorId = -1;
             for (int seen = 0; seen < 400; seen++)
             {
                 var reply = await session.Sector.ReceiveAsync(cts.Token);
                 Assert.NotNull(reply);
                 if (reply!.Header.Opcode == OpcodeId.Known.ServerHandoff.Value)
                 {
-                    Assert.True(reply.Payload.Length >= 24,
-                        $"0x003A payload {reply.Payload.Length}B < 24B; cannot read ToSectorID");
+                    Assert.True(reply.Payload.Length >= 28,
+                        $"0x003A payload {reply.Payload.Length}B < 28B; cannot read To/FromSectorID");
                     toSectorId = BinaryPrimitives.ReadInt32BigEndian(reply.Payload.Span.Slice(20, 4));
+                    fromSectorId = BinaryPrimitives.ReadInt32BigEndian(reply.Payload.Span.Slice(24, 4));
                     break;
                 }
             }
@@ -129,7 +133,7 @@ public sealed class SectorUndockHandoffFollowTests : SectorIntegrationTest
             };
 
             var rejoin = await SectorEnterDriver.FollowHandoffAsync(
-                ctx, session.GameId, slot, toSectorId, cts.Token);
+                ctx, session.GameId, slot, toSectorId, fromSectorId, cts.Token);
             spaceConn = rejoin.Sector;
 
             // Station connection is finished now -- close it raw (no logoff).
@@ -140,7 +144,7 @@ public sealed class SectorUndockHandoffFollowTests : SectorIntegrationTest
             _out.WriteLine($"re-joined sector {rejoin.SectorId} startId=0x{rejoin.StartId:X8} " +
                 $"handshake-frames={rejoin.HandshakeFrames.Count}");
 
-            // --- 3. World: feed handshake + post-START fanout; assert asteroids. ---
+            // --- 3. World: feed handshake + post-START fanout; assert open space. ---
             var world = new SectorWorld();
             foreach (var f in rejoin.HandshakeFrames) world.Ingest(f);
 
@@ -162,27 +166,29 @@ public sealed class SectorUndockHandoffFollowTests : SectorIntegrationTest
             var tracked = world.NearestTo(rejoin.GameId);
             int mobs = tracked.Count(t => SectorWorld.TypeName(t.Obj) is "mob spawn" or "mob");
             int navs = tracked.Count(t => SectorWorld.TypeName(t.Obj).StartsWith("nav"));
+            int stargates = tracked.Count(t => SectorWorld.TypeName(t.Obj) == "stargate");
             int resources = tracked.Count(t => SectorWorld.TypeName(t.Obj) == "resource");
             _out.WriteLine($"space sector {rejoin.SectorId}: {tracked.Count} objects " +
-                $"({mobs} mobs, {navs} navs, {resources} resources)");
+                $"({stargates} stargates, {navs} navs, {mobs} mobs, {resources} resources)");
             foreach (var t in tracked.Take(20))
                 _out.WriteLine($"  gid=0x{t.Obj.GameId:X8} type={SectorWorld.TypeName(t.Obj)} name={t.Obj.Name}");
 
             // Proof we are actually in OPEN SPACE and not still docked: the
-            // sector announced live mob spawns. Station-docked sectors fan out
-            // furniture / lounge NPCs, never NPC ship spawns. Luna space (1015)
-            // is a Needlenose newbie field. (Asteroids are NOT asserted here:
-            // 1015 is a mob/nav sector, not a resource field -- mining means
-            // gating/warping on to a resource sector, a separate step. The
-            // resource counter above stays as a diagnostic for sectors that
-            // do bear them.)
+            // sector announced its navigation skeleton, stargates included.
+            // The server only fans out navs/gates in open space (SendNavigation
+            // is gated on AppearsInRadar); a station-docked interior fans out
+            // furniture and lounge NPCs, never a stargate. Mobs are NOT
+            // asserted: mob CREATEs are range-gated against the avatar's live
+            // position and nothing spawns at the 1015 undock point, so a zero
+            // there is correct server behaviour, not a docking regression.
+            // The mob/resource counters above stay as diagnostics.
             Assert.True(tracked.Count > 0,
                 $"re-join to sector {rejoin.SectorId} produced START 0x{rejoin.StartId:X8} but the " +
                 $"world stayed empty; the handoff-follow did not land in a populated sector.");
-            Assert.True(mobs > 0,
-                $"space sector {rejoin.SectorId} announced {tracked.Count} objects but 0 mob spawns; " +
-                $"a station-docked sector fans out furniture, not NPC ships -- the handoff-follow may " +
-                $"have re-joined the station instead of open space.");
+            Assert.True(stargates > 0,
+                $"space sector {rejoin.SectorId} announced {tracked.Count} objects but 0 stargates; " +
+                $"a station-docked interior fans out furniture, never the nav/gate skeleton -- the " +
+                $"handoff-follow may have re-joined the station instead of open space.");
 
             // --- clean logoff on the space connection. ---
             try

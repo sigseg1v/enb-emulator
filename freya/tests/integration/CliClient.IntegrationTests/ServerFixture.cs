@@ -51,13 +51,22 @@ public sealed class ServerFixture : IAsyncLifetime
     public int    MasterPort { get; } = 3801;   // proxy MASTER_SERVER_PORT
     public string SectorHost { get; } = "127.0.0.1";
     public int    SectorPort { get; } = 3500;   // proxy SECTOR_SERVER_PORT
-    public int    PostgresPort  { get; } = 5434;   // host-side remap of 5432
+
+    // Host-side remap of postgres 5432. docker-compose.yml publishes
+    // "${ENB_PG_HOST_PORT:-5434}:5432" and the justfile derives a PER-BRANCH
+    // ENB_PG_HOST_PORT (5500 + cksum(branch) % 400) so worktree stacks don't
+    // collide -- a hardcoded 5434 only matches a bare `docker compose up` or
+    // the main branch. Resolve the same way compose does: the env var first,
+    // then the bare-compose default.
+    public int PostgresPort { get; } =
+        int.TryParse(Environment.GetEnvironmentVariable("ENB_PG_HOST_PORT"), out var p) ? p : 5434;
 
     /// <summary>
     /// Connection string for the net7_user database (accounts +
     /// avatars). Reachable from the test process because docker-compose
-    /// publishes 5434:5432. Used by <see cref="TestAccounts.New"/> to
-    /// provision per-test accounts on demand.
+    /// publishes <c>${ENB_PG_HOST_PORT:-5434}:5432</c>. Used by
+    /// <see cref="TestAccounts.New"/> to provision per-test accounts on
+    /// demand.
     /// </summary>
     public string PostgresConnectionString { get; }
 

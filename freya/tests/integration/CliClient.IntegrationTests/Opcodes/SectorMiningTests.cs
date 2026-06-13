@@ -4,6 +4,7 @@
 
 using System.Buffers.Binary;
 using N7.CliClient.Auth;
+using N7.CliClient.IntegrationTests.Net;
 using N7.CliClient.Net;
 using N7.CliClient.Opcodes;
 using N7.CliClient.Opcodes.Outbound;
@@ -37,16 +38,22 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// </para>
 ///
 /// <para>
-/// Transport: this harness drives the player's downstream onto its own UDP
-/// socket via a DIRECT MVAS feed (see <see cref="SectorMvasMoveTests"/> --
-/// the server re-points the player endpoint on the MVAS port, keyed on
-/// player_id). On that leg the harness receives RAW server sector packets
-/// (the proxy is bypassed), so the roid creates arrive as 0x2019
-/// RESOURCE_OBJECT_CREATE and the prospect beam as the compact 0x2012 (the
-/// proxy would otherwise consume 0x2019-&gt;0x0004 Type=38 and expand
-/// 0x2012-&gt;0x000B for the Win32 client; the 0x000B fabrication is a proxy
-/// concern verified separately -- see plans/29 CV-09). <see cref="SectorWorld"/>
-/// ingests 0x2019 directly so roids are locatable on the raw leg.
+/// Transport: the harness flies via the proxy's MVAS position feed -- it sends
+/// the 40-byte <c>FreyaClientPosDatagram</c> to the proxy's loopback intake port
+/// 3807 (<see cref="ProxyPositionFeed"/>), EXACTLY as the in-client position hook
+/// (FreyaPosFeed.dll) does, and the proxy re-emits 0x1004 MVAS_SEND_POSITION to
+/// the server from its OWN socket. This keeps the avatar's registered IP == the
+/// proxy across the move, so the proxy-relayed mine trigger
+/// (REQUEST_TARGET + INVENTORY_MOVE over the sector TCP leg) is NOT dropped by
+/// the server's anti-spoof guard (UDP_Client.cpp,
+/// <c>PlayerIPAddr() == source_addr</c>). A DIRECT MVAS feed would instead
+/// overwrite <c>m_Player_IPAddr</c> to the docker-gateway IP
+/// (<c>HandleMVASPosReturn</c> -&gt; <c>SetPlayerPortIP</c>, unconditional) and
+/// the subsequent proxy-relayed trigger would fail the guard. Because everything
+/// stays on the proxy leg, the roid creates arrive as 0x0004 CREATE (proxy-
+/// expanded from the server's 0x2019, create-type 38 == "resource") and the
+/// prospect beam as the proxy-fabricated 0x000B OBJECT_TO_OBJECT_EFFECT -- the
+/// exact bytes the Win32 client decodes. <see cref="SectorWorld"/> tracks both.
 /// </para>
 ///
 /// <para>
@@ -62,7 +69,6 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 [Collection(ServerCollection.Name)]
 public sealed class SectorMiningTests : SectorIntegrationTest
 {
-    private const int MvasPort = 3806;          // MVAS_LOGIN_PORT (Ports.h)
     private const int ProgenExplorerStation = 10301; // Arx Prima (Mars Beta)
     private const int ProgenExplorerSpace = 1030;    // 10301 / 10
     private const int ProgenRace = 2;
@@ -114,9 +120,11 @@ public sealed class SectorMiningTests : SectorIntegrationTest
         var session = Track(await SectorHandshake.ReestablishAsync(
             _server, login.Ticket!, slot, ProgenExplorerStation, cts.Token));
 
-        SectorUdpClient? udp = null;
+        ProxyPositionFeed? feed = null;
         EncryptedTcpConnection? spaceConn = null;
-        var rxFrames = new List<Packet>();
+        CancellationTokenSource? drainCts = null;
+        Task? drain = null;
+        var tcpFrames = new List<Packet>();
         try
         {
             // --- Undock + follow the handoff into the resource sector. ---
@@ -126,12 +134,14 @@ public sealed class SectorMiningTests : SectorIntegrationTest
                 Packet.ForOpcode(OpcodeId.Known.StarbaseRequest.Value, launch), cts.Token);
 
             int toSectorId = -1;
+            int fromSectorId = -1;
             for (int seen = 0; seen < 400; seen++)
             {
                 var reply = await session.Sector.ReceiveAsync(cts.Token);
                 if (reply!.Header.Opcode == OpcodeId.Known.ServerHandoff.Value)
                 {
                     toSectorId = BinaryPrimitives.ReadInt32BigEndian(reply.Payload.Span.Slice(20, 4));
+                    fromSectorId = BinaryPrimitives.ReadInt32BigEndian(reply.Payload.Span.Slice(24, 4));
                     break;
                 }
             }
@@ -146,7 +156,7 @@ public sealed class SectorMiningTests : SectorIntegrationTest
                 Username = account.Username,
             };
             var rejoin = await SectorEnterDriver.FollowHandoffAsync(
-                ctx, session.GameId, slot, toSectorId, cts.Token); // does START_ACK -> InSpace
+                ctx, session.GameId, slot, toSectorId, fromSectorId, cts.Token); // does START_ACK -> InSpace
             spaceConn = rejoin.Sector;
             await session.Sector.DisposeAsync();
             Assert.Equal(ProgenExplorerSpace, rejoin.SectorId);
@@ -154,28 +164,51 @@ public sealed class SectorMiningTests : SectorIntegrationTest
             var world = new SectorWorld();
             foreach (var f in rejoin.HandshakeFrames) world.Ingest(f);
 
-            // Warm-drain the proxy TCP leg so self-position lands before MVAS takeover.
-            await DrainInto(rejoin.Sector, world, TimeSpan.FromSeconds(5), cts.Token);
+            // --- Background drain of the proxy TCP (sector) leg for the whole
+            //     in-space phase. Everything we need fans out HERE: roids as
+            //     0x0004 CREATE (proxy-expanded from the server's 0x2019,
+            //     create-type 38 == "resource"), self-position via 0x0008/0x003E,
+            //     and the prospect beam as the proxy-fabricated 0x000B. ---
+            drainCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+            drain = Task.Run(async () =>
+            {
+                try
+                {
+                    while (!drainCts.IsCancellationRequested)
+                    {
+                        var p = await spaceConn.ReceiveAsync(drainCts.Token);
+                        if (p is null) break;
+                        lock (tcpFrames) tcpFrames.Add(p);
+                        world.Ingest(p);
+                    }
+                }
+                catch (OperationCanceledException) { }
+            });
+
+            // Let the initial fanout + self-position settle.
+            await Task.Delay(TimeSpan.FromSeconds(5), cts.Token);
 
             var self = world.SelfSnapshot(rejoin.GameId).Pos;
-            Assert.True(self is not null, "no own position after re-join; cannot drive MVAS");
+            Assert.True(self is not null,
+                "no own position after re-join; cannot drive the proxy position feed");
             var start = self!.Value;
             _out.WriteLine($"self ({start.X:0}, {start.Y:0}, {start.Z:0}); " +
                 $"field ({FieldCentre.X:0}, {FieldCentre.Y:0}, {FieldCentre.Z:0})");
 
-            // --- Direct MVAS/sector UDP socket: collect raw frames + feed world. ---
-            udp = new SectorUdpClient(
-                _server.SectorHost, MvasPort,
-                onInbound: p => { lock (rxFrames) rxFrames.Add(p); world.Ingest(p); },
-                log: m => _out.WriteLine(m));
-            udp.Start(cts.Token);
+            // --- Proxy position feed: send FreyaClientPosDatagram to 127.0.0.1:3807,
+            //     exactly as FreyaPosFeed.dll does; the proxy re-emits 0x1004 to the
+            //     server from its OWN socket so the avatar's registered IP stays ==
+            //     the proxy and the proxy-relayed mine trigger is not IP-dropped. ---
+            feed = new ProxyPositionFeed(_server.SectorHost);
 
             // --- Fly toward the field; retarget onto the nearest roid as roids
-            //     appear (0x2019 on the raw leg). Stop when within prospect range. ---
+            //     fan out (0x0004 type-38 on the proxy leg). Stop within range.
+            //     The proxy only re-emits 0x1004 on a CHANGED position, so we vary
+            //     the fed coordinate each tick. ---
             (float X, float Y, float Z) cur = start;
             SectorWorld.Tracked? roid = null;
             float roidDist = float.MaxValue;
-            for (int i = 0; i < 80 && !cts.IsCancellationRequested; i++)
+            for (int i = 0; i < 160 && !cts.IsCancellationRequested; i++)
             {
                 (roid, roidDist) = NearestResource(world, rejoin.GameId, cur);
                 if (roid is not null && roidDist <= ApproachTarget) break;
@@ -186,25 +219,29 @@ public sealed class SectorMiningTests : SectorIntegrationTest
 
                 float dx = dst.X - cur.X, dy = dst.Y - cur.Y, dz = dst.Z - cur.Z;
                 float dist = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
-                if (dist < 1f) { await Task.Delay(200, cts.Token); continue; }
-                float inv = 1f / dist;
-                (float X, float Y, float Z) head = (dx * inv, dy * inv, dz * inv);
-                float adv = MathF.Min(1500f, dist);
-                cur = (cur.X + head.X * adv, cur.Y + head.Y * adv, cur.Z + head.Z * adv);
-                udp.SendPosition(rejoin.GameId, cur.X, cur.Y, cur.Z, head);
-                await Task.Delay(60, cts.Token);
+                (float X, float Y, float Z) head = dist < 1f ? (1f, 0f, 0f) : (dx / dist, dy / dist, dz / dist);
+                if (dist >= 1f)
+                {
+                    float adv = MathF.Min(1500f, dist);
+                    cur = (cur.X + head.X * adv, cur.Y + head.Y * adv, cur.Z + head.Z * adv);
+                }
+                feed.Send(cur, head, ProgenExplorerSpace);
+                await Task.Delay(100, cts.Token);
             }
 
             (roid, roidDist) = NearestResource(world, rejoin.GameId, cur);
             Assert.True(roid is not null,
                 "no OT_RESOURCE roid ever appeared in range -- the field did not spawn/send " +
-                "roids on the raw MVAS leg, or 0x2019 ingestion failed.");
+                "roids on the proxy leg, the position feed never moved us into the field, or " +
+                "0x0004 type-38 ingestion failed.");
             Assert.True(roidDist <= ProspectRange,
                 $"nearest roid 0x{roid!.GameId:X8} '{roid.Name}' is {roidDist:0} units away, " +
                 $"beyond ProspectRange {ProspectRange:0} -- cannot mine.");
 
-            // Settle (stop feeding position) so the ship is unambiguously stationary.
-            await Task.Delay(500, cts.Token);
+            // Stop feeding position and let the server settle the ship as stationary
+            // (the position feed is change-gated, so simply not sending more freezes
+            // it; the change-gate also means no velocity was ever applied).
+            await Task.Delay(TimeSpan.FromMilliseconds(1700), cts.Token);
 
             // Candidate roids in range, nearest first. A single roid can have an
             // empty/depleted ore stack (a prior run mined it out within this
@@ -216,12 +253,13 @@ public sealed class SectorMiningTests : SectorIntegrationTest
             _out.WriteLine($"{candidates.Count} candidate roid(s) in range; nearest " +
                 $"0x{candidates[0].Roid.GameId:X8} at {candidates[0].Dist:0} units");
 
-            Packet? prospect = null, tcpBeam = null;
+            Packet? tcpBeam = null;
             SectorWorld.Tracked minedRoid = candidates[0].Roid;
             foreach (var (cand, candDist) in candidates)
             {
                 minedRoid = cand;
-                lock (rxFrames) rxFrames.Clear();
+                int baseline;
+                lock (tcpFrames) baseline = tcpFrames.Count;
                 _out.WriteLine($"trigger mine on roid 0x{cand.GameId:X8} '{cand.Name}' at {candDist:0} units");
 
                 // --- 1. REQUEST_TARGET the roid (server-side target lock). ---
@@ -239,142 +277,104 @@ public sealed class SectorMiningTests : SectorIntegrationTest
                 await spaceConn.SendAsync(
                     Packet.ForOpcode(OpcodeId.Known.InventoryMove.Value, mine), cts.Token);
 
-                // --- Drain BOTH transports for the prospect beam. After an MVAS
-                //     takeover the downstream endpoint is repointed to our UDP
-                //     socket -- but SendToRangeList may still target the player's
-                //     sector-plane (proxy) connection, in which case the proxy
-                //     EXPANDS 0x2012 -> 0x000B and we see the beam on the TCP leg.
-                //     Collect every opcode from both so we can pin whichever the
-                //     server's range-list send actually reaches, and diagnose a
-                //     silent CheckMiningConditions rejection (neither arrives). ---
-                var tcpFrames = new List<Packet>();
+                // --- Wait for the prospect beam. The server emits compact 0x2012
+                //     to the range list (self included); on the proxy leg the
+                //     player's own proxy EXPANDS 0x2012 -> 0x000B
+                //     (UDPClient::StartProspecting), so the beam arrives here as
+                //     0x000B. Watch the shared frame log (fed by the background
+                //     drain) for a 0x000B that landed AFTER this trigger. ---
                 using (var wait = CancellationTokenSource.CreateLinkedTokenSource(cts.Token))
                 {
                     wait.CancelAfter(TimeSpan.FromSeconds(6));
-                    var tcpDrain = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            while (!wait.IsCancellationRequested)
-                            {
-                                var p = await spaceConn.ReceiveAsync(wait.Token);
-                                if (p is null) break;
-                                lock (tcpFrames) tcpFrames.Add(p);
-                            }
-                        }
-                        catch (OperationCanceledException) { }
-                    });
                     while (!wait.IsCancellationRequested)
                     {
-                        bool found;
-                        lock (rxFrames) found = rxFrames.Any(p => p.Header.Opcode == 0x2012);
                         lock (tcpFrames)
-                            found |= tcpFrames.Any(p => p.Header.Opcode is 0x000B or 0x2012);
-                        if (found) { wait.Cancel(); break; }
+                            tcpBeam = tcpFrames.Skip(baseline)
+                                .FirstOrDefault(p => p.Header.Opcode == 0x000B);
+                        if (tcpBeam is not null) break;
                         try { await Task.Delay(100, wait.Token); } catch { }
                     }
-                    try { await tcpDrain; } catch { }
                 }
 
-                Packet? udpProspect, tcpProspect;
-                lock (rxFrames) udpProspect = rxFrames.FirstOrDefault(p => p.Header.Opcode == 0x2012);
+                ushort[] postOps;
                 lock (tcpFrames)
-                {
-                    tcpProspect = tcpFrames.FirstOrDefault(p => p.Header.Opcode == 0x2012);
-                    tcpBeam = tcpFrames.FirstOrDefault(p => p.Header.Opcode == 0x000B);
-                }
-
-                ushort[] udpOps, tcpOps;
-                lock (rxFrames) udpOps = rxFrames.Select(p => p.Header.Opcode).Distinct().OrderBy(x => x).ToArray();
-                lock (tcpFrames) tcpOps = tcpFrames.Select(p => p.Header.Opcode).Distinct().OrderBy(x => x).ToArray();
-                _out.WriteLine($"  post-mine udp opcodes: [{string.Join(",", udpOps.Select(x => $"0x{x:X4}"))}]");
-                _out.WriteLine($"  post-mine tcp opcodes: [{string.Join(",", tcpOps.Select(x => $"0x{x:X4}"))}]");
+                    postOps = tcpFrames.Skip(baseline).Select(p => p.Header.Opcode)
+                        .Distinct().OrderBy(x => x).ToArray();
+                _out.WriteLine($"  post-mine opcodes: [{string.Join(",", postOps.Select(x => $"0x{x:X4}"))}]");
 
                 // Surface any 0x0022 PUSH_MESSAGE -- CheckMiningConditions rejections
                 // are delivered as a client-side message string (no server log), so
                 // this is the only window into WHY a mine was refused.
+                List<Packet> pushMsgs;
                 lock (tcpFrames)
-                    foreach (var pm in tcpFrames.Where(p => p.Header.Opcode == 0x0022))
-                    {
-                        var txt = new string(System.Text.Encoding.Latin1.GetString(pm.Payload.ToArray())
-                            .Where(c => c >= ' ' && c < 127).ToArray());
-                        _out.WriteLine($"  PUSH_MESSAGE(0x0022) {pm.Payload.Length}B: \"{txt}\"");
-                    }
+                    pushMsgs = tcpFrames.Skip(baseline).Where(p => p.Header.Opcode == 0x0022).ToList();
+                foreach (var pm in pushMsgs)
+                {
+                    var txt = new string(System.Text.Encoding.Latin1.GetString(pm.Payload.ToArray())
+                        .Where(c => c >= ' ' && c < 127).ToArray());
+                    _out.WriteLine($"  PUSH_MESSAGE(0x0022) {pm.Payload.Length}B: \"{txt}\"");
+                }
 
-                prospect = udpProspect ?? tcpProspect;
-                if (prospect is not null || tcpBeam is not null) break; // mined OK -> pin it
+                if (tcpBeam is not null) break; // mined OK -> pin it
             }
 
-            Assert.True(prospect is not null || tcpBeam is not null,
-                "no candidate roid in range yielded a 0x2012 START_PROSPECT (udp/tcp) or a " +
-                "proxy-fabricated 0x000B (tcp) -- every CheckMiningConditions attempt was " +
-                "rejected (skill/energy/range/inventory/moving) or no target was an OT_RESOURCE.");
+            Assert.True(tcpBeam is not null,
+                "no candidate roid in range yielded a proxy-fabricated 0x000B prospect beam -- " +
+                "every CheckMiningConditions attempt was rejected (skill/energy/range/inventory/" +
+                "moving) or no target was an OT_RESOURCE.");
 
-            roid = minedRoid; // the roid that actually mined, for the byte-pins below
-            _out.WriteLine($"mined roid 0x{roid.GameId:X8} '{roid.Name}'");
+            var roidMined = minedRoid; // the roid that actually mined, for the byte-pins below
+            _out.WriteLine($"mined roid 0x{roidMined.GameId:X8} '{roidMined.Name}'");
 
-            if (prospect is not null)
-            {
-                // --- Byte-pin the server's 0x2012 (20B): PlayerGID@0, AsteroidGID@4. ---
-                var body = prospect.Payload.Span;
-                Assert.True(body.Length >= 20, $"START_PROSPECT is {body.Length} bytes, expected 20");
-                int beamSource = BinaryPrimitives.ReadInt32LittleEndian(body.Slice(0, 4));
-                int beamTarget = BinaryPrimitives.ReadInt32LittleEndian(body.Slice(4, 4));
-                Assert.Equal(rejoin.GameId, beamSource);  // beam emanates from the mining player
-                Assert.Equal(roid.GameId, beamTarget);    // onto the locked roid
-                _out.WriteLine($"START_PROSPECT(0x2012): source=0x{beamSource:X8} target=0x{beamTarget:X8} " +
-                    $"effectUID=0x{BinaryPrimitives.ReadInt32LittleEndian(body.Slice(8, 4)):X8} " +
-                    $"drainMs={BinaryPrimitives.ReadUInt32LittleEndian(body.Slice(16, 4))}");
-            }
-            if (tcpBeam is not null)
-            {
-                // --- Byte-pin the proxy-fabricated 0x000B OBJECT_TO_OBJECT_EFFECT.
-                //     The sector server never sends the client-facing beam; it
-                //     sends compact 0x2012 to the range list and each member's
-                //     proxy expands it (UDPClient::StartProspecting,
-                //     proxy/UDPProxyToClient_linux.cpp). Layout mirrors the
-                //     authoritative range-list emitter
-                //     Object::SendObjectToObjectEffectRL with Bitmask 0x0007
-                //     (EffectID|TimeStamp|Duration), EffectDescID 0x00BF:
-                //       u16 Bitmask=0x0007 @0
-                //       i32 GameID  (prospector)@2
-                //       i32 TargetID(roid)     @6
-                //       u16 EffectDescID=0x00BF@10
-                //       u8  Message NUL        @12
-                //       i32 EffectID           @13
-                //       u32 TimeStamp          @17
-                //       i16 Duration           @21  -> 23 bytes total. ---
-                var beam = tcpBeam.Payload.Span;
-                Assert.Equal(23, beam.Length);
-                Assert.Equal(0x0007, BinaryPrimitives.ReadUInt16LittleEndian(beam.Slice(0, 2)));
-                int beamSrc = BinaryPrimitives.ReadInt32LittleEndian(beam.Slice(2, 4));
-                int beamTgt = BinaryPrimitives.ReadInt32LittleEndian(beam.Slice(6, 4));
-                Assert.Equal(rejoin.GameId, beamSrc); // beam emanates from the mining ship
-                Assert.Equal(roid.GameId, beamTgt);   // onto the locked roid
-                Assert.Equal(0x00BF, BinaryPrimitives.ReadUInt16LittleEndian(beam.Slice(10, 2)));
-                Assert.Equal(0, beam[12]);            // empty Message
-                short beamDur = BinaryPrimitives.ReadInt16LittleEndian(beam.Slice(21, 2));
-                Assert.True(beamDur > 0 && beamDur <= 32000,
-                    $"beam Duration {beamDur} must be a positive ms value capped at 32000 " +
-                    "(client reads it signed; the server emitter caps at 32000 so a long " +
-                    "mine still renders -- ObjectClass.cpp:884).");
-                _out.WriteLine($"proxy-fabricated 0x000B beam ({beam.Length}B): " +
-                    $"src=0x{beamSrc:X8} tgt=0x{beamTgt:X8} " +
-                    $"fxDesc=0x{BinaryPrimitives.ReadUInt16LittleEndian(beam.Slice(10, 2)):X4} " +
-                    $"effectUID=0x{BinaryPrimitives.ReadInt32LittleEndian(beam.Slice(13, 4)):X8} " +
-                    $"dur={beamDur}ms");
+            // --- Byte-pin the proxy-fabricated 0x000B OBJECT_TO_OBJECT_EFFECT.
+            //     The sector server never sends the client-facing beam; it
+            //     sends compact 0x2012 to the range list and each member's
+            //     proxy expands it (UDPClient::StartProspecting,
+            //     proxy/UDPProxyToClient_linux.cpp). Layout mirrors the
+            //     authoritative range-list emitter
+            //     Object::SendObjectToObjectEffectRL with Bitmask 0x0007
+            //     (EffectID|TimeStamp|Duration), EffectDescID 0x00BF:
+            //       u16 Bitmask=0x0007 @0
+            //       i32 GameID  (prospector)@2
+            //       i32 TargetID(roid)     @6
+            //       u16 EffectDescID=0x00BF@10
+            //       u8  Message NUL        @12
+            //       i32 EffectID           @13
+            //       u32 TimeStamp          @17
+            //       i16 Duration           @21  -> 23 bytes total. ---
+            var beam = tcpBeam!.Payload.Span;
+            Assert.Equal(23, beam.Length);
+            Assert.Equal(0x0007, BinaryPrimitives.ReadUInt16LittleEndian(beam.Slice(0, 2)));
+            int beamSrc = BinaryPrimitives.ReadInt32LittleEndian(beam.Slice(2, 4));
+            int beamTgt = BinaryPrimitives.ReadInt32LittleEndian(beam.Slice(6, 4));
+            Assert.Equal(rejoin.GameId, beamSrc);   // beam emanates from the mining ship
+            Assert.Equal(roidMined.GameId, beamTgt); // onto the locked roid
+            Assert.Equal(0x00BF, BinaryPrimitives.ReadUInt16LittleEndian(beam.Slice(10, 2)));
+            Assert.Equal(0, beam[12]);               // empty Message
+            short beamDur = BinaryPrimitives.ReadInt16LittleEndian(beam.Slice(21, 2));
+            Assert.True(beamDur > 0 && beamDur <= 32000,
+                $"beam Duration {beamDur} must be a positive ms value capped at 32000 " +
+                "(client reads it signed; the server emitter caps at 32000 so a long " +
+                "mine still renders -- ObjectClass.cpp:884).");
+            _out.WriteLine($"proxy-fabricated 0x000B beam ({beam.Length}B): " +
+                $"src=0x{beamSrc:X8} tgt=0x{beamTgt:X8} " +
+                $"fxDesc=0x{BinaryPrimitives.ReadUInt16LittleEndian(beam.Slice(10, 2)):X4} " +
+                $"effectUID=0x{BinaryPrimitives.ReadInt32LittleEndian(beam.Slice(13, 4)):X8} " +
+                $"dur={beamDur}ms");
 
-                // The CLI's own decoder must consume the fabricated bytes to the
-                // last byte (no over/under-read) -- proves CLI <-> proxy parity.
-                var decoded = new N7.CliClient.Opcodes.Records.ObjectToObjectEffectRecord(
-                    tcpBeam.Payload.ToArray()).DumpToString();
-                Assert.DoesNotContain("truncated", decoded);
-                Assert.DoesNotContain("runs past payload", decoded);
-            }
+            // The CLI's own decoder must consume the fabricated bytes to the
+            // last byte (no over/under-read) -- proves CLI <-> proxy parity.
+            var decoded = new N7.CliClient.Opcodes.Records.ObjectToObjectEffectRecord(
+                tcpBeam.Payload.ToArray()).DumpToString();
+            Assert.DoesNotContain("truncated", decoded);
+            Assert.DoesNotContain("runs past payload", decoded);
         }
         finally
         {
-            if (udp is not null) { try { await udp.StopAsync(); } catch { } udp.Dispose(); }
+            if (drainCts is not null) { try { drainCts.Cancel(); } catch { } }
+            if (drain is not null) { try { await drain; } catch { } }
+            feed?.Dispose();
+            if (drainCts is not null) drainCts.Dispose();
             if (spaceConn is not null) { try { await spaceConn.DisposeAsync(); } catch { } }
         }
     }
@@ -417,23 +417,6 @@ public sealed class SectorMiningTests : SectorIntegrationTest
         }
         list.Sort((a, b) => a.Item2.CompareTo(b.Item2));
         return list;
-    }
-
-    private static async Task DrainInto(
-        EncryptedTcpConnection conn, SectorWorld world, TimeSpan window, CancellationToken ct)
-    {
-        using var w = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        w.CancelAfter(window);
-        try
-        {
-            while (!w.IsCancellationRequested)
-            {
-                var p = await conn.ReceiveAsync(w.Token);
-                if (p is null) break;
-                world.Ingest(p);
-            }
-        }
-        catch (OperationCanceledException) { }
     }
 
     /// <summary>

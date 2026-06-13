@@ -86,6 +86,7 @@ public sealed class SectorMvasMoveTests : SectorIntegrationTest
                 Packet.ForOpcode(OpcodeId.Known.StarbaseRequest.Value, launch), cts.Token);
 
             int toSectorId = -1;
+            int fromSectorId = -1;
             for (int seen = 0; seen < 400; seen++)
             {
                 var reply = await session.Sector.ReceiveAsync(cts.Token);
@@ -93,6 +94,8 @@ public sealed class SectorMvasMoveTests : SectorIntegrationTest
                 {
                     toSectorId = System.Buffers.Binary.BinaryPrimitives
                         .ReadInt32BigEndian(reply.Payload.Span.Slice(20, 4));
+                    fromSectorId = System.Buffers.Binary.BinaryPrimitives
+                        .ReadInt32BigEndian(reply.Payload.Span.Slice(24, 4));
                     break;
                 }
             }
@@ -107,7 +110,7 @@ public sealed class SectorMvasMoveTests : SectorIntegrationTest
                 Username = account.Username,
             };
             var rejoin = await SectorEnterDriver.FollowHandoffAsync(
-                ctx, session.GameId, slot, toSectorId, cts.Token);
+                ctx, session.GameId, slot, toSectorId, fromSectorId, cts.Token);
             spaceConn = rejoin.Sector;
             await session.Sector.DisposeAsync(); // station conn finished
             Assert.Equal(expectedSpaceSectorId, rejoin.SectorId);
