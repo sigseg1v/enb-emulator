@@ -607,23 +607,25 @@ play-local CLIENT_PATH='':
     echo ">>> building enbmod Lua runtime (optional; for the Lua-mods toggle)"
     just build-enbmod
 
+    # MERGE the recipe-owned keys into the settings file; never regenerate it
+    # wholesale. The launcher persists user-owned toggles in the same file
+    # (UseClientMods i.e. "Enable Lua Mods", window position, SettingsVersion)
+    # and a full rewrite wiped them on every launch -- enabling Lua mods
+    # survived exactly one session. merge-settings.py preserves every key not
+    # listed below.
     SETTINGS_DIR=tools/LaunchFreya/bin/Debug/net10.0
     mkdir -p "$SETTINGS_DIR"
     cp_json=$(printf '%s' "$cp" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
-    cat > "$SETTINGS_DIR/FreyaLauncher.settings.json" <<JSON
-    {
-      "ClientPath": $cp_json,
-      "LastEmulatorName": "Net7Local",
-      "LastServerName": "localhost",
-      "UsePositionFeed": true,
-      "UseLocalCert": false,
-      "UseSecureAuthentication": true,
-      "AuthenticationPort": "4443",
-      "FormMainPositionX": -1,
-      "FormMainPositionY": -1
-    }
-    JSON
-    echo ">>> wrote $SETTINGS_DIR/FreyaLauncher.settings.json"
+    python3 tools/LaunchFreya/merge-settings.py "$SETTINGS_DIR/FreyaLauncher.settings.json" "{
+      \"ClientPath\": $cp_json,
+      \"LastEmulatorName\": \"Net7Local\",
+      \"LastServerName\": \"localhost\",
+      \"UsePositionFeed\": true,
+      \"UseLocalCert\": false,
+      \"UseSecureAuthentication\": true,
+      \"AuthenticationPort\": \"4443\"
+    }"
+    echo ">>> merged launch settings into $SETTINGS_DIR/FreyaLauncher.settings.json"
 
     : "${WINEPREFIX:=$HOME/.wine-enb}"
     export WINEPREFIX
@@ -714,22 +716,20 @@ play-online CLIENT_PATH='' HOST='':
     cp bin/FreyaProxy.exe "$SETTINGS_DIR/bin/FreyaProxy.exe"
     echo ">>> staged $SETTINGS_DIR/bin/FreyaProxy.exe"
 
+    # MERGE the recipe-owned keys; preserve user-owned toggles (UseClientMods,
+    # window position, SettingsVersion) -- see the play-local comment.
     cp_json=$(printf '%s' "$cp"   | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
     host_json=$(printf '%s' "$host" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
-    cat > "$SETTINGS_DIR/FreyaLauncher.settings.json" <<JSON
-    {
-      "ClientPath": $cp_json,
-      "LastEmulatorName": "Net7MP",
-      "LastServerName": $host_json,
-      "UsePositionFeed": true,
-      "UseLocalCert": false,
-      "UseSecureAuthentication": true,
-      "AuthenticationPort": "443",
-      "FormMainPositionX": -1,
-      "FormMainPositionY": -1
-    }
-    JSON
-    echo ">>> wrote $SETTINGS_DIR/FreyaLauncher.settings.json (Net7MP -> $host:443)"
+    python3 tools/LaunchFreya/merge-settings.py "$SETTINGS_DIR/FreyaLauncher.settings.json" "{
+      \"ClientPath\": $cp_json,
+      \"LastEmulatorName\": \"Net7MP\",
+      \"LastServerName\": $host_json,
+      \"UsePositionFeed\": true,
+      \"UseLocalCert\": false,
+      \"UseSecureAuthentication\": true,
+      \"AuthenticationPort\": \"443\"
+    }"
+    echo ">>> merged launch settings into $SETTINGS_DIR/FreyaLauncher.settings.json (Net7MP -> $host:443)"
 
     : "${WINEPREFIX:=$HOME/.wine-enb}"
     export WINEPREFIX

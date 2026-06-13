@@ -24,8 +24,8 @@ namespace LaunchFreya.Config
         // Inject the enbmod Lua mod runtime (enbmod.dll) into client.exe, enabling
         // client-side UI mods written in Lua without patching the game. OFF by
         // default: experimental and unverified against the live client, so it ships
-        // dark and is opt-in via this key in FreyaLauncher.settings.json (there is no
-        // UI toggle yet). When off, enbmod.dll is neither staged nor injected. A new
+        // dark and is opt-in via the "Enable Lua Mods" checkbox (or this key in
+        // FreyaLauncher.settings.json). When off, enbmod.dll is neither staged nor injected. A new
         // field absent from an older settings file reads as false, which is the
         // intended default, so no migration is needed.
         public bool UseClientMods { get; set; } = false;
