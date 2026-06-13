@@ -167,6 +167,26 @@ returns to the original caller. We observe `this` and the first argument; we nev
 (An earlier `__fastcall(ecx,edx)` re-call dropped the stack args and fed the game garbage -- that was
 verified broken and replaced.)
 
+## Testing the mods headless -- `make test`
+
+`tests/` is a headless test suite for the Lua mods: the scripts under `scripts/` run unmodified
+against **`tests/mock_enb.lua`**, a pure-Lua mock of the C++ `enb` host API, on a *native* Linux
+build of the vendored Lua (built automatically into `build/tests/`). No client, no WINE, no D3D8.
+This is how mods get debugged and verified programmatically -- including visually:
+
+- **Specs** (`tests/spec/*_spec.lua`) assert layout geometry, calibrated/uncalibrated rendering,
+  click->tap->flash, key lighting, and the swallow contract. `tests/spec/mock_contract_spec.lua`
+  pins the mock's mirror of the C++ semantics (msg_class/mask filtering from `hooks.cpp`,
+  run_input fail-open from `lua_api.cpp`) so mock/DLL drift breaks the suite loudly.
+- **Screenshots**: `tests/spec/screenshots_spec.lua` dumps representative full-HUD frames, and
+  `tests/render_frame.py` (Pillow) rasterizes them to `build/tests/shots/*.png` approximating
+  `overlay.cpp`'s draw semantics (vertical gradients, rounded corners, alpha over a dark
+  backdrop) -- so the UI can be *looked at* without launching the game.
+
+Caveats, honestly: the mock's text metric is the scripts' own 7px/char fallback (the real Tahoma
+atlas is variable-width), and the Python rasterizer is an approximation of the D3D8 path, not the
+D3D8 path. The suite verifies *logic and layout*; the in-game CV pass still owns final pixel truth.
+
 ## Calibration -- the part you finish at runtime
 
 `enb.self()`/`enb.target()` read from the **`Offsets`** table in `game.h`. Every field defaults to

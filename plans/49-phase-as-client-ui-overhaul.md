@@ -113,6 +113,30 @@ per-vertex gradient quads + rounded corners from triangle fans, not PNGs.
 - `[x]` `make` (i686-w64-mingw32) clean; README API table updated; note the
   fail-open swallow rule and the no-binary-assets decision.
 
+### AS-8 Headless Lua mod test suite  `[x]`  (added 2026-06-12, owner ask)
+
+Purpose: debug + test mods programmatically (Claude included) WITHOUT
+launching the EnB client -- including visual verification via rendered
+screenshots.
+
+- `[x]` `tests/mock_enb.lua` -- pure-Lua mock of the C++ `enb` host API;
+  scripts under `scripts/` run unmodified against it on a NATIVE Linux
+  build of the vendored Lua. Mirrors the C++ contracts (hooks.cpp
+  msg_class/mask, lua_api.cpp run_input fail-open) with the mirrors
+  pinned by `tests/spec/mock_contract_spec.lua`.
+- `[x]` Specs: freya_ui (layout/buttons/swallow/flash/key-lighting, 17
+  tests), xp_overlay (5), autocalib (4), init startup path (4),
+  mock contract (7), screenshot scenarios (4) -- 41 tests, all green.
+- `[x]` Screenshot pipeline: `screenshots_spec.lua` dumps full-HUD frames
+  to JSON; `tests/render_frame.py` (Pillow) rasterizes them to
+  `build/tests/shots/*.png` approximating overlay.cpp draw semantics.
+  Verified visually: 4 scenarios (uncal/cal/interaction/1024x768).
+- `[x]` `make test` target + README "Testing the mods headless" section.
+- First real catch: xp_overlay labels at x=-16 (off-screen left -- a
+  label cannot physically fit LEFT of a bar that starts at x=27).
+  Fixed: clamp to x=2, label overlaps the bar's left edge
+  (value-on-the-bar style). Owner may veto placement at the CV pass.
+
 ## Status
 
 | Item | State |
@@ -124,3 +148,4 @@ per-vertex gradient quads + rounded corners from triangle fans, not PNGs.
 | AS-5 xp_overlay fix | done -- `scripts/xp_overlay.lua` rewritten: labels right-aligned LEFT of each bar, screen-bottom-anchored via `enb.screen()` |
 | AS-6 Tier B hide | research, later |
 | AS-7 build+docs | done -- `make clean && make` clean (zero -Wall -Wextra warnings); README API table + AS section updated |
+| AS-8 headless test suite | done -- 41 tests green + 4 rendered screenshot scenarios; caught + fixed the xp_overlay off-screen label bug. `make test` |

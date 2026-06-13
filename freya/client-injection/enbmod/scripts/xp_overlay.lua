@@ -53,7 +53,11 @@ enb.on_tick(function()
         local s   = fmt(lvl, pct)
         local lw, lh = enb.measure(s)
         if lw == 0 then lw = #s * 7; lh = 14 end
-        local x   = CFG.BAR_X - CFG.LABEL_PAD - lw   -- right-aligned to bar start
+        -- right-aligned to the bar start; the screen edge is only ~19px away,
+        -- so a real label cannot fully fit LEFT of the bar -- clamp to x=2 and
+        -- let it overlap the bar's left portion (value-on-the-bar style)
+        -- rather than clip off-screen.
+        local x   = math.max(2, CFG.BAR_X - CFG.LABEL_PAD - lw)
         local ty  = y + math.floor((CFG.BAR_H - lh) / 2)
         enb.draw.text(x, ty, s, calibrated and row.rgb or 0x888888)
     end

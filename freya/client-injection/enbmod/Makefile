@@ -57,7 +57,7 @@ INJ_SRC := inject/inject.cpp
 INJ_CXXFLAGS := -O2 -std=c++17 -Wall
 INJ_LDFLAGS  := -static -static-libgcc -static-libstdc++ -lkernel32 -lpsapi
 
-.PHONY: all clean dirs
+.PHONY: all clean dirs test
 all: dirs $(DLL) $(INJ)
 	@echo "==> built $(DLL) and $(INJ)"
 
@@ -86,3 +86,9 @@ $(INJ): $(INJ_SRC)
 
 clean:
 	rm -rf $(BUILD)
+
+# Headless Lua mod tests: scripts run against tests/mock_enb.lua on a NATIVE
+# Lua build (no client, no WINE); screenshot scenarios render to
+# build/tests/shots/*.png for visual verification.
+test:
+	tests/run_tests.sh
