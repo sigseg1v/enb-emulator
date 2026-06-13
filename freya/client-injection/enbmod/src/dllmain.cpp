@@ -107,6 +107,12 @@ DWORD WINAPI worker(LPVOID) {
         if (luaL_dostring(g_L, lp.c_str()) != LUA_OK) lua_pop(g_L,1);
     }
 
+    // Initialize MinHook BEFORE running init.lua: a script may install a game
+    // hook at load time (enb.enable_inspace / enb.enable_event_hooks), and
+    // MH_CreateHook fails with NOT_INITIALIZED until this runs. hooks::init()
+    // below re-calls it idempotently.
+    if (!enb::hooks::mh_init()) enb::logf("hooks::mh_init failed -- game hooks unavailable");
+
     run_init_script();
 
     // wire the tick BEFORE installing hooks, then install. g_ready gates execution.

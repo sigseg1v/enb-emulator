@@ -136,8 +136,21 @@ extern "C" __attribute__((naked)) void hk_Chat() {
     );
 }
 
+bool mh_init() {
+    MH_STATUS s = MH_Initialize();
+    // Idempotent: dllmain calls this BEFORE running init.lua so a script that
+    // enables a game hook at load time (enable_event_hooks / enable_inspace_hook)
+    // finds MinHook ready. init() below may call it again -- ALREADY_INITIALIZED
+    // is success, not an error.
+    if (s != MH_OK && s != MH_ERROR_ALREADY_INITIALIZED) {
+        logf("MH_Initialize failed: %s", MH_StatusToString(s));
+        return false;
+    }
+    return true;
+}
+
 bool init() {
-    if (MH_Initialize() != MH_OK) { logf("MH_Initialize failed"); return false; }
+    if (!mh_init()) return false;
 
     HMODULE u32 = GetModuleHandleA("user32.dll");
     void* target = (void*)GetProcAddress(u32, "PeekMessageA");
@@ -184,12 +197,18 @@ void disable_event_hooks() {
 static bool g_inspace_hook_on = false;
 bool enable_inspace_hook() {
     if (g_inspace_hook_on) return true;
-    if (MH_CreateHook((void*)game::addr::EnergyBar, (void*)&hk_InSpace,
-                      &real_InSpace_tramp) != MH_OK) {
-        logf("hook EnergyBar (inspace heartbeat) failed"); return false;
+    MH_STATUS s = MH_CreateHook((void*)game::addr::EnergyBar, (void*)&hk_InSpace,
+                                &real_InSpace_tramp);
+    if (s != MH_OK) {
+        logf("hook EnergyBar (inspace heartbeat) MH_CreateHook failed: %s",
+             MH_StatusToString(s));
+        return false;
     }
-    if (MH_EnableHook((void*)game::addr::EnergyBar) != MH_OK) {
-        logf("enable EnergyBar (inspace heartbeat) failed"); return false;
+    s = MH_EnableHook((void*)game::addr::EnergyBar);
+    if (s != MH_OK) {
+        logf("enable EnergyBar (inspace heartbeat) MH_EnableHook failed: %s",
+             MH_StatusToString(s));
+        return false;
     }
     g_inspace_hook_on = true;
     logf("inspace heartbeat hook installed on EnergyBar @ %p", (void*)game::addr::EnergyBar);

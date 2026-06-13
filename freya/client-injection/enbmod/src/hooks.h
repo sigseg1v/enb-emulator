@@ -11,6 +11,11 @@
 
 namespace enb { namespace hooks {
 
+// Initialize the MinHook library only (idempotent). Call this BEFORE running any
+// Lua that may install a game hook at load time, so MH_CreateHook does not fail
+// with MH_ERROR_NOT_INITIALIZED. init() calls it too.
+bool mh_init();
+
 // Install MinHook + the PeekMessageA tick hook. Returns false on failure (logged).
 bool init();
 void shutdown();
