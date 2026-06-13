@@ -194,9 +194,9 @@ state, and the live tap count. Toggle calibrated stats, the background, and the 
 top-right controls. `PORT=N` changes the port; `NO_OPEN=1` skips auto-opening the browser; Ctrl-C
 stops the server.
 
-The background (`tests/enb-mod-bg.png`, a 1280x960 game-client screenshot) is a **local drop-in**,
-not committed -- it's a binary, copyrighted game image. Put your own screenshot there to position
-the HUD against the real view; without it the previewer just uses a dark backdrop.
+The background is `tests/enb-mod-bg.png`, a 1280x960 game-client screenshot, so the HUD is
+positioned against the real view. Swap in your own screenshot at that path to check a different
+scene; without any file there the previewer falls back to a dark backdrop.
 
 **Just want a quick snapshot?** **`just mock-ui-shots`** runs the suite and stitches the four
 scenarios into a labeled 2x2 contact sheet (`build/tests/shots/_contact.png`), opened in your image
