@@ -187,5 +187,46 @@ namespace LaunchFreya.Tests
         [InlineData("   ")]
         public void ParseResponse_ReturnsNullOnUnparseable(string json)
             => Assert.Null(UpdateLogic.ParseResponse(json));
+
+        // ---- IsSafeModId (mod-store path/url segment guard) ----
+
+        [Theory]
+        [InlineData("player-hud")]
+        [InlineData("discipline-card")]
+        [InlineData("autocalibrate")]
+        [InlineData("a")]
+        [InlineData("A.B_c-1")]
+        public void IsSafeModId_AcceptsSimpleSegments(string id)
+            => Assert.True(UpdateLogic.IsSafeModId(id));
+
+        [Theory]
+        [InlineData("")]
+        [InlineData(null)]
+        [InlineData(".")]
+        [InlineData("..")]
+        [InlineData("a/b")]            // path separator
+        [InlineData("a\\b")]           // windows separator
+        [InlineData("../evil")]        // traversal
+        [InlineData("C:foo")]          // drive-relative
+        [InlineData("a b")]            // space
+        [InlineData("name!")]          // punctuation outside [._-]
+        public void IsSafeModId_RejectsUnsafe(string id)
+            => Assert.False(UpdateLogic.IsSafeModId(id));
+
+        // ---- ParseResponse reads the mods array ----
+
+        [Fact]
+        public void ParseResponse_ReadsModsArray()
+        {
+            string json = "{\"status\":\"UP_TO_DATE\",\"mods\":[" +
+                "{\"id\":\"player-hud\",\"hash\":\"abc1234567\",\"url\":\"https://dl/mods/player-hud-abc1234567.zip\"}," +
+                "{\"id\":\"native-hud-hide\",\"hash\":\"def8901234\",\"url\":\"https://dl/mods/native-hud-hide-def8901234.zip\"}]}";
+            var resp = UpdateLogic.ParseResponse(json);
+            Assert.NotNull(resp);
+            Assert.Equal(2, resp.Mods.Count);
+            Assert.Equal("player-hud", resp.Mods[0].Id);
+            Assert.Equal("abc1234567", resp.Mods[0].Hash);
+            Assert.Equal("https://dl/mods/player-hud-abc1234567.zip", resp.Mods[0].Url);
+        }
     }
 }

@@ -40,11 +40,25 @@ namespace LaunchFreya.Update
         [JsonPropertyName("hash")]         public string Hash         { get; set; }
     }
 
+    // One published enbmod Lua mod the server vouches for. The launcher compares
+    // Hash to the local ./mods/<Id>/modhash and downloads Url (a <id>-<hash>.zip)
+    // only on a mismatch. An Id never in this list is a user's own mod and is
+    // never touched. See freya/client-injection/enbmod/MOD-STRUCTURE.md.
+    public sealed class ModUpdate
+    {
+        [JsonPropertyName("id")]   public string Id   { get; set; }
+        [JsonPropertyName("hash")] public string Hash { get; set; }
+        [JsonPropertyName("url")]  public string Url  { get; set; }
+    }
+
     public sealed class UpdateCheckResponse
     {
         // "UP_TO_DATE" or "UPDATE_NEEDED".
         [JsonPropertyName("status")] public string Status { get; set; }
         [JsonPropertyName("files")]  public List<UpdateFile> Files { get; set; }
+        // The authoritative set of OUR Lua mods (id + hash + zip url). Orthogonal
+        // to Status: present in both replies, since mod updates do not gate Play.
+        [JsonPropertyName("mods")]   public List<ModUpdate> Mods { get; set; }
     }
 
     public static class UpdateStatus

@@ -19,18 +19,19 @@ namespace LaunchFreya
     }
 
     // Discovers the available enbmod mods by reading the mod.json manifests under
-    // the source scripts/mods/ tree (the same tree StageClientMods copies from).
-    // Both the launcher's staging step and the "Configure Mods" window use this so
-    // the catalog and what gets staged can never drift.
+    // the persistent mod store (<launcher-dir>/mods/, the same tree
+    // StageClientMods stages from and the self-updater refreshes). Both the
+    // launcher's staging step and the "Configure Mods" window use this so the
+    // catalog and what gets staged can never drift. Lists OUR mods and the user's
+    // own mods alike -- they coexist in the store.
     public static class ModCatalog
     {
-        // The mods/ subfolder of the located source scripts dir, or null if the
-        // scripts tree isn't present (unbuilt checkout).
+        // The persistent mod store dir, or null if it doesn't exist yet. Callers
+        // that want the bundled mods seeded first should call
+        // ModStore.SeedFromBundle() before scanning.
         public static string ModsDir()
         {
-            var scripts = Launcher.LocateScriptsDir();
-            if (string.IsNullOrEmpty(scripts)) return null;
-            var mods = Path.Combine(scripts, "mods");
+            var mods = ModStore.Dir();
             return Directory.Exists(mods) ? mods : null;
         }
 

@@ -666,14 +666,39 @@ char *HandleUpdateCheck(size_t *out_len, char *recv_buffer)
     bool injectOk   = injectSrv.empty()  || HashEq(clientInject, injectSrv);
     bool enbmodOk   = enbmodSrv.empty()  || HashEq(clientEnbmod, enbmodSrv);
 
+    const std::string base = mf.DlBase();
+
+    // The published Lua mods (id, hash) ride in the response UNCONDITIONALLY,
+    // independent of the binary up-to-date decision: mod updates are orthogonal
+    // to launcher/proxy/enbmod version, and Play is never gated on them. The
+    // launcher compares each hash to its local ./mods/<id>/modhash and only
+    // re-downloads mods/<id>-<hash>.zip on a mismatch -- a user's own mod
+    // (unknown id, no modhash) is never named here, so it is never touched.
+    std::string modsJson;
+    {
+        auto mods = mf.Mods();
+        for (const auto &m : mods)
+        {
+            if (!modsJson.empty()) modsJson += ",";
+            const std::string &id = m.first, &hash = m.second;
+            modsJson += "{\"id\":\"";
+            modsJson += id;
+            modsJson += "\",\"hash\":\"";
+            modsJson += hash;
+            modsJson += "\",\"url\":\"";
+            modsJson += base + "/mods/" + id + "-" + hash + ".zip";
+            modsJson += "\"}";
+        }
+    }
+    const std::string modsField = ",\"mods\":[" + modsJson + "]";
+
     std::string json;
     if (launcherOk && proxyOk && posFeedOk && injectOk && enbmodOk)
     {
-        json = "{\"status\":\"UP_TO_DATE\"}";
+        json = "{\"status\":\"UP_TO_DATE\"" + modsField + "}";
     }
     else
     {
-        const std::string base = mf.DlBase();
         std::string files;
         auto add = [&](const char *rel, const std::string &url, const std::string &hash) {
             if (!files.empty()) files += ",";
@@ -707,7 +732,7 @@ char *HandleUpdateCheck(size_t *out_len, char *recv_buffer)
         {
             add("bin/enbmod.dll", base + "/enbmod.dll", enbmodSrv);
         }
-        json = "{\"status\":\"UPDATE_NEEDED\",\"files\":[" + files + "]}";
+        json = "{\"status\":\"UPDATE_NEEDED\",\"files\":[" + files + "]" + modsField + "}";
     }
 
     return HttpResult(out_len, json.c_str(), "application/json");

@@ -438,6 +438,21 @@ The same migration path applies if the upstream protocol catalog adds an opcode 
 | A new third-party C++ dep | `server/third_party/<name>/` |
 | A precompiled binary we can't rebuild | `vendor/<name>/` with `THIRD_PARTY_BINARIES.md` |
 | A new plan/sub-plan | `plans/<NN-phase>.md`, update `plans/00-master.md` |
+| A new enbmod Lua mod | `freya/client-injection/enbmod/scripts/mods/<id>/` (with `mod.json`) |
+
+## Client mod structure (READ before touching mods, the launcher mod store, or the mod deploy step)
+
+enbmod Lua mods follow a fixed storage + packaging + update contract documented
+in **`freya/client-injection/enbmod/MOD-STRUCTURE.md`**. It is the source of
+truth for: the per-mod `mod.json`, the client `./mods/<id>/` store at the
+launcher location (ours carry a `modhash` marker; a user's own mods -- unknown
+id, no marker -- are NEVER touched), the deterministic 10-char content hash, the
+`mods/<id>-<hash>.zip` deploy packaging + manifest `mods` array + CloudFront
+invalidation, and the launcher's modhash-vs-manifest update check. Three
+codebases implement parts of it and MUST stay in sync -- the deploy publisher
+(`deploy/do/scripts/Push-ClientPatch.ps1`), the login server patcher manifest
+(`login-server/Net7SSL/PatcherManifest.*` + `LinuxAuth.cpp`), and the launcher
+(`tools/LaunchFreya`). Adhere to MOD-STRUCTURE.md when changing any of them.
 
 ## Build & dev
 

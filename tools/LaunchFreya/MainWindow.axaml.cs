@@ -149,6 +149,11 @@ namespace LaunchFreya
             catch (Exception ex) { AppendLog($"update: cleanup skipped: {ex.Message}"); }
 #endif
 
+            // Populate the mod store (<launcher-dir>/mods) from the bundled mods on
+            // a fresh/offline install so the Configure Mods UI and staging both see
+            // them. The self-updater refreshes our mods there when online.
+            ModStore.SeedFromBundle(AppendLog);
+
             // Locate FreyaLauncher.cfg: prefer next to the .dll (deployed
             // alongside) and fall back to the legacy LaunchNet7 source
             // tree so a dev `dotnet run` works.
@@ -496,6 +501,24 @@ namespace LaunchFreya
                 SetPlay(false);
                 return;
             }
+
+            // Reconcile OUR Lua mods against the server's published set whenever
+            // the user has client mods enabled. This is orthogonal to the binary
+            // version gate below (mods never gate Play) and best-effort: a mod
+            // download/extract failure is logged, never fatal. Skipped on the
+            // background auto-refresh so a timer tick never downloads.
+            if (!auto && _user.UseClientMods)
+            {
+                try
+                {
+                    int n = await updater.ReconcileModsAsync(resp,
+                        msg => Dispatcher.UIThread.Post(() => { if (gen == _statusProbeGen) c_Status.Text = msg; }));
+                    if (gen != _statusProbeGen) return;   // selection changed mid-reconcile
+                    if (n > 0) AppendLog($"mods: {n} mod(s) updated from the server.");
+                }
+                catch (Exception ex) { AppendLog($"mods: reconcile error: {ex.Message}"); }
+            }
+
             if (string.Equals(resp.Status, UpdateStatus.UpToDate, StringComparison.OrdinalIgnoreCase))
             {
                 WriteStatus("ONLINE");

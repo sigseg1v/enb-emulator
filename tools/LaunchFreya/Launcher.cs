@@ -737,6 +737,12 @@ namespace LaunchFreya
             var dos = StageDllNextToClient(dllSrc, "enbmod.dll", "Client mods");
             if (dos == null) return null;
 
+            // Make sure the persistent mod store (<launcher-dir>/mods) is populated
+            // with our bundled mods on a fresh/offline install before we stage from
+            // it. The self-updater refreshes our mods there when online; the store
+            // is the single source of truth for both ours and the user's mods.
+            ModStore.SeedFromBundle(_warn);
+
             // Copy the scripts/ tree beside the staged DLL, but stage only the
             // ENABLED mods: disabled mod folders are skipped on copy AND pruned from
             // a previous launch's staging, so a disabled mod is never present for
@@ -759,10 +765,13 @@ namespace LaunchFreya
         }
 
         // Stage scripts/ next to the client, honouring the per-mod enable state in
-        // _setting.ModStates. Everything outside mods/ (init.lua, lib/, and the
-        // runtime-generated calib_data.lua) is copied as-is; under mods/, only
-        // enabled mod folders are copied and any disabled folder lingering from a
-        // previous launch is deleted at the destination.
+        // _setting.ModStates. The shared bootstrap (init.lua, lib/, and the
+        // runtime-generated calib_data.lua) is copied from the bundled scripts
+        // tree as-is. The MODS, however, come from the persistent mod store
+        // (<launcher-dir>/mods, ours + the user's), NOT the bundle: only enabled
+        // mod folders are copied (minus the 'modhash' bookkeeping file), and any
+        // disabled or removed folder lingering from a previous launch is deleted
+        // at the destination.
         void StageScriptsWithEnabledMods(string scriptsSrc, string scriptsDst)
         {
             Directory.CreateDirectory(scriptsDst);
@@ -780,9 +789,14 @@ namespace LaunchFreya
                 CopyDirectory(sub, Path.Combine(scriptsDst, name));
             }
 
-            var modsSrc = Path.Combine(scriptsSrc, "mods");
-            if (!Directory.Exists(modsSrc)) return;
+            var modsSrc = ModStore.Dir();
             var modsDst = Path.Combine(scriptsDst, "mods");
+            if (!Directory.Exists(modsSrc))
+            {
+                // No store at all: nothing to stage, but still prune any leftovers.
+                if (Directory.Exists(modsDst)) Directory.Delete(modsDst, recursive: true);
+                return;
+            }
             Directory.CreateDirectory(modsDst);
 
             var states = _setting.ModStates;
@@ -794,6 +808,10 @@ namespace LaunchFreya
                 if (ModCatalog.IsEnabled(states, id))
                 {
                     CopyDirectory(modDir, destDir);
+                    // 'modhash' is launcher bookkeeping, not a mod file -- don't
+                    // ship it into the game's load location.
+                    var hashFile = Path.Combine(destDir, ModStore.ModHashFileName);
+                    if (File.Exists(hashFile)) File.Delete(hashFile);
                     staged++;
                 }
                 else

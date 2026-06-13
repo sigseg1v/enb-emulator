@@ -37,6 +37,8 @@
 #include <ctime>
 #include <string>
 #include <mutex>
+#include <utility>
+#include <vector>
 
 class PatcherManifest
 {
@@ -66,6 +68,14 @@ public:
     std::string InjectExeHash() const;    // "" when the manifest omits it
     std::string EnbmodDllHash() const;    // "" when the manifest omits it (Lua mod runtime)
 
+    // The published enbmod Lua mods as (id, hash) pairs, parsed from the
+    // manifest's optional "mods" array. Empty when the manifest omits it. Each
+    // mod is distributed as mods/<id>-<hash>.zip under the dl base; the launcher
+    // compares the hash to its local ./mods/<id>/modhash and only re-downloads on
+    // a mismatch, so a user's own mod (unknown id) is never touched. See
+    // freya/client-injection/enbmod/MOD-STRUCTURE.md.
+    std::vector<std::pair<std::string, std::string>> Mods() const;
+
     // CloudFront base URL for the published files (NET7_PATCHER_DL_BASE),
     // trailing slash trimmed. Files are flat in the bucket; the launcher maps
     // them to its own relative layout (bin/FreyaProxy.exe) on download.
@@ -86,5 +96,6 @@ private:
     std::string m_posFeedDll;   // optional; "" when absent from the manifest
     std::string m_injectExe;    // optional; "" when absent from the manifest
     std::string m_enbmodDll;    // optional; "" when absent from the manifest (Lua mod runtime)
+    std::vector<std::pair<std::string, std::string>> m_mods;   // optional (id, hash) pairs
     std::string m_dlBase;
 };
