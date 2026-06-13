@@ -183,6 +183,11 @@ This is how mods get debugged and verified programmatically -- including visuall
   `overlay.cpp`'s draw semantics (vertical gradients, rounded corners, alpha over a dark
   backdrop) -- so the UI can be *looked at* without launching the game.
 
+**Just want to LOOK at it?** From the repo root run **`just mock-ui`**: it runs the suite, stitches
+the four scenarios into a labeled 2x2 contact sheet (`build/tests/shots/_contact.png`), and opens it
+in your image viewer. Re-run after editing a script to see the change. `NO_OPEN=1 just mock-ui`
+writes the files without opening.
+
 Caveats, honestly: the mock's text metric is the scripts' own 7px/char fallback (the real Tahoma
 atlas is variable-width), and the Python rasterizer is an approximation of the D3D8 path, not the
 D3D8 path. The suite verifies *logic and layout*; the in-game CV pass still owns final pixel truth.

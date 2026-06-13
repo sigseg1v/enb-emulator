@@ -162,6 +162,31 @@ build-enbmod:
     rm -rf bin/scripts; cp -r freya/client-injection/enbmod/scripts bin/scripts
     @echo ">>> done. bin/enbmod.dll + bin/scripts/. Enable in the launcher with UseClientMods=true."
 
+# Preview the enbmod Lua HUD without launching the game. Runs the headless mod
+# test suite (scripts/*.lua against tests/mock_enb.lua on a native Lua build),
+# which rasterizes the HUD scenarios to PNGs via tests/render_frame.py, then
+# assembles a labeled 2x2 contact sheet and opens it. This is how you SEE the
+# UI -- and any mod tweak -- with no client / WINE / D3D8. Re-run after editing
+# a script to see the change. Set NO_OPEN=1 to just write the files.
+mock-ui:
+    @python3 -c 'import PIL' 2>/dev/null || { echo "ERROR: Pillow missing -- 'pip install pillow' (or apt install python3-pil)"; exit 1; }
+    freya/client-injection/enbmod/tests/run_tests.sh
+    @shots=freya/client-injection/enbmod/build/tests/shots; out="$shots/_contact.png"; \
+    if command -v montage >/dev/null 2>&1; then \
+        montage -background '#0a0e18' -fill '#cfd6e4' -pointsize 13 -label '%f' \
+            "$shots"/0*.png -tile 2x2 -geometry '+10+10' "$out" && \
+        echo ">>> contact sheet: $out"; \
+    else \
+        out="$shots"; echo ">>> ImageMagick 'montage' not found; individual PNGs in $shots"; \
+    fi; \
+    if [ "${NO_OPEN:-0}" = 1 ]; then \
+        echo ">>> NO_OPEN=1, not opening"; \
+    elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v xdg-open >/dev/null 2>&1; then \
+        xdg-open "$out" >/dev/null 2>&1 & echo ">>> opened $out"; \
+    else \
+        echo ">>> no display detected; view the PNGs under $shots"; \
+    fi
+
 # Standalone Windows client package. Produces dist/enb-client-windows/ holding a
 # self-contained launcher (FreyaLauncher.exe -- no .NET runtime needed) + the Win32
 # proxy (bin/FreyaProxy.exe) + the 32-bit MVAS position-feed injection pair
