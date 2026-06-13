@@ -70,8 +70,8 @@ wine build/inject.exe --pid 1234
 `enbmod.dll` and the `scripts/` folder must sit together (the DLL resolves `scripts/init.lua`
 relative to its own location). On success you'll get `enbmod.log` next to the DLL.
 
-Alternative loaders (see `../LUA-MODDING-DESIGN.md §2`): `ddraw.dll` proxy (also puts you in the
-render path for overlays) with `WINEDLLOVERRIDES=ddraw=n,b`; or piggyback the Net-7 launcher.
+Alternative loaders (see `../LUA-MODDING-DESIGN.md §2`): a `d3d8.dll` proxy (the game's actual
+render API) with `WINEDLLOVERRIDES=d3d8=n,b`; or piggyback the Net-7 launcher.
 **Do not** proxy `authlogin.dll` -- Net-7 already patches it.
 
 ## The Lua API
@@ -93,9 +93,15 @@ render path for overlays) with `WINEDLLOVERRIDES=ddraw=n,b`; or piggyback the Ne
 | `enb.on_tick(fn)` | fn runs every pump iteration (game thread) |
 | `enb.on_skill(fn)` / `enb.on_chat(fn)` | event-hook callbacks (need `enable_event_hooks`) |
 | `enb.enable_event_hooks()` | install the game-fn hooks (off by default) |
+| `enb.screen()` | `w, h` of the real backbuffer (`0,0` until the first present) |
+| `enb.measure(s)` | `w, h` of `s` in the overlay font (`0,0` until the atlas is built) |
+| `enb.on_input(fn[,mask])` | `fn(msg,wparam,lparam)` from the PeekMessageA hook; **return truthy to SWALLOW** (msg → `WM_NULL`). Fail-open on Lua error. `mask` = `enb.WANT_KEY\|WANT_CHAR\|WANT_MOUSE` (default all). `enb.msg.*` = raw `WM_*` ids |
 | `enb.draw.text(x,y,s[,rgb])` | overlay text (rebuilt each tick) |
-| `enb.draw.rect(x,y,w,h[,rgb[,filled]])` | overlay rectangle |
-| `enb.draw.line(x0,y0,x1,y1[,rgb])` | overlay line |
+| `enb.draw.rect(x,y,w,h[,rgb[,filled[,alpha]]])` | overlay rectangle |
+| `enb.draw.line(x0,y0,x1,y1[,rgb[,alpha]])` | overlay line |
+| `enb.draw.rect_grad(x,y,w,h,rgbTop,rgbBot[,alpha])` | vertical-gradient filled rect (per-vertex color) |
+| `enb.draw.rrect(x,y,w,h,radius[,rgb[,alpha[,filled]]])` | rounded rectangle (triangle-fan corners) |
+| `enb.draw.rrect_grad(x,y,w,h,radius,rgbTop,rgbBot[,alpha])` | rounded gradient rect |
 | `enb.draw.image(path,x,y[,w,h[,alpha]])` | blit PNG/TGA/BMP/JPG (stb_image, cached, alpha-blended) |
 | `enb.tap(vk)` / `enb.key(vk[,down])` | post key to game window (fires bound abilities) |
 | `enb.char(cp)` | post WM_CHAR |
@@ -104,13 +110,42 @@ render path for overlays) with `WINEDLLOVERRIDES=ddraw=n,b`; or piggyback the Ne
 | `enb.call_cdecl(addr,…)` | call a free fn (cdecl/stdcall), returns EAX |
 
 ### Overlay
-Grabs the `IDirectDrawSurface` vtable from a throwaway surface, hooks **Flip** (vtable index 11)
-with MinHook, and draws a per-frame display list onto the surface's GDI DC before present. The
-list is immediate-mode: Lua rebuilds it every `on_tick` (the tick swaps staging→render under a
-lock so the Flip thread always sees a complete frame). Images load via `stb_image` and blit with
-`AlphaBlend` (premultiplied). **Unverified in-game** -- windowed-mode present often uses `Blt`
-(vtable 5) instead of `Flip`; if nothing draws, also hook `Blt`. Wine's ddraw vtable layout is
-the standard one, so index 11 should hold.
+client.exe renders through **Direct3D 8** (`client.exe` imports `d3d8.dll`; an earlier
+DirectDraw Flip/Blt hook never fired in a full session). The overlay resolves the
+`IDirect3DDevice8` vtable from a throwaway probe device, hooks **Present** (vtable index 15)
+with MinHook, and in the hook draws a per-frame display list using the *game's* device:
+state-blocked `XYZRHW` quads (`DrawPrimitiveUP`) for rects/lines/images and a GDI-baked
+font-atlas texture (Tahoma, ASCII 32..126) for text. Device state is snapshotted/restored
+around the draw via `CreateStateBlock(D3DSBT_ALL)`. The list is immediate-mode: Lua rebuilds it
+every `on_tick` (the tick swaps staging→render under a lock so the Present thread always sees a
+complete frame). Images load via `stb_image` into pow2 `D3DPOOL_MANAGED` textures (managed
+resources survive a device `Reset`, so no Reset hook is needed); all GPU caches rebuild if the
+device pointer ever changes. The one-shot `overlay: Present hook FIRED` log line in
+`enbmod.log` confirms the hook is live in-game.
+
+### UI overhaul -- `scripts/freya_ui.lua` (Phase AS)
+A replacement bottom-center HUD that **removes** native widgets without reversing the client's
+UI code. Two tiers:
+
+- **Tier A (shipped): cover + swallow.** The overlay renders *after* the game's frame, so an
+  opaque panel drawn over a native widget always wins. To make the hidden widget unclickable,
+  `enb.on_input` turns any mouse message landing on the cover panel into `WM_NULL` inside the
+  `PeekMessageA` hook (PM_REMOVE path) before the game's window proc sees it -- a complete input
+  kill. The widget still exists; it is invisible and inert. `freya_ui.lua` covers the six circular
+  hotkey buttons + the circular warp control + the native stat bars, draws a **12-button action
+  bar** (`1 2 3 4 5 6 7 8 9 0 - =`, VKs `0x31..0x39,0x30,0xBD,0xBB`) where a click taps the matching
+  key (`enb.tap`) and a physical keypress lights the same button (key messages are observed but
+  **not** swallowed -- the game still needs them for the bind), and three equal-length stacked stat
+  bars (hull/shield/energy) fed by `enb.self()` (gray skeleton until calibrated). Buttons/panels are
+  procedural `rrect_grad` -- **no binary assets** (repo rule). All geometry derives from
+  `enb.screen()`, so it bottom-anchors at any resolution; the pixel constants in `CFG` are tuned for
+  1280x992 and want an in-game nudge.
+- **Tier B (later, AS-6): true hide.** Find the client's widget visibility flags from the static
+  anchors and skip the native draw outright. Strictly better (no overdraw, resize-proof) but needs
+  in-game reversing; Tier A ships the user-visible result without it.
+
+**Fail-open is load-bearing:** `on_input` runs Lua via `lua_pcall`, and any error returns *false*
+(do not swallow), so a script bug can never wedge the user's keyboard/mouse.
 
 ### Actions
 `enb.tap/key/char` post Win32 messages to the game window (found by enumerating this process's
@@ -177,8 +212,9 @@ game process** by design -- it's what makes modding possible. Consequences:
 - **Hot-reload callback leak.** Each reload re-ran init.lua without releasing the previous run's
   `on_tick` refs, so handlers (and their work) accumulated every save. `reset_callbacks()` now
   unrefs them first.
-- **Overlay HDC leak.** `load_image`'s DIBSection-failure path leaked a memory DC every frame and
-  never cached the failure; now it releases the DC and caches the negative result.
+- **Overlay hooked the wrong API (never drew).** The original overlay hooked
+  `IDirectDrawSurface::Flip`/`Blt`, but the game presents through Direct3D 8 -- a full session
+  log showed the hooks installed and never firing. Rewritten as the D3D8 Present hook above.
 - **Unsafe unload.** `DllMain(DETACH)` ran `MH_Uninitialize` even on process termination (under the
   loader lock, with other threads dead) -- now it only unhooks on a real `FreeLibrary`.
 - **String reads.** `mem::cstr/wstr` did a `VirtualQuery` *per byte* and read outside the VEH guard;
@@ -191,13 +227,14 @@ game, and any struct offset (all calibration is yours).
 
 **Real / working (verified):** build, injection, Lua VM, per-frame tick, hot-reload,
 VEH-guarded crash-safe memory primitives (verified under Wine), the full `enb.*` surface, the
-offsets/calibration plumbing, opt-in event hooks, the DirectDraw Flip-hook overlay (text/rect/
-line/image via stb_image+AlphaBlend), input-synthesis actions, and the `__thiscall` call thunk
-(verified correct + stack-stable under Wine).
+offsets/calibration plumbing, opt-in event hooks, the D3D8 Present-hook overlay (text/rect/
+line/image via stb_image + textured quads), input-synthesis actions, and the `__thiscall` call
+thunk (verified correct + stack-stable under Wine).
 
 **Pending / needs runtime work:**
 - All struct offsets (`Offsets`) are placeholders -- `enb.self()` is empty until you calibrate.
 - Event-hook arg layouts are unknown; only `this` is trustworthy today.
-- **Overlay is code-complete but unverified in-game** -- may need the `Blt` hook for windowed mode.
+- **Overlay (D3D8 rewrite) is code-complete but unverified in-game** -- watch `enbmod.log` for
+  the one-shot `overlay: Present hook FIRED` line on first launch.
 - **Direct ability-call args are unrecovered** -- the call *mechanism* works; you supply verified
   `this`/args per target. Input-synthesis (`enb.tap`) is the works-today trigger path.

@@ -25,6 +25,12 @@ using namespace enb::game;
 static std::vector<int> g_tick_refs;
 static int g_skill_ref = LUA_NOREF;
 static int g_chat_ref  = LUA_NOREF;
+static int g_input_ref = LUA_NOREF;
+// The Lua state, captured in open(). The input handler runs synchronously from
+// the PeekMessageA hook (game thread, after the tick's pcall returns -- not
+// re-entrant) and must return a swallow decision, so unlike skill/chat it can't
+// be marshalled through the event queue.
+static lua_State* g_L = nullptr;
 
 // Events are produced inside game-function hooks; we queue and flush them on the tick so all
 // Lua execution happens from one place (the tick), never re-entrantly mid-game-call.
@@ -205,6 +211,8 @@ void reset_callbacks(lua_State* L){
     g_tick_refs.clear();
     if (g_skill_ref != LUA_NOREF) { luaL_unref(L, LUA_REGISTRYINDEX, g_skill_ref); g_skill_ref = LUA_NOREF; }
     if (g_chat_ref  != LUA_NOREF) { luaL_unref(L, LUA_REGISTRYINDEX, g_chat_ref);  g_chat_ref  = LUA_NOREF; }
+    if (g_input_ref != LUA_NOREF) { luaL_unref(L, LUA_REGISTRYINDEX, g_input_ref); g_input_ref = LUA_NOREF; }
+    hooks::set_input_mask(0);   // stop entering Lua for input until a reload re-registers
     { std::lock_guard<std::mutex> lk(g_evq_mx); g_evq.clear(); }
 }
 
@@ -230,6 +238,48 @@ static int l_enable_event_hooks(lua_State* L){
     lua_pushboolean(L, hooks::enable_event_hooks()); return 1;
 }
 
+// enb.on_input(fn [, mask])  -- fn(msg, wparam, lparam) -> truthy to SWALLOW.
+// Optional mask = bitwise-or of enb.WANT_KEY/WANT_CHAR/WANT_MOUSE; default all.
+// Registering nil clears the handler.
+static bool run_input(unsigned msg, unsigned wparam, long lparam) {
+    if (g_input_ref == LUA_NOREF || !g_L) return false;
+    lua_State* L = g_L;
+    lua_rawgeti(L, LUA_REGISTRYINDEX, g_input_ref);
+    lua_pushinteger(L, (lua_Integer)msg);
+    lua_pushinteger(L, (lua_Integer)wparam);
+    lua_pushinteger(L, (lua_Integer)lparam);
+    if (lua_pcall(L, 3, 1, 0) != LUA_OK) {
+        logf("lua on_input error: %s", lua_tostring(L, -1));
+        lua_pop(L, 1);
+        return false;   // FAIL OPEN: a script error never swallows input
+    }
+    bool swallow = lua_toboolean(L, -1);
+    lua_pop(L, 1);
+    return swallow;
+}
+static int l_on_input(lua_State* L){
+    if (g_input_ref != LUA_NOREF) { luaL_unref(L, LUA_REGISTRYINDEX, g_input_ref); g_input_ref = LUA_NOREF; }
+    if (lua_isnoneornil(L, 1)) { hooks::set_input_mask(0); return 0; }
+    luaL_checktype(L, 1, LUA_TFUNCTION);
+    unsigned mask = (unsigned)luaL_optinteger(L, 2,
+        hooks::WANT_KEY | hooks::WANT_CHAR | hooks::WANT_MOUSE);
+    lua_pushvalue(L, 1);
+    g_input_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    hooks::set_input_mask(mask);
+    return 0;
+}
+
+// enb.screen() -> w, h  (real backbuffer size; 0,0 until the first present)
+static int l_screen(lua_State* L){
+    int w = 0, h = 0; overlay::screen_size(&w, &h);
+    lua_pushinteger(L, w); lua_pushinteger(L, h); return 2;
+}
+// enb.measure(s) -> w, h  (font pixel size; 0,0 until the atlas is built)
+static int l_measure(lua_State* L){
+    int w = 0, h = 0; overlay::measure_text(luaL_checkstring(L, 1), &w, &h);
+    lua_pushinteger(L, w); lua_pushinteger(L, h); return 2;
+}
+
 static int l_log(lua_State* L){
     logs(luaL_checkstring(L,1)); return 0;
 }
@@ -248,12 +298,41 @@ static int l_draw_rect(lua_State* L){
     int w=(int)luaL_checkinteger(L,3), h=(int)luaL_checkinteger(L,4);
     uint32_t rgb=(uint32_t)luaL_optinteger(L,5,0xFFFFFF);
     bool filled=lua_toboolean(L,6);
-    overlay::rect(x,y,w,h,rgb,filled); return 0;
+    int a=(int)luaL_optinteger(L,7,255);
+    overlay::rect(x,y,w,h,rgb,filled,a); return 0;
 }
 static int l_draw_line(lua_State* L){
     overlay::line((int)luaL_checkinteger(L,1),(int)luaL_checkinteger(L,2),
                   (int)luaL_checkinteger(L,3),(int)luaL_checkinteger(L,4),
-                  (uint32_t)luaL_optinteger(L,5,0xFFFFFF)); return 0;
+                  (uint32_t)luaL_optinteger(L,5,0xFFFFFF),
+                  (int)luaL_optinteger(L,6,255)); return 0;
+}
+// enb.draw.rect_grad(x,y,w,h, rgb_top, rgb_bottom [, alpha])
+static int l_draw_rect_grad(lua_State* L){
+    int x=(int)luaL_checkinteger(L,1), y=(int)luaL_checkinteger(L,2);
+    int w=(int)luaL_checkinteger(L,3), h=(int)luaL_checkinteger(L,4);
+    uint32_t top=(uint32_t)luaL_checkinteger(L,5), bot=(uint32_t)luaL_checkinteger(L,6);
+    int a=(int)luaL_optinteger(L,7,255);
+    overlay::rect_grad(x,y,w,h,top,bot,a); return 0;
+}
+// enb.draw.rrect(x,y,w,h, radius [, rgb [, alpha [, filled]]])
+static int l_draw_rrect(lua_State* L){
+    int x=(int)luaL_checkinteger(L,1), y=(int)luaL_checkinteger(L,2);
+    int w=(int)luaL_checkinteger(L,3), h=(int)luaL_checkinteger(L,4);
+    int r=(int)luaL_checkinteger(L,5);
+    uint32_t rgb=(uint32_t)luaL_optinteger(L,6,0xFFFFFF);
+    int a=(int)luaL_optinteger(L,7,255);
+    bool filled = lua_isnoneornil(L,8) ? true : lua_toboolean(L,8);
+    overlay::rrect(x,y,w,h,r,rgb,a,filled); return 0;
+}
+// enb.draw.rrect_grad(x,y,w,h, radius, rgb_top, rgb_bottom [, alpha])
+static int l_draw_rrect_grad(lua_State* L){
+    int x=(int)luaL_checkinteger(L,1), y=(int)luaL_checkinteger(L,2);
+    int w=(int)luaL_checkinteger(L,3), h=(int)luaL_checkinteger(L,4);
+    int r=(int)luaL_checkinteger(L,5);
+    uint32_t top=(uint32_t)luaL_checkinteger(L,6), bot=(uint32_t)luaL_checkinteger(L,7);
+    int a=(int)luaL_optinteger(L,8,255);
+    overlay::rrect_grad(x,y,w,h,r,top,bot,a); return 0;
 }
 static int l_draw_image(lua_State* L){
     const char* p=luaL_checkstring(L,1);
@@ -313,11 +392,20 @@ static void push_addr_table(lua_State* L){
 }
 
 void open(lua_State* L){
+    g_L = L;   // captured for the synchronous input handler (see run_input)
     luaL_openlibs(L);
 
     lua_newtable(L); // enb
 
     lua_pushinteger(L,(lua_Integer)kImageBase); lua_setfield(L,-2,"base");
+
+    // input-mask flags (enb.on_input second arg) + raw window-message ids so a
+    // Lua handler can classify msg without magic numbers.
+    #define ENBI(name, val) lua_pushinteger(L,(lua_Integer)(val)); lua_setfield(L,-2,#name)
+    ENBI(WANT_KEY,   hooks::WANT_KEY);
+    ENBI(WANT_CHAR,  hooks::WANT_CHAR);
+    ENBI(WANT_MOUSE, hooks::WANT_MOUSE);
+    #undef ENBI
 
     static const luaL_Reg fns[] = {
         {"log", l_log},
@@ -328,6 +416,9 @@ void open(lua_State* L){
         {"on_tick", l_on_tick},
         {"on_skill", l_on_skill},
         {"on_chat", l_on_chat},
+        {"on_input", l_on_input},
+        {"screen", l_screen},
+        {"measure", l_measure},
         {"enable_event_hooks", l_enable_event_hooks},
         {"tap", l_tap},
         {"key", l_key},
@@ -343,6 +434,7 @@ void open(lua_State* L){
     lua_newtable(L);
     static const luaL_Reg drawfns[] = {
         {"text",l_draw_text},{"rect",l_draw_rect},{"line",l_draw_line},{"image",l_draw_image},
+        {"rect_grad",l_draw_rect_grad},{"rrect",l_draw_rrect},{"rrect_grad",l_draw_rrect_grad},
         {nullptr,nullptr}
     };
     luaL_setfuncs(L, drawfns, 0);
@@ -364,6 +456,19 @@ void open(lua_State* L){
     push_addr_table(L);
     lua_setfield(L,-2,"addr");
 
+    // enb.msg subtable -- raw Win32 message ids for on_input classification.
+    lua_newtable(L);
+    #define ENBM(name, val) lua_pushinteger(L,(lua_Integer)(val)); lua_setfield(L,-2,#name)
+    ENBM(KEYDOWN,    0x0100); ENBM(KEYUP,      0x0101);
+    ENBM(SYSKEYDOWN, 0x0104); ENBM(SYSKEYUP,   0x0105);
+    ENBM(CHAR,       0x0102);
+    ENBM(MOUSEMOVE,  0x0200); ENBM(MOUSEWHEEL, 0x020A);
+    ENBM(LBUTTONDOWN,0x0201); ENBM(LBUTTONUP,  0x0202); ENBM(LBUTTONDBLCLK,0x0203);
+    ENBM(RBUTTONDOWN,0x0204); ENBM(RBUTTONUP,  0x0205); ENBM(RBUTTONDBLCLK,0x0206);
+    ENBM(MBUTTONDOWN,0x0207); ENBM(MBUTTONUP,  0x0208); ENBM(MBUTTONDBLCLK,0x0209);
+    #undef ENBM
+    lua_setfield(L,-2,"msg");
+
     lua_setglobal(L,"enb");
 
     // wire the game-function hooks to enqueue events for the tick
@@ -371,6 +476,8 @@ void open(lua_State* L){
         std::lock_guard<std::mutex> lk(g_evq_mx); g_evq.push_back({0,a,b}); });
     hooks::set_on_chat([](unsigned a, unsigned b){
         std::lock_guard<std::mutex> lk(g_evq_mx); g_evq.push_back({1,a,b}); });
+    // input handler runs synchronously on the game thread (returns swallow bool).
+    hooks::set_on_input(run_input);
 }
 
 static void call_ref(lua_State* L, int ref, int nargs){

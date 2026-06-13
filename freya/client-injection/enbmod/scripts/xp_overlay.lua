@@ -1,52 +1,61 @@
--- xp_overlay.lua -- draw "<level>  <pct>%" next to the three XP bars (Combat /
--- Exploration / Trade) in the bottom-left of the HUD.
+-- xp_overlay.lua -- draw "<level> <pct>%" to the LEFT of the three XP bars
+-- (Combat / Exploration / Trade) in the bottom-left of the HUD.
 --
--- require("xp_overlay") from init.lua (or paste this in). It registers its own
--- on_tick and draws every frame.
+-- require("xp_overlay") from init.lua. It registers its own on_tick and draws
+-- every frame, screen-anchored from the bottom-left via enb.screen() so it
+-- tracks any window size.
 --
--- DATA SOURCE: enb.self().{combat,explore,trade}_{lvl,pct}. Those read the player
--- object via the calibrated offsets (game.h Offsets). UNTIL you calibrate
--- player_ptr_addr + combat_lvl/combat_pct/... the values are nil and this draws
--- "L?  ?%" -- which is still useful: it proves the overlay path is alive before
--- the numbers are real. See calib.lua + the static anchors XpBars(0x0058c450),
--- LevelText(0x00548d60), RpgLevels(0x0074bfb0) for finding the offsets.
+-- DATA SOURCE: enb.self().{combat,explore,trade}_{lvl,pct}, which read the
+-- player object via the calibrated offsets (game.h Offsets). UNTIL you
+-- calibrate player_ptr_addr + combat_lvl/combat_pct/... the values are nil and
+-- this draws "L? ?%" in gray -- still useful: it proves the overlay path is
+-- alive before the numbers are real. See calib.lua + the static anchors
+-- XpBars(0x0058c450), LevelText(0x00548d60), RpgLevels(0x0074bfb0).
 
--- ---- geometry (screen/surface pixels). Tune to your resolution. ------------
--- The three bars in the screenshot sit stacked at the very bottom-left. Defaults
--- below target the 1280x768 window in the reference shot; the bars are ~160px
--- wide starting near the left edge, ~12px apart. Text is drawn just past the
--- right end of each bar. Nudge BAR_X/BAR_Y/ROW_DY/TEXT_DX until it lines up.
+-- ---- geometry, anchored from the bottom-left (1280x992 reference) ----------
+-- The three native XP bars sit stacked at the very bottom-left: they start at
+-- x~27, are ~165px wide, ~12px tall, ~20px apart, the bottom one ~17px off the
+-- screen bottom. The label is drawn just LEFT of each bar, right-aligned so it
+-- ends a fixed pad before the bar's left edge.
 local CFG = {
-    BAR_X    = 30,     -- left edge of the bars
-    BAR_TOP  = 731,    -- y of the TOP (Combat) bar
-    ROW_DY   = 12,     -- vertical gap between bars
-    TEXT_DX  = 168,    -- text x = BAR_X + TEXT_DX (just right of the bar end)
-    TEXT_DY  = -4,     -- nudge text up so it centres on the thin bar
+    BAR_X       = 27,    -- left edge of the bars
+    BAR_W       = 165,   -- bar width (label right-aligns to BAR_X)
+    BAR_H       = 12,    -- bar height (for vertical centering of the label)
+    ROW_DY      = 20,    -- vertical pitch between bars
+    BOTTOM_PAD  = 17,    -- gap from screen bottom to the BOTTOM bar's top
+    LABEL_PAD   = 8,     -- gap between the label's right edge and BAR_X
 }
 
--- top -> bottom order matches the screenshot: Combat, Exploration, Trade.
+-- top -> bottom order matches the HUD: Combat, Exploration, Trade.
 local ROWS = {
-    { key = "combat",  label = "Combat",  rgb = 0xFF6644 },  -- red  (combat)
-    { key = "explore", label = "Explore", rgb = 0x55DD55 },  -- green(exploration)
-    { key = "trade",   label = "Trade",   rgb = 0x55AAFF },  -- blue (trade)
+    { key = "combat",  rgb = 0xFF6644 },  -- red   (combat)
+    { key = "explore", rgb = 0x55DD55 },  -- green (exploration)
+    { key = "trade",   rgb = 0x55AAFF },  -- blue  (trade)
 }
 
 local function fmt(lvl, pct)
-    local l = lvl and tostring(lvl) or "?"
-    local p = pct and tostring(pct) or "?"
-    return string.format("L%s  %s%%", l, p)
+    return string.format("L%s %s%%", lvl and tostring(lvl) or "?",
+                                     pct and tostring(pct) or "?")
 end
 
 enb.on_tick(function()
+    local sw, sh = enb.screen()
+    if sh == 0 then sh = 992 end  -- pre-first-present fallback
+
     local me = enb.self()
     local calibrated = me.base ~= 0
+    -- bottom bar's top y; rows stack upward from there
+    local y_bottom = sh - CFG.BOTTOM_PAD - CFG.BAR_H
     for i, row in ipairs(ROWS) do
-        local y   = CFG.BAR_TOP + (i - 1) * CFG.ROW_DY + CFG.TEXT_DY
-        local x   = CFG.BAR_X + CFG.TEXT_DX
+        local y   = y_bottom - (#ROWS - i) * CFG.ROW_DY
         local lvl = me[row.key .. "_lvl"]
         local pct = me[row.key .. "_pct"]
-        local rgb = calibrated and row.rgb or 0x888888
-        enb.draw.text(x, y, fmt(lvl, pct), rgb)
+        local s   = fmt(lvl, pct)
+        local lw, lh = enb.measure(s)
+        if lw == 0 then lw = #s * 7; lh = 14 end
+        local x   = CFG.BAR_X - CFG.LABEL_PAD - lw   -- right-aligned to bar start
+        local ty  = y + math.floor((CFG.BAR_H - lh) / 2)
+        enb.draw.text(x, ty, s, calibrated and row.rgb or 0x888888)
     end
 end)
 

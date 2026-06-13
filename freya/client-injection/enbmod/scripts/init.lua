@@ -16,6 +16,12 @@
 --   enb.on_tick(fn)                     called every message-pump iteration (game thread)
 --   enb.on_skill(fn) / enb.on_chat(fn)  raw event hooks (require enable_event_hooks())
 --   enb.enable_event_hooks()            installs the game-function hooks (off by default)
+--   enb.screen() -> w, h                real backbuffer size (0,0 until first frame)
+--   enb.measure(s) -> w, h              text pixel size in the overlay font (0,0 pre-atlas)
+--   enb.on_input(fn[, mask])            fn(msg, wparam, lparam) -> truthy SWALLOWS the msg
+--                                       (Tier A input kill); fail-open on Lua error.
+--                                       mask = enb.WANT_KEY|WANT_CHAR|WANT_MOUSE (default all);
+--                                       enb.msg.* holds the raw WM_* ids for classification.
 
 enb.log("init.lua running")
 
@@ -38,6 +44,17 @@ enb.log("init.lua running")
 --   tgt_name = 0x??, tgt_name_is_ptr = 1, tgt_name_wide = 0,
 --   tgt_pos_x = 0x??, tgt_pos_y = 0x??, tgt_pos_z = 0x??,
 -- }
+--
+-- The EASY path: run autocalib in-game (see autocalib.lua), then it writes
+-- scripts/calib_data.lua (gitignored, install-specific). We load it here if it
+-- exists, so calibration survives restarts and hot-reloads without editing init.
+do
+    local ok, data = pcall(require, "calib_data")
+    if ok and type(data) == "table" then
+        enb.calibrate(data)
+        enb.log("init.lua: applied persisted calib_data.lua")
+    end
+end
 
 -- ---------------------------------------------------------------------------
 -- Example: lightweight throttled status line every ~2s once calibrated.
@@ -65,25 +82,27 @@ end)
 -- enb.on_chat (function(this, arg) enb.log(("chat  this=%08x arg=%08x"):format(this, arg)) end)
 
 -- ---------------------------------------------------------------------------
--- OVERLAY (DirectDraw Flip hook). Drawing API, rebuilt every tick:
+-- OVERLAY (D3D8 Present hook). Drawing API, rebuilt every tick:
 --   enb.draw.text(x, y, str [, 0xRRGGBB])
---   enb.draw.rect(x, y, w, h [, 0xRRGGBB [, filled_bool]])
---   enb.draw.line(x0, y0, x1, y1 [, 0xRRGGBB])
+--   enb.draw.rect(x, y, w, h [, 0xRRGGBB [, filled [, alpha]]])
+--   enb.draw.line(x0, y0, x1, y1 [, 0xRRGGBB [, alpha]])
+--   enb.draw.rect_grad(x, y, w, h, rgbTop, rgbBottom [, alpha])     -- vertical gradient
+--   enb.draw.rrect(x, y, w, h, radius [, rgb [, alpha [, filled]]]) -- rounded rect
+--   enb.draw.rrect_grad(x, y, w, h, radius, rgbTop, rgbBottom [, alpha])
 --   enb.draw.image(path, x, y [, w, h [, alpha0_255]])   -- PNG/TGA/BMP/JPG via stb_image
--- NOTE: unverified in-game (Flip vs Blt / Wine ddraw may need tuning) -- see README.
 -- ---------------------------------------------------------------------------
+-- Small dev status box (top-left). Comment out for a clean HUD; it proves the
+-- overlay path is alive before calibration.
 enb.on_tick(function()
-    -- a simple always-on HUD box + label
-    enb.draw.rect(20, 20, 220, 70, 0x00FF88, false)
+    enb.draw.rrect(20, 20, 220, 56, 8, 0x00FF88, 200, false)
     enb.draw.text(28, 26, "enbmod overlay", 0x00FF88)
     local me = enb.self()
     if me.base ~= 0 then
-        enb.draw.text(28, 46, ("hull %s  shield %s"):format(tostring(me.hull), tostring(me.shield)), 0xFFFFFF)
-        enb.draw.text(28, 64, ("energy %s"):format(tostring(me.energy)), 0xFFFFFF)
+        enb.draw.text(28, 46, ("hull %s  shield %s  energy %s"):format(
+            tostring(me.hull), tostring(me.shield), tostring(me.energy)), 0xFFFFFF)
     else
         enb.draw.text(28, 46, "self() not calibrated", 0xFF5555)
     end
-    -- enb.draw.image([[C:\\path\\icon.png]], 250, 20, 32, 32, 255)
 end)
 
 -- ---------------------------------------------------------------------------
@@ -111,7 +130,15 @@ end
 -- correct (this in ECX, args ordered, ESP balanced); the *arguments* are your responsibility.
 
 -- ---------------------------------------------------------------------------
--- XP bars HUD: draws "<level> <pct>%" next to the Combat/Exploration/Trade bars
--- in the bottom-left. Shows "L? ?%" until the level/pct offsets are calibrated.
+-- XP bars HUD: draws "<level> <pct>%" to the LEFT of the Combat/Exploration/
+-- Trade bars in the bottom-left. Shows "L? ?%" until offsets are calibrated.
 -- ---------------------------------------------------------------------------
 require("xp_overlay")
+
+-- ---------------------------------------------------------------------------
+-- FREYA UI (Phase AS): replacement bottom-center HUD -- covers the native six
+-- circular hotkey buttons + the warp control + native stat bars, draws a
+-- 12-button action bar (1..9 0 - =) and three stacked stat bars, and swallows
+-- mouse input over the covered region. See freya_ui.lua.
+-- ---------------------------------------------------------------------------
+require("freya_ui")

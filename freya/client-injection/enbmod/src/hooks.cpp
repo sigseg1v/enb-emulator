@@ -8,17 +8,55 @@ namespace enb { namespace hooks {
 
 static std::function<void()> g_tick;
 static std::function<void(unsigned, unsigned)> g_on_skill, g_on_chat;
+static std::function<bool(unsigned, unsigned, long)> g_on_input;
+static unsigned g_input_mask = 0;
 static bool g_event_hooks_on = false;
 
 // ---- PeekMessageA tick hook -------------------------------------------------
 typedef BOOL (WINAPI *PeekMessageA_t)(LPMSG, HWND, UINT, UINT, UINT);
 static PeekMessageA_t real_PeekMessageA = nullptr;
 
+// Which WANT_* class (if any) does this window message belong to? 0 = none.
+static unsigned msg_class(UINT msg) {
+    switch (msg) {
+    case WM_KEYDOWN: case WM_KEYUP: case WM_SYSKEYDOWN: case WM_SYSKEYUP:
+        return hooks::WANT_KEY;
+    case WM_CHAR:
+        return hooks::WANT_CHAR;
+    case WM_MOUSEMOVE: case WM_MOUSEWHEEL:
+    case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_LBUTTONDBLCLK:
+    case WM_RBUTTONDOWN: case WM_RBUTTONUP: case WM_RBUTTONDBLCLK:
+    case WM_MBUTTONDOWN: case WM_MBUTTONUP: case WM_MBUTTONDBLCLK:
+        return hooks::WANT_MOUSE;
+    default:
+        return 0;
+    }
+}
+
 static BOOL WINAPI hk_PeekMessageA(LPMSG m, HWND h, UINT min, UINT max, UINT rm) {
     // g_tick runs Lua via lua_pcall (errors are caught Lua-side); the C++ path only enqueues,
     // so nothing here throws. (mingw 32-bit has no SEH, so we can't __try around it anyway.)
     if (g_tick) g_tick();
-    return real_PeekMessageA(m, h, min, max, rm);
+
+    BOOL got = real_PeekMessageA(m, h, min, max, rm);
+
+    // Input interception: only on messages the game actually REMOVES from its
+    // queue (PM_REMOVE). A peek that leaves the message queued will be retrieved
+    // again later; swallowing it here would not stick and we'd double-dispatch.
+    if (got && m && (rm & PM_REMOVE) && g_on_input && g_input_mask) {
+        unsigned cls = msg_class(m->message);
+        if (cls & g_input_mask) {
+            // g_on_input runs Lua via lua_pcall and is documented to FAIL OPEN:
+            // any error returns false (do not swallow), so a script bug cannot
+            // wedge the user's input. We only act on an explicit true.
+            if (g_on_input(m->message, (unsigned)m->wParam, (long)m->lParam)) {
+                m->message = WM_NULL;
+                m->wParam = 0;
+                m->lParam = 0;
+            }
+        }
+    }
+    return got;
 }
 
 // ---- game __thiscall event hooks --------------------------------------------
@@ -92,6 +130,8 @@ void shutdown() {
 void set_tick(std::function<void()> cb) { g_tick = std::move(cb); }
 void set_on_skill(std::function<void(unsigned, unsigned)> cb) { g_on_skill = std::move(cb); }
 void set_on_chat (std::function<void(unsigned, unsigned)> cb) { g_on_chat  = std::move(cb); }
+void set_on_input(std::function<bool(unsigned, unsigned, long)> cb) { g_on_input = std::move(cb); }
+void set_input_mask(unsigned mask) { g_input_mask = mask; }
 
 bool enable_event_hooks() {
     if (g_event_hooks_on) return true;
