@@ -183,6 +183,42 @@ namespace LaunchFreya.Tests
         }
 
         [Fact]
+        public async Task OurMod_NotInResponse_IsPruned()
+        {
+            string baseDir = FreshBase();
+            try
+            {
+                // One of OUR mods (carries a modhash marker) that the server no
+                // longer publishes -- a renamed/removed mod. It must be pruned.
+                string oldMod = Path.Combine(baseDir, "mods", "player-hud");
+                Directory.CreateDirectory(oldMod);
+                File.WriteAllText(Path.Combine(oldMod, "freya_ui.lua"), "-- old");
+                File.WriteAllText(Path.Combine(oldMod, "modhash"), "deadbeef00");
+
+                // A user's own mod (no marker) that is ALSO absent from the
+                // response must survive the prune.
+                string userMod = Path.Combine(baseDir, "mods", "my-cool-mod");
+                Directory.CreateDirectory(userMod);
+                File.WriteAllText(Path.Combine(userMod, "secret.lua"), "-- keep");
+
+                string url = "https://dl/mods/freya-hud-abc1234567.zip";
+                var map = new Dictionary<string, byte[]> { [url] = MakeZip(("mod.json", "{}")) };
+                var (updater, _) = MakeUpdater(baseDir, map);
+                var resp = new UpdateCheckResponse
+                {
+                    Mods = new List<ModUpdate> { new ModUpdate { Id = "freya-hud", Hash = "abc1234567", Url = url } }
+                };
+
+                await updater.ReconcileModsAsync(resp);
+
+                Assert.False(Directory.Exists(oldMod));                       // ours, gone -> pruned
+                Assert.True(File.Exists(Path.Combine(userMod, "secret.lua"))); // user's -> kept
+                Assert.True(Directory.Exists(Path.Combine(baseDir, "mods", "freya-hud"))); // new -> present
+            }
+            finally { Directory.Delete(baseDir, true); }
+        }
+
+        [Fact]
         public async Task UnsafeModId_IsSkipped()
         {
             string baseDir = FreshBase();

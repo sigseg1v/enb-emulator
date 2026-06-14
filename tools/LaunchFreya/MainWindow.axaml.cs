@@ -866,6 +866,9 @@ namespace LaunchFreya
             var mods = ModCatalog.Scan();
 
             var list = new StackPanel { Spacing = 4, Margin = new Avalonia.Thickness(0) };
+            // Share the name-column width across every row so the authors line up
+            // in a column regardless of how long each mod name is.
+            Grid.SetIsSharedSizeScope(list, true);
             if (mods.Count == 0)
             {
                 list.Children.Add(new TextBlock
@@ -893,7 +896,10 @@ namespace LaunchFreya
                     }
                     else
                     {
-                        name.Foreground = null;   // inherit the normal theme colour
+                        // Clear the LOCAL value so the theme's foreground setter wins
+                        // again. Setting it to null instead would paint the text with a
+                        // null brush -> invisible.
+                        name.ClearValue(TextBlock.ForegroundProperty);
                         dep.IsVisible = false;
                     }
                 }
@@ -920,29 +926,40 @@ namespace LaunchFreya
                     Text = m.Name,
                     FontWeight = FontWeight.SemiBold,
                     VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                    Margin = new Avalonia.Thickness(8, 0, 16, 0),
                 };
                 var authorText = new TextBlock
                 {
                     Text = "by " + m.Author,
                     Foreground = new SolidColorBrush(Colors.Gray),
                     VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
-                    Margin = new Avalonia.Thickness(8, 0, 0, 0),
                 };
                 // Red "requires ..." note, shown only when a dependency is unmet.
                 var depText = new TextBlock
                 {
                     VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
-                    Margin = new Avalonia.Thickness(8, 0, 0, 0),
+                    Margin = new Avalonia.Thickness(12, 0, 0, 0),
                     IsVisible = false,
                 };
                 rowNames.Add((m, nameText, depText));
 
-                var row = new StackPanel
+                // Grid columns: checkbox | name (shared width) | author | dep.
+                // The shared-size name column makes every author start at the same x.
+                var row = new Grid
                 {
-                    Orientation = Avalonia.Layout.Orientation.Horizontal,
-                    Spacing = 8,
                     Margin = new Avalonia.Thickness(4, 2, 4, 2),
+                    ColumnDefinitions = new ColumnDefinitions
+                    {
+                        new ColumnDefinition(GridLength.Auto),
+                        new ColumnDefinition(GridLength.Auto) { SharedSizeGroup = "ModName" },
+                        new ColumnDefinition(GridLength.Auto),
+                        new ColumnDefinition(GridLength.Star),
+                    },
                 };
+                Grid.SetColumn(cb, 0);
+                Grid.SetColumn(nameText, 1);
+                Grid.SetColumn(authorText, 2);
+                Grid.SetColumn(depText, 3);
                 row.Children.Add(cb);
                 row.Children.Add(nameText);
                 row.Children.Add(authorText);

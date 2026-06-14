@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading;
@@ -204,8 +206,11 @@ namespace LaunchFreya.Update
         // This is best-effort and per-mod isolated: one mod's download/extract
         // failure is logged and skipped, never aborting the others, and never
         // throwing -- a mod problem must not block Play or the binary update path.
-        // An id NOT in the response is a user's own mod and is never touched here,
-        // which is the whole safety guarantee (see MOD-STRUCTURE.md).
+        // After updating, prune store folders for mods we no longer publish (a
+        // renamed/removed mod): a folder that carries a modhash marker but is
+        // absent from the response is one of ours that went away. An id with NO
+        // marker is the user's own mod and is never touched -- the safety
+        // guarantee (see MOD-STRUCTURE.md).
         //
         // Returns the number of mods actually updated.
         public async Task<int> ReconcileModsAsync(UpdateCheckResponse resp,
@@ -269,6 +274,39 @@ namespace LaunchFreya.Update
                     try { if (File.Exists(zip)) File.Delete(zip); } catch { /* best-effort */ }
                 }
             }
+
+            // Prune OUR mods that the server no longer publishes (a removed or
+            // renamed mod). We can tell ours from a user's own mod by the modhash
+            // marker: the updater writes it on every mod we install, and a user's
+            // mod never has one. So a store folder that carries a modhash marker
+            // but is absent from this response is one of ours that went away ->
+            // delete it. A folder WITHOUT the marker is the user's and is left
+            // untouched (the safety guarantee in MOD-STRUCTURE.md).
+            try
+            {
+                var published = new HashSet<string>(
+                    resp.Mods.Where(m => m != null).Select(m => m.Id),
+                    StringComparer.OrdinalIgnoreCase);
+                if (Directory.Exists(store))
+                {
+                    foreach (var dir in Directory.GetDirectories(store))
+                    {
+                        var id = Path.GetFileName(dir);
+                        if (published.Contains(id)) continue;
+                        if (!File.Exists(Path.Combine(dir, ModHashFileName))) continue; // user's mod
+                        try
+                        {
+                            Directory.Delete(dir, recursive: true);
+                            _log($"mods: removed '{id}' (no longer published).");
+                        }
+                        catch (Exception ex)
+                        {
+                            _log($"mods: could not remove stale mod '{id}': {ex.Message}");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) { _log($"mods: prune of removed mods failed: {ex.Message}"); }
 
             if (updated > 0) _log($"mods: updated {updated} mod(s).");
             return updated;

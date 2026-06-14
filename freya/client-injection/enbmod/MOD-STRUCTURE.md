@@ -117,3 +117,14 @@ The launcher learns the authoritative mod set from the login server's
 Because the decision is purely `modhash` vs manifest hash keyed by `id`, a
 user's own mod (unknown id, no `modhash`) is never selected for update. That
 is the entire safety mechanism: **we only ever replace ids we own.**
+
+**Pruning removed mods.** After applying updates, the launcher also deletes
+store folders for mods we *used to* ship but no longer publish (a renamed or
+retired mod -- e.g. the old `player-hud`/`discipline-card`/`native-hud-hide`
+that became `freya-hud`/`hide-ui`). "Ours" is decided by the same marker: a
+store folder that carries a `modhash` file but whose `id` is absent from the
+manifest is one of ours that went away, so it is removed. A folder WITHOUT a
+`modhash` is the user's own mod and is left untouched -- the same guarantee as
+above. Dev builds do the equivalent against the bundled mod set (the bundle is
+the authoritative "ours" list in dev; see `ModStore.SeedFromBundle`), tagging
+the folders they seed so the prune can tell them from a dev's scratch mods.

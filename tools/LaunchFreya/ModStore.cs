@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 namespace LaunchFreya
 {
@@ -59,6 +61,7 @@ namespace LaunchFreya
                         {
                             Directory.Delete(dst, recursive: true);
                             CopyDir(src, dst);
+                            MarkOurs(dst);
                             log($"mods: refreshed '{id}' in the store from the bundle (dev build)");
                         }
                         catch (Exception ex)
@@ -69,11 +72,53 @@ namespace LaunchFreya
                         continue;   // present: gap-filled (release) or refreshed (debug)
                     }
                     CopyDir(src, dst);
+#if DEBUG
+                    MarkOurs(dst);
+#endif
                     log($"mods: seeded '{id}' into the store from the bundle");
                 }
+
+#if DEBUG
+                // Dev iteration: the bundle is the complete set of OUR mods, so
+                // prune store folders that are ours (carry the marker we write
+                // above) but no longer exist in the bundle -- i.e. a mod we
+                // renamed or deleted. A folder WITHOUT the marker is the dev's own
+                // scratch mod and is left alone. Release builds rely on the online
+                // updater's manifest-driven prune instead.
+                var bundleIds = new HashSet<string>(
+                    Directory.GetDirectories(bundleMods).Select(Path.GetFileName),
+                    StringComparer.OrdinalIgnoreCase);
+                foreach (var dir in Directory.GetDirectories(store))
+                {
+                    var id = Path.GetFileName(dir);
+                    if (bundleIds.Contains(id)) continue;
+                    if (!File.Exists(Path.Combine(dir, ModHashFileName))) continue; // dev's own
+                    try
+                    {
+                        Directory.Delete(dir, recursive: true);
+                        log($"mods: removed '{id}' from the store (no longer in the bundle)");
+                    }
+                    catch (Exception ex)
+                    {
+                        log($"mods: could not remove stale '{id}': {ex.Message}");
+                    }
+                }
+#endif
             }
             catch (Exception ex) { log($"mods: seeding from bundle failed: {ex.Message}"); }
         }
+
+#if DEBUG
+        // Tag a dev-seeded folder as ours so the dev prune can tell it apart from
+        // the dev's own scratch mods. The sentinel value never matches a real
+        // published hash, so if this build ever goes online the updater simply
+        // re-fetches the mod -- harmless in dev.
+        static void MarkOurs(string dir)
+        {
+            try { File.WriteAllText(Path.Combine(dir, ModHashFileName), "dev"); }
+            catch { /* best-effort: prune just won't see this folder as ours */ }
+        }
+#endif
 
         static void CopyDir(string src, string dst)
         {
