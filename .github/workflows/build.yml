@@ -63,7 +63,7 @@ jobs:
         run: cmake -S server -B build/server -G Ninja
       - name: Upload CMake logs
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: cmake-configure-logs-${{ matrix.os }}
           path: |
@@ -104,14 +104,14 @@ jobs:
           wc -l server/WARNINGS.txt
       - name: Upload BUILD_ERRORS.md
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: server-build-errors-${{ matrix.os }}
           path: server/BUILD_ERRORS.md
           if-no-files-found: ignore
       - name: Upload WARNINGS.txt
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: server-warnings-${{ matrix.os }}
           path: server/WARNINGS.txt
@@ -398,7 +398,7 @@ jobs:
             --results-directory test-results/
       - name: Upload TRX artifact
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: cli-integration-trx-${{ matrix.shard }}
           path: test-results/**/*.trx
