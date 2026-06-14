@@ -47,6 +47,11 @@ namespace addr {
     constexpr uintptr_t ChatRender    = 0x00680700; // chat rendering
     constexpr uintptr_t ChatChannel   = 0x0065bfd0; // channel routing
     constexpr uintptr_t ChatSend      = 0x00749ed0; // channel state + send-message
+    constexpr uintptr_t ChatLocalLine = 0x0074d990; // local chat-window line printer (no packet).
+                                                    // __stdcall(int channel, const char* msg, int flag):
+                                                    // channel 0x11=error 0x13=system 0x15=warning 6=usage.
+                                                    // The client uses it for its own notices; observed at
+                                                    // runtime to take 3 stack args + ret 0xc (stdcall, no this).
 
     // ---- navs ----
     constexpr uintptr_t NavListBuild  = 0x007b7ef0;

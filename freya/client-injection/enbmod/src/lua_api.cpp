@@ -706,30 +706,47 @@ static void call_ref(lua_State* L, int ref, int nargs){
     }
 }
 
+// Echo a line into the game's chat window via the client's local line printer
+// (no packet -- same routine the client uses for its own notices). tick() runs
+// on the game/message-pump thread, the same thread the client prints chat on, so
+// this is safe to call from run_console. Channel 0x13 = local system line.
+typedef void (__stdcall* ChatLocalLineFn)(int channel, const char* msg, int flag);
+static void chat_echo(const std::string& line){
+    ((ChatLocalLineFn)game::addr::ChatLocalLine)(0x13, ("[Lua] " + line).c_str(), 0);
+}
+
 // Execute one "/run" snippet on the Lua thread. Tries it as an expression first
 // (`return <code>`) so a bare value or function call echoes its result, then
-// falls back to running it as a statement. Errors and results both go to the log.
+// falls back to running it as a statement. The expression's output is echoed to
+// the chat window as "[Lua] ..."; errors go there too so failures are visible.
 static void run_console(lua_State* L, const std::string& code){
     std::string expr = "return " + code;
     if (luaL_loadstring(L, expr.c_str()) != LUA_OK){
         lua_pop(L, 1);  // discard the expr compile error; try as a statement
         if (luaL_loadstring(L, code.c_str()) != LUA_OK){
-            logf("[run] compile error: %s", lua_tostring(L, -1));
+            std::string e = lua_tostring(L, -1) ? lua_tostring(L, -1) : "?";
+            logf("[run] compile error: %s", e.c_str());
+            chat_echo("error: " + e);
             lua_pop(L, 1);
             return;
         }
     }
     int base = lua_gettop(L) - 1;  // index below the loaded chunk
     if (lua_pcall(L, 0, LUA_MULTRET, 0) != LUA_OK){
-        logf("[run] error: %s", lua_tostring(L, -1));
+        std::string e = lua_tostring(L, -1) ? lua_tostring(L, -1) : "?";
+        logf("[run] error: %s", e.c_str());
+        chat_echo("error: " + e);
         lua_pop(L, 1);
         return;
     }
     int nres = lua_gettop(L) - base;
     for (int i = 1; i <= nres; i++){
         int idx = base + i;
-        if (lua_isstring(L, idx)) logf("[run] %s", lua_tostring(L, idx));
-        else logf("[run] <%s>", luaL_typename(L, idx));
+        std::string out = lua_isstring(L, idx)
+            ? lua_tostring(L, idx)
+            : std::string("<") + luaL_typename(L, idx) + ">";
+        logf("[run] %s", out.c_str());
+        chat_echo(out);
     }
     lua_pop(L, nres);
 }
