@@ -201,6 +201,65 @@ function M.watch_vitals()
     watch_obj("ENTITY", entity, 0x60, true)   -- 0x180 bytes, numeric fields only
 end
 
+-- ---- discipline level / xp probe -------------------------------------------
+-- The player level + Combat/Explore/Trade levels & xp% are NOT flat fields in
+-- the dumped vitals objects -- they live behind the RPGInfo / AuxData property
+-- bag, so value-typing a single snapshot can't find them (the levels read 0 on
+-- a low character, and the on-screen xp% is computed from cur/next-xp ints, not
+-- stored as a float). This walks the pointer graph out from the player entity a
+-- couple of levels deep and flags: word-like string keys (structure anchors
+-- like "Combat"/"Explore"/"Level"/"Experience"), small ints (candidate levels),
+-- and integer PAIRS whose ratio matches a known on-screen xp% (pin cur/next xp).
+-- Run by hand with the on-screen % to filter precisely:
+--   require("autocalib").probe_levels(54)   -- explore at 54%
+local function wordlike(c) return c and #c >= 3 and #c <= 40 and c:match("^[%w _'%-]+$") end
+
+function M.probe_levels(target_pct)
+    local ctrl = enb.vitals_ctrl and enb.vitals_ctrl() or 0
+    if ctrl == 0 then enb.log("[lvl] vitals_ctrl 0 -- not in space"); return end
+    local data   = enb.mem.readable(ctrl + 4, 4) and enb.mem.u32(ctrl + 4) or 0
+    local entity = (data ~= 0 and enb.mem.readable(data + 0x88, 4)) and enb.mem.u32(data + 0x88) or 0
+    enb.log(("[lvl] ===== level/xp probe; entity=%08x target_pct=%s ====="):format(
+        entity, tostring(target_pct)))
+    local seen, lines = {}, 0
+    local LINECAP, QCAP = 160, 300
+    local function logln(s) if lines < LINECAP then enb.log(s); lines = lines + 1 end end
+    local queue, qi = { { entity, "ent", 0 }, { data, "dat", 0 } }, 1
+    while qi <= #queue do
+        local node = queue[qi]; qi = qi + 1
+        local base, path, depth = node[1], node[2], node[3]
+        if base ~= 0 and not seen[base] and enb.mem.readable(base, 4) then
+            seen[base] = true
+            for i = 0, 0x5f do
+                local a = base + i * 4
+                if not enb.mem.readable(a, 4) then break end
+                local u = enb.mem.u32(a)
+                if u >= 0x00400000 and enb.mem.readable(u, 4) then
+                    local c = enb.mem.str(u)
+                    if wordlike(c) then logln(("[lvl] %s+0x%03x -> %q"):format(path, i * 4, c)) end
+                end
+                if u >= 1 and u <= 99 then logln(("[lvl] %s+0x%03x = %d (lvl?)"):format(path, i * 4, u)) end
+                if enb.mem.readable(a + 4, 4) then
+                    local b = enb.mem.u32(a + 4)
+                    if u > 0 and b > u and b < 5e7 then
+                        local r = u / b
+                        local hit = target_pct and math.abs(r * 100 - target_pct) <= 1.5
+                        if hit or (not target_pct and r >= 0.05 and r <= 0.95 and b < 100000) then
+                            logln(("[lvl] %s+0x%03x cur=%d next=%d -> %.1f%%%s"):format(
+                                path, i * 4, u, b, r * 100, hit and " XP-MATCH" or ""))
+                        end
+                    end
+                end
+                if depth < 2 and #queue < QCAP and u >= 0x00400000
+                   and enb.mem.readable(u, 8) and not seen[u] then
+                    queue[#queue + 1] = { u, ("%s+0x%03x"):format(path, i * 4), depth + 1 }
+                end
+            end
+        end
+    end
+    enb.log(("[lvl] ===== end level/xp probe (%d lines, %d objs) ====="):format(lines, qi - 1))
+end
+
 -- The fields autocalib knows how to persist (mirror of game.h Offsets).
 local FIELDS = {
     "player_ptr_addr",
@@ -257,6 +316,8 @@ do
             probed = true
             local ok, err = pcall(M.probe_vitals)
             if not ok then enb.log("[probe] error: " .. tostring(err)) end
+            local lok, lerr = pcall(M.probe_levels)
+            if not lok then enb.log("[lvl] error: " .. tostring(lerr)) end
             enb.log("[watch] armed -- fire weapons / boost / take a hit to move a bar")
         end
         if probed then
