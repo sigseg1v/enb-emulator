@@ -137,11 +137,15 @@ archive/replay/
 !**/*.ico
 !**/*.ICO
 !**/*.icns
-!**/*.bik
 
 # Per-rule: still EXCLUDE genuine build outputs inside the re-included paths
 client/mods/release/*.tmp
 tools/**/obj/
+
+# Original Westwood/EA copyrighted binaries: removed and must never be re-added
+# (see client/mods/THIRD_PARTY_BINARIES.md). These override the !-reincludes above.
+client/mods/release/client.exe
+*.bik
 tools/**/bin/
 server/**/build/
 server/src/Debug/
