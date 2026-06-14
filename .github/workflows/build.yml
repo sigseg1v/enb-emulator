@@ -12,7 +12,7 @@ jobs:
     name: lint-plans
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Plans directory + master status table exist
         run: |
           set -euo pipefail
@@ -24,7 +24,7 @@ jobs:
     name: check-no-mojibake (license-header guard)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: No U+FFFD replacement chars in tracked source
         run: bash tools/check_no_mojibake.sh
 
@@ -32,7 +32,7 @@ jobs:
     name: sql-injection-audit (parameterised-query gate)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: No dynamic SQL string-building in server-native code
         # Phase N drove the server-native sprintf/strcat-SQL surface to
         # zero; every DB call goes through the wrapper's parameterised
@@ -50,7 +50,7 @@ jobs:
       matrix:
         os: [ubuntu-24.04, ubuntu-22.04]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install build deps
         run: |
           sudo apt-get update
@@ -81,7 +81,7 @@ jobs:
       matrix:
         os: [ubuntu-24.04, ubuntu-22.04]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install build deps
         run: |
           sudo apt-get update
@@ -135,7 +135,7 @@ jobs:
           --health-timeout=3s
           --health-retries=10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install psql
         run: |
           sudo apt-get update
@@ -154,7 +154,7 @@ jobs:
     runs-on: ubuntu-24.04
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install .NET 10 SDK
         uses: actions/setup-dotnet@v4
         with:
@@ -166,7 +166,7 @@ jobs:
     name: cli-unit-test (freya/cli-client)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install .NET 10 SDK
         uses: actions/setup-dotnet@v4
         with:
@@ -198,7 +198,7 @@ jobs:
           --health-timeout=3s
           --health-retries=10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install build deps
         run: |
           sudo apt-get update
@@ -217,7 +217,7 @@ jobs:
     name: installer-shellcheck
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install shellcheck
         run: |
           sudo apt-get update
@@ -230,7 +230,7 @@ jobs:
     runs-on: ubuntu-24.04
     needs: ctest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install build deps
         run: |
           sudo apt-get update
@@ -317,7 +317,7 @@ jobs:
     env:
       SHARDS: "4"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install .NET 10 SDK
         uses: actions/setup-dotnet@v4
         with:
@@ -423,7 +423,7 @@ jobs:
     name: cli-integration-coverage (shard partition guard)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install .NET 10 SDK
         uses: actions/setup-dotnet@v4
         with:
