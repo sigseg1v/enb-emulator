@@ -1330,3 +1330,30 @@ format & byte order", Trap 2).
   - Overall level + xp% still show "LV --" (not yet pinned) -- that is expected,
     not a regression.
 - **Setup**: `just play-local` with `UseClientMods=true`.
+
+## CV-AS-RUNJMP -- /run console no longer crashes (Lua error path uses GCC builtins)
+
+- **What changed**: Lua's error handling (`ldo.c` LUAI_THROW / LUAI_TRY) was
+  using libc `setjmp`/`longjmp`. On 32-bit mingw-w64 under Wine that unwind path
+  is unreliable -- the FIRST Lua error (a `/run` syntax error such as the failed
+  `return return 1+1` expr-wrap probe) faulted with unhandled STATUS_SINGLE_STEP
+  (0x80000004) instead of jumping cleanly back to the protected call. Removing
+  the earlier-suspected `ChatLocalLine` echo did NOT change the crash code, which
+  ruled that out and pointed at the jump machinery itself. The build now force-
+  includes `src/lua_build_config.h` into every Lua TU, pointing LUAI_THROW/
+  LUAI_TRY/luai_jmpbuf at `__builtin_setjmp`/`__builtin_longjmp` -- the SAME
+  mechanism `mem.h` already uses and documents as "verified working under Wine".
+- **Why this is the likely fix but UNVERIFIED here**: cannot be exercised without
+  the real Win32 client under Wine; the headless Lua tests run native (libc
+  jmp is fine there) so they cannot reproduce or confirm it.
+- **What to look for (real client)**:
+  - In space, type `/run return 1 + 1` in chat -> no crash; `enbmod.log` shows
+    `[run] 2`.
+  - `/run enb.aux("MaxHullPoints")` etc. echoes the value to `enbmod.log`
+    (this is the intended in-game evaluation path for the aux reads).
+  - A deliberately broken `/run x = (` (syntax error) and `/run error("boom")`
+    (runtime error) both log a `[run] compile error`/`[run] error` line and do
+    NOT crash -- that is the longjmp path that previously took the client down.
+- **Setup**: `just play-local` with `UseClientMods=true`. Rebuild the DLL first
+  (`just build-enbmod`); the Lua objects must be recompiled with the new
+  `-include` (a stale `build/lua/ldo.o` would keep the old libc-jmp behaviour).
