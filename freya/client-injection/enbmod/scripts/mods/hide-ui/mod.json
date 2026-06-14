@@ -1,0 +1,7 @@
+{
+  "id": "hide-ui",
+  "name": "Hide Native UI",
+  "author": "Freya",
+  "description": "Suppresses the stock in-space stat bars and XP bars by ret-patching their per-frame paint routines, so translucent replacement HUDs do not show the native widgets through them. Required by freya-hud; disable to bring the original bars back.",
+  "entrypoint": "native_hud_hide.lua"
+}

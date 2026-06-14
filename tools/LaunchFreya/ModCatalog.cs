@@ -14,6 +14,10 @@ namespace LaunchFreya
         public string Author { get; init; } = "";
         public string Description { get; init; } = "";
         public string Entrypoint { get; init; } = "init.lua";
+        // Other mod ids this mod needs enabled to work (mod.json "dependencies").
+        // The Configure Mods window flags a mod red when a dependency is disabled
+        // or missing. Empty for mods with no declared dependencies.
+        public IReadOnlyList<string> Dependencies { get; init; } = Array.Empty<string>();
         // Absolute path of the mod folder in the SOURCE scripts tree (used for staging).
         public string Dir { get; init; } = "";
     }
@@ -55,14 +59,24 @@ namespace LaunchFreya
                     string Get(string k, string fallback) =>
                         root.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String
                             ? v.GetString() : fallback;
+                    List<string> GetStrArray(string k)
+                    {
+                        var list = new List<string>();
+                        if (root.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Array)
+                            foreach (var e in v.EnumerateArray())
+                                if (e.ValueKind == JsonValueKind.String)
+                                    list.Add(e.GetString());
+                        return list;
+                    }
                     result.Add(new ModInfo
                     {
-                        Id          = Get("id", folderName),
-                        Name        = Get("name", folderName),
-                        Author      = Get("author", "Unknown"),
-                        Description = Get("description", ""),
-                        Entrypoint  = Get("entrypoint", "init.lua"),
-                        Dir         = dir,
+                        Id           = Get("id", folderName),
+                        Name         = Get("name", folderName),
+                        Author       = Get("author", "Unknown"),
+                        Description  = Get("description", ""),
+                        Entrypoint   = Get("entrypoint", "init.lua"),
+                        Dependencies = GetStrArray("dependencies"),
+                        Dir          = dir,
                     });
                 }
                 catch
@@ -83,5 +97,27 @@ namespace LaunchFreya
         // from the map is on by default, so newly-added mods light up automatically.
         public static bool IsEnabled(IReadOnlyDictionary<string, bool> states, string id)
             => states == null || !states.TryGetValue(id, out var on) || on;
+
+        // For an ENABLED mod, the declared dependencies that are not satisfied -- a
+        // dep is satisfied only when it is a present mod AND currently enabled. Each
+        // returned string is the dep id with a reason suffix ("foo (disabled)" /
+        // "foo (missing)"). A disabled mod is not active, so it never reports unmet
+        // deps (returns empty). `catalog` is the set of mods currently present.
+        public static List<string> UnmetDependencies(
+            IReadOnlyDictionary<string, bool> states,
+            IEnumerable<ModInfo> catalog,
+            ModInfo mod)
+        {
+            var unmet = new List<string>();
+            if (mod == null || !IsEnabled(states, mod.Id)) return unmet;
+            var known = new HashSet<string>(
+                catalog.Select(m => m.Id), StringComparer.OrdinalIgnoreCase);
+            foreach (var dep in mod.Dependencies)
+            {
+                if (!known.Contains(dep)) unmet.Add(dep + " (missing)");
+                else if (!IsEnabled(states, dep)) unmet.Add(dep + " (disabled)");
+            }
+            return unmet;
+        }
     }
 }

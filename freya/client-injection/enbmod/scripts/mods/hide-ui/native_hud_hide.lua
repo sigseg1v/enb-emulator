@@ -4,7 +4,7 @@
 --
 -- native_hud_hide.lua -- hide the stock in-space stat/XP widgets that the Freya
 -- glass cards replace. Loaded as a mod entrypoint by the mod loader; disabling
--- the "native-hud-hide" mod in the launcher removes this file from the staged
+-- the "hide-ui" mod in the launcher removes this file from the staged
 -- scripts, so nothing here runs and the original bars come back.
 --
 -- The glass cards are translucent, so the native in-space stat bars / xp bars

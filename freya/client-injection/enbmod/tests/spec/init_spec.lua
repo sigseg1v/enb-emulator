@@ -28,7 +28,7 @@ test("persisted calib_data.lua was applied via enb.calibrate", function()
 end)
 
 test("all HUD modules registered their tick callbacks", function()
-    -- xp_overlay (discipline-card) + freya_ui (player-hud) each register a tick
+    -- xp_overlay + freya_ui (both in the freya-hud mod) each register a tick
     ok(#mock.state().ticks >= 2, "tick callbacks registered: " .. #mock.state().ticks)
     local frame = mock.tick()
     ok(#frame > 20, "combined frame draws the full HUD (" .. #frame .. " cmds)")

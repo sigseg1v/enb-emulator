@@ -11,10 +11,10 @@
 -- library can recover them. introspect() walks the module's functions, harvests
 -- their upvalues, and presents them under `.upvalues` so you can drill in:
 --
---   /run introspect("player-hud")                       -- manifest + module + upvalues
---   /run introspect("player-hud").upvalues              -- just the private state
---   /run introspect("player-hud").upvalues.privateMap   -- a specific captured local
---   /run introspect("player-hud").upvalues.privateMap["abc"]
+--   /run introspect("freya-hud")                       -- manifest + module + upvalues
+--   /run introspect("freya-hud").upvalues              -- just the private state
+--   /run introspect("freya-hud").upvalues.privateMap   -- a specific captured local
+--   /run introspect("freya-hud").upvalues.privateMap["abc"]
 --
 -- Limit: a private local only shows up if some RETURNED function closes over it.
 -- State captured solely by callbacks handed to enb.on_tick/on_chat/... lives on

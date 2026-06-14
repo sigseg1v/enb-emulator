@@ -17,11 +17,12 @@ Each mod folder contains a `mod.json` and its Lua files:
 
 ```json
 {
-  "id": "player-hud",
-  "name": "Player HUD",
+  "id": "freya-hud",
+  "name": "Freya HUD",
   "author": "Freya",
   "description": "One-line human description shown in Configure Mods.",
-  "entrypoint": "freya_ui.lua"
+  "entrypoint": "init.lua",
+  "dependencies": ["hide-ui"]
 }
 ```
 
@@ -30,6 +31,13 @@ Each mod folder contains a `mod.json` and its Lua files:
   (no path separators) -- it is used as a directory name and a URL segment.
 - `entrypoint` is the Lua file the loader `dofile`s. Shared library code lives
   in `scripts/lib/` (siblings on `package.path`), NOT under a mod folder.
+- `dependencies` (optional) is an array of other mod `id`s this mod needs
+  enabled to work fully. It is advisory, NOT enforced at load time: the loader
+  still loads a mod whose deps are off, and each mod must tolerate a missing dep
+  (e.g. `freya-hud` renders over the native bars when `hide-ui` is off rather
+  than aborting). The launcher's Configure Mods window reads it and paints a
+  mod's row red ("requires &lt;id&gt; (disabled/missing)") when the mod is
+  enabled but a declared dependency is not. Omit or use `[]` for no deps.
 
 ## 2. Client-side layout: `./mods/<id>/` at the launcher location
 

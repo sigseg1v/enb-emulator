@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Sockets;
@@ -875,6 +876,29 @@ namespace LaunchFreya
                 });
             }
 
+            // Per-row widgets we recolor when dependency state changes.
+            var rowNames = new List<(ModInfo Mod, TextBlock Name, TextBlock Dep)>();
+
+            void RefreshDepStatus()
+            {
+                foreach (var (mod, name, dep) in rowNames)
+                {
+                    var unmet = ModCatalog.UnmetDependencies(_user.ModStates, mods, mod);
+                    if (unmet.Count > 0)
+                    {
+                        name.Foreground = StatusDangerBrush;
+                        dep.Text = "requires " + string.Join(", ", unmet);
+                        dep.Foreground = StatusDangerBrush;
+                        dep.IsVisible = true;
+                    }
+                    else
+                    {
+                        name.Foreground = null;   // inherit the normal theme colour
+                        dep.IsVisible = false;
+                    }
+                }
+            }
+
             foreach (var m in mods)
             {
                 var id = m.Id;
@@ -883,7 +907,13 @@ namespace LaunchFreya
                     IsChecked = ModCatalog.IsEnabled(_user.ModStates, id),
                     VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
                 };
-                cb.IsCheckedChanged += (_, __) => _user.ModStates[id] = cb.IsChecked == true;
+                // Toggling ANY mod can change another mod's dependency status, so
+                // re-evaluate every row after each change, not just this one.
+                cb.IsCheckedChanged += (_, __) =>
+                {
+                    _user.ModStates[id] = cb.IsChecked == true;
+                    RefreshDepStatus();
+                };
 
                 var nameText = new TextBlock
                 {
@@ -898,6 +928,14 @@ namespace LaunchFreya
                     VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
                     Margin = new Avalonia.Thickness(8, 0, 0, 0),
                 };
+                // Red "requires ..." note, shown only when a dependency is unmet.
+                var depText = new TextBlock
+                {
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                    Margin = new Avalonia.Thickness(8, 0, 0, 0),
+                    IsVisible = false,
+                };
+                rowNames.Add((m, nameText, depText));
 
                 var row = new StackPanel
                 {
@@ -908,6 +946,7 @@ namespace LaunchFreya
                 row.Children.Add(cb);
                 row.Children.Add(nameText);
                 row.Children.Add(authorText);
+                row.Children.Add(depText);
 
                 // Wrap so the whole row carries the description tooltip on hover.
                 var rowBorder = new Border
@@ -920,6 +959,8 @@ namespace LaunchFreya
                     ToolTip.SetTip(rowBorder, m.Description);
                 list.Children.Add(rowBorder);
             }
+
+            RefreshDepStatus();   // initial paint reflects the persisted enable states
 
             var scroller = new ScrollViewer
             {

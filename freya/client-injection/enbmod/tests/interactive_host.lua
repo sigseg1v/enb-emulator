@@ -29,8 +29,8 @@ local scripts = here .. "/../scripts"
 package.path = here .. "/?.lua;" ..
                scripts .. "/?.lua;" ..
                scripts .. "/lib/?.lua;" ..
-               scripts .. "/mods/player-hud/?.lua;" ..
-               scripts .. "/mods/discipline-card/?.lua;" .. package.path
+               scripts .. "/mods/freya-hud/?.lua;" ..
+               scripts .. "/mods/hide-ui/?.lua;" .. package.path
 
 local mock = require("mock_enb")
 mock.install{ screen = { 1280, 960 } }   -- match enb-mod-bg.png by default

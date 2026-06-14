@@ -1,7 +1,0 @@
-{
-  "id": "native-hud-hide",
-  "name": "Native HUD Hide",
-  "author": "Freya",
-  "description": "Suppresses the stock in-space stat bars and XP bars by ret-patching their per-frame paint routines, so the translucent Freya glass cards do not show the native widgets through them. Disable this if you want the original bars back, or to verify a load crash.",
-  "entrypoint": "native_hud_hide.lua"
-}
