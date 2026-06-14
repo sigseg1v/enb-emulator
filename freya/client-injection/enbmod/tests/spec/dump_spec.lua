@@ -38,6 +38,13 @@ test("nested tables descend and indent", function()
     assert(s:find("inner = 5"), "expected nested value, got: " .. s)
 end)
 
+test("empty table at the depth boundary prints {} not {...}", function()
+    -- {a={}} dumped at depth=1: the inner empty table sits exactly at the cap.
+    local s = dump({ a = {} }, { depth = 1 })
+    assert(s:find("a = {}"), "expected empty inner as {}, got: " .. s)
+    assert(not s:find("{%.%.%.}"), "empty table must not collapse to {...}: " .. s)
+end)
+
 test("depth limit collapses deeper tables to {...}", function()
     local s = dump({ a = { b = { c = { d = 1 } } } }, { depth = 2 })
     assert(s:find("{%.%.%.}"), "expected depth collapse, got: " .. s)

@@ -35,12 +35,13 @@ local function dump(value, opts)
         local t = type(v)
         if t == "table" then
             if seen[v] then emit("<cycle>"); return end
+            if next(v) == nil then emit("{}"); return end   -- before the depth cap: an
+                                                            -- empty table is "{}", not "{...}"
             if depth >= maxdepth then emit("{...}"); return end
             seen[v] = true
             local keys = {}
             for k in pairs(v) do keys[#keys + 1] = k end
             table.sort(keys, key_lt)
-            if #keys == 0 then emit("{}"); seen[v] = nil; return end
             emit("{\n")
             local pad = string.rep("  ", depth + 1)
             local shown = math.min(#keys, maxkeys)
