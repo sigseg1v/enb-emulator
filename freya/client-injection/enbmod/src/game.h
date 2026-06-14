@@ -111,7 +111,8 @@ namespace player {
 // hooks::vitals_ctrl chain), which reads exactly these keys every frame:
 //   HullPoints / MaxHullPoints      -- hull stored absolute
 //   MaxShieldPower / MaxEnergyPower -- shield/reactor max (current = fill_frac*max)
-//   RPGInfo CombatLevel/TradeLevel/ExploreLevel -- discipline levels
+// The discipline levels (RPGInfo CombatLevel/TradeLevel/ExploreLevel) use this
+// same property-bag mechanism but live on a DIFFERENT object -- see namespace rpg.
 namespace aux {
     // build_key(keybuf, "KeyName"): __thiscall, ECX = keybuf (a zeroed scratch
     // buffer >= keybuf_sz). Interns the key; no owned heap, so no cleanup needed.
@@ -122,6 +123,20 @@ namespace aux {
     constexpr int       val_off   = 0x84;   // entry + 0x84 -> float value
     constexpr int       valid_off = 0x70;   // entry + 0x70 -> nonzero when value is set
     constexpr int       keybuf_sz = 0x40;   // zeroed scratch key-object buffer
+}
+
+// Discipline levels (RPGInfo Combat/Trade/Explore) -- a property bag like aux,
+// but on the RPG manager, not the ship entity, and behind a different-typed
+// getter. The manager is the `this` (ECX) of the level-reader at addr::RpgLevels,
+// captured live by its hook (hooks::rpg_mgr()); it holds the RPGInfo AuxData
+// container at manager + container_off. Entries are resolved with get_entry
+// (__cdecl(container, keybuf), same shape as aux::get_value but a different value
+// type tag), with the int level at entry + aux::val_off and validity at
+// entry + aux::valid_off. Keys are built with aux::build_key. Levels read 0 on a
+// fresh character (correct), so a successful read shows "0", not the "--" skeleton.
+namespace rpg {
+    constexpr int       container_off = 0x12c0;     // manager + this -> RPGInfo AuxData container
+    constexpr uintptr_t get_entry     = 0x00514b60; // __cdecl(container, keybuf) -> entry|0
 }
 
 // Runtime-editable field offsets. -1 means "not calibrated -- reads return nil/0".

@@ -1357,3 +1357,34 @@ format & byte order", Trap 2).
 - **Setup**: `just play-local` with `UseClientMods=true`. Rebuild the DLL first
   (`just build-enbmod`); the Lua objects must be recompiled with the new
   `-include` (a stale `build/lua/ldo.o` would keep the old libc-jmp behaviour).
+
+## CV-AS-RPGLVL -- discipline levels read off the RPG manager (not the ship entity)
+
+- **What was wrong**: the discipline levels (Combat/Trade/Explore) showed "LV --"
+  because they were read with enb.aux_i on the ship vitals entity. They do NOT
+  live there: RPGInfo is a property bag on the RPG MANAGER object, and the level
+  entries use a different value type than the vitals getter -- so the read missed
+  twice over (wrong object, wrong getter type).
+- **Fix**: a new read-only hook on the client's own discipline-level reader
+  (game.h addr::RpgLevels, __fastcall ECX = the RPG manager) captures the manager
+  pointer live (hooks::rpg_mgr()), exactly like the in-space heartbeat captures
+  the vitals controller. enb.rpg_level(key) resolves the RPGInfo AuxData container
+  at manager+0x12c0 and looks the key up through the level getter (0x00514b60,
+  __cdecl(container, keybuf) -- same shape as the vitals getter, confirmed via the
+  funcmap, different value-type tag). freya_hud H.stats() now uses enb.rpg_level.
+- **Calling convention is load-bearing** (same risk class as CV-AS-AUXNUMS): the
+  capture hook is the proven naked-trampoline pattern (pushal / push ecx / call /
+  popal / jmp trampoline); the getter is __cdecl(container, keybuf), value int at
+  entry+0x84, validity at entry+0x70. Reads are readability- and validity-guarded.
+- **Expected behaviour**: on a FRESH character all three levels are 0, so a
+  correct read shows "0" (not the "--" skeleton). They are nil -> "--" only until
+  the client's RPG level-reader has run at least once (manager pointer still 0).
+- **Headless coverage**: none -- the mock has no RPG manager / aux bag.
+- **What to look for (real client)**:
+  - In space (or once the character/RPG panel has updated), the discipline card
+    shows 0/0/0 on a fresh char, and real numbers that climb as you level a
+    discipline -- never the gray "LV --" skeleton once the reader has fired.
+  - No crash on load / zone / open-character-sheet from the new hook or getter.
+    If it crashes, comment the enb.rpg_level use in freya_hud H.stats() lvl() to
+    bisect (vitals + the rest of the HUD are independent of it).
+- **Setup**: `just play-local` with `UseClientMods=true`; `just build-enbmod` first.

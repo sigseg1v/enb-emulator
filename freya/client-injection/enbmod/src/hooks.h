@@ -67,6 +67,11 @@ unsigned long last_inspace_tick();
 // Calibration tooling (autocalib) uses this instead of scanning memory.
 unsigned vitals_ctrl();
 
+// ECX (this) captured from the most recent RPG level-reader call: the RPG manager
+// that holds the RPGInfo AuxData container (discipline levels). 0 until the hook
+// (installed by enable_event_hooks) has fired. lua_api reads levels off this.
+unsigned rpg_mgr();
+
 // Event sinks set by the Lua layer. Args are best-effort raw pointers/values.
 void set_on_skill(std::function<void(unsigned /*this*/, unsigned /*arg*/)> cb);
 void set_on_chat (std::function<void(unsigned /*this*/, unsigned /*arg*/)> cb);
