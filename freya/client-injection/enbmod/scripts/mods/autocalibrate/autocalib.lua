@@ -137,6 +137,70 @@ function M.probe_vitals()
     enb.log("[probe] ===== end vitals probe; copy the +0x.. PERCENT? offsets =====")
 end
 
+-- ---- continuous vitals change-watcher --------------------------------------
+-- A single in-space snapshot can't tell WHICH 0..1 float is the live bar fill
+-- when every bar is full (they all read 1.0 = cur/max with cur==max). This
+-- watcher re-reads the gadget + entity objects every frame and logs any dword
+-- that CHANGES, so the live offset reveals itself the instant a bar moves --
+-- fire weapons / boost (drains energy), or take a hit (shield/hull). Each change
+-- is shown as both float and int, so a flat cur/max integer is caught too if one
+-- exists. Per-offset throttle + a hard log cap keep animation tweens from
+-- spamming the log.
+local W = { last = {}, log_n = {}, log_t = {}, tick = 0 }
+
+local function classify(u, f)
+    if f == f and f > -0.01 and f <= 1.5 then
+        return ("%.4f (frac)"):format(f)
+    elseif f == f and math.abs(f) > 1e-3 and math.abs(f) < 1e9 then
+        return ("%.3f (f) / %d"):format(f, u)
+    else
+        return ("%d (0x%x)"):format(u, u)
+    end
+end
+
+-- watch one object; skip_ptrs drops pointer-looking dwords (entity is full of
+-- them and they churn as the heap moves -- only numeric fields interest us).
+local function watch_obj(name, base, count, skip_ptrs)
+    if not base or base == 0 then return end
+    local lt = W.last[name];  if not lt then lt = {}; W.last[name]  = lt end
+    local ln = W.log_n[name]; if not ln then ln = {}; W.log_n[name] = ln end
+    local lg = W.log_t[name]; if not lg then lg = {}; W.log_t[name] = lg end
+    for i = 0, count - 1 do
+        local a = base + i * 4
+        if not enb.mem.readable(a, 4) then break end
+        local u = enb.mem.u32(a)
+        local rec = lt[i]
+        if rec and rec.u ~= u then
+            local ptrish = (u >= 0x00400000) and enb.mem.readable(u, 4)
+            local under_cap = (ln[i] or 0) < 16
+            local cooled = (lg[i] == nil) or (W.tick - lg[i] > 6)
+            if not (skip_ptrs and ptrish) and under_cap and cooled then
+                local f = enb.mem.f32(a)
+                enb.log(("[watch] %s +0x%03x: %s -> %s"):format(
+                    name, i * 4, classify(rec.u, rec.f), classify(u, f)))
+                ln[i] = (ln[i] or 0) + 1
+                lg[i] = W.tick
+            end
+            lt[i] = { u = u, f = enb.mem.f32(a) }
+        elseif not rec then
+            lt[i] = { u = u, f = enb.mem.f32(a) }
+        end
+    end
+end
+
+function M.watch_vitals()
+    local ctrl = enb.vitals_ctrl and enb.vitals_ctrl() or 0
+    if ctrl == 0 then return end
+    W.tick = W.tick + 1
+    for _, g in ipairs({ { "ENERGY", 0x1c }, { "SHIELD", 0x20 }, { "HULL", 0x24 } }) do
+        local gp = enb.mem.readable(ctrl + g[2], 4) and enb.mem.u32(ctrl + g[2]) or 0
+        watch_obj(g[1], gp, 0x28, false)   -- gadget body ~0xa0 bytes
+    end
+    local data = enb.mem.readable(ctrl + 4, 4) and enb.mem.u32(ctrl + 4) or 0
+    local entity = (data ~= 0 and enb.mem.readable(data + 0x88, 4)) and enb.mem.u32(data + 0x88) or 0
+    watch_obj("ENTITY", entity, 0x60, true)   -- 0x180 bytes, numeric fields only
+end
+
 -- The fields autocalib knows how to persist (mirror of game.h Offsets).
 local FIELDS = {
     "player_ptr_addr",
@@ -177,26 +241,30 @@ function M.save(t)
     return true
 end
 
--- Auto-run the vitals probe ONCE, ~1s after first entering space (gadgets need a
--- few frames to populate). Fully automatic: enter space, read the annotated dump
--- in enbmod.log. Re-run any time by hand with require("autocalib").probe_vitals().
+-- Auto-run the vitals probe ONCE ~1s after first entering space (gadgets need a
+-- few frames to populate), THEN keep the change-watcher running every frame.
+-- Fully automatic: enter space (one-shot [probe] dump), then move a bar -- fire
+-- weapons / boost (drains energy) or take a hit (shield/hull) -- and the live
+-- fill offset shows up in the [watch] lines. Re-run the snapshot by hand with
+-- require("autocalib").probe_vitals().
 do
-    local done = false
+    local probed = false
     local space_ticks = 0
     enb.on_tick(function()
-        if done then return end
-        if enb.inspace and enb.inspace() then
-            space_ticks = space_ticks + 1
-            if space_ticks >= 60 then
-                done = true
-                local ok, err = pcall(M.probe_vitals)
-                if not ok then enb.log("[probe] error: " .. tostring(err)) end
-            end
-        else
-            space_ticks = 0
+        if not (enb.inspace and enb.inspace()) then space_ticks = 0; return end
+        space_ticks = space_ticks + 1
+        if not probed and space_ticks >= 60 then
+            probed = true
+            local ok, err = pcall(M.probe_vitals)
+            if not ok then enb.log("[probe] error: " .. tostring(err)) end
+            enb.log("[watch] armed -- fire weapons / boost / take a hit to move a bar")
+        end
+        if probed then
+            local ok, err = pcall(M.watch_vitals)
+            if not ok then enb.log("[watch] error: " .. tostring(err)) end
         end
     end)
-    enb.log("autocalib: armed -- auto-probe ~1s after entering space")
+    enb.log("autocalib: armed -- auto-probe + change-watch after entering space")
 end
 
 return M
