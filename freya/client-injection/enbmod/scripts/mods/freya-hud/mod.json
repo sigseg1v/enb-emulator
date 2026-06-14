@@ -2,7 +2,7 @@
   "id": "freya-hud",
   "name": "Freya HUD",
   "author": "Freya",
-  "description": "The Freya cockpit HUD: a glass player card (hull / shield / energy) with the 12-slot action hotbar, plus a bottom-left discipline card (combat / trade / explore levels + XP). Visibility-gated on game state -- shown in space, cards-only in station, hidden on login / char-select. Depends on hide-ui to suppress the stock widgets that would otherwise show through the glass.",
+  "description": "Custom UI for player card, action bar, level card.",
   "entrypoint": "init.lua",
   "dependencies": ["hide-ui"]
 }

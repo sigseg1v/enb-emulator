@@ -2,6 +2,6 @@
   "id": "autocalibrate",
   "name": "Auto-Calibrate",
   "author": "Freya",
-  "description": "Scans client memory in-game to locate the player object and its stat field offsets, then writes scripts/calib_data.lua so the HUD can read hull / shield / energy / levels. Run once per client build; the result persists across restarts.",
+  "description": "Scans client memory in-game to locate the player object and its stat field offsets, then writes to the log.",
   "entrypoint": "autocalib.lua"
 }
