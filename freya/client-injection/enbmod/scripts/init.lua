@@ -30,6 +30,11 @@
 
 enb.log("init.lua running")
 
+-- dump(v[,opts]): global value pretty-printer for the "/run" chat console. The
+-- console auto-dumps a returned table, but `dump` is also callable directly
+-- (e.g. `/run dump(enb.self(), {depth=2})`) to inspect any live data structure.
+dump = require("dump")
+
 -- Persisted calibration: autocalibrate writes scripts/calib_data.lua (gitignored,
 -- install-specific). Apply it here so calibration survives restarts/hot-reloads.
 do

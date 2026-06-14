@@ -711,8 +711,48 @@ static void call_ref(lua_State* L, int ref, int nargs){
 // on the game/message-pump thread, the same thread the client prints chat on, so
 // this is safe to call from run_console. Channel 0x13 = local system line.
 typedef void (__stdcall* ChatLocalLineFn)(int channel, const char* msg, int flag);
-static void chat_echo(const std::string& line){
-    ((ChatLocalLineFn)game::addr::ChatLocalLine)(0x13, ("[Lua] " + line).c_str(), 0);
+static void chat_echo(const std::string& text){
+    auto send = [](const std::string& s){
+        ((ChatLocalLineFn)game::addr::ChatLocalLine)(0x13, ("[Lua] " + s).c_str(), 0);
+    };
+    // A dumped table is multi-line; the chat printer is one line per call, so
+    // split on '\n' and cap the burst so a huge structure can't flood the window.
+    const int kMaxLines = 60;
+    size_t start = 0;
+    int lines = 0;
+    while (true) {
+        size_t nl = text.find('\n', start);
+        std::string seg = text.substr(start, nl == std::string::npos ? std::string::npos
+                                                                      : nl - start);
+        if (!seg.empty() && seg.back() == '\r') seg.pop_back();
+        if (++lines > kMaxLines) { send("... (output truncated)"); break; }
+        send(seg);
+        if (nl == std::string::npos) break;
+        start = nl + 1;
+    }
+}
+
+// Convert a result on the Lua stack at `idx` to display text. Tables are run
+// through the global dump() (set in init.lua) so structures are inspectable;
+// strings/numbers print directly; everything else shows its type tag.
+static std::string result_text(lua_State* L, int idx){
+    if (lua_type(L, idx) == LUA_TTABLE) {
+        lua_getglobal(L, "dump");
+        if (lua_isfunction(L, -1)) {
+            lua_pushvalue(L, idx);
+            if (lua_pcall(L, 1, 1, 0) == LUA_OK && lua_isstring(L, -1)) {
+                std::string s = lua_tostring(L, -1);
+                lua_pop(L, 1);
+                return s;
+            }
+            lua_pop(L, 1);          // dump error object or non-string result
+            return "<table> (dump failed)";
+        }
+        lua_pop(L, 1);              // dump not available
+        return "<table>";
+    }
+    if (lua_isstring(L, idx)) return lua_tostring(L, idx);
+    return std::string("<") + luaL_typename(L, idx) + ">";
 }
 
 // Execute one "/run" snippet on the Lua thread. Tries it as an expression first
@@ -741,10 +781,7 @@ static void run_console(lua_State* L, const std::string& code){
     }
     int nres = lua_gettop(L) - base;
     for (int i = 1; i <= nres; i++){
-        int idx = base + i;
-        std::string out = lua_isstring(L, idx)
-            ? lua_tostring(L, idx)
-            : std::string("<") + luaL_typename(L, idx) + ">";
+        std::string out = result_text(L, base + i);
         logf("[run] %s", out.c_str());
         chat_echo(out);
     }
