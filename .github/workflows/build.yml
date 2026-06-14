@@ -63,7 +63,7 @@ jobs:
         run: cmake -S server -B build/server -G Ninja
       - name: Upload CMake logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: cmake-configure-logs-${{ matrix.os }}
           path: |
@@ -104,14 +104,14 @@ jobs:
           wc -l server/WARNINGS.txt
       - name: Upload BUILD_ERRORS.md
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: server-build-errors-${{ matrix.os }}
           path: server/BUILD_ERRORS.md
           if-no-files-found: ignore
       - name: Upload WARNINGS.txt
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: server-warnings-${{ matrix.os }}
           path: server/WARNINGS.txt
@@ -156,7 +156,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Install .NET 10 SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
       - name: Build tool suite
@@ -168,7 +168,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Install .NET 10 SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
       # The CLI unit suite (Core parsers, REPL completion, codecs) is pure
@@ -319,7 +319,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Install .NET 10 SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
       - name: Build CliClient.IntegrationTests
@@ -398,7 +398,7 @@ jobs:
             --results-directory test-results/
       - name: Upload TRX artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: cli-integration-trx-${{ matrix.shard }}
           path: test-results/**/*.trx
@@ -425,7 +425,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Install .NET 10 SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
       - name: Build CliClient.IntegrationTests
