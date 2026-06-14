@@ -2,6 +2,7 @@
 
 #include "PatcherManifest.h"
 
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
@@ -100,13 +101,14 @@ std::string JsonString(const std::string &obj, const char *field)
     return obj.substr(p, end - p);
 }
 
-// Walk the "files":[ ... ] array, yielding each top-level { ... } object as a
-// substring. Brace-depth aware so nested objects (none expected, but safe)
+// Walk a named "<key>":[ ... ] array, yielding each top-level { ... } object as
+// a substring. Brace-depth aware so nested objects (none expected, but safe)
 // don't split early.
-void ForEachFileObject(const std::string &json,
-                       const std::function<void(const std::string &)> &fn)
+void ForEachObjectIn(const std::string &json, const char *key,
+                     const std::function<void(const std::string &)> &fn)
 {
-    size_t arr = json.find("\"files\"");
+    std::string needle = std::string("\"") + key + "\"";
+    size_t arr = json.find(needle);
     if (arr == std::string::npos) return;
     size_t lb = json.find('[', arr);
     if (lb == std::string::npos) return;
@@ -168,7 +170,7 @@ bool PatcherManifest::Load()
         return false;   // Fetch already logged
 
     std::string launcherExe, launcherCfg, proxyExe, posFeedDll, injectExe, enbmodDll;
-    ForEachFileObject(body, [&](const std::string &obj) {
+    ForEachObjectIn(body, "files", [&](const std::string &obj) {
         std::string rel  = JsonString(obj, "relativePath");
         std::string hash = JsonString(obj, "sha512");
         if (rel.empty() || hash.empty()) return;
@@ -178,6 +180,21 @@ bool PatcherManifest::Load()
         else if (rel == kPosFeedDllRel)  posFeedDll = hash;
         else if (rel == kInjectExeRel)   injectExe = hash;
         else if (rel == kEnbmodDllRel)   enbmodDll = hash;
+    });
+
+    // Optional "mods" array of {id, hash}. An id must be a safe single path
+    // segment (it becomes a URL segment and a client directory name); anything
+    // else is dropped rather than trusted. A malformed/absent array just yields
+    // no mods -- the launcher then has nothing to reconcile.
+    std::vector<std::pair<std::string, std::string>> mods;
+    ForEachObjectIn(body, "mods", [&](const std::string &obj) {
+        std::string id   = JsonString(obj, "id");
+        std::string hash = JsonString(obj, "hash");
+        if (id.empty() || hash.empty()) return;
+        for (char c : id)
+            if (!(isalnum((unsigned char)c) || c == '.' || c == '_' || c == '-'))
+                return;   // unsafe id; skip
+        mods.emplace_back(id, hash);
     });
 
     if (launcherExe.empty() || launcherCfg.empty() || proxyExe.empty())
@@ -203,14 +220,15 @@ bool PatcherManifest::Load()
         m_posFeedDll  = posFeedDll;
         m_injectExe   = injectExe;
         m_enbmodDll   = enbmodDll;
+        m_mods        = mods;
         m_dlBase      = dlBase;
         m_loaded      = true;
     }
 
     int total = 3 + (!posFeedDll.empty() ? 1 : 0) + (!injectExe.empty() ? 1 : 0)
                   + (!enbmodDll.empty() ? 1 : 0);
-    LogMessage("PatcherManifest: loaded %d file hashes from %s (dl base '%s')\n",
-               total, url, dlBase.c_str());
+    LogMessage("PatcherManifest: loaded %d file hashes + %zu mod(s) from %s (dl base '%s')\n",
+               total, mods.size(), url, dlBase.c_str());
     return true;
 }
 
@@ -274,6 +292,12 @@ std::string PatcherManifest::EnbmodDllHash() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_enbmodDll;
+}
+
+std::vector<std::pair<std::string, std::string>> PatcherManifest::Mods() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_mods;
 }
 
 std::string PatcherManifest::DlBase() const

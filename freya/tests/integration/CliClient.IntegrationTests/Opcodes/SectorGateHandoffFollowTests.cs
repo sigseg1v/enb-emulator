@@ -4,6 +4,7 @@
 
 using System.Buffers.Binary;
 using N7.CliClient.Auth;
+using N7.CliClient.IntegrationTests.Net;
 using N7.CliClient.Net;
 using N7.CliClient.Opcodes;
 using N7.CliClient.Repl;
@@ -34,10 +35,14 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 ///   StargateDestination; :3965 case 19 -> SectorServerHandoff) emits a 0x003A
 ///   SERVER_HANDOFF. Assert ToSectorID == 1060 (Earth).</item>
 ///   <item>FollowHandoffAsync into 1060 with the SAME avatar id; assert it
-///   lands (non-zero StartId) and that the destination fans out RESOURCE nodes
-///   (Earth space carries 20 type-38 asteroids). Resource presence is the proof
-///   the gate jump reached a mineable sector -- the gate-half of the live mining
-///   round-trip.</item>
+///   lands (non-zero StartId), then FLY (via the proxy's MVAS position feed,
+///   <see cref="ProxyPositionFeed"/> -- the same transport
+///   <see cref="SectorMiningTests"/> proves) from the arrival gate toward the
+///   "Nav High Earth 1 Resource Field" centre and assert RESOURCE nodes fan
+///   out. Roid CREATEs are range-gated against the avatar's live position --
+///   nothing arrives at the gate-entry point -- so the fly-in is required, and
+///   resource presence is the proof the gate jump reached a mineable sector:
+///   the gate-half of the live mining round-trip.</item>
 /// </list>
 ///
 /// <para>
@@ -48,7 +53,8 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// reproduces the client's select-then-confirm sequence; no gating is loosened.
 /// Route confirmed against the live DB: sector_objects(sector_id=1015) gate 533
 /// "Sector Gate to Earth" gate_to=1060; sector_objects(sector_id=1060,type=38)
-/// = 20 resource nodes.
+/// = 20 resource nodes, nearest field to the arrival gate "Nav High Earth 1
+/// Resource Field" (sector_object_id 200137) at (28940, 1080, 1000).
 /// </para>
 /// </summary>
 [Collection(ServerCollection.Name)]
@@ -93,6 +99,9 @@ public sealed class SectorGateHandoffFollowTests : SectorIntegrationTest
 
         EncryptedTcpConnection? lunaConn = null;
         EncryptedTcpConnection? earthConn = null;
+        ProxyPositionFeed? feed = null;
+        CancellationTokenSource? drainCts = null;
+        Task? drain = null;
         try
         {
             // --- 1. Undock: 0x004E Action=1 -> handoff -> re-join Luna space. ---
@@ -101,10 +110,10 @@ public sealed class SectorGateHandoffFollowTests : SectorIntegrationTest
             await session.Sector.SendAsync(
                 Packet.ForOpcode(OpcodeId.Known.StarbaseRequest.Value, launch), cts.Token);
 
-            int toLuna = await DrainToHandoff(session.Sector, cts.Token);
+            var (toLuna, fromLuna) = await DrainToHandoff(session.Sector, cts.Token);
             Assert.Equal(lunaSpaceId, toLuna);
 
-            var luna = await SectorEnterDriver.FollowHandoffAsync(ctx, session.GameId, slot, toLuna, cts.Token);
+            var luna = await SectorEnterDriver.FollowHandoffAsync(ctx, session.GameId, slot, toLuna, fromLuna, cts.Token);
             lunaConn = luna.Sector;
             await session.Sector.DisposeAsync();
             Assert.Equal(lunaSpaceId, luna.SectorId);
@@ -143,11 +152,11 @@ public sealed class SectorGateHandoffFollowTests : SectorIntegrationTest
                 Packet.ForOpcode(OpcodeId.Known.Action.Value,
                     GateCommand.BuildActionFrame(luna.GameId, 19, earthGate.GameId, 0)), cts.Token);
 
-            int toEarth = await DrainToHandoff(luna.Sector, cts.Token);
+            var (toEarth, fromEarth) = await DrainToHandoff(luna.Sector, cts.Token);
             Assert.Equal(earthSpaceId, toEarth);
 
-            // --- 4. Follow the gate handoff into Earth space; assert resources. ---
-            var earth = await SectorEnterDriver.FollowHandoffAsync(ctx, luna.GameId, slot, toEarth, cts.Token);
+            // --- 4. Follow the gate handoff into Earth space; fly to the field. ---
+            var earth = await SectorEnterDriver.FollowHandoffAsync(ctx, luna.GameId, slot, toEarth, fromEarth, cts.Token);
             earthConn = earth.Sector;
             await luna.Sector.DisposeAsync();
             lunaConn = null;
@@ -156,16 +165,81 @@ public sealed class SectorGateHandoffFollowTests : SectorIntegrationTest
 
             var earthWorld = new SectorWorld();
             foreach (var f in earth.HandshakeFrames) earthWorld.Ingest(f);
-            await DrainFanout(earth.Sector, earthWorld, TimeSpan.FromSeconds(6), cts.Token);
+
+            // Background drain of the proxy TCP leg for the fly-in: roid CREATEs
+            // arrive here as 0x0004 (proxy-expanded from the server's compact
+            // 0x2019, create-type 38 == "resource") as the avatar comes in range,
+            // and self-position via 0x0008/0x003E.
+            drainCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+            var earthSector = earth.Sector;
+            drain = Task.Run(async () =>
+            {
+                try
+                {
+                    while (!drainCts.IsCancellationRequested)
+                    {
+                        var p = await earthSector.ReceiveAsync(drainCts.Token);
+                        if (p is null) break;
+                        earthWorld.Ingest(p);
+                    }
+                }
+                catch (OperationCanceledException) { }
+            });
+
+            // Let the initial fanout + self-position settle.
+            await Task.Delay(TimeSpan.FromSeconds(5), cts.Token);
+            var self = earthWorld.SelfSnapshot(earth.GameId).Pos;
+            Assert.True(self is not null,
+                "no own position after the gate re-join; cannot drive the proxy position feed");
+
+            // Fly from the arrival gate toward the nearest resource field.
+            // Roid CREATEs are range-gated against the avatar's live position,
+            // so nothing fans out at the gate-entry point -- we feed positions
+            // through the proxy's MVAS intake (the same transport the in-client
+            // position hook uses; see SectorMiningTests for why NOT a direct
+            // MVAS datagram) until the field's roids appear. The proxy only
+            // re-emits 0x1004 on a CHANGED position, so each tick advances.
+            (float X, float Y, float Z) fieldCentre = (28940f, 1080f, 1000f); // "Nav High Earth 1 Resource Field"
+            feed = new ProxyPositionFeed(_server.SectorHost);
+            (float X, float Y, float Z) cur = self!.Value;
+            _out.WriteLine($"self ({cur.X:0}, {cur.Y:0}, {cur.Z:0}); flying to field " +
+                $"({fieldCentre.X:0}, {fieldCentre.Y:0}, {fieldCentre.Z:0})");
+
+            int resources = 0;
+            for (int i = 0; i < 160 && !cts.IsCancellationRequested; i++)
+            {
+                resources = earthWorld.NearestTo(earth.GameId)
+                    .Count(t => SectorWorld.TypeName(t.Obj) == "resource");
+                if (resources > 0) break;
+
+                float dx = fieldCentre.X - cur.X, dy = fieldCentre.Y - cur.Y, dz = fieldCentre.Z - cur.Z;
+                float dist = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
+                (float X, float Y, float Z) head = dist < 1f ? (1f, 0f, 0f) : (dx / dist, dy / dist, dz / dist);
+                if (dist >= 1f)
+                {
+                    float adv = MathF.Min(1500f, dist);
+                    cur = (cur.X + head.X * adv, cur.Y + head.Y * adv, cur.Z + head.Z * adv);
+                }
+                feed.Send(cur, head, earthSpaceId);
+                await Task.Delay(100, cts.Token);
+            }
 
             var earthObjs = earthWorld.NearestTo(earth.GameId);
-            int resources = earthObjs.Count(t => SectorWorld.TypeName(t.Obj) == "resource");
+            resources = earthObjs.Count(t => SectorWorld.TypeName(t.Obj) == "resource");
             int mobs = earthObjs.Count(t => SectorWorld.TypeName(t.Obj) is "mob spawn" or "mob");
             _out.WriteLine($"earth {earth.SectorId}: {earthObjs.Count} objects ({resources} resources, {mobs} mobs)");
 
             Assert.True(resources > 0,
-                $"gated into sector {earth.SectorId} (START 0x{earth.StartId:X8}) but saw 0 resource nodes; " +
-                $"Earth space carries 20 type-38 asteroids -- the gate jump did not reach the mineable sector.");
+                $"gated into sector {earth.SectorId} (START 0x{earth.StartId:X8}) and flew to the " +
+                $"resource field at ({fieldCentre.X:0}, {fieldCentre.Y:0}, {fieldCentre.Z:0}) but saw " +
+                $"0 resource nodes -- the field did not spawn/send roids on the proxy leg, or the " +
+                $"position feed never moved us into range.");
+
+            // Stop the background drain BEFORE the logoff drain below -- two
+            // concurrent ReceiveAsync calls on one connection would race.
+            drainCts.Cancel();
+            try { await drain; } catch { }
+            drain = null;
 
             // --- clean logoff on the Earth connection. ---
             try
@@ -180,14 +254,20 @@ public sealed class SectorGateHandoffFollowTests : SectorIntegrationTest
         }
         finally
         {
+            if (drainCts is not null) { try { drainCts.Cancel(); } catch { } }
+            if (drain is not null) { try { await drain; } catch { } }
+            feed?.Dispose();
+            drainCts?.Dispose();
             if (earthConn is not null) { try { await earthConn.DisposeAsync(); } catch { } }
             if (lunaConn is not null) { try { await lunaConn.DisposeAsync(); } catch { } }
         }
     }
 
     /// <summary>Drain the sector connection until a 0x003A SERVER_HANDOFF and
-    /// return its ToSectorID (offset 20, big-endian).</summary>
-    private static async Task<int> DrainToHandoff(EncryptedTcpConnection conn, CancellationToken ct)
+    /// return its ToSectorID (offset 20, BE) and FromSectorID (offset 24, BE).
+    /// FromSectorID is echoed back in the re-join MasterJoin so the destination
+    /// sector spawns the avatar at the gate linking back to where we came from.</summary>
+    private static async Task<(int To, int From)> DrainToHandoff(EncryptedTcpConnection conn, CancellationToken ct)
     {
         for (int seen = 0; seen < 600; seen++)
         {
@@ -195,9 +275,10 @@ public sealed class SectorGateHandoffFollowTests : SectorIntegrationTest
             Assert.NotNull(reply);
             if (reply!.Header.Opcode == OpcodeId.Known.ServerHandoff.Value)
             {
-                Assert.True(reply.Payload.Length >= 24,
-                    $"0x003A payload {reply.Payload.Length}B < 24B; cannot read ToSectorID");
-                return BinaryPrimitives.ReadInt32BigEndian(reply.Payload.Span.Slice(20, 4));
+                Assert.True(reply.Payload.Length >= 28,
+                    $"0x003A payload {reply.Payload.Length}B < 28B; cannot read To/FromSectorID");
+                return (BinaryPrimitives.ReadInt32BigEndian(reply.Payload.Span.Slice(20, 4)),
+                        BinaryPrimitives.ReadInt32BigEndian(reply.Payload.Span.Slice(24, 4)));
             }
         }
         throw new Xunit.Sdk.XunitException("no 0x003A SERVER_HANDOFF within 600 frames");

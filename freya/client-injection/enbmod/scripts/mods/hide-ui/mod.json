@@ -1,0 +1,7 @@
+{
+  "id": "hide-ui",
+  "name": "Hide Native UI",
+  "author": "Freya",
+  "description": "Suppresses the stock in-space HUD elements so that they can be customized via other mods instead.",
+  "entrypoint": "native_hud_hide.lua"
+}

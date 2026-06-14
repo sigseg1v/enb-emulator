@@ -1,0 +1,8 @@
+{
+  "id": "freya-hud",
+  "name": "Freya HUD",
+  "author": "Freya",
+  "description": "Custom UI for player card, action bar, level card.",
+  "entrypoint": "init.lua",
+  "dependencies": ["hide-ui"]
+}

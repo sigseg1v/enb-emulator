@@ -18,11 +18,46 @@ enbmod/
     dllmain.cpp       DllMain -> worker thread: Lua init, script load, hot-reload
   inject/inject.cpp   CreateRemoteThread/LoadLibraryA injector
   scripts/
-    init.lua          loaded on startup, hot-reloaded on change
-    calib.lua         runtime helpers to FIND the offsets (dump/scan/watch)
+    init.lua          bootstrap: applies calib_data, runs the mod loader
+    lib/              shared libraries (require'd by short name)
+      modloader.lua   discovers + runs the mods staged under mods/
+      json.lua        tiny JSON decoder (parses mod.json)
+      freya_hud.lua   shared HUD toolkit (palette, glass panels, text)
+      calib.lua       runtime helpers to FIND the offsets (dump/scan/watch)
+    mods/             one folder per mod, each with a mod.json manifest
+      freya-hud/      PlayerCard + hotbar + DiscCard   (init.lua -> freya_ui.lua + xp_overlay.lua)
+                      depends on hide-ui
+      hide-ui/        ret-patch the stock stat/xp bars (native_hud_hide.lua)
+      autocalibrate/  find offsets, write calib_data.lua (autocalib.lua)
   third_party/lua     Lua 5.4.7 (static)
   third_party/minhook MinHook (static)
 ```
+
+### Mods, mod.json, and the loader
+Each mod is a folder under `scripts/mods/<id>/` with a `mod.json` manifest:
+
+```json
+{ "id": "freya-hud", "name": "Freya HUD", "author": "Freya",
+  "description": "...", "entrypoint": "init.lua",
+  "dependencies": ["hide-ui"] }
+```
+
+`init.lua` requires `lib/modloader.lua`, which lists `scripts/mods/` (via the C++
+`enb.list_dir`), parses each `mod.json` (via `lib/json.lua`), and `dofile`s each
+mod's `entrypoint`. Discovery only ever sees the mods that are physically present,
+so **disabling a mod = not staging its folder** -- it is never discovered, loaded,
+or injected. The Freya launcher's **"Configure Mods..."** window (enabled when
+"Enable Lua Mods" is checked) writes the per-mod enable state; the launcher stages
+only the enabled mod folders next to the client and prunes any disabled folder left
+from a prior launch. A mod's `entrypoint` and `lib/` are on `package.path`, so mods
+`require("freya_hud")` etc. by short name.
+
+A mod may declare a `"dependencies"` array of other mod ids it needs enabled. The
+loader does **not** enforce these at runtime (a mod must tolerate a missing dep --
+e.g. `freya-hud` still draws if `hide-ui` is off, it just renders over the native
+bars); they drive the launcher's Configure Mods window, which paints a mod's row red
+("requires &lt;id&gt; (disabled/missing)") when it is enabled but a dependency is
+not. `freya-hud` depends on `hide-ui` for exactly this reason.
 
 ## Build
 
@@ -70,8 +105,8 @@ wine build/inject.exe --pid 1234
 `enbmod.dll` and the `scripts/` folder must sit together (the DLL resolves `scripts/init.lua`
 relative to its own location). On success you'll get `enbmod.log` next to the DLL.
 
-Alternative loaders (see `../LUA-MODDING-DESIGN.md §2`): `ddraw.dll` proxy (also puts you in the
-render path for overlays) with `WINEDLLOVERRIDES=ddraw=n,b`; or piggyback the Net-7 launcher.
+Alternative loaders (see `../LUA-MODDING-DESIGN.md §2`): a `d3d8.dll` proxy (the game's actual
+render API) with `WINEDLLOVERRIDES=d3d8=n,b`; or piggyback the Net-7 launcher.
 **Do not** proxy `authlogin.dll` -- Net-7 already patches it.
 
 ## The Lua API
@@ -88,14 +123,23 @@ render path for overlays) with `WINEDLLOVERRIDES=ddraw=n,b`; or piggyback the Ne
 | `enb.mem.write_u32/write_f32(a,v)` | bool (false if not writable) |
 | `enb.calibrate{ … }` | set offsets at runtime (hot-reloadable) |
 | `enb.offsets()` | current offsets table |
-| `enb.self()` | `{ base, hull, shield, energy, combat_lvl, x,y,z, … }`; uncalibrated fields absent, `base==0` if no `player_ptr_addr` |
+| `enb.self()` | `{ base, name, hull, shield, energy, combat_lvl, x,y,z, … }`; uncalibrated fields absent, `base==0` if no `player_ptr_addr` |
 | `enb.target()` | `{ base, name, distance, … }` or `nil` |
+| `enb.state()` | game-state name: `"space"`/`"station"`/`"login"`/`"charsel"`/`"load"`/`"unknown"` (calibration-driven; `"unknown"` until `game_state_addr` is set → HUD shows) |
+| `enb.cursor(on)` | draw our procedural mouse arrow ON TOP of the overlay (the native cursor renders under the HUD); `on=false` stops it |
+| `enb.patch_ret(addr[,pop])` | overwrite a function entry with `ret` to suppress a native draw routine. `pop` = callee stack-cleanup bytes (`0`→`0xC3`, `N`→`0xC2 imm16`). DANGEROUS: real-client-verified `(addr,pop)` only |
 | `enb.on_tick(fn)` | fn runs every pump iteration (game thread) |
 | `enb.on_skill(fn)` / `enb.on_chat(fn)` | event-hook callbacks (need `enable_event_hooks`) |
 | `enb.enable_event_hooks()` | install the game-fn hooks (off by default) |
+| `enb.screen()` | `w, h` of the real backbuffer (`0,0` until the first present) |
+| `enb.measure(s)` | `w, h` of `s` in the overlay font (`0,0` until the atlas is built) |
+| `enb.on_input(fn[,mask])` | `fn(msg,wparam,lparam)` from the PeekMessageA hook; **return truthy to SWALLOW** (msg → `WM_NULL`). Fail-open on Lua error. `mask` = `enb.WANT_KEY\|WANT_CHAR\|WANT_MOUSE` (default all). `enb.msg.*` = raw `WM_*` ids |
 | `enb.draw.text(x,y,s[,rgb])` | overlay text (rebuilt each tick) |
-| `enb.draw.rect(x,y,w,h[,rgb[,filled]])` | overlay rectangle |
-| `enb.draw.line(x0,y0,x1,y1[,rgb])` | overlay line |
+| `enb.draw.rect(x,y,w,h[,rgb[,filled[,alpha]]])` | overlay rectangle |
+| `enb.draw.line(x0,y0,x1,y1[,rgb[,alpha]])` | overlay line |
+| `enb.draw.rect_grad(x,y,w,h,rgbTop,rgbBot[,alpha])` | vertical-gradient filled rect (per-vertex color) |
+| `enb.draw.rrect(x,y,w,h,radius[,rgb[,alpha[,filled]]])` | rounded rectangle (triangle-fan corners) |
+| `enb.draw.rrect_grad(x,y,w,h,radius,rgbTop,rgbBot[,alpha])` | rounded gradient rect |
 | `enb.draw.image(path,x,y[,w,h[,alpha]])` | blit PNG/TGA/BMP/JPG (stb_image, cached, alpha-blended) |
 | `enb.tap(vk)` / `enb.key(vk[,down])` | post key to game window (fires bound abilities) |
 | `enb.char(cp)` | post WM_CHAR |
@@ -104,13 +148,61 @@ render path for overlays) with `WINEDLLOVERRIDES=ddraw=n,b`; or piggyback the Ne
 | `enb.call_cdecl(addr,…)` | call a free fn (cdecl/stdcall), returns EAX |
 
 ### Overlay
-Grabs the `IDirectDrawSurface` vtable from a throwaway surface, hooks **Flip** (vtable index 11)
-with MinHook, and draws a per-frame display list onto the surface's GDI DC before present. The
-list is immediate-mode: Lua rebuilds it every `on_tick` (the tick swaps staging→render under a
-lock so the Flip thread always sees a complete frame). Images load via `stb_image` and blit with
-`AlphaBlend` (premultiplied). **Unverified in-game** -- windowed-mode present often uses `Blt`
-(vtable 5) instead of `Flip`; if nothing draws, also hook `Blt`. Wine's ddraw vtable layout is
-the standard one, so index 11 should hold.
+client.exe renders through **Direct3D 8** (`client.exe` imports `d3d8.dll`; an earlier
+DirectDraw Flip/Blt hook never fired in a full session). The overlay resolves the
+`IDirect3DDevice8` vtable from a throwaway probe device, hooks **Present** (vtable index 15)
+with MinHook, and in the hook draws a per-frame display list using the *game's* device:
+state-blocked `XYZRHW` quads (`DrawPrimitiveUP`) for rects/lines/images and a GDI-baked
+font-atlas texture (Tahoma, ASCII 32..126) for text. Device state is snapshotted/restored
+around the draw via `CreateStateBlock(D3DSBT_ALL)`. The list is immediate-mode: Lua rebuilds it
+every `on_tick` (the tick swaps staging→render under a lock so the Present thread always sees a
+complete frame). Images load via `stb_image` into pow2 `D3DPOOL_MANAGED` textures (managed
+resources survive a device `Reset`, so no Reset hook is needed); all GPU caches rebuild if the
+device pointer ever changes. The one-shot `overlay: Present hook FIRED` log line in
+`enbmod.log` confirms the hook is live in-game.
+
+### UI overhaul -- the Freya cockpit-glass HUD (Phase AS)
+A replacement HUD that ports the `Earth & Beyond HUD.html` design. The visible HUD is one mod,
+**`freya-hud`** (`mods/freya-hud/`, entrypoint `init.lua`), whose two draw components share
+`lib/freya_hud.lua` (palette, the `H.glass()` panel = gradient body + gloss + hairline border +
+cyan corner ticks, outlined text, and visibility gating):
+
+- **`freya_ui.lua`** -- the **PlayerCard** (name + LV header, three vitals as a track +
+  vertical-gradient fill with cur/max printed inside + percent) and a **glass hotbar** of twelve
+  rounded slots (`1 2 3 4 5 6 7 8 9 0 - =`, VKs `0x31..0x39,0x30,0xBD,0xBB`): a click taps the
+  matching key (`enb.tap`) and a physical keypress lights the slot (key messages observed but
+  **not** swallowed -- the game still needs the bind). Mouse over the cards is swallowed to
+  `WM_NULL`.
+- **`xp_overlay.lua`** -- the bottom-left **DiscCard**: three rows (C/E/T colored letter + xp bar +
+  "LV n" badge), fed by `enb.self()` (gray skeleton until calibrated).
+
+`init.lua` requires `xp_overlay` then `freya_ui` so the DiscCard draws under the PlayerCard.
+
+All shapes are procedural `rrect_grad`/`rrect`/`line` -- **no binary assets** (repo rule). Geometry
+derives from `enb.screen()` (bottom-anchored at any resolution).
+
+**Visibility** is gated on `enb.state()` via `freya_hud.vis()`: **space** = cards + hotbar,
+**station** = cards only (hotbar hidden, owner ask), **login/charsel/load** = nothing. `enb.cursor()`
+draws our pointer on top of it all. Both need real-client calibration/confirmation
+(CV-AS-STATE / CV-AS-CURSOR in `plans/29`).
+
+**Hiding the native widgets we replace** is the separate **`hide-ui`** mod (AS-6), declared as a
+**dependency** of `freya-hud`: the glass is translucent, so the native stat/xp/skill widgets bleed
+through. `enb.patch_ret(addr[,pop])` neuters a widget's per-frame PAINT routine with an early `ret`.
+The mod is **enabled by default**
+(owner-directed 2026-06-13) and patches the two pinned paint targets: `enb.addr.VitalsPaint`
+(0x005dcae0) and `enb.addr.XpPaint` (0x0058cf60) -- both `void __fastcall`, pop 0, pure paint (they
+only check each gadget's visible flag and call the paint primitive), so an early ret hides them
+without touching state. The `*Bars`/`EnergyBar`/`SkillButton` entries are the constructors/updater
+and are NEVER patched. The skill buttons have no standalone pure-paint entry, so they still need a
+runtime per-gadget visible-flag write instead of a static patch (left off). **Caveat:** this is on
+ahead of real-client confirmation -- the addresses are pinned by behavioural analysis but "does an
+early ret break gameplay" is only provable on the real client (CV-AS-HIDE-VITALS/-XP). If the
+client crashes on load, **disable the `hide-ui` mod** in the launcher's Configure Mods window
+(freya-hud's row then turns red to show its dependency is unmet, but it still runs).
+
+**Fail-open is load-bearing:** `on_input` runs Lua via `lua_pcall`, and any error returns *false*
+(do not swallow), so a script bug can never wedge the user's keyboard/mouse.
 
 ### Actions
 `enb.tap/key/char` post Win32 messages to the game window (found by enumerating this process's
@@ -132,6 +224,45 @@ returns to the original caller. We observe `this` and the first argument; we nev
 (An earlier `__fastcall(ecx,edx)` re-call dropped the stack args and fed the game garbage -- that was
 verified broken and replaced.)
 
+## Testing the mods headless -- `make test`
+
+`tests/` is a headless test suite for the Lua mods: the scripts under `scripts/` run unmodified
+against **`tests/mock_enb.lua`**, a pure-Lua mock of the C++ `enb` host API, on a *native* Linux
+build of the vendored Lua (built automatically into `build/tests/`). No client, no WINE, no D3D8.
+This is how mods get debugged and verified programmatically -- including visually:
+
+- **Specs** (`tests/spec/*_spec.lua`) assert layout geometry, calibrated/uncalibrated rendering,
+  click->tap->flash, key lighting, and the swallow contract. `tests/spec/mock_contract_spec.lua`
+  pins the mock's mirror of the C++ semantics (msg_class/mask filtering from `hooks.cpp`,
+  run_input fail-open from `lua_api.cpp`) so mock/DLL drift breaks the suite loudly.
+- **Screenshots**: `tests/spec/screenshots_spec.lua` dumps representative full-HUD frames, and
+  `tests/render_frame.py` (Pillow) rasterizes them to `build/tests/shots/*.png` approximating
+  `overlay.cpp`'s draw semantics (vertical gradients, rounded corners, alpha over a dark
+  backdrop) -- so the UI can be *looked at* without launching the game.
+
+**Want to PLAY with it?** From the repo root run **`just mock-ui`**: it opens an interactive
+in-browser previewer. The real `scripts/*.lua` run inside a native Lua host
+(`tests/interactive_host.lua`), a Python stdlib server (`tests/preview_server.py`) bridges a browser
+`<canvas>` to them, and the **actual game screen** (`tests/enb-mod-bg.png`, 1280x960) is the
+background so HUD positioning can be checked against the real client view. Mouse move/click and
+keyboard events drive the scripts' `on_input`/`on_tick` handlers live -- click an action-bar button
+or press `1`-`9`/`0`/`-`/`=` to fire its keybind; the corner HUD shows mouse coords, the swallow
+state, and the live tap count. Toggle calibrated stats, the background, and the resolution from the
+top-right controls. `PORT=N` changes the port; `NO_OPEN=1` skips auto-opening the browser; Ctrl-C
+stops the server.
+
+The background is `tests/enb-mod-bg.png`, a 1280x960 game-client screenshot, so the HUD is
+positioned against the real view. Swap in your own screenshot at that path to check a different
+scene; without any file there the previewer falls back to a dark backdrop.
+
+**Just want a quick snapshot?** **`just mock-ui-shots`** runs the suite and stitches the four
+scenarios into a labeled 2x2 contact sheet (`build/tests/shots/_contact.png`), opened in your image
+viewer -- a static visual-diff for a script tweak. `NO_OPEN=1` writes the files without opening.
+
+Caveats, honestly: the mock's text metric is the scripts' own 7px/char fallback (the real Tahoma
+atlas is variable-width), and the Python rasterizer is an approximation of the D3D8 path, not the
+D3D8 path. The suite verifies *logic and layout*; the in-game CV pass still owns final pixel truth.
+
 ## Calibration -- the part you finish at runtime
 
 `enb.self()`/`enb.target()` read from the **`Offsets`** table in `game.h`. Every field defaults to
@@ -139,15 +270,16 @@ verified broken and replaced.)
 is deliberate: the static map gives stable function addresses and AuxData *keys*, not C++ field
 layouts. You supply the offsets:
 
-1. Run the game. Use `scripts/calib.lua` from `init.lua`:
+1. Run the game with the **`autocalibrate`** mod enabled. It uses `lib/calib.lua`:
    - `calib.find_ptr_to_value(currentHull, hullOffsetGuess)` -- scan `.data` for the pointer that
      leads to your ship object.
    - `calib.dump(base, 64)` -- hex-dump the object; eyeball which `+0x..` holds hull/shield/energy
      (look for the float/int that matches the HUD).
    - `calib.watch(addr,"hull")` + `calib.pump_watches()` -- confirm a field by watching it change.
    (A memory scanner/debugger works too; same goal -- find `player_ptr_addr` and the field offsets.)
-2. Put the numbers in `enb.calibrate{ player_ptr_addr=…, hull=…, shield=…, … }` in `init.lua`.
-3. Save -- hot-reload applies it without restarting the game.
+2. The mod's `autocalib.save{ player_ptr_addr=…, hull=…, shield=…, … }` calls `enb.calibrate`
+   live AND writes `scripts/calib_data.lua` (gitignored, install-specific).
+3. `init.lua` applies `calib_data.lua` on every startup/hot-reload, so calibration persists.
 
 The cleaner long-term path (see `INJECTION-MAP.md §1`) is to resolve the generic **`AuxData::Get`**
 accessor and read every stat by key instead of by raw offset. That replaces the offsets table
@@ -177,8 +309,9 @@ game process** by design -- it's what makes modding possible. Consequences:
 - **Hot-reload callback leak.** Each reload re-ran init.lua without releasing the previous run's
   `on_tick` refs, so handlers (and their work) accumulated every save. `reset_callbacks()` now
   unrefs them first.
-- **Overlay HDC leak.** `load_image`'s DIBSection-failure path leaked a memory DC every frame and
-  never cached the failure; now it releases the DC and caches the negative result.
+- **Overlay hooked the wrong API (never drew).** The original overlay hooked
+  `IDirectDrawSurface::Flip`/`Blt`, but the game presents through Direct3D 8 -- a full session
+  log showed the hooks installed and never firing. Rewritten as the D3D8 Present hook above.
 - **Unsafe unload.** `DllMain(DETACH)` ran `MH_Uninitialize` even on process termination (under the
   loader lock, with other threads dead) -- now it only unhooks on a real `FreeLibrary`.
 - **String reads.** `mem::cstr/wstr` did a `VirtualQuery` *per byte* and read outside the VEH guard;
@@ -191,13 +324,14 @@ game, and any struct offset (all calibration is yours).
 
 **Real / working (verified):** build, injection, Lua VM, per-frame tick, hot-reload,
 VEH-guarded crash-safe memory primitives (verified under Wine), the full `enb.*` surface, the
-offsets/calibration plumbing, opt-in event hooks, the DirectDraw Flip-hook overlay (text/rect/
-line/image via stb_image+AlphaBlend), input-synthesis actions, and the `__thiscall` call thunk
-(verified correct + stack-stable under Wine).
+offsets/calibration plumbing, opt-in event hooks, the D3D8 Present-hook overlay (text/rect/
+line/image via stb_image + textured quads), input-synthesis actions, and the `__thiscall` call
+thunk (verified correct + stack-stable under Wine).
 
 **Pending / needs runtime work:**
 - All struct offsets (`Offsets`) are placeholders -- `enb.self()` is empty until you calibrate.
 - Event-hook arg layouts are unknown; only `this` is trustworthy today.
-- **Overlay is code-complete but unverified in-game** -- may need the `Blt` hook for windowed mode.
+- **Overlay (D3D8 rewrite) is code-complete but unverified in-game** -- watch `enbmod.log` for
+  the one-shot `overlay: Present hook FIRED` line on first launch.
 - **Direct ability-call args are unrecovered** -- the call *mechanism* works; you supply verified
   `this`/args per target. Input-synthesis (`enb.tap`) is the works-today trigger path.

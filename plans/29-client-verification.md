@@ -1124,3 +1124,209 @@ format & byte order", Trap 2).
   solo (not grouped).
 - **Setup**: `just play-cli` (or `play-local`) with at least two characters in
   the same sector, grouped via `group invite <player>` + `group accept`.
+
+### [ ] CV-23 -- Long-idle session can still zone (reliable-UDP resend protocol fix)
+
+- **Change**: server + proxy, the 0x2016/0x2017 reliable-stream recovery path
+  (proxy<->server control band; the client never sees these opcodes, but a
+  failed recovery strands the client on the sector load screen). Server
+  `Player::ReSendOpcodes` (server/src/PlayerConnection.cpp) previously parsed
+  the 0x2017 request with SIGNED SHORT reads, so any request for a sequence
+  number above 32767 (a few hours of play) went negative, matched nothing, and
+  -- because the no-match path sent NO reply -- the proxy waited forever. Fixed
+  to parse the canonical 8-byte `ReSendRequest {int32 packet_start, int32
+  packet_count}` (now in common/include/net7/PacketStructures.h, with
+  legacy 16-byte LP64-proxy tolerance), honour the count, and answer EVERY
+  requested sequence: the cached datagram when the resend ring still holds it,
+  a header-only blank when evicted. Ring deepened RESEND_ELEMENTS 20 -> 64
+  (zone-out bursts evicted entries before the NACK arrived). Proxy side:
+  emits the shared 8-byte struct (its old private `{long;long}` was 16 bytes
+  on LP64 builds), guards header-only blank fills in the reassembly drain
+  (previously a heap overread), prunes the reassembly map (previously grew
+  unbounded all session), and -- the load-bearing half -- retries
+  timer-driven via SO_RCVTIMEO + `PumpPacketResend` every ~300ms, because the
+  old retry only ran on ARRIVAL of further datagrams and the post-handoff
+  0x003A burst is the FINAL traffic on a zone-out, so one lost tail packet
+  could never recover.
+- **CLI byte-pin**: `ResendPacketSequenceCodecTests` in
+  `freya/cli-client/tests/CliClient.UnitTests/Opcodes/` pins the 8-byte
+  encode, both decode forms, and the >32767 sequence case; codec is
+  `CliClient.Core/Opcodes/Outbound/ResendPacketSequenceCodec.cs`.
+- **What to look for (real client)**: the long-session zone-out. Stay logged
+  in for several hours (idle in a sector is fine -- sequence numbers accrue
+  past 32768), then gate or undock. Previously this was the "stuck on load
+  screen after sitting a while" hang (also reported on the online deploy);
+  now the zone must complete. Also do a burst of rapid back-to-back gate
+  jumps on a fresh session -- no load-screen stall. Watch the proxy log for
+  "re-request ... (timer)" lines recovering lost packets and "blank fill for
+  evicted packet" lines unsticking evicted ones.
+- **Setup**: `just play-local` (rebuilt server + proxy images and a freshly
+  built bin/FreyaProxy.exe -- both sides must be the new binaries, since the
+  wire struct width and the blank-reply contract changed together). The
+  online deploy needs the same rebuild before the friend's hang is fixed.
+
+### [ ] CV-24 -- Repeated zone in ONE session does not hang (CV-23 resend pump scoped to post-login)
+
+- **Change**: proxy only, a correctness fix to the CV-23 reliable-stream work
+  (regression repair, not new wire behaviour). CV-23 added the timer-driven
+  `PumpPacketResend` (SO_RCVTIMEO + ~300ms pump) so a lost tail of the
+  post-handoff 0x003A burst could recover when no further datagrams arrive. But
+  the pump ran unconditionally, so during the NEXT sector login on the same
+  single-client proxy it could build a bulk resend NACK from the PREVIOUS
+  session's leftover reassembly residue (a late datagram landing in the new
+  window before its seq-0 reset). The server then flooded header-only blank
+  fills that raced `m_CurrentPacketNum` past the new login's real stage packets,
+  which then dropped as "already processed" -- so the SECOND sector login in one
+  session hung on the load screen forever. Fix: gate `PumpPacketResend` on
+  `m_LoginComplete` (false from sector LOGIN 0x0002 until START_ACK 0x0006, i.e.
+  exactly the handshake window) so the timer pump is dormant during any login
+  and only runs in the established post-login steady state it was built for; the
+  arrival-driven recovery in `SendPacketSequence` still runs during login,
+  matching pre-CV-23 behaviour. Companion fix: reset `m_UDPClient`'s
+  `m_LoginComplete` at sector LOGIN in lockstep with `m_UDPConnection` /
+  `m_UDPGlobalClient` (it was the odd plane out -- set true at START but never
+  reset, leaving its pump gate stuck open across a re-join).
+  `proxy/UDPProxyToClient_linux.cpp` (the gate), `proxy/ClientToServer_linux_stubs.cpp`
+  (the reset).
+- **CLI byte-pin**: no new packet format -- the gate changes WHEN an existing
+  packet is emitted, not its bytes. Pinned behaviourally by the
+  `*HandoffFollow` integration tests, which each do a second full sector login
+  (follow re-join) on one proxy: `SectorUndockHandoffFollowTests`,
+  `SectorGateHandoffFollowTests`, and `SectorMvasMoveTests` (its follow leg).
+  All three pass on a fresh stack; before the fix the follow login hung.
+- **What to look for (real client)**: in ONE session (no relog), zone twice or
+  more -- e.g. undock, then gate, then gate again. Each subsequent zone must
+  complete; previously the second could stick on the load screen. The CV-23
+  long-idle and rapid-burst checks still apply.
+- **Setup**: `just play-local` (rebuilt proxy image + freshly built
+  bin/FreyaProxy.exe -- this is a proxy-only change, but both the docker proxy
+  and the WINE-side FreyaProxy.exe must be the new binary).
+
+### [ ] CV-AS-STATE -- Freya HUD shows ONLY in space/station, never on login/charsel/load
+
+- **Change**: client-only (enbmod.dll, Freya/MIT -- no server/proxy wire
+  change). The HUD is visibility-gated on `enb.state()`, which now has TWO
+  sources (lua_api.cpp `l_state`):
+  1. the calibration-driven game-state int (`game_state_addr` + `state_space/
+     station/login/charsel/load` in game.h) -- the full state set, but currently
+     UNCALIBRATED (`game_state_addr == 0`), so it names nothing yet;
+  2. a NEW zero-calibration **in-space heartbeat** -- a read-only hook on the
+     per-frame in-space vitals VALUE updater (`game.h::addr::EnergyBar`
+     0x005dc4a0, installed via `enb.enable_inspace()` from init.lua). That
+     updater repaints every frame in space and not at all on the front-end / in
+     station, so a fresh call stamp positively means "space". It can ONLY
+     distinguish space-vs-not-space, so it upgrades "unknown" -> "space" and
+     never names station/login/charsel.
+  Net effect today: `enb.state()` = "space" when in space, "unknown" everywhere
+  else. `freya_hud.vis()` maps space -> cards+hotbar, station -> cards only
+  (owner ask), login/charsel/load -> nothing, unknown -> full HUD (so dev /
+  pre-calibration still renders). init.lua also logs every `enb.state()` /
+  `enb.inspace()` transition (one line per change) to enbmod.log to DISCOVER the
+  real transitions the game fires.
+- **Headless coverage**: `freya_ui_spec.lua` + `xp_overlay_spec.lua` pin the
+  gating against the mock (station drops the hotbar; login/charsel/load draw an
+  empty frame and pass input through). The EnergyBar hook is UNVERIFIABLE
+  headless (like `patch_ret`): the mock fakes `enb.inspace()` off mock state. The
+  real hook firing per-frame in space, and being silent everywhere else, is
+  exactly this entry.
+- **What to look for (real client)**: enbmod.log shows `inspace heartbeat -> true`
+  and `state: unknown -> space` ONLY after entering space (not at login/charsel/
+  load, not docked). In space, the full HUD appears (player + discipline cards +
+  hotbar). On the front-end and docked, the heartbeat stays false. Walk
+  login -> charsel -> load -> space -> dock and read the transition log to
+  confirm the heartbeat tracks space entry/exit and to capture what other
+  observable states the game exposes (for later calibrating `game_state_addr`).
+- **Setup**: `just play-local` with `UseClientMods=true`; walk login -> charsel
+  -> load -> space -> dock and tail enbmod.log.
+
+### [ ] CV-AS-CURSOR -- Our mouse pointer draws ON TOP of the HUD, not under it
+
+- **Change**: client-only (enbmod.dll). `enb.cursor(on)` (lua_api.cpp
+  `l_cursor` -> overlay.cpp `set_cursor`/`draw_cursor`) draws a procedural arrow
+  (no binary asset) after the display list, inside the D3D8 Present hook, mapping
+  the screen cursor to client coords via GetCursorPos+ScreenToClient. freya_ui
+  toggles it with HUD visibility (on in space/station, off when hidden).
+- **Headless coverage**: `freya_ui_spec.lua` "cursor follows visibility" pins
+  the on/off toggle against the mock; it CANNOT prove the real draw order /
+  client-coord mapping.
+- **What to look for (real client)**: in space, the pointer renders above the
+  glass cards/hotbar (never hidden behind a panel), tracks the real cursor 1:1,
+  and disappears on the login/charsel/load screens.
+- **Setup**: `just play-local` with `UseClientMods=true`; move the mouse over
+  the player card and hotbar -- the arrow stays visible on top.
+
+### [ ] CV-AS-HIDE-VITALS / CV-AS-HIDE-XP / CV-AS-HIDE-SKILL -- native widgets suppressed cleanly behind the glass
+
+- **Change**: client-only (enbmod.dll). The glass cards are translucent, so the
+  native in-space stat bars / xp bars / skill buttons bleed through. `enb.patch_ret(addr [,pop])`
+  (lua_api.cpp `l_patch_ret`) overwrites a function entry with a `ret` (0xC3, or
+  0xC2 imm16 for callee-cleanup) to suppress the routine that draws each.
+  **Turned ON by default (owner-directed 2026-06-13)** for the two pinned paint
+  targets -- init.lua runs `enb.patch_ret(VitalsPaint)` + `enb.patch_ret(XpPaint)`
+  at startup. This is ON ahead of confirmation: "an early ret hides the widget
+  without breaking gameplay" is only provable against the real client, so this CV
+  stays open and is the load-bearing check. If the client crashes on load,
+  comment the two patch_ret lines in init.lua.
+- **Addresses pinned by behavioural analysis (2026-06-13).** The hide targets
+  are each widget's per-frame PAINT routine, NOT the constructor/updater. A
+  painter is a small `void __fastcall(ECX)` that, per child bar, checks the
+  gadget visible flag and calls the gadget paint primitive, then returns -- it
+  touches no game state, so pop=0 (`0xC3`) and an early ret is clean:
+  - **VITALS paint** = `enb.addr.VitalsPaint` 0x005dcae0 (paints hull/shield/
+    reactor gadgets at controller +0x1c/+0x20/+0x24).
+  - **XP paint** = `enb.addr.XpPaint` 0x0058cf60 (paints combat/trade/explore).
+  The earlier candidates were WRONG and unsafe: VitalsBars 0x005dbfc0 and
+  XpBars 0x0058c450 are CONSTRUCTORS; EnergyBar 0x005dc4a0 is the value-updater;
+  SkillButton 0x00662dc0 is the skill CONSTRUCTOR. Ret-patching any of those
+  leaves uninitialised pointers / frozen state and crashes -- do not.
+- **Headless coverage**: the mock records `enb.patch_ret` calls but cannot
+  execute the patch; correctness is entirely this entry.
+- **What to look for (real client), PER widget** -- both are ON at startup, so
+  this is a confirm-or-revert check, not an enable step:
+  - **VITALS** (`VitalsPaint` patched): the native reactor/shield/hull bars are
+    gone; the player card's bars remain; flight, targeting, and stat updates
+    still work; no crash on load, zone, or undock.
+  - **XP** (`XpPaint` patched): the native combat/trade/explore xp bars are gone;
+    the discipline card remains; leveling/xp still functions.
+  - **SKILL**: no clean ret-patch exists -- the skill gadget's render is fused
+    with state mutation, so there is no standalone pure-paint entry. Hiding it
+    needs a runtime per-gadget visible-flag write (clear the byte at gadget+0x60
+    on the skill gadget once its live pointer is known), not a static patch. This
+    sub-id stays open pending that runtime path; the constructor 0x00662dc0 must
+    NOT be ret-patched.
+- **Setup**: `just play-local` with `UseClientMods=true`. The vitals+xp hides
+  apply automatically at startup. If the client crashes on load, comment the two
+  `patch_ret` lines in init.lua and re-launch to bisect.
+
+### [ ] CV-AS-AUXNUMS -- HUD shows correct numeric cur/max vitals + discipline levels (AuxData getter)
+
+- **Change**: client-only (enbmod.dll). New `enb.aux(key)` / `enb.aux_i(key)`
+  (lua_api.cpp) call the client's own property-bag getter to read the numeric
+  vitals + levels, which live in a string-keyed bag on the player ship entity,
+  NOT at flat struct offsets. `H.stats()` (freya_hud.lua) feeds the player card:
+  hull `HullPoints`/`MaxHullPoints` (absolute); shield/reactor max
+  `MaxShieldPower`/`MaxEnergyPower` with current = max * live gadget fill
+  fraction; levels `RPGInfo CombatLevel`/`TradeLevel`/`ExploreLevel`.
+- **Calling convention is load-bearing** (got this class of bug before with the
+  `/run` ChatLocalLine crash): build_key `0x004ad380` is `__thiscall` (ECX = a
+  zeroed >=0x40-byte key buffer); get_value `0x00546710` is `__cdecl(entity,
+  keybuf)`; value float/int at entry+0x84, validity flag at entry+0x70. Reads are
+  guarded (entity + entry readability checked, NaN-guarded) but the getter itself
+  is real game code, so a wrong convention would corrupt the stack and crash.
+  Called from on_tick = the game message-pump thread = the same thread the game's
+  own vitals updater runs the identical getter on, so it is single-threaded
+  against the game's aux access (no concurrent-mutation race).
+- **Headless coverage**: none -- the mock has no aux property bag; correctness is
+  entirely this entry. The CLI cannot validate it.
+- **What to look for (real client)**:
+  - In space, each bar prints "cur / max" inside it, and the maxes match the
+    character sheet (owner's were hull 11, shield 45, reactor 142). Hull current
+    tracks damage; shield/reactor current = max * the bar's fill.
+  - The discipline card shows the real Combat/Trade/Explore levels (not the gray
+    skeleton) and they update on level-up.
+  - No crash on load / zone / undock / dock from the aux calls. If it crashes,
+    the convention or an offset is wrong -- comment the `enb.aux*` use in
+    freya_hud.lua `H.stats()` to bisect (the rest of the HUD is independent).
+  - Overall level + xp% still show "LV --" (not yet pinned) -- that is expected,
+    not a regression.
+- **Setup**: `just play-local` with `UseClientMods=true`.

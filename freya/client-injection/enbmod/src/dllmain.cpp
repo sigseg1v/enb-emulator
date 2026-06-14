@@ -95,11 +95,23 @@ DWORD WINAPI worker(LPVOID) {
     if (!g_L) { enb::logf("luaL_newstate failed"); return 1; }
     enb::lua::open(g_L);
 
-    // make package paths point at our scripts dir so require() works
+    // Expose the staged scripts dir and put it + its lib/ on package.path so
+    // require() resolves both top-level scripts and shared libs (lib/freya_hud,
+    // lib/modloader, lib/json, ...). The mod loader appends each mod's own dir.
     {
-        std::string lp = "package.path = [[" + g_mod_dir + "\\scripts\\?.lua]] .. ';' .. package.path";
+        std::string scripts = g_mod_dir + "\\scripts";
+        std::string lp =
+            "enb.script_dir = [[" + scripts + "]]\n"
+            "package.path = [[" + scripts + "\\?.lua]] .. ';' .. "
+                          "[[" + scripts + "\\lib\\?.lua]] .. ';' .. package.path";
         if (luaL_dostring(g_L, lp.c_str()) != LUA_OK) lua_pop(g_L,1);
     }
+
+    // Initialize MinHook BEFORE running init.lua: a script may install a game
+    // hook at load time (enb.enable_inspace / enb.enable_event_hooks), and
+    // MH_CreateHook fails with NOT_INITIALIZED until this runs. hooks::init()
+    // below re-calls it idempotently.
+    if (!enb::hooks::mh_init()) enb::logf("hooks::mh_init failed -- game hooks unavailable");
 
     run_init_script();
 

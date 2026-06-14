@@ -12,7 +12,7 @@ jobs:
     name: lint-plans
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Plans directory + master status table exist
         run: |
           set -euo pipefail
@@ -24,7 +24,7 @@ jobs:
     name: check-no-mojibake (license-header guard)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: No U+FFFD replacement chars in tracked source
         run: bash tools/check_no_mojibake.sh
 
@@ -32,7 +32,7 @@ jobs:
     name: sql-injection-audit (parameterised-query gate)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: No dynamic SQL string-building in server-native code
         # Phase N drove the server-native sprintf/strcat-SQL surface to
         # zero; every DB call goes through the wrapper's parameterised
@@ -50,7 +50,7 @@ jobs:
       matrix:
         os: [ubuntu-24.04, ubuntu-22.04]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install build deps
         run: |
           sudo apt-get update
@@ -63,7 +63,7 @@ jobs:
         run: cmake -S server -B build/server -G Ninja
       - name: Upload CMake logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cmake-configure-logs-${{ matrix.os }}
           path: |
@@ -81,7 +81,7 @@ jobs:
       matrix:
         os: [ubuntu-24.04, ubuntu-22.04]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install build deps
         run: |
           sudo apt-get update
@@ -104,14 +104,14 @@ jobs:
           wc -l server/WARNINGS.txt
       - name: Upload BUILD_ERRORS.md
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: server-build-errors-${{ matrix.os }}
           path: server/BUILD_ERRORS.md
           if-no-files-found: ignore
       - name: Upload WARNINGS.txt
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: server-warnings-${{ matrix.os }}
           path: server/WARNINGS.txt
@@ -135,7 +135,7 @@ jobs:
           --health-timeout=3s
           --health-retries=10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install psql
         run: |
           sudo apt-get update
@@ -154,9 +154,9 @@ jobs:
     runs-on: ubuntu-24.04
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install .NET 10 SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
       - name: Build tool suite
@@ -166,9 +166,9 @@ jobs:
     name: cli-unit-test (freya/cli-client)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install .NET 10 SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
       # The CLI unit suite (Core parsers, REPL completion, codecs) is pure
@@ -198,7 +198,7 @@ jobs:
           --health-timeout=3s
           --health-retries=10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install build deps
         run: |
           sudo apt-get update
@@ -217,7 +217,7 @@ jobs:
     name: installer-shellcheck
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install shellcheck
         run: |
           sudo apt-get update
@@ -230,7 +230,7 @@ jobs:
     runs-on: ubuntu-24.04
     needs: ctest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install build deps
         run: |
           sudo apt-get update
@@ -302,24 +302,24 @@ jobs:
   # new test can never silently fall outside CI.
   #
   # SHARD COUNT lives in two places that MUST agree: the matrix list
-  # `shard: [1, 2, 3]` and `SHARDS: "3"`. Bump both to rebalance.
+  # `shard: [1, 2, 3, 4]` and `SHARDS: "4"`. Bump both to rebalance.
   cli-integration-test:
-    name: cli-integration-test (shard ${{ matrix.shard }}/3)
+    name: cli-integration-test (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-24.04
-    # One shard runs ~1/3 of the suite (~8 min) + stack bring-up (~3 min)
-    # + the proxy-recycle self-heal. 25 min covers a shard with margin;
-    # the un-sharded job needed 45 and still timed out.
+    # One shard runs ~1/4 of the suite (~6 min) + stack bring-up (~3 min)
+    # + the periodic proactive proxy recycle. 25 min covers a shard with
+    # ample margin; the un-sharded job needed 45 and still timed out.
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
     env:
-      SHARDS: "3"
+      SHARDS: "4"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install .NET 10 SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
       - name: Build CliClient.IntegrationTests
@@ -380,7 +380,7 @@ jobs:
           cmake -S freya/tests/server -B build/tests -G Ninja
           cmake --build build/tests --target handshake_live_test replay_test -j"$(nproc)"
           ctest --test-dir build/tests --output-on-failure -R 'Replay\.LivePostHandshakeReplay'
-      - name: Run integration suite (shard ${{ matrix.shard }}/3)
+      - name: Run integration suite (shard ${{ matrix.shard }}/4)
         env:
           # ServerFixture owns the lifecycle when we DON'T pass this.
           # We brought the stack up explicitly above so we DO set it --
@@ -398,7 +398,7 @@ jobs:
             --results-directory test-results/
       - name: Upload TRX artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cli-integration-trx-${{ matrix.shard }}
           path: test-results/**/*.trx
@@ -423,9 +423,9 @@ jobs:
     name: cli-integration-coverage (shard partition guard)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install .NET 10 SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
       - name: Build CliClient.IntegrationTests
@@ -438,4 +438,4 @@ jobs:
           dotnet test freya/tests/integration/CliClient.IntegrationTests/CliClient.IntegrationTests.csproj \
             --no-build --list-tests > /tmp/alltests.txt
           python3 tools/ci/integration_shard_filter.py \
-            --list-file /tmp/alltests.txt --shards 3 --check
+            --list-file /tmp/alltests.txt --shards 4 --check

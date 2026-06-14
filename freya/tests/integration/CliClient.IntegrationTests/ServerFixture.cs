@@ -43,21 +43,43 @@ public sealed class ServerFixture : IAsyncLifetime
     // endpoints the CliClient.Core types connect to from the test
     // process — which lives on the docker host, not inside the
     // compose network.
-    public string LoginHost  { get; } = "127.0.0.1";
-    public int    LoginPort  { get; } = 4443;   // host-side remap of 443
-    public string GlobalHost { get; } = "127.0.0.1";
-    public int    GlobalPort { get; } = 3805;   // proxy GLOBAL_SERVER_PORT
-    public string MasterHost { get; } = "127.0.0.1";
-    public int    MasterPort { get; } = 3801;   // proxy MASTER_SERVER_PORT
-    public string SectorHost { get; } = "127.0.0.1";
-    public int    SectorPort { get; } = 3500;   // proxy SECTOR_SERVER_PORT
-    public int    PostgresPort  { get; } = 5434;   // host-side remap of 5432
+    // Each port resolves from an env var first (so an isolated stack on
+    // remapped host ports can be targeted for local repro without disturbing a
+    // running default stack), then the docker-compose.yml default. CI sets none
+    // of these, so it keeps the exact published-port defaults.
+    private static int Port(string env, int dflt) =>
+        int.TryParse(Environment.GetEnvironmentVariable(env), out var p) ? p : dflt;
+    // Host defaults to 127.0.0.1; a local repro stack can bind a distinct
+    // loopback IP (e.g. 127.0.0.2) on the SAME default ports, so the
+    // server-emitted redirect port (always 3500) still matches SectorPort
+    // while avoiding a collision with a default stack on 127.0.0.1.
+    private static string Host(string env) =>
+        Environment.GetEnvironmentVariable(env) is { Length: > 0 } h ? h : "127.0.0.1";
+
+    public string LoginHost  { get; } = Host("CLI_INTEGRATION_LOGIN_HOST");
+    public int    LoginPort  { get; } = Port("CLI_INTEGRATION_LOGIN_PORT", 4443);   // host-side remap of 443
+    public string GlobalHost { get; } = Host("CLI_INTEGRATION_GLOBAL_HOST");
+    public int    GlobalPort { get; } = Port("CLI_INTEGRATION_GLOBAL_PORT", 3805);  // proxy GLOBAL_SERVER_PORT
+    public string MasterHost { get; } = Host("CLI_INTEGRATION_MASTER_HOST");
+    public int    MasterPort { get; } = Port("CLI_INTEGRATION_MASTER_PORT", 3801);  // proxy MASTER_SERVER_PORT
+    public string SectorHost { get; } = Host("CLI_INTEGRATION_SECTOR_HOST");
+    public int    SectorPort { get; } = Port("CLI_INTEGRATION_SECTOR_PORT", 3500);  // proxy SECTOR_SERVER_PORT
+
+    // Host-side remap of postgres 5432. docker-compose.yml publishes
+    // "${ENB_PG_HOST_PORT:-5434}:5432" and the justfile derives a PER-BRANCH
+    // ENB_PG_HOST_PORT (5500 + cksum(branch) % 400) so worktree stacks don't
+    // collide -- a hardcoded 5434 only matches a bare `docker compose up` or
+    // the main branch. Resolve the same way compose does: the env var first,
+    // then the bare-compose default.
+    public int PostgresPort { get; } =
+        int.TryParse(Environment.GetEnvironmentVariable("ENB_PG_HOST_PORT"), out var p) ? p : 5434;
 
     /// <summary>
     /// Connection string for the net7_user database (accounts +
     /// avatars). Reachable from the test process because docker-compose
-    /// publishes 5434:5432. Used by <see cref="TestAccounts.New"/> to
-    /// provision per-test accounts on demand.
+    /// publishes <c>${ENB_PG_HOST_PORT:-5434}:5432</c>. Used by
+    /// <see cref="TestAccounts.New"/> to provision per-test accounts on
+    /// demand.
     /// </summary>
     public string PostgresConnectionString { get; }
 
@@ -83,11 +105,55 @@ public sealed class ServerFixture : IAsyncLifetime
     private static readonly TimeSpan ProxyRestartDedupWindow =
         TimeSpan.FromSeconds(12);
 
+    // Proactive (vs. reactive) wedge avoidance. The reactive recycle above
+    // only fires once a handshake has ALREADY stalled, and only the ESTABLISH
+    // path detects that stall and recovers -- a post-establish operation (a
+    // handoff follow, a chat-reply wait) that hits the wedge has no in-line
+    // recovery and instead hangs to its full per-test cancellation deadline
+    // (the shard-3 CI timeouts: Mvas_DirectPositionFeed 150s, the chat reply
+    // 90s). Recycling every N establishes REDUCES how often the wedge tips by
+    // bounding the accumulated per-session proxy state. Every establish/
+    // reestablish funnels through SectorHandshake.WithProxyRecycleOnWedgeAsync,
+    // which calls MaybeProactiveRecycleAsync below before its first attempt.
+    //
+    // IMPORTANT -- cadence alone does NOT eliminate the wedge. The earlier
+    // model here ("the wedge needs ~40 logins to tip; every-6 keeps a margin
+    // below 40, so it never tips during a test") was empirically FALSIFIED by
+    // CI run 27475072828 (2026-06-13): with every-6 actively firing
+    // (chat tests are ~8s apart, well outside the 12s recycle dedup window, so
+    // the recycles really happened), SlashReplaceshipMissingArg still wedged
+    // its in-band chat-reply drain ~24 establishes after a fresh recycle, with
+    // NO framing-desync logged on a clean-looking proxy. The tip is
+    // non-deterministic, not a fixed login count -- so no recycle cadence can
+    // guarantee the wedge never tips mid-test. The post-establish drain
+    // failure that slips through cadence is now caught by [RetryFact] (see
+    // RetryFact.cs), which recycles the proxy and re-runs the whole test on a
+    // transient (cancellation/socket) failure -- but NEVER on an assertion
+    // failure, so real wire regressions still hard-fail. Cadence-6 is kept as
+    // the first line of defence (fewer wedges -> fewer retries); RetryFact is
+    // the safety net for the tail. (Underlying proxy never-reset-global defect
+    // is still tracked in plans/11-phase-k-ingame.md; both layers are
+    // test-infra mitigation, not a server/wire change.)
+    private int _establishesSinceRecycle;
+    private const int ProactiveRecycleEveryEstablishes = 6;
+
+    /// <summary>
+    /// The single live fixture for the run. The collection fixture
+    /// (<see cref="ServerCollection"/>) guarantees exactly one instance, so a
+    /// static handle is safe and lets the <c>RetryFact</c> test-case runner
+    /// reach <see cref="RestartProxyAsync"/> between attempts without DI
+    /// plumbing -- the runner sits in the xUnit framework layer, below the
+    /// constructor-injection boundary, so it cannot receive the fixture the
+    /// normal way. Set in the ctor, cleared in <see cref="DisposeAsync"/>.
+    /// </summary>
+    public static ServerFixture? Current { get; private set; }
+
     public ServerFixture()
     {
         PostgresConnectionString =
             $"Host={LoginHost};Port={PostgresPort};Username=net7;Password=net7;" +
             "Database=net7_user;Pooling=true;MaxPoolSize=20";
+        Current = this;
     }
 
     public async Task InitializeAsync()
@@ -189,13 +255,41 @@ public sealed class ServerFixture : IAsyncLifetime
     /// compose CLI and the running stack, both present in CI.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// Called once per establish/reestablish (from
+    /// <c>SectorHandshake.WithProxyRecycleOnWedgeAsync</c>) BEFORE the
+    /// handshake runs. Every <see cref="ProactiveRecycleEveryEstablishes"/>th
+    /// call recycles the proxy so accumulated per-session proxy state never
+    /// reaches the single-client wedge threshold -- see the
+    /// <see cref="_establishesSinceRecycle"/> note. The recycle resets the
+    /// counter (in <see cref="RestartProxyAsync"/>), so this is a sliding
+    /// window, not a one-shot.
+    /// </summary>
+    public async Task MaybeProactiveRecycleAsync(CancellationToken ct = default)
+    {
+        if (Interlocked.Increment(ref _establishesSinceRecycle)
+            < ProactiveRecycleEveryEstablishes)
+            return;
+
+        Console.Error.WriteLine(
+            "[ServerFixture] proactively recycling the proxy after " +
+            $"{ProactiveRecycleEveryEstablishes} establishes to stay under the " +
+            "single-client session-accumulation wedge threshold.");
+        await RestartProxyAsync(ct);
+    }
+
     public async Task RestartProxyAsync(CancellationToken ct = default)
     {
         await _proxyRestartLock.WaitAsync(ct);
         try
         {
             if (DateTime.UtcNow - _lastProxyRestartUtc < ProxyRestartDedupWindow)
+            {
+                // A recent recycle already freshened the proxy; the
+                // accumulation window restarts from here too.
+                Interlocked.Exchange(ref _establishesSinceRecycle, 0);
                 return;
+            }
 
             Console.Error.WriteLine(
                 "[ServerFixture] recycling the proxy container to clear the " +
@@ -213,6 +307,8 @@ public sealed class ServerFixture : IAsyncLifetime
             await WaitForProxyBootCompleteAsync(TimeSpan.FromSeconds(30), ct);
 
             _lastProxyRestartUtc = DateTime.UtcNow;
+            // Fresh proxy: the accumulation window starts over.
+            Interlocked.Exchange(ref _establishesSinceRecycle, 0);
         }
         finally
         {
@@ -279,6 +375,7 @@ public sealed class ServerFixture : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
+        Current = null;
         if (_ownsCompose)
         {
             // -v wipes the named volumes (pgdata, net7-ipc). Faster

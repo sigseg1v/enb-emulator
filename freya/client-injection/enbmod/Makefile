@@ -47,9 +47,9 @@ DLL_CXXFLAGS := -O2 -std=c++17 -fno-strict-aliasing -Wall -Wextra -Wno-unused-pa
                -I$(LUA_DIR) -I$(MH_DIR)/include -I$(TP) -DUNICODE -D_UNICODE
 DLL_LDFLAGS  := -shared -static -static-libgcc -static-libstdc++ \
                -Wl,--kill-at -Wl,--enable-stdcall-fixup
-# ddraw: overlay Flip hook + DirectDrawCreate. msimg32: AlphaBlend for image blitting.
-DLL_LIBS := $(LUA_LIB) $(MH_LIB) -lkernel32 -luser32 -lgdi32 -lole32 -loleaut32 -lpsapi \
-            -lddraw -lmsimg32
+# d3d8 is loaded at runtime (GetModuleHandle/GetProcAddress in overlay.cpp), not linked.
+# gdi32: font-atlas bake (CreateDIBSection/TextOutA).
+DLL_LIBS := $(LUA_LIB) $(MH_LIB) -lkernel32 -luser32 -lgdi32 -lole32 -loleaut32 -lpsapi
 
 # ---- inject.exe -------------------------------------------------------------
 INJ     := $(BUILD)/inject.exe
@@ -57,7 +57,7 @@ INJ_SRC := inject/inject.cpp
 INJ_CXXFLAGS := -O2 -std=c++17 -Wall
 INJ_LDFLAGS  := -static -static-libgcc -static-libstdc++ -lkernel32 -lpsapi
 
-.PHONY: all clean dirs
+.PHONY: all clean dirs test
 all: dirs $(DLL) $(INJ)
 	@echo "==> built $(DLL) and $(INJ)"
 
@@ -86,3 +86,9 @@ $(INJ): $(INJ_SRC)
 
 clean:
 	rm -rf $(BUILD)
+
+# Headless Lua mod tests: scripts run against tests/mock_enb.lua on a NATIVE
+# Lua build (no client, no WINE); screenshot scenarios render to
+# build/tests/shots/*.png for visual verification.
+test:
+	tests/run_tests.sh

@@ -213,6 +213,26 @@ bool UDPClient::OpenFixedPort(short port, long ip_addr)
         return false;
     }
 
+    // Bound recv wait so RecvThread can run PumpPacketResend even when the
+    // server has gone quiet. Without this the reliable-stream retry only
+    // ever ran on ARRIVAL of further datagrams -- and after a sector
+    // handoff the 0x003A burst is the final traffic, so a lost tail packet
+    // stalled the client on the load screen forever.
+#ifdef _WIN32
+    DWORD recv_timeout = 250; // milliseconds
+#else
+    struct timeval recv_timeout;
+    recv_timeout.tv_sec  = 0;
+    recv_timeout.tv_usec = 250 * 1000;
+#endif
+    if (::setsockopt(m_Listen_Socket, SOL_SOCKET, SO_RCVTIMEO,
+                     (const char *) &recv_timeout, sizeof(recv_timeout)) < 0)
+    {
+        // Non-fatal: recovery degrades to the arrival-driven path only.
+        LogMessage("UDPClient: setsockopt(SO_RCVTIMEO) failed: %s\n",
+                   strerror(errno));
+    }
+
     // Resolve the game server's IP. Falls back to the ip_addr ctor arg
     // if NET7_GAME_SERVER_HOST is unset and the default 'server' name
     // doesn't resolve (e.g. running outside docker).
@@ -383,10 +403,14 @@ void UDPClient::RecvThread()
                                           MAX_UDPC_BUFFER, src_addr, src_port);
         if (received <= 0)
         {
-            // recv() returned -1 (with errno set by SIGINT / EINTR /
-            // close()) or 0 (shouldn't happen on UDP). Bail if the
-            // socket has been closed under us.
+            // recv() returned -1 (SO_RCVTIMEO expiry, SIGINT / EINTR, or
+            // close()) or 0 (shouldn't happen on UDP). Bail if the socket
+            // has been closed under us; otherwise give the reliable-stream
+            // recovery a chance to retry an outstanding hole -- the pump is
+            // self-gated (active connection, pending hole, >=300ms since
+            // the last NACK), so calling it on every quiet pass is cheap.
             if (m_Listen_Socket == INVALID_SOCKET) break;
+            PumpPacketResend();
             continue;
         }
 

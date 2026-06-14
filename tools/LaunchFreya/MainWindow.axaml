@@ -91,8 +91,16 @@
 
     <!-- Row 3: Options -->
     <Border Grid.Row="3" Classes="panel" Margin="0,8,0,0">
-      <CheckBox Name="c_CheckBox_LuaMods" Content="Enable Lua Mods (experimental)"
-                ToolTip.Tip="Inject the enbmod Lua runtime into the client so Lua scripts can add client-side UI mods. Experimental and unverified -- off by default." />
+      <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+        <CheckBox Name="c_CheckBox_LuaMods" Content="Enable Lua Mods (experimental)"
+                  VerticalAlignment="Center"
+                  ToolTip.Tip="Inject the enbmod Lua runtime into the client so Lua scripts can add client-side UI mods. Experimental and unverified -- off by default." />
+        <!-- Enabled only while Lua Mods is checked; opens the per-mod config popup. -->
+        <Button Name="c_Button_ConfigureMods" Content="Configure Mods..."
+                IsEnabled="{Binding #c_CheckBox_LuaMods.IsChecked}"
+                Click="OnConfigureModsClick"
+                ToolTip.Tip="Turn individual Lua mods on or off. Disabled mods are not staged or loaded." />
+      </StackPanel>
     </Border>
 
     <!-- Row 4: Status line + (Phase AN) indeterminate update/download spinner -->

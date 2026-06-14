@@ -9,4 +9,9 @@
   <ItemGroup>
     <InternalsVisibleTo Include="CliClient.UnitTests" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Westwood RSA/RC4 handshake crypto, kept in its own (non-freya) assembly
+         for clean licensing separation. See proxy/WestwoodCrypto/. -->
+    <ProjectReference Include="..\..\..\..\proxy\WestwoodCrypto\WestwoodCrypto.csproj" />
+  </ItemGroup>
 </Project>

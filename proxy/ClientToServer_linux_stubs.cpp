@@ -477,6 +477,12 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
         g_ServerMgr->m_UDPConnection->SetConnectionActive(true);
         g_ServerMgr->m_UDPClient->SetConnectionActive(true);
         g_ServerMgr->m_UDPConnection->SetLoginComplete(false);
+        // m_UDPClient was the odd plane out: its m_LoginComplete was set true
+        // at START (0x0005) but never reset here at the next sector LOGIN, so
+        // the timer pump's m_LoginComplete gate would stay open through the
+        // re-join handshake. Reset it in lockstep with m_UDPConnection and
+        // m_UDPGlobalClient so every plane's pump is dormant during login.
+        g_ServerMgr->m_UDPClient->SetLoginComplete(false);
         // Phase K: the server's MVASauth (3806) sends in-game UDP (0x2016
         // PACKET_SEQUENCE wrapping 0x2020 LOGIN_STAGE_S_C, position fan-out,
         // etc.) to the proxy's *global plane* source port (m_Player_Port is

@@ -47,7 +47,12 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 [Collection(ServerCollection.Name)]
 public sealed class SectorMvasMoveTests : SectorIntegrationTest
 {
-    private const int MvasPort = 3806; // MVAS_LOGIN_PORT (common/include/net7/Ports.h)
+    // MVAS_LOGIN_PORT (common/include/net7/Ports.h). Override via
+    // CLI_INTEGRATION_MVAS_PORT for a port-remapped stack (same pattern
+    // ServerFixture uses for LOGIN/GLOBAL/MASTER/SECTOR).
+    private static readonly int MvasPort =
+        int.TryParse(Environment.GetEnvironmentVariable("CLI_INTEGRATION_MVAS_PORT"), out var p)
+            ? p : 3806;
 
     private readonly ITestOutputHelper _out;
 
@@ -86,6 +91,7 @@ public sealed class SectorMvasMoveTests : SectorIntegrationTest
                 Packet.ForOpcode(OpcodeId.Known.StarbaseRequest.Value, launch), cts.Token);
 
             int toSectorId = -1;
+            int fromSectorId = -1;
             for (int seen = 0; seen < 400; seen++)
             {
                 var reply = await session.Sector.ReceiveAsync(cts.Token);
@@ -93,6 +99,8 @@ public sealed class SectorMvasMoveTests : SectorIntegrationTest
                 {
                     toSectorId = System.Buffers.Binary.BinaryPrimitives
                         .ReadInt32BigEndian(reply.Payload.Span.Slice(20, 4));
+                    fromSectorId = System.Buffers.Binary.BinaryPrimitives
+                        .ReadInt32BigEndian(reply.Payload.Span.Slice(24, 4));
                     break;
                 }
             }
@@ -107,7 +115,7 @@ public sealed class SectorMvasMoveTests : SectorIntegrationTest
                 Username = account.Username,
             };
             var rejoin = await SectorEnterDriver.FollowHandoffAsync(
-                ctx, session.GameId, slot, toSectorId, cts.Token);
+                ctx, session.GameId, slot, toSectorId, fromSectorId, cts.Token);
             spaceConn = rejoin.Sector;
             await session.Sector.DisposeAsync(); // station conn finished
             Assert.Equal(expectedSpaceSectorId, rejoin.SectorId);

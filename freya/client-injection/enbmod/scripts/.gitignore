@@ -1,0 +1,3 @@
+# Install-specific calibration written by autocalib.lua (offsets differ per
+# client build / patch). Never committed -- each user generates their own.
+calib_data.lua

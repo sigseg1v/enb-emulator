@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading;
@@ -30,6 +33,9 @@ namespace LaunchFreya.Update
         public const string EnbmodRelativePath = "bin/enbmod.dll";
         public const string StagingDirName = "updates";
         public const string BackupSuffix = ".old";
+        // The persistent mod store + per-mod version marker. See MOD-STRUCTURE.md.
+        public const string ModsDirName = "mods";
+        public const string ModHashFileName = "modhash";
 
         readonly HttpClient _http;
         readonly string _baseDir;
@@ -188,6 +194,122 @@ namespace LaunchFreya.Update
                 SelfReplaced = true;
                 progress($"Updated {self.file.RelativePath}");
             }
+        }
+
+        // Reconcile OUR enbmod Lua mods against the server's published set. For
+        // each {id, hash, url} the launcher compares the hash to the local
+        // <baseDir>/mods/<id>/modhash and, on a mismatch (or a missing marker),
+        // downloads the zip and REPLACES the folder: wipe it, extract, then write
+        // modhash LAST so the marker exists only when the extract fully succeeded
+        // (a partial extract never reads as "up to date" next time).
+        //
+        // This is best-effort and per-mod isolated: one mod's download/extract
+        // failure is logged and skipped, never aborting the others, and never
+        // throwing -- a mod problem must not block Play or the binary update path.
+        // After updating, prune store folders for mods we no longer publish (a
+        // renamed/removed mod): a folder that carries a modhash marker but is
+        // absent from the response is one of ours that went away. An id with NO
+        // marker is the user's own mod and is never touched -- the safety
+        // guarantee (see MOD-STRUCTURE.md).
+        //
+        // Returns the number of mods actually updated.
+        public async Task<int> ReconcileModsAsync(UpdateCheckResponse resp,
+            Action<string> progress = null, CancellationToken ct = default)
+        {
+            progress ??= _log;
+            if (resp?.Mods == null || resp.Mods.Count == 0) return 0;
+
+            string store = Path.Combine(_baseDir, ModsDirName);
+            string staging = Path.Combine(_baseDir, StagingDirName);
+            int updated = 0;
+
+            foreach (var mod in resp.Mods)
+            {
+                if (mod == null) continue;
+                if (!UpdateLogic.IsSafeModId(mod.Id))
+                {
+                    _log($"mods: skipping unsafe mod id '{mod.Id}'");
+                    continue;
+                }
+                if (string.IsNullOrEmpty(mod.Hash) || string.IsNullOrEmpty(mod.Url))
+                {
+                    _log($"mods: '{mod.Id}' has no hash/url; skipping");
+                    continue;
+                }
+
+                string modDir = Path.Combine(store, mod.Id);
+                string hashFile = Path.Combine(modDir, ModHashFileName);
+                string local = null;
+                try { if (File.Exists(hashFile)) local = File.ReadAllText(hashFile).Trim(); }
+                catch (Exception ex) { _log($"mods: could not read {hashFile}: {ex.Message}"); }
+
+                if (UpdateLogic.HashesEqual(local, mod.Hash))
+                    continue;   // already at this version
+
+                string zip = Path.Combine(staging, $"{mod.Id}-{mod.Hash}.zip");
+                try
+                {
+                    Directory.CreateDirectory(staging);
+                    progress($"Downloading mod {mod.Id}...");
+                    await DownloadFileAsync(mod.Url, zip, ct).ConfigureAwait(false);
+
+                    // Replace the folder: wipe -> extract -> write marker last.
+                    if (Directory.Exists(modDir)) Directory.Delete(modDir, recursive: true);
+                    Directory.CreateDirectory(modDir);
+                    // ZipFile guards against entries resolving outside modDir.
+                    ZipFile.ExtractToDirectory(zip, modDir, overwriteFiles: true);
+                    File.WriteAllText(hashFile, mod.Hash.Trim());
+
+                    updated++;
+                    progress($"Updated mod {mod.Id} ({mod.Hash})");
+                }
+                catch (Exception ex)
+                {
+                    _log($"mods: failed to update '{mod.Id}': {ex.Message}");
+                    // Leave whatever was there; a half-wiped dir simply has no
+                    // modhash, so the next check retries this mod.
+                }
+                finally
+                {
+                    try { if (File.Exists(zip)) File.Delete(zip); } catch { /* best-effort */ }
+                }
+            }
+
+            // Prune OUR mods that the server no longer publishes (a removed or
+            // renamed mod). We can tell ours from a user's own mod by the modhash
+            // marker: the updater writes it on every mod we install, and a user's
+            // mod never has one. So a store folder that carries a modhash marker
+            // but is absent from this response is one of ours that went away ->
+            // delete it. A folder WITHOUT the marker is the user's and is left
+            // untouched (the safety guarantee in MOD-STRUCTURE.md).
+            try
+            {
+                var published = new HashSet<string>(
+                    resp.Mods.Where(m => m != null).Select(m => m.Id),
+                    StringComparer.OrdinalIgnoreCase);
+                if (Directory.Exists(store))
+                {
+                    foreach (var dir in Directory.GetDirectories(store))
+                    {
+                        var id = Path.GetFileName(dir);
+                        if (published.Contains(id)) continue;
+                        if (!File.Exists(Path.Combine(dir, ModHashFileName))) continue; // user's mod
+                        try
+                        {
+                            Directory.Delete(dir, recursive: true);
+                            _log($"mods: removed '{id}' (no longer published).");
+                        }
+                        catch (Exception ex)
+                        {
+                            _log($"mods: could not remove stale mod '{id}': {ex.Message}");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) { _log($"mods: prune of removed mods failed: {ex.Message}"); }
+
+            if (updated > 0) _log($"mods: updated {updated} mod(s).");
+            return updated;
         }
 
         async Task DownloadFileAsync(string url, string destPath, CancellationToken ct)

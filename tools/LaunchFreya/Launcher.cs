@@ -50,6 +50,11 @@ namespace LaunchFreya
         // client-side UI mods without patching the game. Experimental; opt-in.
         public bool   EnableClientMods         { get; set; }
 
+        // Per-mod enable state by mod id (scripts/mods/<id>). A mod absent from the
+        // map is enabled. StageClientMods stages only enabled mods. Mirrors
+        // UserSettings.ModStates; copied across in MainWindow before launch.
+        public System.Collections.Generic.Dictionary<string, bool> ModStates { get; set; } = new();
+
         public string EffectiveRegistrationHostname
             => string.IsNullOrEmpty(RegistrationHostname) ? Hostname : RegistrationHostname;
     }
@@ -732,14 +737,23 @@ namespace LaunchFreya
             var dos = StageDllNextToClient(dllSrc, "enbmod.dll", "Client mods");
             if (dos == null) return null;
 
-            // Copy the scripts/ tree beside the staged DLL. Missing scripts is not
-            // fatal -- enbmod just logs an init.lua error and keeps ticking -- but
-            // warn so the user knows why their mods aren't running.
+            // Make sure the persistent mod store (<launcher-dir>/mods) is populated
+            // with our bundled mods on a fresh/offline install before we stage from
+            // it. The self-updater refreshes our mods there when online; the store
+            // is the single source of truth for both ours and the user's mods.
+            ModStore.SeedFromBundle(_warn);
+
+            // Copy the scripts/ tree beside the staged DLL, but stage only the
+            // ENABLED mods: disabled mod folders are skipped on copy AND pruned from
+            // a previous launch's staging, so a disabled mod is never present for
+            // init.lua to discover -- i.e. it is neither loaded nor injected. Missing
+            // scripts is not fatal -- enbmod just logs an init.lua error and keeps
+            // ticking -- but warn so the user knows why their mods aren't running.
             try
             {
                 var clientDir = Path.GetDirectoryName(_setting.ClientPath);
                 if (scriptsSrc != null && !string.IsNullOrEmpty(clientDir))
-                    CopyDirectory(scriptsSrc, Path.Combine(clientDir, "scripts"));
+                    StageScriptsWithEnabledMods(scriptsSrc, Path.Combine(clientDir, "scripts"));
                 else
                     _warn("Client mods: enbmod scripts/ folder not found; injecting the DLL with no scripts.");
             }
@@ -748,6 +762,75 @@ namespace LaunchFreya
                 _warn($"Client mods: could not stage scripts/: {ex.Message}. Injecting the DLL anyway.");
             }
             return dos;
+        }
+
+        // Stage scripts/ next to the client, honouring the per-mod enable state in
+        // _setting.ModStates. The shared bootstrap (init.lua, lib/, and the
+        // runtime-generated calib_data.lua) is copied from the bundled scripts
+        // tree as-is. The MODS, however, come from the persistent mod store
+        // (<launcher-dir>/mods, ours + the user's), NOT the bundle: only enabled
+        // mod folders are copied (minus the 'modhash' bookkeeping file), and any
+        // disabled or removed folder lingering from a previous launch is deleted
+        // at the destination.
+        void StageScriptsWithEnabledMods(string scriptsSrc, string scriptsDst)
+        {
+            Directory.CreateDirectory(scriptsDst);
+
+            // Top-level files (init.lua, ...). Note: we never delete files at the
+            // destination root, so a runtime-written calib_data.lua survives re-staging.
+            foreach (var file in Directory.GetFiles(scriptsSrc))
+                File.Copy(file, Path.Combine(scriptsDst, Path.GetFileName(file)), overwrite: true);
+
+            // Non-mods subdirs (lib/, ...) copy wholesale.
+            foreach (var sub in Directory.GetDirectories(scriptsSrc))
+            {
+                var name = Path.GetFileName(sub);
+                if (string.Equals(name, "mods", StringComparison.OrdinalIgnoreCase)) continue;
+                CopyDirectory(sub, Path.Combine(scriptsDst, name));
+            }
+
+            var modsSrc = ModStore.Dir();
+            var modsDst = Path.Combine(scriptsDst, "mods");
+            if (!Directory.Exists(modsSrc))
+            {
+                // No store at all: nothing to stage, but still prune any leftovers.
+                if (Directory.Exists(modsDst)) Directory.Delete(modsDst, recursive: true);
+                return;
+            }
+            Directory.CreateDirectory(modsDst);
+
+            var states = _setting.ModStates;
+            int staged = 0, skipped = 0;
+            foreach (var modDir in Directory.GetDirectories(modsSrc))
+            {
+                var id = Path.GetFileName(modDir);
+                var destDir = Path.Combine(modsDst, id);
+                if (ModCatalog.IsEnabled(states, id))
+                {
+                    CopyDirectory(modDir, destDir);
+                    // 'modhash' is launcher bookkeeping, not a mod file -- don't
+                    // ship it into the game's load location.
+                    var hashFile = Path.Combine(destDir, ModStore.ModHashFileName);
+                    if (File.Exists(hashFile)) File.Delete(hashFile);
+                    staged++;
+                }
+                else
+                {
+                    // Disabled: ensure no stale copy remains from a prior launch.
+                    if (Directory.Exists(destDir)) Directory.Delete(destDir, recursive: true);
+                    skipped++;
+                }
+            }
+
+            // Prune any destination mod folder that no longer exists in the source.
+            foreach (var destDir in Directory.GetDirectories(modsDst))
+            {
+                var id = Path.GetFileName(destDir);
+                if (!Directory.Exists(Path.Combine(modsSrc, id)))
+                    Directory.Delete(destDir, recursive: true);
+            }
+
+            _warn($"Client mods: staged {staged} mod(s), skipped {skipped} disabled.");
         }
 
         // Copy a DLL into the client release folder and return its DOS path, or null
@@ -837,16 +920,29 @@ namespace LaunchFreya
         // build-enbmod`) across the same dev / packaged layouts.
         static string LocateEnbmodScripts()
         {
-            var candidates = new[]
-            {
-                Path.Combine(AppContext.BaseDirectory, "bin", "scripts"),
-                Path.Combine(AppContext.BaseDirectory, "scripts"),
-                Path.Combine(Directory.GetCurrentDirectory(), "bin", "scripts"),
-            };
+            var candidates = new List<string>();
+#if DEBUG
+            // Dev: prefer the LIVE repo scripts/ tree so a dev's Lua edits are
+            // picked up on the next launch with no `just build-enbmod` to stage
+            // them into bin/scripts first. This dir is absent in a packaged
+            // install, so it is simply skipped there; Release builds never even
+            // compile this candidate in. Combined with the dev-build store
+            // refresh in ModStore.SeedFromBundle, this makes repo -> store ->
+            // client fully automatic in dev.
+            candidates.Add(Path.Combine(Directory.GetCurrentDirectory(),
+                "freya", "client-injection", "enbmod", "scripts"));
+#endif
+            candidates.Add(Path.Combine(AppContext.BaseDirectory, "bin", "scripts"));
+            candidates.Add(Path.Combine(AppContext.BaseDirectory, "scripts"));
+            candidates.Add(Path.Combine(Directory.GetCurrentDirectory(), "bin", "scripts"));
             foreach (var c in candidates)
                 if (Directory.Exists(c)) return c;
             return null;
         }
+
+        // Public accessor for the source scripts/ dir, so ModCatalog (and the
+        // "Configure Mods" UI) reads the same tree StageClientMods stages from.
+        public static string LocateScriptsDir() => LocateEnbmodScripts();
 
         // `winepath -w <unix>` -> the DOS path WINE uses to open the file. On
         // native Windows there is no WINE and the path is already a DOS path, so

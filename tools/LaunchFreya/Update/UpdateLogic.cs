@@ -33,6 +33,22 @@ namespace LaunchFreya.Update
             => !string.IsNullOrEmpty(a) && !string.IsNullOrEmpty(b)
                && string.Equals(a.Trim(), b.Trim(), StringComparison.OrdinalIgnoreCase);
 
+        // A mod id must be a single safe path segment: it becomes both a URL
+        // segment and a directory name under ./mods/. Anything with a separator,
+        // a drive, a dot-dot, or a non-[A-Za-z0-9._-] char is rejected so a
+        // malicious manifest cannot escape the mod store. Mirrors the deploy-side
+        // check in Push-ClientPatch.ps1 and the login-side check in
+        // PatcherManifest.cpp.
+        public static bool IsSafeModId(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return false;
+            if (id == "." || id == "..") return false;
+            foreach (char c in id)
+                if (!(char.IsAsciiLetterOrDigit(c) || c == '.' || c == '_' || c == '-'))
+                    return false;
+            return true;
+        }
+
         // Path-traversal guard (SECURITY -- the highest-risk item in this phase).
         // A relativePath from the /updateCheck response must resolve to a file
         // INSIDE baseDir (the launcher install dir) or a subdirectory of it --

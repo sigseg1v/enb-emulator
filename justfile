@@ -162,6 +162,50 @@ build-enbmod:
     rm -rf bin/scripts; cp -r freya/client-injection/enbmod/scripts bin/scripts
     @echo ">>> done. bin/enbmod.dll + bin/scripts/. Enable in the launcher with UseClientMods=true."
 
+# Open the enbmod Lua HUD in an INTERACTIVE in-browser previewer, without
+# launching the game. Runs the REAL mod scripts (scripts/*.lua) inside a native
+# Lua host (tests/interactive_host.lua against tests/mock_enb.lua) and bridges a
+# browser <canvas> to them: mouse move/click + keyboard drive the scripts'
+# on_input/on_tick handlers, and the returned draw commands render over the real
+# game-screen background (tests/enb-mod-bg.png, 1280x960) so HUD positioning can
+# be checked against the actual screen. Click an action-bar button or press
+# 1-9/0/-/= to fire its keybind; the HUD shows mouse coords, swallow state, and
+# the live tap count. Ctrl-C to stop. Set PORT=N to change the port, NO_OPEN=1
+# to not auto-open the browser. No client / WINE / D3D8 required.
+mock-ui:
+    @# Kill any previewer already running (frees the port -- only one mock UI at a time).
+    @# Bracket on [p] so the pattern can't match this pkill's OWN command line.
+    @pkill -f 'tests/[p]review_server.py' 2>/dev/null && sleep 0.5 || true
+    @lua=freya/client-injection/enbmod/build/tests/lua; \
+    [ -x "$lua" ] || { echo ">>> native Lua not built yet -- building via the test suite"; \
+        freya/client-injection/enbmod/tests/run_tests.sh >/dev/null; }
+    python3 freya/client-injection/enbmod/tests/preview_server.py \
+        --port "${PORT:-8777}" $([ "${NO_OPEN:-0}" = 1 ] && echo --no-open)
+
+# Render the enbmod HUD scenarios to static PNGs and assemble a labeled 2x2
+# contact sheet (no interactivity). Runs the headless mod test suite, which
+# rasterizes each scenario via tests/render_frame.py. Use `just mock-ui` for the
+# interactive previewer; this is the quick visual-diff snapshot. NO_OPEN=1 to
+# just write the files.
+mock-ui-shots:
+    @python3 -c 'import PIL' 2>/dev/null || { echo "ERROR: Pillow missing -- 'pip install pillow' (or apt install python3-pil)"; exit 1; }
+    freya/client-injection/enbmod/tests/run_tests.sh
+    @shots=freya/client-injection/enbmod/build/tests/shots; out="$shots/_contact.png"; \
+    if command -v montage >/dev/null 2>&1; then \
+        montage -background '#0a0e18' -fill '#cfd6e4' -pointsize 13 -label '%f' \
+            "$shots"/0*.png -tile 2x2 -geometry '+10+10' "$out" && \
+        echo ">>> contact sheet: $out"; \
+    else \
+        out="$shots"; echo ">>> ImageMagick 'montage' not found; individual PNGs in $shots"; \
+    fi; \
+    if [ "${NO_OPEN:-0}" = 1 ]; then \
+        echo ">>> NO_OPEN=1, not opening"; \
+    elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v xdg-open >/dev/null 2>&1; then \
+        xdg-open "$out" >/dev/null 2>&1 & echo ">>> opened $out"; \
+    else \
+        echo ">>> no display detected; view the PNGs under $shots"; \
+    fi
+
 # Standalone Windows client package. Produces dist/enb-client-windows/ holding a
 # self-contained launcher (FreyaLauncher.exe -- no .NET runtime needed) + the Win32
 # proxy (bin/FreyaProxy.exe) + the 32-bit MVAS position-feed injection pair
@@ -607,23 +651,25 @@ play-local CLIENT_PATH='':
     echo ">>> building enbmod Lua runtime (optional; for the Lua-mods toggle)"
     just build-enbmod
 
+    # MERGE the recipe-owned keys into the settings file; never regenerate it
+    # wholesale. The launcher persists user-owned toggles in the same file
+    # (UseClientMods i.e. "Enable Lua Mods", window position, SettingsVersion)
+    # and a full rewrite wiped them on every launch -- enabling Lua mods
+    # survived exactly one session. merge-settings.py preserves every key not
+    # listed below.
     SETTINGS_DIR=tools/LaunchFreya/bin/Debug/net10.0
     mkdir -p "$SETTINGS_DIR"
     cp_json=$(printf '%s' "$cp" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
-    cat > "$SETTINGS_DIR/FreyaLauncher.settings.json" <<JSON
-    {
-      "ClientPath": $cp_json,
-      "LastEmulatorName": "Net7Local",
-      "LastServerName": "localhost",
-      "UsePositionFeed": true,
-      "UseLocalCert": false,
-      "UseSecureAuthentication": true,
-      "AuthenticationPort": "4443",
-      "FormMainPositionX": -1,
-      "FormMainPositionY": -1
-    }
-    JSON
-    echo ">>> wrote $SETTINGS_DIR/FreyaLauncher.settings.json"
+    python3 tools/LaunchFreya/merge-settings.py "$SETTINGS_DIR/FreyaLauncher.settings.json" "{
+      \"ClientPath\": $cp_json,
+      \"LastEmulatorName\": \"Net7Local\",
+      \"LastServerName\": \"localhost\",
+      \"UsePositionFeed\": true,
+      \"UseLocalCert\": false,
+      \"UseSecureAuthentication\": true,
+      \"AuthenticationPort\": \"4443\"
+    }"
+    echo ">>> merged launch settings into $SETTINGS_DIR/FreyaLauncher.settings.json"
 
     : "${WINEPREFIX:=$HOME/.wine-enb}"
     export WINEPREFIX
@@ -714,22 +760,20 @@ play-online CLIENT_PATH='' HOST='':
     cp bin/FreyaProxy.exe "$SETTINGS_DIR/bin/FreyaProxy.exe"
     echo ">>> staged $SETTINGS_DIR/bin/FreyaProxy.exe"
 
+    # MERGE the recipe-owned keys; preserve user-owned toggles (UseClientMods,
+    # window position, SettingsVersion) -- see the play-local comment.
     cp_json=$(printf '%s' "$cp"   | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
     host_json=$(printf '%s' "$host" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
-    cat > "$SETTINGS_DIR/FreyaLauncher.settings.json" <<JSON
-    {
-      "ClientPath": $cp_json,
-      "LastEmulatorName": "Net7MP",
-      "LastServerName": $host_json,
-      "UsePositionFeed": true,
-      "UseLocalCert": false,
-      "UseSecureAuthentication": true,
-      "AuthenticationPort": "443",
-      "FormMainPositionX": -1,
-      "FormMainPositionY": -1
-    }
-    JSON
-    echo ">>> wrote $SETTINGS_DIR/FreyaLauncher.settings.json (Net7MP -> $host:443)"
+    python3 tools/LaunchFreya/merge-settings.py "$SETTINGS_DIR/FreyaLauncher.settings.json" "{
+      \"ClientPath\": $cp_json,
+      \"LastEmulatorName\": \"Net7MP\",
+      \"LastServerName\": $host_json,
+      \"UsePositionFeed\": true,
+      \"UseLocalCert\": false,
+      \"UseSecureAuthentication\": true,
+      \"AuthenticationPort\": \"443\"
+    }"
+    echo ">>> merged launch settings into $SETTINGS_DIR/FreyaLauncher.settings.json (Net7MP -> $host:443)"
 
     : "${WINEPREFIX:=$HOME/.wine-enb}"
     export WINEPREFIX

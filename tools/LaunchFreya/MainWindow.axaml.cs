@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Sockets;
@@ -148,6 +149,11 @@ namespace LaunchFreya
             try { new Updater(AppContext.BaseDirectory, Environment.ProcessPath, AppendLog).CleanupStaleArtifacts(); }
             catch (Exception ex) { AppendLog($"update: cleanup skipped: {ex.Message}"); }
 #endif
+
+            // Populate the mod store (<launcher-dir>/mods) from the bundled mods on
+            // a fresh/offline install so the Configure Mods UI and staging both see
+            // them. The self-updater refreshes our mods there when online.
+            ModStore.SeedFromBundle(AppendLog);
 
             // Locate FreyaLauncher.cfg: prefer next to the .dll (deployed
             // alongside) and fall back to the legacy LaunchNet7 source
@@ -496,6 +502,24 @@ namespace LaunchFreya
                 SetPlay(false);
                 return;
             }
+
+            // Reconcile OUR Lua mods against the server's published set whenever
+            // the user has client mods enabled. This is orthogonal to the binary
+            // version gate below (mods never gate Play) and best-effort: a mod
+            // download/extract failure is logged, never fatal. Skipped on the
+            // background auto-refresh so a timer tick never downloads.
+            if (!auto && _user.UseClientMods)
+            {
+                try
+                {
+                    int n = await updater.ReconcileModsAsync(resp,
+                        msg => Dispatcher.UIThread.Post(() => { if (gen == _statusProbeGen) c_Status.Text = msg; }));
+                    if (gen != _statusProbeGen) return;   // selection changed mid-reconcile
+                    if (n > 0) AppendLog($"mods: {n} mod(s) updated from the server.");
+                }
+                catch (Exception ex) { AppendLog($"mods: reconcile error: {ex.Message}"); }
+            }
+
             if (string.Equals(resp.Status, UpdateStatus.UpToDate, StringComparison.OrdinalIgnoreCase))
             {
                 WriteStatus("ONLINE");
@@ -685,6 +709,7 @@ namespace LaunchFreya
             _setting.EnablePositionFeed = _user.UsePositionFeed;   // PB-2
             _user.UseClientMods         = c_CheckBox_LuaMods.IsChecked == true;
             _setting.EnableClientMods   = _user.UseClientMods;     // enbmod Lua mods
+            _setting.ModStates          = _user.ModStates;         // per-mod enable/disable
 
             // Persist (keep the raw typed value so the box redisplays it verbatim)
             _user.AuthenticationPort = c_TextBox_Port.Text;
@@ -829,6 +854,199 @@ namespace LaunchFreya
             RenderLogTab(tabs[0]);   // SelectionChanged does not fire for the initial index
 
             await dlg.ShowDialog(this);
+        }
+
+        // "Configure Mods..." -- a scrollable popup listing every enbmod mod found
+        // under the source scripts/mods/ tree. Each row is an enable/disable
+        // checkbox + the mod name + its author, with the mod description as a hover
+        // tooltip. Toggling a row records the state in _user.ModStates; a disabled
+        // mod is not staged next to the client and so is never loaded or injected.
+        async void OnConfigureModsClick(object sender, RoutedEventArgs e)
+        {
+            var mods = ModCatalog.Scan();
+
+            var list = new StackPanel { Spacing = 6, Margin = new Avalonia.Thickness(0) };
+            if (mods.Count == 0)
+            {
+                list.Children.Add(new TextBlock
+                {
+                    Text = "No mods found. Build them with `just build-enbmod`.",
+                    Foreground = StatusDimBrush,
+                    Margin = new Avalonia.Thickness(4),
+                });
+            }
+
+            // Row card backgrounds (faint white tint; brighter on hover).
+            var rowBg      = new SolidColorBrush(Color.Parse("#0FFFFFFF"));
+            var rowBgHover = new SolidColorBrush(Color.Parse("#1FFFFFFF"));
+            var rowBorderClr = new SolidColorBrush(Color.Parse("#1AFFFFFF"));
+            var badgeBg    = new SolidColorBrush(Color.Parse("#33EC5C50"));   // ~20% red
+
+            // Per-row widgets we restyle when dependency state changes.
+            var rowNames = new List<(ModInfo Mod, TextBlock Name, Border Badge, TextBlock BadgeText)>();
+
+            void RefreshDepStatus()
+            {
+                foreach (var (mod, name, badge, badgeText) in rowNames)
+                {
+                    var unmet = ModCatalog.UnmetDependencies(_user.ModStates, mods, mod);
+                    if (unmet.Count > 0)
+                    {
+                        name.Foreground = StatusDangerBrush;
+                        badgeText.Text = "requires " + string.Join(", ", unmet);
+                        badge.IsVisible = true;
+                    }
+                    else
+                    {
+                        // Clear the LOCAL value so the theme's foreground setter wins
+                        // again. Setting it to null instead would paint the text with a
+                        // null brush -> invisible.
+                        name.ClearValue(TextBlock.ForegroundProperty);
+                        badge.IsVisible = false;
+                    }
+                }
+            }
+
+            foreach (var m in mods)
+            {
+                var id = m.Id;
+                var cb = new CheckBox
+                {
+                    IsChecked = ModCatalog.IsEnabled(_user.ModStates, id),
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                    Margin = new Avalonia.Thickness(0, 0, 12, 0),
+                };
+                // Toggling ANY mod can change another mod's dependency status, so
+                // re-evaluate every row after each change, not just this one.
+                cb.IsCheckedChanged += (_, __) =>
+                {
+                    _user.ModStates[id] = cb.IsChecked == true;
+                    RefreshDepStatus();
+                };
+
+                // Two-line text block: name on top, "by Author" beneath. Authors
+                // sit under their names, so they are all left-aligned -- no fragile
+                // column alignment, and it reads as a clean list.
+                var nameText = new TextBlock
+                {
+                    Text = m.Name,
+                    FontWeight = FontWeight.SemiBold,
+                    FontSize = 14,
+                };
+                var authorText = new TextBlock
+                {
+                    Text = "by " + m.Author,
+                    Foreground = StatusDimBrush,
+                    FontSize = 11,
+                    Margin = new Avalonia.Thickness(0, 1, 0, 0),
+                };
+                var textStack = new StackPanel
+                {
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                };
+                textStack.Children.Add(nameText);
+                textStack.Children.Add(authorText);
+
+                // Red pill, right-aligned, shown only when a dependency is unmet.
+                var badgeText = new TextBlock
+                {
+                    Foreground = StatusDangerBrush,
+                    FontSize = 11,
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                };
+                var badge = new Border
+                {
+                    Child = badgeText,
+                    Background = badgeBg,
+                    BorderBrush = StatusDangerBrush,
+                    BorderThickness = new Avalonia.Thickness(1),
+                    CornerRadius = new Avalonia.CornerRadius(10),
+                    Padding = new Avalonia.Thickness(9, 2, 9, 3),
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                    Margin = new Avalonia.Thickness(12, 0, 0, 0),
+                    IsVisible = false,
+                };
+                rowNames.Add((m, nameText, badge, badgeText));
+
+                // Grid columns: checkbox | text (fills) | status pill (right).
+                var row = new Grid
+                {
+                    ColumnDefinitions = new ColumnDefinitions
+                    {
+                        new ColumnDefinition(GridLength.Auto),
+                        new ColumnDefinition(GridLength.Star),
+                        new ColumnDefinition(GridLength.Auto),
+                    },
+                };
+                Grid.SetColumn(cb, 0);
+                Grid.SetColumn(textStack, 1);
+                Grid.SetColumn(badge, 2);
+                row.Children.Add(cb);
+                row.Children.Add(textStack);
+                row.Children.Add(badge);
+
+                // Rounded card per row; brightens on hover. Carries the description
+                // tooltip and makes the whole row hit-testable.
+                var rowBorder = new Border
+                {
+                    Child = row,
+                    Background = rowBg,
+                    BorderBrush = rowBorderClr,
+                    BorderThickness = new Avalonia.Thickness(1),
+                    CornerRadius = new Avalonia.CornerRadius(6),
+                    Padding = new Avalonia.Thickness(12, 9, 12, 9),
+                };
+                rowBorder.PointerEntered += (_, __) => rowBorder.Background = rowBgHover;
+                rowBorder.PointerExited  += (_, __) => rowBorder.Background = rowBg;
+                if (!string.IsNullOrEmpty(m.Description))
+                    ToolTip.SetTip(rowBorder, m.Description);
+                list.Children.Add(rowBorder);
+            }
+
+            RefreshDepStatus();   // initial paint reflects the persisted enable states
+
+            var scroller = new ScrollViewer
+            {
+                Content = list,
+                HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+                VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+            };
+
+            var closeBtn = new Button
+            {
+                Content = "Close",
+                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                Margin = new Avalonia.Thickness(0, 8, 0, 0),
+            };
+
+            var root = new DockPanel { Margin = new Avalonia.Thickness(10) };
+            var header = new TextBlock
+            {
+                Text = "Enable or disable individual Lua mods. Hover a row for its description.",
+                Foreground = new SolidColorBrush(Colors.Gray),
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Avalonia.Thickness(0, 0, 0, 8),
+            };
+            DockPanel.SetDock(header, Dock.Top);
+            DockPanel.SetDock(closeBtn, Dock.Bottom);
+            root.Children.Add(header);
+            root.Children.Add(closeBtn);
+            root.Children.Add(scroller);   // fills the rest
+
+            var dlg = new Window
+            {
+                Title = "Configure Mods",
+                Width = 480,
+                Height = 420,
+                Content = root,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            };
+            closeBtn.Click += (_, __) => dlg.Close();
+
+            await dlg.ShowDialog(this);
+
+            // Persist the choices so they survive across launches.
+            _user.Save();
         }
 
         // Render a tab: read its source, keep only the last `Lines` lines, and

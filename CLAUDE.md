@@ -126,11 +126,11 @@ CC-BY-NC-SA source (a port/transcription of `server/`, `proxy/`,
 If you think any file would violate the MIT premise, **STOP and flag it to the
 project owner to decide** (leave CC, clean-room rewrite, or owner-directed MIT)
 -- do NOT silently stamp MIT on a Net-7 derivative, and do NOT silently leave a
-genuine `freya/` original under CC. The crypto handshake files
-(`freya/cli-client/src/CliClient.Core/Net/WestwoodRSA.cs`, `WestwoodRC4.cs`,
-`RsaHandshake.cs`) are the precedent: their licensing was ambiguous (textbook
-RC4/RSA but originally written as ports), so by owner decision they carry **no
-SPDX/license header at all** rather than a claimed license.
+genuine `freya/` original under CC. When a file is a genuine Net-7 derivative
+that nonetheless needs to be consumed by `freya/` code, keep it OUT of the
+`freya/` tree in its own assembly under the CC-licensed source and have the
+`freya/` project reference it (e.g. `proxy/WestwoodCrypto/`, the Westwood
+RSA/RC4 handshake primitives the CLI links against).
 
 ## Coding rules
 
@@ -438,6 +438,21 @@ The same migration path applies if the upstream protocol catalog adds an opcode 
 | A new third-party C++ dep | `server/third_party/<name>/` |
 | A precompiled binary we can't rebuild | `vendor/<name>/` with `THIRD_PARTY_BINARIES.md` |
 | A new plan/sub-plan | `plans/<NN-phase>.md`, update `plans/00-master.md` |
+| A new enbmod Lua mod | `freya/client-injection/enbmod/scripts/mods/<id>/` (with `mod.json`) |
+
+## Client mod structure (READ before touching mods, the launcher mod store, or the mod deploy step)
+
+enbmod Lua mods follow a fixed storage + packaging + update contract documented
+in **`freya/client-injection/enbmod/MOD-STRUCTURE.md`**. It is the source of
+truth for: the per-mod `mod.json`, the client `./mods/<id>/` store at the
+launcher location (ours carry a `modhash` marker; a user's own mods -- unknown
+id, no marker -- are NEVER touched), the deterministic 10-char content hash, the
+`mods/<id>-<hash>.zip` deploy packaging + manifest `mods` array + CloudFront
+invalidation, and the launcher's modhash-vs-manifest update check. Three
+codebases implement parts of it and MUST stay in sync -- the deploy publisher
+(`deploy/do/scripts/Push-ClientPatch.ps1`), the login server patcher manifest
+(`login-server/Net7SSL/PatcherManifest.*` + `LinuxAuth.cpp`), and the launcher
+(`tools/LaunchFreya`). Adhere to MOD-STRUCTURE.md when changing any of them.
 
 ## Build & dev
 
@@ -449,6 +464,30 @@ just package   # build OCI image
 ```
 
 See `docs/08-build.md` and `docs/09-running-locally.md` for the details.
+
+## After every push: check CI and fix it if it is red (CRITICAL)
+
+Pushing is not "done." Every time you `git push`, you MUST immediately check
+the resulting CI run and, if it is failing, FIX it before considering the work
+complete -- do not move on, do not report success, do not wait to be told.
+
+1. After the push, find the run for the pushed SHA:
+   `gh run list --workflow build.yml --branch <branch> --limit 1`
+   (poll `gh run watch <id>` or re-list until it finishes).
+2. If it is green, you are done. If it is red, treat it exactly like any other
+   defect (see "Log warnings and errors are not noise"): get the real failure
+   -- failed job log, or download the TRX artifact
+   (`gh run download <id> -n cli-integration-trx-<shard>`) and read the actual
+   failing test + message -- find the root cause, fix it, push, and re-check.
+3. A red CI you caused (or that your branch carries) is YOUR problem to fix in
+   the same session, even if the failing job is not the code you touched. "It
+   was already broken" / "it's the integration suite, not my change" is a
+   diagnosis, not an exemption: still drive it to green.
+4. The integration suite (`cli-integration-test`) shards across parallel jobs
+   with a per-job `timeout-minutes`; a single hung test (per-test cancellation
+   token fires at its deadline) can push a shard over the job timeout and kill
+   it with no TRX. When a shard times out, suspect a newly-slow/hung test in
+   that shard's slice, not flakiness, until proven otherwise.
 
 ## Pointers
 

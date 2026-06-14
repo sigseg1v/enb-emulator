@@ -261,32 +261,66 @@ void Player::SendPacketCache()
 	m_OpcodeResends = 0;
 }
 
-void Player::ReSendOpcodes(unsigned char *data)
+// 0x2017 RESEND_PACKET_SEQUENCE: the proxy NACKs a hole in the reliable
+// 0x2016 stream and we answer EVERY requested sequence number -- the cached
+// datagram if it is still fresh in the ring, or a header-only blank so the
+// proxy can stop waiting and advance. The old parse read both fields as
+// SIGNED SHORTS (*(short*)&data[0]): past sequence 32767 the value went
+// negative, never matched the u32 ring entries, fell off the loop without
+// ANY reply, and the proxy stalled forever on the load screen. Payload is
+// struct ReSendRequest (common/include/net7/PacketStructures.h): two LE
+// int32s {packet_start, packet_count}. Older LP64 proxy builds sent the
+// fields widened to 8 bytes each (16-byte payload, values in the low
+// dwords); accept that form too rather than misread its high dword as the
+// count.
+void Player::ReSendOpcodes(unsigned char *data, short bytes)
 {
-	long packet_num = *((short*) &data[0]);
-	long opcode_count = *((short*) &data[4]);
-	u32 current_tick = GetNet7TickCount();
-
-	LogMessage("Opcode re-send #%x (%s)\n", packet_num, Name());
-
-	//see if this packet still exists, send if it does, otherwise send a blank
-	if (m_UDPConnection)
+	if (bytes < (short) sizeof(ReSendRequest))
 	{
+		LogMessage("Opcode re-send request too short (%d bytes) from %s\n", bytes, Name());
+		return;
+	}
+
+	u32 packet_start = *((u32*) &data[0]);
+	u32 packet_count = *((u32*) &data[4]);
+	if (bytes >= 16 && packet_count == 0)
+	{
+		//legacy LP64 {u64,u64} layout: high dword of packet_start is at
+		//offset 4 (zero), the count's low dword is at offset 8
+		packet_count = *((u32*) &data[8]);
+	}
+	if (packet_count < 1) packet_count = 1;
+	if (packet_count > RESEND_ELEMENTS) packet_count = RESEND_ELEMENTS;
+
+	LogMessage("Opcode re-send #%x x%d (%s)\n", packet_start, packet_count, Name());
+
+	if (!m_UDPConnection)
+	{
+		return;
+	}
+
+	for (u32 packet_num = packet_start; packet_num < packet_start + packet_count; packet_num++)
+	{
+		bool sent = false;
 		for (int i = 0; i < RESEND_ELEMENTS; i++)
 		{
 			if (m_ResendQueue[i].packet_num == packet_num)
 			{
-				if (m_ResendQueue[i].data && m_ResendQueue[i].message == *((int *) m_ResendQueue[i].data) )
+				if (m_ResendQueue[i].data && m_ResendQueue[i].message == *((u32 *) m_ResendQueue[i].data) )
 				{
 					m_RSendQueue->RetreiveMessage(m_ScratchBuffer, m_ResendQueue[i].length, m_ResendQueue[i].data );
 					m_UDPConnection->SendOpcode(ENB_OPCODE_2016_PACKET_SEQUENCE, this, m_ScratchBuffer, m_ResendQueue[i].length, m_Player_IPAddr, m_Player_Port, packet_num);
-				}
-				else
-				{
-					m_UDPConnection->SendOpcode(ENB_OPCODE_2016_PACKET_SEQUENCE, this, 0, 0, m_Player_IPAddr, m_Player_Port, packet_num);
+					sent = true;
 				}
 				break;
 			}
+		}
+		if (!sent)
+		{
+			//evicted from the ring (or overwritten in the backing buffer):
+			//send a blank so the proxy marks the hole done instead of
+			//waiting forever for a packet that can never come
+			m_UDPConnection->SendOpcode(ENB_OPCODE_2016_PACKET_SEQUENCE, this, 0, 0, m_Player_IPAddr, m_Player_Port, packet_num);
 		}
 	}
 }
@@ -620,7 +654,7 @@ void Player::HandleClientOpcode(short opcode, short bytes, unsigned char *data)
 
 		//resend lost/dropped opcodes
 	case ENB_OPCODE_2017_RESEND_PACKET_SEQUENCE:
-		ReSendOpcodes(data);
+		ReSendOpcodes(data, bytes);
 		break;
 
     case ENB_OPCODE_3004_PLAYER_SHIP_SENT:

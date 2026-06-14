@@ -8075,3 +8075,49 @@ Follow-up to the sector-names/navs/dock commit.
 
 Verified: 795/795 unit tests green in Release; integration project still builds
 against the changed Core; mojibake gate exit 0; build.yml is valid YAML.
+
+## Reliable-UDP resend fix: the long-session load-screen hang (2026-06-12)
+
+Root cause of "game stuck at load screen zoning out of a station after
+sitting a while" (local; the online deploy shows the same symptom). Five
+compounding defects in the 0x2016/0x2017 reliable-stream recovery between
+server and proxy, all inherited from upstream:
+
+1. Server `Player::ReSendOpcodes` parsed the 0x2017 request with signed
+   SHORT reads at offsets 0/4 -- any sequence above 32767 (a few hours of
+   accrued traffic) went negative and matched nothing in the u32 ring.
+2. The no-match path sent NO reply at all (only the stale-data path sent a
+   blank), so the proxy waited for a packet that could never come.
+3. The proxy's private `struct ReSend {long;long}` was 16 bytes on the LP64
+   Linux build vs the 8-byte layout the server reads -- the wire width
+   diverged by build target.
+4. RESEND_ELEMENTS=20 was shallow enough that a zone-out burst evicted
+   entries before the NACK arrived (this was the Gate-test re-send flake).
+5. Proxy retry was arrival-driven only (one 0x2017 per hole, skip-pesky
+   needs 10 MORE datagrams, m_PacketResendTimer was set but never read, the
+   recv thread blocked forever) -- and the post-handoff 0x003A burst is the
+   FINAL traffic on a zone-out, so a lost tail packet stalled permanently.
+
+Fix, in dependency order (CLI parse + byte-pin landed FIRST per the server
+rules): canonical `ReSendRequest {int32;int32}` added to
+common/include/net7/PacketStructures.h; CLI codec + 6 unit-test pins
+(ResendPacketSequenceCodec / ResendPacketSequenceCodecTests); server parses
+u32 with legacy-16B tolerance, honours the clamped count, answers every
+requested sequence (cached resend or header-only blank), ring 20 -> 64,
+dead `ReSendLoginOpcode` decl deleted; proxy emits the shared struct,
+guards header-only blanks in the drain loop (was a heap overread), prunes
+the reassembly map past a 64-seq tail (was unbounded), and adds
+SO_RCVTIMEO(250ms) + PumpPacketResend (~300ms cadence, same 10-strike
+skip-pesky rule, re-drives the drain) so tail-loss recovers with no further
+arrivals. Also fixed the split-failure NACK count off-by-one (harmless
+while the server ignored the count; wrong once honoured).
+
+Scope notes: the 0x2017 band is proxy<->server control traffic the real
+client never sees; no client-visible wire format changed. Deliberately NOT
+done: speculative double-send of the handoff burst (no primary source for
+it) and any change to Phase AI sector teardown (read and cleared -- not
+the bug). Real-client check tracked as CV-23 in plans/29. Verified: Linux
+server+proxy images and the MinGW FreyaProxy.exe build clean; 46/46 server
+gtests; 814/814 CLI unit tests. NOT yet deployed -- containers still run
+the old binaries until the next play-local/rebuild; the online box needs
+the same redeploy.
