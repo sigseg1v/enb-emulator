@@ -350,128 +350,6 @@ function M.dump_for_levels()
     hunt_pct({ { data, "dat" }, { entity, "ent" } }, 0.50, 0.58)
 end
 
--- ---- raw current/max hull/shield/energy hunt -------------------------------
--- The bars fill correctly because the gadget stores the fill FRACTION at +0x68 --
--- but the owner wants the literal "current / max" numbers, and no raw cur/max
--- integers live in the gadget body (the [watch] dump proved it). They live in the
--- data/entity object. Key insight: cur/max == the fraction we already read off the
--- gadget. So scan data + entity for ANY field-PAIR (a,b) whose ratio matches a
--- live vital's fill fraction, with `b` (the max) in a sane HP/energy range. Cross-
--- referencing the three distinct fractions (hull ~0.10, shield ~0.52, energy ~1.0)
--- kills false positives -- a layout that holds the right cur/max for hull AND
--- shield at a consistent stride is the stat block. Pairs need NOT be adjacent:
--- cur values often cluster together and max values cluster separately.
-local function hunt_curmax(roots, name, frac)
-    if not (frac and frac > 0 and frac < 0.97) then
-        enb.log(("[cm] %s frac=%s not discriminating (skip; full or unknown)"):format(
-            name, tostring(frac)))
-        return
-    end
-    enb.log(("[cm] ===== %s cur/max hunt: ratio~=%.4f ====="):format(name, frac))
-    local n = 0
-    for _, r in ipairs(roots) do
-        local base, bn = r[1], r[2]
-        if base ~= 0 and enb.mem.readable(base, 4) then
-            for i = 0, 0x7f do
-                local ai = base + i * 4
-                if not enb.mem.readable(ai, 4) then break end
-                for j = 0, 0x7f do
-                    if i ~= j then
-                        local aj = base + j * 4
-                        if enb.mem.readable(aj, 4) then
-                            -- try int/int and float/float interpretations
-                            local cu, mu = enb.mem.u32(ai), enb.mem.u32(aj)
-                            if mu >= 10 and mu <= 200000 and cu <= mu
-                               and math.abs(cu / mu - frac) <= 0.01 then
-                                enb.log(("[cm] %s %s cur=+0x%03x(%d) max=+0x%03x(%d) = %.4f INT"):format(
-                                    name, bn, i * 4, cu, j * 4, mu, cu / mu)); n = n + 1
-                            end
-                            local cf, mf = enb.mem.f32(ai), enb.mem.f32(aj)
-                            if mf == mf and cf == cf and mf >= 10 and mf <= 200000
-                               and cf >= 0 and cf <= mf
-                               and math.abs(cf / mf - frac) <= 0.01 then
-                                enb.log(("[cm] %s %s cur=+0x%03x(%.1f) max=+0x%03x(%.1f) = %.4f FLOAT"):format(
-                                    name, bn, i * 4, cf, j * 4, mf, cf / mf)); n = n + 1
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-    enb.log(("[cm] ===== end %s (%d candidate pairs) ====="):format(name, n))
-end
-
--- ---- exact-value finder (the reliable pin) ---------------------------------
--- Ratio-matching cur/max produced only a false positive (a transform component
--- whose ratio happened to equal the hull fraction), and value-typing can't find
--- the discipline levels/xp because they live behind the aux property bag, not as
--- flat fields. The unambiguous method is to search for a LITERAL number read off
--- the character sheet: max hull, max shield, max reactor, a discipline level, an
--- xp total. findval() scans the data + entity objects AND one pointer-hop out of
--- each (the property bag is a hop away) for that exact value as int OR float, and
--- logs every offset that holds it. Run live once "/run" works:
---   /run require("autocalib").findval(880)      -- e.g. your max hull
---   /run require("autocalib").findval(54, 0.5)  -- xp% as int 54 or float ~0.54
--- tol (default 0) widens the float match window; ints always match exactly.
-function M.findval(target, tol, label)
-    tol = tol or 0
-    local ctrl = enb.vitals_ctrl and enb.vitals_ctrl() or 0
-    if ctrl == 0 then enb.log("[find] vitals_ctrl 0 -- not in space"); return end
-    local data   = enb.mem.readable(ctrl + 4, 4) and enb.mem.u32(ctrl + 4) or 0
-    local entity = (data ~= 0 and enb.mem.readable(data + 0x88, 4)) and enb.mem.u32(data + 0x88) or 0
-    enb.log(("[find] ===== target=%s%s (tol=%.3f) ====="):format(
-        tostring(target), label and (" ("..label..")") or "", tol))
-    local n, seen = 0, {}
-    -- roots: data, entity, and a pointer-hop out of each.
-    local roots = { { data, "dat" }, { entity, "ent" } }
-    for _, r in ipairs({ { data, "dat" }, { entity, "ent" } }) do
-        local base = r[1]
-        if base ~= 0 and enb.mem.readable(base, 4) then
-            for i = 0, 0x7f do
-                local a = base + i * 4
-                if not enb.mem.readable(a, 4) then break end
-                local u = enb.mem.u32(a)
-                if u >= 0x00400000 and enb.mem.readable(u, 8) and not seen[u] then
-                    seen[u] = true
-                    roots[#roots + 1] = { u, ("%s+0x%03x->"):format(r[2], i * 4) }
-                end
-            end
-        end
-    end
-    for _, r in ipairs(roots) do
-        local base, name = r[1], r[2]
-        if base ~= 0 and enb.mem.readable(base, 4) then
-            for i = 0, 0x7f do
-                local a = base + i * 4
-                if not enb.mem.readable(a, 4) then break end
-                local u, f = enb.mem.u32(a), enb.mem.f32(a)
-                if u == target then
-                    enb.log(("[find] %s+0x%03x = %d  (INT match)"):format(name, i * 4, u)); n = n + 1
-                elseif f == f and math.abs(f - target) <= tol + 1e-4 then
-                    enb.log(("[find] %s+0x%03x = %.4f  (FLOAT match)"):format(name, i * 4, f)); n = n + 1
-                end
-            end
-        end
-    end
-    enb.log(("[find] ===== end (%d hits across %d objs) ====="):format(n, #roots))
-end
-
--- Pull live fractions from the same chain the bars use, then hunt cur/max pairs.
-function M.dump_curmax()
-    local ctrl = enb.vitals_ctrl and enb.vitals_ctrl() or 0
-    if ctrl == 0 then enb.log("[cm] vitals_ctrl 0 -- not in space"); return end
-    local data   = enb.mem.readable(ctrl + 4, 4) and enb.mem.u32(ctrl + 4) or 0
-    local entity = (data ~= 0 and enb.mem.readable(data + 0x88, 4)) and enb.mem.u32(data + 0x88) or 0
-    local v = (enb.vitals and enb.vitals()) or {}
-    enb.log(("[cm] live fractions: hull=%.4f shield=%.4f energy=%.4f"):format(
-        v.hull or -1, v.shield or -1, v.energy or -1))
-    local roots = { { data, "dat" }, { entity, "ent" } }
-    hunt_curmax(roots, "HULL",   v.hull)
-    hunt_curmax(roots, "SHIELD", v.shield)
-    hunt_curmax(roots, "ENERGY", v.energy)
-end
-
 -- The fields autocalib knows how to persist (mirror of game.h Offsets).
 local FIELDS = {
     "player_ptr_addr",
@@ -520,7 +398,6 @@ end
 -- require("autocalib").probe_vitals().
 do
     local probed = false
-    local curmax_done = false
     local space_ticks = 0
     enb.on_tick(function()
         if not (enb.inspace and enb.inspace()) then space_ticks = 0; return end
@@ -534,35 +411,10 @@ do
             local rok, rerr = pcall(M.dump_for_levels)
             if not rok then enb.log("[raw] error: " .. tostring(rerr)) end
             enb.log("[watch] armed -- fire weapons / boost / take a hit to move a bar")
-            enb.log("[cm] armed -- take a hit (drop hull/shield below 90%) for the cur/max hunt")
-            -- Exact-value pin for the vitals MAX numbers the owner read off the
-            -- character sheet (max hull / shield / reactor). Ratio-matching gave
-            -- only a false positive, so search for the literal values instead --
-            -- including one pointer-hop out (the aux property bag is a hop away).
-            -- These are this character's current maxes; re-run live for any value:
-            --   /run require("autocalib").findval(<n>)
-            local cok, cerr = pcall(function()
-                M.findval(11,  0.5, "max hull?")
-                M.findval(45,  0.5, "max shield?")
-                M.findval(142, 0.5, "max reactor?")
-            end)
-            if not cok then enb.log("[find] error: " .. tostring(cerr)) end
         end
         if probed then
             local ok, err = pcall(M.watch_vitals)
             if not ok then enb.log("[watch] error: " .. tostring(err)) end
-            -- One-shot cur/max hunt the instant a bar drops below 0.9: a full bar's
-            -- 1.0 ratio matches every equal pair and is useless as a search key, so
-            -- we wait for real damage before scanning. Also runnable on demand once
-            -- "/run" works:  /run require("autocalib").dump_curmax()
-            if not curmax_done then
-                local v = (enb.vitals and enb.vitals()) or {}
-                if (v.hull and v.hull < 0.9) or (v.shield and v.shield < 0.9) then
-                    curmax_done = true
-                    local cok, cerr = pcall(M.dump_curmax)
-                    if not cok then enb.log("[cm] error: " .. tostring(cerr)) end
-                end
-            end
         end
     end)
     enb.log("autocalib: armed -- auto-probe + change-watch after entering space")

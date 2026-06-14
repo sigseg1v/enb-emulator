@@ -412,6 +412,64 @@ static int l_vitals(lua_State* L){
     return 1;
 }
 
+// enb.aux(key [, entity]) -> number | nil. Reads a string-keyed AuxData float
+// value off the local player's ship entity (or an explicit entity address) via
+// the client's own property-bag getter. This is how the NUMERIC current/max
+// vitals live (HullPoints / MaxHullPoints / MaxShieldPower / MaxEnergyPower) and
+// the discipline levels (RPGInfo CombatLevel / TradeLevel / ExploreLevel) -- they
+// are NOT flat struct fields, so enb.mem at a fixed offset cannot find them.
+// Returns nil if out of space, the entity/entry is unreadable, or the key unset.
+//
+// Convention is load-bearing: build_key is __thiscall (ECX = key buffer), get_value
+// is __cdecl(entity, keybuf). Calling either with the wrong convention corrupts the
+// stack and faults the client (the ChatLocalLine-class crash). The key buffer is a
+// zeroed stack scratch object the builder fills in; it owns no heap, so no cleanup.
+typedef void* (__thiscall* AuxBuildKey_t)(void* keybuf, const char* name);
+typedef int   (__cdecl*    AuxGetValue_t)(int entity, void* keybuf);
+// Resolve a string-keyed AuxData entry on `entity` to its value slot. Returns the
+// address of the 4-byte value (entry+val_off) ready to read, or 0 on any miss.
+// The value's type (float for vitals, int for levels) is the CALLER's choice -- the
+// same slot holds both depending on the key, so the two wrappers below pick.
+static uintptr_t aux_value_addr(lua_State* L, int key_arg, int entity_arg){
+    const char* key = luaL_checkstring(L, key_arg);
+    uintptr_t entity;
+    if (lua_isnoneornil(L, entity_arg)) {
+        uintptr_t ctrl = hooks::vitals_ctrl();
+        if (!ctrl) return 0;                       // not in space
+        uintptr_t data = mem::ptr(ctrl + game::player::ctrl_data);
+        entity = data ? mem::ptr(data + game::player::data_entity) : 0;
+    } else {
+        entity = (uintptr_t)luaL_checkinteger(L, entity_arg);
+    }
+    if (!entity || !mem::readable((void*)entity, 4)) return 0;
+
+    unsigned char keybuf[game::aux::keybuf_sz];
+    memset(keybuf, 0, sizeof(keybuf));
+    ((AuxBuildKey_t)game::aux::build_key)(keybuf, key);
+    int entry = ((AuxGetValue_t)game::aux::get_value)((int)entity, keybuf);
+    if (!entry || !mem::readable((void*)(uintptr_t)entry, game::aux::val_off + 4)) return 0;
+    if (mem::i32((uintptr_t)entry + game::aux::valid_off) == 0) return 0;   // value not set
+    return (uintptr_t)entry + game::aux::val_off;
+}
+// enb.aux(key [, entity]) -> number | nil. The value as a FLOAT. Use for the
+// numeric vitals: HullPoints / MaxHullPoints / MaxShieldPower / MaxEnergyPower.
+static int l_aux(lua_State* L){
+    uintptr_t a = aux_value_addr(L, 1, 2);
+    if (!a) return 0;
+    float v = mem::f32(a);
+    if (v != v) return 0;                           // NaN guard
+    lua_pushnumber(L, v);
+    return 1;
+}
+// enb.aux_i(key [, entity]) -> integer | nil. The same slot as an INT. Use for the
+// discipline levels: "RPGInfo CombatLevel" / "RPGInfo TradeLevel" / "RPGInfo ExploreLevel".
+static int l_aux_i(lua_State* L){
+    uintptr_t a = aux_value_addr(L, 1, 2);
+    if (!a) return 0;
+    lua_pushinteger(L, (lua_Integer)mem::i32(a));
+    return 1;
+}
+
 // enb.on_input(fn [, mask])  -- fn(msg, wparam, lparam) -> truthy to SWALLOW.
 // Optional mask = bitwise-or of enb.WANT_KEY/WANT_CHAR/WANT_MOUSE; default all.
 // Registering nil clears the handler.
@@ -624,6 +682,8 @@ void open(lua_State* L){
         {"inspace", l_inspace},
         {"vitals_ctrl", l_vitals_ctrl},
         {"vitals", l_vitals},
+        {"aux", l_aux},
+        {"aux_i", l_aux_i},
         {"tap", l_tap},
         {"key", l_key},
         {"char", l_char},

@@ -102,6 +102,28 @@ namespace player {
     constexpr int entity_name = 0x124;    // [entity + 0x124]-> char* character name
 }
 
+// AuxData property-bag reader. The client keeps per-object gameplay vitals as
+// string-keyed float entries (a property bag), NOT flat struct fields -- so the
+// numeric current/max for hull/shield/reactor (and the discipline levels) have
+// no fixed struct offset to read. They are resolved through the client's own
+// getter: intern a key object from a key string, then look it up on the object's
+// aux container. Observed at runtime in the vitals updater (the same
+// hooks::vitals_ctrl chain), which reads exactly these keys every frame:
+//   HullPoints / MaxHullPoints      -- hull stored absolute
+//   MaxShieldPower / MaxEnergyPower -- shield/reactor max (current = fill_frac*max)
+//   RPGInfo CombatLevel/TradeLevel/ExploreLevel -- discipline levels
+namespace aux {
+    // build_key(keybuf, "KeyName"): __thiscall, ECX = keybuf (a zeroed scratch
+    // buffer >= keybuf_sz). Interns the key; no owned heap, so no cleanup needed.
+    constexpr uintptr_t build_key = 0x004ad380;
+    // get_value(entity, keybuf) -> entry|0: __cdecl. Resolves an absolute
+    // (non-percent) value entry on `entity`; type-checked, returns 0 on miss.
+    constexpr uintptr_t get_value = 0x00546710;
+    constexpr int       val_off   = 0x84;   // entry + 0x84 -> float value
+    constexpr int       valid_off = 0x70;   // entry + 0x70 -> nonzero when value is set
+    constexpr int       keybuf_sz = 0x40;   // zeroed scratch key-object buffer
+}
+
 // Runtime-editable field offsets. -1 means "not calibrated -- reads return nil/0".
 // Layout intentionally flat & simple so the Lua calibrate() can poke any field by name.
 struct Offsets {

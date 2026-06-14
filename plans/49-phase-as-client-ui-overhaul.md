@@ -71,9 +71,24 @@ per-vertex gradient quads + rounded corners from triangle fans, not PNGs.
   `calib.watch`, then `enb.calibrate{...}` and PERSIST the result to
   `scripts/calib_data.lua` (gitignored -- offsets are install-specific)
   loaded by init.lua when present.
-- `[ ]` Calibrate: player_ptr_addr, hull/shield/energy (+max), combat/
-  explore/trade lvl + pct, pos. Until done the new stat bars render in
-  "uncalibrated" gray, same convention as xp_overlay today.
+- `[x]` Numeric vitals (cur/max) + discipline levels NO LONGER need flat-struct
+  calibration: the client keeps them in a string-keyed property bag on the player
+  ship entity, not flat fields, so there is no stable offset to pin. Added a new
+  `enb.aux(key)` (float) / `enb.aux_i(key)` (int) that resolve a key on the live
+  vitals-controller entity via the client's own property-bag getter (build_key
+  `0x004ad380` __thiscall + get_value `0x00546710` __cdecl; value float/int at
+  entry+0x84, validity at +0x70). `H.stats()` now reads HullPoints/MaxHullPoints
+  (hull stored absolute), MaxShieldPower/MaxEnergyPower (shield/reactor current =
+  max * live gadget fill fraction), and RPGInfo Combat/Trade/ExploreLevel. The
+  card prints "cur / max" inside each bar whenever aux returns them -- no flat
+  calibration, works the instant we are in space. Called from on_tick = the game
+  message-pump thread = same thread the game's own vitals updater runs on, so the
+  getter call is single-threaded against the game's aux access (no race).
+  Real-client check: CV-AS-AUXNUMS (see plans/29).
+- `[ ]` STILL un-pinned: overall level + per-level xp progress (owner confirmed
+  overall level is 0 on a fresh char; no single aux key has surfaced it yet, so
+  the header stays "LV --" until one does). player_ptr_addr / pos / target still
+  use the autocalibrate flat path.
 - Runbook: owner in-game + hot-reload loop; cannot be done offline.
 
 ### AS-4 Lua UI module: the new HUD  `[x]`

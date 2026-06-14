@@ -139,12 +139,23 @@ local function draw_player_card(L)
     local track_w = p.w - CFG.PC_PAD_X * 2 - CFG.PCT_W
     local vy = p.y + CFG.PC_PAD_Y + CFG.HEAD_H + CFG.VITAL_GAP
     for _, v in ipairs(VITALS) do
-        local cur, max = me[v.key], me[v.max]
-        -- prefer the live gadget fraction; fall back to flat cur/max if present.
+        -- numeric cur/max come live from the AuxData property bag (H.stats):
+        -- hull is stored absolute; shield/reactor store only the max, so their
+        -- current is max * the live gadget fill fraction. Fall back to the flat
+        -- struct only when aux gave nothing.
         local frac = vit[v.key]
-        if frac == nil and has_flat and cur and max and max > 0 then frac = cur / max end
+        local max  = st[v.max]
+        local cur
+        if v.key == "hull" then cur = st.hull
+        elseif max and frac then cur = max * frac end
+        if (cur == nil or max == nil) and has_flat then
+            cur, max = cur or me[v.key], max or me[v.max]
+        end
+        -- prefer the live gadget fraction; fall back to cur/max if present.
+        if frac == nil and cur and max and max > 0 then frac = cur / max end
         local known = frac ~= nil
         if known then frac = frac < 0 and 0 or (frac > 1 and 1 or frac) end
+        local have_nums = cur ~= nil and max ~= nil
         -- track + fill + border
         enb.draw.rrect(track_x, vy, track_w, CFG.VITAL_H, H.RADIUS, H.TRACK, 220, true)
         if known and frac > 0 then
@@ -158,9 +169,9 @@ local function draw_player_card(L)
         if known then
             local _, vh = H.measure("0%")
             local ty = vy + math.floor((CFG.VITAL_H - vh) / 2)
-            -- raw "cur / max" only when the flat struct gives it; always the %.
-            if has_flat and cur and max then
-                local val = string.format("%d / %d", cur, max)
+            -- raw "cur / max" whenever we have the numbers (aux or flat); always the %.
+            if have_nums then
+                local val = string.format("%d / %d", math.floor(cur + 0.5), math.floor(max + 0.5))
                 H.otext(track_x + track_w - CFG.VAL_PAD - H.measure(val), ty + 2, val, 0xffffff)
             end
             local ps = math.floor(frac * 100 + 0.5) .. "%"

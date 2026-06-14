@@ -86,54 +86,43 @@ function H.vis()
     return false, false
 end
 
--- ---- live character stats (level / xp / discipline levels) -----------------
--- Read straight off the same controller->data chain enb.vitals() walks for the
--- bar fractions, so this needs NO flat-struct calibration and NO DLL rebuild --
--- it works the instant we are in space, exactly like the name + bars do.
+-- ---- live character stats (vitals numbers / discipline levels) -------------
+-- The numeric current/max vitals and the discipline levels do NOT live at flat
+-- struct offsets -- the client keeps them in a string-keyed property bag on the
+-- player ship entity. We read them through the client's own getter, exposed as
+-- enb.aux(key) (float) / enb.aux_i(key) (int), which resolve the key on the live
+-- vitals-controller entity. So this needs NO flat-struct calibration; it works
+-- the instant we are in space, exactly like the bar fractions + name do, and is
+-- nil out of space (controller == 0). Keys observed at runtime in the vitals
+-- updater + level reader. Each is range-guarded so a stale read never shows junk.
 --
--- OFFSETS ARE NOT PINNED YET. The first probe pass guessed dat+0x5c == overall
--- level (it read 3 on a fresh char), but the owner confirmed the real overall
--- level is 0 -- so that field is something else, and the probe could not even SEE
--- the true level field because it filtered out zeros. On a level-0 / 0-xp fresh
--- character every level/xp value is 0 or 1, so a single snapshot cannot identify
--- them. The deterministic fix lives in autocalibrate: snapshot the data object,
--- level ONE discipline, and the dword that changes 0->1 is that level (likewise
--- the overall-level field changes when overall ticks up). Until those land here,
--- stats() returns nothing and the cards stay on the honest "LV --" skeleton --
--- a wrong number is worse than a blank.
+-- Hull is stored absolute (HullPoints / MaxHullPoints). Shield + reactor store
+-- only the max (MaxShieldPower / MaxEnergyPower); their current is max * the live
+-- gadget fill fraction (enb.vitals()), so the card computes cur from frac * max.
 --
--- Fill PINNED below as `OFF.<field> = 0x..` once the diff proves an offset; each
--- is read guarded (readable + sane range) so a bad value never faults.
-local OFF = {
-    -- level   = 0x..,   -- overall level
-    -- combat  = 0x.., explore = 0x.., trade = 0x..,  -- discipline levels
-    -- xp_cur  = 0x.., xp_next = 0x..,                -- current-level xp progress
-}
-
+-- Still NOT resolved: overall level + per-level xp progress (the owner confirmed
+-- overall level is 0 on a fresh char, and no single aux key has surfaced it yet).
+-- Until one does, out.level/out.xp_* stay nil and the header shows "LV --".
 function H.stats()
     local out = {}
-    local m = enb.mem
-    local ctrl = (enb.vitals_ctrl and enb.vitals_ctrl()) or 0
-    if ctrl == 0 or not (m and m.readable(ctrl + 4, 4)) then return out end
-    local data = m.u32(ctrl + 4)
-    if data == 0 then return out end
+    if not enb.aux then return out end
 
-    local function int_at(off, lo, hi)
-        if not off or not m.readable(data + off, 4) then return nil end
-        local v = m.u32(data + off)
-        if v >= lo and v <= hi then return v end
+    local function num(key, lo, hi)
+        local v = enb.aux(key)
+        if v and v >= lo and v <= hi then return v end
+    end
+    local function lvl(key)
+        local v = enb.aux_i and enb.aux_i(key)
+        if v and v >= 0 and v <= 100 then return v end
     end
 
-    out.level   = int_at(OFF.level,   0, 300)
-    out.combat  = int_at(OFF.combat,  0, 60)
-    out.explore = int_at(OFF.explore, 0, 60)
-    out.trade   = int_at(OFF.trade,   0, 60)
-    if OFF.xp_cur and OFF.xp_next and m.readable(data + OFF.xp_next, 4) then
-        local cur, need = m.u32(data + OFF.xp_cur), m.u32(data + OFF.xp_next)
-        if need > 0 and cur <= need then
-            out.xp_cur, out.xp_next, out.xp_pct = cur, need, cur / need * 100
-        end
-    end
+    out.hull       = num("HullPoints",     0, 1e6)
+    out.hull_max   = num("MaxHullPoints",  0, 1e6)
+    out.shield_max = num("MaxShieldPower", 0, 1e6)
+    out.energy_max = num("MaxEnergyPower", 0, 1e6)
+    out.combat  = lvl("RPGInfo CombatLevel")
+    out.explore = lvl("RPGInfo ExploreLevel")
+    out.trade   = lvl("RPGInfo TradeLevel")
     return out
 end
 

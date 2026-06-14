@@ -1297,3 +1297,36 @@ format & byte order", Trap 2).
 - **Setup**: `just play-local` with `UseClientMods=true`. The vitals+xp hides
   apply automatically at startup. If the client crashes on load, comment the two
   `patch_ret` lines in init.lua and re-launch to bisect.
+
+### [ ] CV-AS-AUXNUMS -- HUD shows correct numeric cur/max vitals + discipline levels (AuxData getter)
+
+- **Change**: client-only (enbmod.dll). New `enb.aux(key)` / `enb.aux_i(key)`
+  (lua_api.cpp) call the client's own property-bag getter to read the numeric
+  vitals + levels, which live in a string-keyed bag on the player ship entity,
+  NOT at flat struct offsets. `H.stats()` (freya_hud.lua) feeds the player card:
+  hull `HullPoints`/`MaxHullPoints` (absolute); shield/reactor max
+  `MaxShieldPower`/`MaxEnergyPower` with current = max * live gadget fill
+  fraction; levels `RPGInfo CombatLevel`/`TradeLevel`/`ExploreLevel`.
+- **Calling convention is load-bearing** (got this class of bug before with the
+  `/run` ChatLocalLine crash): build_key `0x004ad380` is `__thiscall` (ECX = a
+  zeroed >=0x40-byte key buffer); get_value `0x00546710` is `__cdecl(entity,
+  keybuf)`; value float/int at entry+0x84, validity flag at entry+0x70. Reads are
+  guarded (entity + entry readability checked, NaN-guarded) but the getter itself
+  is real game code, so a wrong convention would corrupt the stack and crash.
+  Called from on_tick = the game message-pump thread = the same thread the game's
+  own vitals updater runs the identical getter on, so it is single-threaded
+  against the game's aux access (no concurrent-mutation race).
+- **Headless coverage**: none -- the mock has no aux property bag; correctness is
+  entirely this entry. The CLI cannot validate it.
+- **What to look for (real client)**:
+  - In space, each bar prints "cur / max" inside it, and the maxes match the
+    character sheet (owner's were hull 11, shield 45, reactor 142). Hull current
+    tracks damage; shield/reactor current = max * the bar's fill.
+  - The discipline card shows the real Combat/Trade/Explore levels (not the gray
+    skeleton) and they update on level-up.
+  - No crash on load / zone / undock / dock from the aux calls. If it crashes,
+    the convention or an offset is wrong -- comment the `enb.aux*` use in
+    freya_hud.lua `H.stats()` to bisect (the rest of the HUD is independent).
+  - Overall level + xp% still show "LV --" (not yet pinned) -- that is expected,
+    not a regression.
+- **Setup**: `just play-local` with `UseClientMods=true`.
