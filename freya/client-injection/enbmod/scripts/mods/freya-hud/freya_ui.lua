@@ -172,7 +172,7 @@ local function draw_player_card(L)
             -- raw "cur / max" whenever we have the numbers (aux or flat); always the %.
             if have_nums then
                 local val = string.format("%d / %d", math.floor(cur + 0.5), math.floor(max + 0.5))
-                H.otext(track_x + track_w - CFG.VAL_PAD - H.measure(val), ty + 2, val, 0xffffff)
+                H.otext(track_x + track_w - CFG.VAL_PAD - H.measure(val), ty, val, 0xffffff)
             end
             local ps = math.floor(frac * 100 + 0.5) .. "%"
             -- left-align the % in its own column just right of the bar, so a wide
