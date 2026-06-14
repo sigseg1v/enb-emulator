@@ -55,6 +55,16 @@ if enb.enable_inspace then
     enb.log("init.lua: enable_inspace() -> " .. tostring(enb.enable_inspace()))
 end
 
+-- Game-event hooks: installs the SkillLifecycle / ChatChannel / ChatSend hooks
+-- behind enb.on_skill()/enb.on_chat() AND the "/run <lua>" chat console. Without
+-- this call the ChatSend hook never installs, so a typed "/run ..." is never
+-- intercepted -- it falls straight through to the game's own slash parser, which
+-- rejects it as "Illegal slash command". Enabling it makes the live Lua console
+-- (and on_skill/on_chat) work. Safe to call repeatedly (idempotent in C++).
+if enb.enable_event_hooks then
+    enb.log("init.lua: enable_event_hooks() -> " .. tostring(enb.enable_event_hooks()))
+end
+
 -- State-transition logger. The game exposes no single game-state global we've
 -- calibrated yet, so log every change in what we CAN observe -- enb.state() and
 -- the raw inspace heartbeat -- to discover the actual transitions the game fires

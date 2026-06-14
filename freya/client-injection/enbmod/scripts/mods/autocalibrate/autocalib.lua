@@ -278,6 +278,145 @@ function M.probe_levels(target_pct)
     end
 end
 
+-- ---- full raw level/xp dump (no filtering) ---------------------------------
+-- probe_levels() hides zeros and ignores floats, which is exactly wrong for a
+-- fresh character: the owner confirmed overall + all three discipline LEVELS are
+-- 0, and the only non-zero progress is Exploration at ~54% through level 0
+-- (Combat / Trade 0%). So the level fields are invisible (zero-filtered) and the
+-- xp% may be a float (ignored). This dump prints EVERY dword of the data object
+-- and the player entity as both int and float -- no filtering -- plus a focused
+-- hunt for the lone ~54% value (a float in 0.50..0.58, or an int pair at that
+-- ratio) that anchors Exploration. With the level triple = three 0s and the xp
+-- triple = (0, ~54%, 0), the offsets fall straight out of the raw rows.
+local function fsane(f) return f == f and math.abs(f) > 1e-9 and math.abs(f) < 1e9 end
+
+local function dump_raw(label, base, words)
+    if not base or base == 0 or not enb.mem.readable(base, 4) then
+        enb.log(("[raw] %s -- unreadable @%s"):format(label, tostring(base)))
+        return
+    end
+    enb.log(("[raw] ===== %s @%08x ====="):format(label, base))
+    for i = 0, words - 1 do
+        local a = base + i * 4
+        if not enb.mem.readable(a, 4) then break end
+        local u = enb.mem.u32(a)
+        local f = enb.mem.f32(a)
+        local row = ("[raw] +0x%03x = %10d  0x%08x"):format(i * 4, u, u)
+        if fsane(f) then row = row .. ("   f=%.4f"):format(f) end
+        if u >= 0x00400000 and enb.mem.readable(u, 4) then row = row .. "  ->ptr" end
+        enb.log(row)
+    end
+end
+
+-- Hunt the lone Exploration ~pct value across data + entity + one pointer hop.
+local function hunt_pct(roots, lo, hi)
+    enb.log(("[hunt] ===== values in %.2f..%.2f (Exploration xp anchor) ====="):format(lo, hi))
+    local seen, n = {}, 0
+    for _, r in ipairs(roots) do
+        local base, name = r[1], r[2]
+        if base ~= 0 and not seen[base] and enb.mem.readable(base, 4) then
+            seen[base] = true
+            for i = 0, 0x7f do
+                local a = base + i * 4
+                if not enb.mem.readable(a, 4) then break end
+                local f = enb.mem.f32(a)
+                if f == f and f >= lo and f <= hi then
+                    enb.log(("[hunt] %s+0x%03x  f=%.4f (FLOAT pct?)"):format(name, i * 4, f)); n = n + 1
+                end
+                if enb.mem.readable(a + 4, 4) then
+                    local u, b = enb.mem.u32(a), enb.mem.u32(a + 4)
+                    if u > 0 and b > u and b < 5e6 then
+                        local r2 = u / b
+                        if r2 >= lo and r2 <= hi then
+                            enb.log(("[hunt] %s+0x%03x  %d/%d = %.4f (INT pair pct?)"):format(
+                                name, i * 4, u, b, r2)); n = n + 1
+                        end
+                    end
+                end
+            end
+        end
+    end
+    enb.log(("[hunt] ===== end (%d hits) ====="):format(n))
+end
+
+function M.dump_for_levels()
+    local ctrl = enb.vitals_ctrl and enb.vitals_ctrl() or 0
+    if ctrl == 0 then enb.log("[raw] vitals_ctrl 0 -- not in space"); return end
+    local data   = enb.mem.readable(ctrl + 4, 4) and enb.mem.u32(ctrl + 4) or 0
+    local entity = (data ~= 0 and enb.mem.readable(data + 0x88, 4)) and enb.mem.u32(data + 0x88) or 0
+    enb.log(("[raw] ground truth: overall=0, C=0%%, E=54%%, T=0%%, all levels 0"))
+    dump_raw("DATA [ctrl+4]", data, 0x60)        -- 0x180 bytes
+    dump_raw("ENTITY [data+0x88]", entity, 0x60)
+    hunt_pct({ { data, "dat" }, { entity, "ent" } }, 0.50, 0.58)
+end
+
+-- ---- raw current/max hull/shield/energy hunt -------------------------------
+-- The bars fill correctly because the gadget stores the fill FRACTION at +0x68 --
+-- but the owner wants the literal "current / max" numbers, and no raw cur/max
+-- integers live in the gadget body (the [watch] dump proved it). They live in the
+-- data/entity object. Key insight: cur/max == the fraction we already read off the
+-- gadget. So scan data + entity for ANY field-PAIR (a,b) whose ratio matches a
+-- live vital's fill fraction, with `b` (the max) in a sane HP/energy range. Cross-
+-- referencing the three distinct fractions (hull ~0.10, shield ~0.52, energy ~1.0)
+-- kills false positives -- a layout that holds the right cur/max for hull AND
+-- shield at a consistent stride is the stat block. Pairs need NOT be adjacent:
+-- cur values often cluster together and max values cluster separately.
+local function hunt_curmax(roots, name, frac)
+    if not (frac and frac > 0 and frac < 0.97) then
+        enb.log(("[cm] %s frac=%s not discriminating (skip; full or unknown)"):format(
+            name, tostring(frac)))
+        return
+    end
+    enb.log(("[cm] ===== %s cur/max hunt: ratio~=%.4f ====="):format(name, frac))
+    local n = 0
+    for _, r in ipairs(roots) do
+        local base, bn = r[1], r[2]
+        if base ~= 0 and enb.mem.readable(base, 4) then
+            for i = 0, 0x7f do
+                local ai = base + i * 4
+                if not enb.mem.readable(ai, 4) then break end
+                for j = 0, 0x7f do
+                    if i ~= j then
+                        local aj = base + j * 4
+                        if enb.mem.readable(aj, 4) then
+                            -- try int/int and float/float interpretations
+                            local cu, mu = enb.mem.u32(ai), enb.mem.u32(aj)
+                            if mu >= 10 and mu <= 200000 and cu <= mu
+                               and math.abs(cu / mu - frac) <= 0.01 then
+                                enb.log(("[cm] %s %s cur=+0x%03x(%d) max=+0x%03x(%d) = %.4f INT"):format(
+                                    name, bn, i * 4, cu, j * 4, mu, cu / mu)); n = n + 1
+                            end
+                            local cf, mf = enb.mem.f32(ai), enb.mem.f32(aj)
+                            if mf == mf and cf == cf and mf >= 10 and mf <= 200000
+                               and cf >= 0 and cf <= mf
+                               and math.abs(cf / mf - frac) <= 0.01 then
+                                enb.log(("[cm] %s %s cur=+0x%03x(%.1f) max=+0x%03x(%.1f) = %.4f FLOAT"):format(
+                                    name, bn, i * 4, cf, j * 4, mf, cf / mf)); n = n + 1
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    enb.log(("[cm] ===== end %s (%d candidate pairs) ====="):format(name, n))
+end
+
+-- Pull live fractions from the same chain the bars use, then hunt cur/max pairs.
+function M.dump_curmax()
+    local ctrl = enb.vitals_ctrl and enb.vitals_ctrl() or 0
+    if ctrl == 0 then enb.log("[cm] vitals_ctrl 0 -- not in space"); return end
+    local data   = enb.mem.readable(ctrl + 4, 4) and enb.mem.u32(ctrl + 4) or 0
+    local entity = (data ~= 0 and enb.mem.readable(data + 0x88, 4)) and enb.mem.u32(data + 0x88) or 0
+    local v = (enb.vitals and enb.vitals()) or {}
+    enb.log(("[cm] live fractions: hull=%.4f shield=%.4f energy=%.4f"):format(
+        v.hull or -1, v.shield or -1, v.energy or -1))
+    local roots = { { data, "dat" }, { entity, "ent" } }
+    hunt_curmax(roots, "HULL",   v.hull)
+    hunt_curmax(roots, "SHIELD", v.shield)
+    hunt_curmax(roots, "ENERGY", v.energy)
+end
+
 -- The fields autocalib knows how to persist (mirror of game.h Offsets).
 local FIELDS = {
     "player_ptr_addr",
@@ -326,6 +465,7 @@ end
 -- require("autocalib").probe_vitals().
 do
     local probed = false
+    local curmax_done = false
     local space_ticks = 0
     enb.on_tick(function()
         if not (enb.inspace and enb.inspace()) then space_ticks = 0; return end
@@ -336,11 +476,26 @@ do
             if not ok then enb.log("[probe] error: " .. tostring(err)) end
             local lok, lerr = pcall(M.probe_levels)
             if not lok then enb.log("[lvl] error: " .. tostring(lerr)) end
+            local rok, rerr = pcall(M.dump_for_levels)
+            if not rok then enb.log("[raw] error: " .. tostring(rerr)) end
             enb.log("[watch] armed -- fire weapons / boost / take a hit to move a bar")
+            enb.log("[cm] armed -- take a hit (drop hull/shield below 90%) for the cur/max hunt")
         end
         if probed then
             local ok, err = pcall(M.watch_vitals)
             if not ok then enb.log("[watch] error: " .. tostring(err)) end
+            -- One-shot cur/max hunt the instant a bar drops below 0.9: a full bar's
+            -- 1.0 ratio matches every equal pair and is useless as a search key, so
+            -- we wait for real damage before scanning. Also runnable on demand once
+            -- "/run" works:  /run require("autocalib").dump_curmax()
+            if not curmax_done then
+                local v = (enb.vitals and enb.vitals()) or {}
+                if (v.hull and v.hull < 0.9) or (v.shield and v.shield < 0.9) then
+                    curmax_done = true
+                    local cok, cerr = pcall(M.dump_curmax)
+                    if not cok then enb.log("[cm] error: " .. tostring(cerr)) end
+                end
+            end
         end
     end)
     enb.log("autocalib: armed -- auto-probe + change-watch after entering space")
