@@ -920,12 +920,21 @@ namespace LaunchFreya
         // build-enbmod`) across the same dev / packaged layouts.
         static string LocateEnbmodScripts()
         {
-            var candidates = new[]
-            {
-                Path.Combine(AppContext.BaseDirectory, "bin", "scripts"),
-                Path.Combine(AppContext.BaseDirectory, "scripts"),
-                Path.Combine(Directory.GetCurrentDirectory(), "bin", "scripts"),
-            };
+            var candidates = new List<string>();
+#if DEBUG
+            // Dev: prefer the LIVE repo scripts/ tree so a dev's Lua edits are
+            // picked up on the next launch with no `just build-enbmod` to stage
+            // them into bin/scripts first. This dir is absent in a packaged
+            // install, so it is simply skipped there; Release builds never even
+            // compile this candidate in. Combined with the dev-build store
+            // refresh in ModStore.SeedFromBundle, this makes repo -> store ->
+            // client fully automatic in dev.
+            candidates.Add(Path.Combine(Directory.GetCurrentDirectory(),
+                "freya", "client-injection", "enbmod", "scripts"));
+#endif
+            candidates.Add(Path.Combine(AppContext.BaseDirectory, "bin", "scripts"));
+            candidates.Add(Path.Combine(AppContext.BaseDirectory, "scripts"));
+            candidates.Add(Path.Combine(Directory.GetCurrentDirectory(), "bin", "scripts"));
             foreach (var c in candidates)
                 if (Directory.Exists(c)) return c;
             return null;

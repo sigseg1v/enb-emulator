@@ -40,7 +40,34 @@ namespace LaunchFreya
                 {
                     var id = Path.GetFileName(src);
                     var dst = Path.Combine(store, id);
-                    if (Directory.Exists(dst)) continue;   // already present; leave it
+                    if (Directory.Exists(dst))
+                    {
+#if DEBUG
+                        // Dev iteration: in a dev build the bundle (the repo's
+                        // scripts/) is the source of truth, so refresh our OWN
+                        // bundled mods into the store on every launch. Without
+                        // this the store SHADOWS the bundle forever (seeding only
+                        // fills gaps), so a Lua edit to one of our mods never
+                        // reaches the game -- you would have to hand-delete the
+                        // store copy. This loop only ever iterates ids present in
+                        // the bundle (ours), so a user's own mod (an id we never
+                        // ship) is never touched. Release builds keep gap-only
+                        // seeding: there the online self-updater (modhash) owns
+                        // refresh and re-copying the shipped bundle would regress
+                        // a newer updater-fetched mod.
+                        try
+                        {
+                            Directory.Delete(dst, recursive: true);
+                            CopyDir(src, dst);
+                            log($"mods: refreshed '{id}' in the store from the bundle (dev build)");
+                        }
+                        catch (Exception ex)
+                        {
+                            log($"mods: could not refresh '{id}' from the bundle: {ex.Message}");
+                        }
+#endif
+                        continue;   // present: gap-filled (release) or refreshed (debug)
+                    }
                     CopyDir(src, dst);
                     log($"mods: seeded '{id}' into the store from the bundle");
                 }
