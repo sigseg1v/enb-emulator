@@ -83,8 +83,8 @@ test("scenario: vitals fill from fractions with uncalibrated flat struct", funct
     mock.set_vitals{ hull = 0.75, shield = 0.5, energy = 0.25 }
     local frame = mock.tick()
 
-    -- track_w = PC_W - PC_PAD_X*2 - PCT_W = 224 - 14 - 34 = 176
-    local track_w = 176
+    -- track_w = PC_W - PC_PAD_X*2 - PCT_W = 224 - 14 - 52 = 158
+    local track_w = 158
     local fills = mock.find(frame, "rrect_grad", function(c) return c.h == 16 end)
     eq(#fills, 3, "three vital fills drawn from fractions")
     eq(fills[1].w, math.floor(track_w * 0.75), "hull fill width tracks fraction")

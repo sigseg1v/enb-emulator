@@ -86,6 +86,17 @@ namespace vitals {
     constexpr int fill_frac     = 0x68;   // gadget + 0x68 -> 0..1 fill fraction (cur/max)
 }
 
+// Player-entity chain hung off the same live vitals controller. The controller's
+// data object ([ctrl+0x04]) points at the local player's ship entity
+// ([data+0x88]); the entity carries the character name as a char* at +0x124
+// (observed: the field held "<your char>" at runtime). Build-constant struct
+// offsets, same caveat as vitals -- only the controller pointer varies per run.
+namespace player {
+    constexpr int ctrl_data   = 0x04;     // [ctrl + 0x04]   -> data object
+    constexpr int data_entity = 0x88;     // [data + 0x88]   -> player ship entity
+    constexpr int entity_name = 0x124;    // [entity + 0x124]-> char* character name
+}
+
 // Runtime-editable field offsets. -1 means "not calibrated -- reads return nil/0".
 // Layout intentionally flat & simple so the Lua calibrate() can poke any field by name.
 struct Offsets {

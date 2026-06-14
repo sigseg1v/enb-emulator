@@ -389,6 +389,19 @@ static int l_vitals(lua_State* L){
     push_frac("hull",   game::vitals::gadget_hull);
     push_frac("shield", game::vitals::gadget_shield);
     push_frac("energy", game::vitals::gadget_energy);
+    // character name off the same controller's player-entity chain.
+    uintptr_t data   = mem::ptr(ctrl + game::player::ctrl_data);
+    uintptr_t entity = data ? mem::ptr(data + game::player::data_entity) : 0;
+    if (entity) {
+        uintptr_t namep = mem::ptr(entity + game::player::entity_name);
+        if (namep) {
+            std::string nm = mem::cstr(namep);
+            if (!nm.empty()) {
+                lua_pushlstring(L, nm.data(), nm.size());
+                lua_setfield(L, -2, "name");
+            }
+        }
+    }
     return 1;
 }
 

@@ -58,7 +58,7 @@ local CFG = {
     HEAD_H        = 16,    -- name/level header row
     VITAL_H       = 16,    -- vital bar height (tall enough for the inside value text)
     VITAL_GAP     = 3,
-    PCT_W         = 34,    -- percentage column to the right of each vital bar
+    PCT_W         = 52,    -- percentage column to the right of each vital bar
     VAL_PAD       = 4,     -- inset of the inside value text from the bar's right edge
     PC_GAP        = 24,    -- gap between the player card's bottom and the hotbar top
 
@@ -109,11 +109,14 @@ local function draw_player_card(L)
     local p = L.pc
     H.glass(p.x, p.y, p.w, p.h)
 
-    -- header: NAME (left) + LV n (right). Name/levels still come from the flat
-    -- struct, which is uncalibrated -- they fall back to PILOT / LV -- for now
-    -- (the real name + level live behind the entity's named-property accessors).
-    local name = (has_flat and me.name and me.name ~= "" and me.name) or "PILOT"
-    H.otext(p.x + CFG.PC_PAD_X, p.y + CFG.PC_PAD_Y, name:upper(), has_flat and H.INK or H.UNCAL)
+    -- header: NAME (left) + LV n (right). The name comes live from the vitals
+    -- controller's player-entity chain (enb.vitals().name), so it works without
+    -- the flat-struct calibration; fall back to the flat name, then PILOT.
+    local name
+    if vit.name and vit.name ~= "" then name = vit.name
+    elseif has_flat and me.name and me.name ~= "" then name = me.name end
+    H.otext(p.x + CFG.PC_PAD_X, p.y + CFG.PC_PAD_Y, (name or "PILOT"):upper(),
+            name and H.INK or H.UNCAL)
     local lv = "LV --"
     if has_flat then
         lv = "LV " .. math.max(me.combat_lvl or 0, me.explore_lvl or 0, me.trade_lvl or 0)
@@ -125,7 +128,6 @@ local function draw_player_card(L)
     -- vitals
     local track_x = p.x + CFG.PC_PAD_X
     local track_w = p.w - CFG.PC_PAD_X * 2 - CFG.PCT_W
-    local pct_right = p.x + p.w - CFG.PC_PAD_X
     local vy = p.y + CFG.PC_PAD_Y + CFG.HEAD_H + CFG.VITAL_GAP
     for _, v in ipairs(VITALS) do
         local cur, max = me[v.key], me[v.max]
@@ -153,7 +155,10 @@ local function draw_player_card(L)
                 H.otext(track_x + track_w - CFG.VAL_PAD - H.measure(val), ty + 2, val, 0xffffff)
             end
             local ps = math.floor(frac * 100 + 0.5) .. "%"
-            H.otext(pct_right - H.measure(ps) - 8, ty + 2, ps, H.INK)
+            -- left-align the % in its own column just right of the bar, so a wide
+            -- glyph run can't bleed back over the bar (right-aligning at the card
+            -- edge pushed "100%" left onto the bar).
+            H.otext(track_x + track_w + 8, ty + 2, ps, H.INK)
         end
         vy = vy + CFG.VITAL_H + CFG.VITAL_GAP
     end

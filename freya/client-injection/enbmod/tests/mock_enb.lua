@@ -54,7 +54,7 @@ function M.reset()
     S = {
         screen_w = 1280, screen_h = 992,
         self_tbl = { base = 0 },
-        vitals_tbl = {},         -- enb.vitals(): { hull=frac, shield=frac, energy=frac }
+        vitals_tbl = {},         -- enb.vitals(): { hull=frac, shield=frac, energy=frac, name=str }
         target_tbl = nil,
         state = "space",         -- enb.state(): space/station/login/charsel/load/unknown
         cursor = false,          -- last enb.cursor(on) value

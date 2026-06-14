@@ -22,6 +22,7 @@ local BAR_X = (1280 - BAR_W) // 2         -- 331
 local BAR_Y = 992 - SLOT - 18             -- 928
 local PC_H  = 5 + 16 + 3 + 3 * 16 + 2 * 3 + 5   -- 83
 local PC_X, PC_W = BAR_X, 224
+local TRACK_W = PC_W - 7 * 2 - 52         -- PC_W - PC_PAD_X*2 - PCT_W = 158
 local PC_Y  = BAR_Y - 24 - PC_H           -- 821
 local LIT   = 0x2f4a6e                     -- CFG.SLOT_LIT_TOP (armed slot body top)
 local KEY_INK = 0xcfe0f2
@@ -49,8 +50,8 @@ test("uncalibrated: player card + 12 hotbar slots, no vital fills", function()
     eq(#card, 1, "one player-card body")
     eq(card[1].x, PC_X, "card x = hotbar left edge")
     eq(card[1].y, PC_Y, "card y above the hotbar")
-    -- no vital fills when uncalibrated (track h=16, fill width <=176)
-    local fills = mock.find(frame, "rrect_grad", function(c) return c.h == 16 and c.w <= 176 end)
+    -- no vital fills when uncalibrated (track h=16, fill width <=TRACK_W)
+    local fills = mock.find(frame, "rrect_grad", function(c) return c.h == 16 and c.w <= TRACK_W end)
     eq(#fills, 0, "no vital fills uncalibrated")
 end)
 
@@ -91,17 +92,26 @@ test("uncalibrated: card header reads PILOT / LV -- in uncal gray", function()
     eq(lv[1].rgb, H.UNCAL, "LV -- uncal gray")
 end)
 
+test("name comes live from enb.vitals() without flat calibration", function()
+    mock.set_self{ base = 0 }                      -- flat struct uncalibrated
+    mock.set_vitals{ name = "Jefive", hull = 0.5 }
+    local frame = mock.tick()
+    local nm = mock.find(frame, "text", function(c) return c.text == "JEFIVE" and c.rgb == H.INK end)
+    eq(#nm, 1, "live name shown (uppercased, INK) without flat calibration")
+    mock.set_vitals{}
+end)
+
 test("calibrated: vital fills sized cur/max in vital colors", function()
     mock.set_self{ base = 0x05000000, name = "JETHREE",
         hull = 750, hull_max = 1000, shield = 400, shield_max = 1000,
         energy = 900, energy_max = 1000, combat_lvl = 23, explore_lvl = 31, trade_lvl = 12 }
     local frame = mock.tick()
-    local fills = mock.find(frame, "rrect_grad", function(c) return c.h == 16 and c.w <= 176 end)
+    local fills = mock.find(frame, "rrect_grad", function(c) return c.h == 16 and c.w <= TRACK_W end)
     eq(#fills, 3, "three vital fills")
     table.sort(fills, function(a, b) return a.y < b.y end)
-    eq(fills[1].w, math.floor(176 * 0.75), "hull fill width")
-    eq(fills[2].w, math.floor(176 * 0.40), "shield fill width")
-    eq(fills[3].w, math.floor(176 * 0.90), "reactor fill width")
+    eq(fills[1].w, math.floor(TRACK_W * 0.75), "hull fill width")
+    eq(fills[2].w, math.floor(TRACK_W * 0.40), "shield fill width")
+    eq(fills[3].w, math.floor(TRACK_W * 0.90), "reactor fill width")
     eq(fills[1].rgb, H.HULL, "hull red")
     eq(fills[2].rgb, H.SHIELD, "shield blue")
     eq(fills[3].rgb, H.REACTOR, "reactor green")
@@ -117,10 +127,10 @@ test("vital fill clamps to [0,1] on out-of-range values", function()
     mock.set_self{ base = 1, hull = 2000, hull_max = 1000,
         shield = -50, shield_max = 1000, energy = 0, energy_max = 0 }
     local frame = mock.tick()
-    local fills = mock.find(frame, "rrect_grad", function(c) return c.h == 16 and c.w <= 176 end)
+    local fills = mock.find(frame, "rrect_grad", function(c) return c.h == 16 and c.w <= TRACK_W end)
     -- hull clamps full; shield clamps to 0 -> not drawn; reactor max=0 -> not drawn
     eq(#fills, 1, "only hull drawn")
-    eq(fills[1].w, 176, "overfull hull clamps to track width")
+    eq(fills[1].w, TRACK_W, "overfull hull clamps to track width")
     mock.set_self{ base = 0 }
 end)
 
