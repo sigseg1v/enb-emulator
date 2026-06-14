@@ -53,7 +53,9 @@ function M.discover(scripts_dir)
 end
 
 -- Discover and run every staged mod. Each entrypoint runs in a pcall so one bad
--- mod cannot take the whole HUD down. Returns the discovered manifest list.
+-- mod cannot take the whole HUD down. Returns the discovered manifest list, each
+-- entry augmented with runtime state for introspection: .ok (did it load),
+-- .module (whatever the entrypoint returned, for /run drill-in), or .error.
 function M.load_all(scripts_dir)
     local mods = M.discover(scripts_dir)
     for _, m in ipairs(mods) do
@@ -61,11 +63,14 @@ function M.load_all(scripts_dir)
         local path = m.dir .. "/" .. entry
         -- let a mod require its own sibling files by short name
         package.path = m.dir .. "/?.lua;" .. package.path
-        local ok, err = pcall(dofile, path)
+        local ok, ret = pcall(dofile, path)
+        m.ok = ok
         if ok then
+            m.module = ret      -- entrypoint return value (table, or nil if none)
             enb.log("mod loaded: " .. (m.name or m.id))
         else
-            enb.log("mod FAILED [" .. tostring(m.id) .. "]: " .. tostring(err))
+            m.error = ret
+            enb.log("mod FAILED [" .. tostring(m.id) .. "]: " .. tostring(ret))
         end
     end
     return mods

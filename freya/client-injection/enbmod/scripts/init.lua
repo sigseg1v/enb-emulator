@@ -81,3 +81,15 @@ end
 local modloader = require("modloader")
 local mods = modloader.load_all(enb.script_dir or "scripts")
 enb.log(string.format("init.lua: %d mod(s) loaded", #mods))
+
+-- Mod registry for the /run console. enb.mods is keyed by mod id; each entry is
+-- the manifest plus runtime state (.ok / .module / .error). Introspect from chat:
+--   /run dump(enb.mods, {depth = 1})        -- list every loaded mod by id
+--   /run enb.mods["player-hud"]             -- one mod's manifest + state
+--   /run enb.mods["player-hud"].module      -- that mod's returned module table
+enb.mods = {}
+for _, m in ipairs(mods) do enb.mods[m.id] = m end
+
+-- introspect(modid): inspect a loaded mod incl. its private (closed-over) state.
+--   /run introspect("player-hud").upvalues.privateMap["abc"]
+introspect = require("introspect")
