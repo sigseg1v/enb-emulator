@@ -101,20 +101,26 @@ end
 -- ---- player card -----------------------------------------------------------
 local function draw_player_card(L)
     local me = enb.self()
-    local cal = me.base ~= 0
+    -- Live bar fractions from the vitals controller (game::vitals chain). These
+    -- work whenever we are in space, independent of the flat-struct player_ptr
+    -- calibration (me.base), which models cur/max ints we cannot read yet.
+    local vit = (enb.vitals and enb.vitals()) or {}
+    local has_flat = me.base ~= 0
     local p = L.pc
     H.glass(p.x, p.y, p.w, p.h)
 
-    -- header: NAME (left) + LV n (right)
-    local name = (cal and me.name and me.name ~= "" and me.name) or "PILOT"
-    H.otext(p.x + CFG.PC_PAD_X, p.y + CFG.PC_PAD_Y, name:upper(), cal and H.INK or H.UNCAL)
+    -- header: NAME (left) + LV n (right). Name/levels still come from the flat
+    -- struct, which is uncalibrated -- they fall back to PILOT / LV -- for now
+    -- (the real name + level live behind the entity's named-property accessors).
+    local name = (has_flat and me.name and me.name ~= "" and me.name) or "PILOT"
+    H.otext(p.x + CFG.PC_PAD_X, p.y + CFG.PC_PAD_Y, name:upper(), has_flat and H.INK or H.UNCAL)
     local lv = "LV --"
-    if cal then
+    if has_flat then
         lv = "LV " .. math.max(me.combat_lvl or 0, me.explore_lvl or 0, me.trade_lvl or 0)
     end
     local lw = H.measure(lv)
     H.otext(p.x + p.w - CFG.PC_PAD_X - lw, p.y + CFG.PC_PAD_Y, lv,
-            cal and H.INK_DIM or H.UNCAL)
+            has_flat and H.INK_DIM or H.UNCAL)
 
     -- vitals
     local track_x = p.x + CFG.PC_PAD_X
@@ -123,14 +129,14 @@ local function draw_player_card(L)
     local vy = p.y + CFG.PC_PAD_Y + CFG.HEAD_H + CFG.VITAL_GAP
     for _, v in ipairs(VITALS) do
         local cur, max = me[v.key], me[v.max]
-        local frac = 0
-        if cal and cur and max and max > 0 then
-            frac = cur / max
-            if frac < 0 then frac = 0 elseif frac > 1 then frac = 1 end
-        end
+        -- prefer the live gadget fraction; fall back to flat cur/max if present.
+        local frac = vit[v.key]
+        if frac == nil and has_flat and cur and max and max > 0 then frac = cur / max end
+        local known = frac ~= nil
+        if known then frac = frac < 0 and 0 or (frac > 1 and 1 or frac) end
         -- track + fill + border
         enb.draw.rrect(track_x, vy, track_w, CFG.VITAL_H, H.RADIUS, H.TRACK, 220, true)
-        if cal and frac > 0 then
+        if known and frac > 0 then
             local fw = math.floor(track_w * frac)
             if fw > 0 then
                 enb.draw.rrect_grad(track_x, vy, fw, CFG.VITAL_H, H.RADIUS,
@@ -138,12 +144,14 @@ local function draw_player_card(L)
             end
         end
         enb.draw.rrect(track_x, vy, track_w, CFG.VITAL_H, H.RADIUS, H.LINE, 70, false)
-        -- inside value "cur / max", right-aligned + percentage to the right
-        if cal and cur and max then
-            local val = string.format("%d / %d", cur, max)
-            local vw, vh = H.measure(val)
+        if known then
+            local _, vh = H.measure("0%")
             local ty = vy + math.floor((CFG.VITAL_H - vh) / 2)
-            H.otext(track_x + track_w - CFG.VAL_PAD - vw, ty + 2, val, 0xffffff)
+            -- raw "cur / max" only when the flat struct gives it; always the %.
+            if has_flat and cur and max then
+                local val = string.format("%d / %d", cur, max)
+                H.otext(track_x + track_w - CFG.VAL_PAD - H.measure(val), ty + 2, val, 0xffffff)
+            end
             local ps = math.floor(frac * 100 + 0.5) .. "%"
             H.otext(pct_right - H.measure(ps) - 8, ty + 2, ps, H.INK)
         end

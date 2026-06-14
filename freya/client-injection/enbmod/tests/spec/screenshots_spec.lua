@@ -72,3 +72,32 @@ test("scenario: login (HUD fully hidden)", function()
     eq(#frame, 0, "login draws nothing")
     mock.set_game_state("space")
 end)
+
+-- The real game gives us live bar fractions from the vitals controller
+-- (enb.vitals(), the game::vitals chain) BEFORE the flat player struct
+-- (me.base) is calibrated. This pins that the bars fill from those fractions
+-- alone -- name/level fall back to PILOT/LV --, and no raw "cur / max" text is
+-- drawn -- so the HUD is useful the moment we are in space.
+test("scenario: vitals fill from fractions with uncalibrated flat struct", function()
+    mock.set_self{ base = 0 }                   -- flat player struct NOT calibrated
+    mock.set_vitals{ hull = 0.75, shield = 0.5, energy = 0.25 }
+    local frame = mock.tick()
+
+    -- track_w = PC_W - PC_PAD_X*2 - PCT_W = 224 - 14 - 34 = 176
+    local track_w = 176
+    local fills = mock.find(frame, "rrect_grad", function(c) return c.h == 16 end)
+    eq(#fills, 3, "three vital fills drawn from fractions")
+    eq(fills[1].w, math.floor(track_w * 0.75), "hull fill width tracks fraction")
+    eq(fills[2].w, math.floor(track_w * 0.5),  "shield fill width tracks fraction")
+    eq(fills[3].w, math.floor(track_w * 0.25), "energy fill width tracks fraction")
+
+    -- percentage shown for each bar; name falls back to PILOT (flat uncalibrated)
+    ok(#mock.find(frame, "text", function(c) return c.text == "75%" end) >= 1, "hull %")
+    ok(#mock.find(frame, "text", function(c) return c.text == "PILOT" end) >= 1, "name fallback")
+    -- no raw "cur / max" text without the flat struct
+    eq(#mock.find(frame, "text", function(c) return tostring(c.text):find(" / ") ~= nil end),
+       0, "no cur/max raw text without flat calibration")
+
+    mock.set_self{}             -- reset
+    mock.set_vitals{}
+end)

@@ -70,6 +70,22 @@ namespace addr {
     constexpr uintptr_t AuxGet_Skill  = 0x00417f21;
 }
 
+// Vitals-bar fill chain. Unlike the Offsets struct below (runtime hypotheses),
+// these are CONFIRMED build-constant field offsets, observed at runtime: the
+// vitals controller `this` is captured live every frame by the in-space
+// heartbeat hook (hooks::vitals_ctrl()); from it each bar's gadget sits at a
+// fixed slot, and the gadget's true fill fraction (cur/max, 0..1) is at
+// +fill_frac. That fraction SNAPS to the new ratio the instant a bar changes (a
+// second copy at +0x70 lags/animates the on-screen tween -- we read the snapping
+// one). These hold for every install of this client build; only the controller
+// pointer varies per run, so it is read live rather than stored here.
+namespace vitals {
+    constexpr int gadget_energy = 0x1c;   // [ctrl + 0x1c] -> reactor bar gadget
+    constexpr int gadget_shield = 0x20;   // [ctrl + 0x20] -> shield bar gadget
+    constexpr int gadget_hull   = 0x24;   // [ctrl + 0x24] -> hull bar gadget
+    constexpr int fill_frac     = 0x68;   // gadget + 0x68 -> 0..1 fill fraction (cur/max)
+}
+
 // Runtime-editable field offsets. -1 means "not calibrated -- reads return nil/0".
 // Layout intentionally flat & simple so the Lua calibrate() can poke any field by name.
 struct Offsets {

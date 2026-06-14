@@ -368,6 +368,30 @@ static int l_vitals_ctrl(lua_State* L){
     return 1;
 }
 
+// enb.vitals() -> { hull=frac, shield=frac, energy=frac }  (each 0..1, omitted
+// if unreadable). Reads the live vitals controller (heartbeat-captured) -> each
+// bar's gadget -> its fill fraction (game::vitals offsets). Independent of the
+// flat-struct player_ptr_addr calibration: it works whenever the in-space vitals
+// updater is firing, and the table is empty out of space (controller == 0).
+static int l_vitals(lua_State* L){
+    lua_newtable(L);
+    uintptr_t ctrl = hooks::vitals_ctrl();
+    if (!ctrl) return 1;
+    auto push_frac = [&](const char* key, int slot){
+        uintptr_t g = mem::ptr(ctrl + slot);
+        if (!g) return;
+        float f = mem::f32(g + game::vitals::fill_frac);
+        if (f != f) return;                 // NaN guard
+        if (f < 0.0f) f = 0.0f; else if (f > 1.0f) f = 1.0f;
+        lua_pushnumber(L, f);
+        lua_setfield(L, -2, key);
+    };
+    push_frac("hull",   game::vitals::gadget_hull);
+    push_frac("shield", game::vitals::gadget_shield);
+    push_frac("energy", game::vitals::gadget_energy);
+    return 1;
+}
+
 // enb.on_input(fn [, mask])  -- fn(msg, wparam, lparam) -> truthy to SWALLOW.
 // Optional mask = bitwise-or of enb.WANT_KEY/WANT_CHAR/WANT_MOUSE; default all.
 // Registering nil clears the handler.
@@ -579,6 +603,7 @@ void open(lua_State* L){
         {"enable_inspace", l_enable_inspace},
         {"inspace", l_inspace},
         {"vitals_ctrl", l_vitals_ctrl},
+        {"vitals", l_vitals},
         {"tap", l_tap},
         {"key", l_key},
         {"char", l_char},

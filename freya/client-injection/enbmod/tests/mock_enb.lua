@@ -54,6 +54,7 @@ function M.reset()
     S = {
         screen_w = 1280, screen_h = 992,
         self_tbl = { base = 0 },
+        vitals_tbl = {},         -- enb.vitals(): { hull=frac, shield=frac, energy=frac }
         target_tbl = nil,
         state = "space",         -- enb.state(): space/station/login/charsel/load/unknown
         cursor = false,          -- last enb.cursor(on) value
@@ -74,6 +75,7 @@ end
 function M.state() return S end
 function M.set_screen(w, h) S.screen_w, S.screen_h = w, h end
 function M.set_self(t) S.self_tbl = t end
+function M.set_vitals(t) S.vitals_tbl = t end
 function M.set_game_state(s) S.state = s end
 function M.set_target(t) S.target_tbl = t end
 function M.mem_set_u32(addr, v) S.mem[addr] = v end
@@ -213,6 +215,7 @@ function M.install(opts)
         enable_inspace = function() return true end,
         inspace = function() return S.state == "space" end,
         vitals_ctrl = function() return 0 end,   -- no live game memory headless
+        vitals = function() return S.vitals_tbl end,
 
         tap  = function(vk) S.taps[#S.taps + 1] = vk; return true end,
         key  = function(vk, down) S.keys[#S.keys + 1] = { vk = vk, down = down }; return true end,
