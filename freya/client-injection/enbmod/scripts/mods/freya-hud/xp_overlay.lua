@@ -49,7 +49,12 @@ enb.on_tick(function()
     if sh == 0 then sh = 992 end
 
     local me = enb.self()
-    local cal = me.base ~= 0
+    -- Discipline levels come live from the controller->data chain (H.stats), so
+    -- the card works with no flat-struct calibration; fall back to the flat self()
+    -- fields, then the gray skeleton. (Per-discipline xp% is not pinned yet -- the
+    -- one xp pair we have feeds the overall card -- so the bars stay empty.)
+    local st = (H.stats and H.stats()) or {}
+    local cal = (st.combat or st.explore or st.trade) ~= nil or me.base ~= 0
 
     local dc_h = CFG.PAD_Y * 2 + #ROWS * CFG.ROW_H + (#ROWS - 1) * CFG.ROW_GAP
     local x = CFG.X
@@ -60,7 +65,7 @@ enb.on_tick(function()
     local bar_w = CFG.W - CFG.PAD_X * 2 - CFG.LETTER_W - 4 - CFG.BADGE_W - 4
     local ry = y + CFG.PAD_Y
     for _, row in ipairs(ROWS) do
-        local lvl = me[row.key .. "_lvl"]
+        local lvl = st[row.key] or me[row.key .. "_lvl"]
         local pct = me[row.key .. "_pct"]
         local text_y = ry + math.floor((CFG.ROW_H - 14) / 2)
 

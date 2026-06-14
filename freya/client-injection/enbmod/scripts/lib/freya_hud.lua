@@ -86,6 +86,49 @@ function H.vis()
     return false, false
 end
 
+-- ---- live character stats (level / xp / discipline levels) -----------------
+-- Read straight off the same controller->data chain enb.vitals() walks for the
+-- bar fractions, so this needs NO flat-struct calibration and NO DLL rebuild --
+-- it works the instant we are in space, exactly like the name + bars do.
+--
+-- Offsets pinned from the in-space level/xp probe (autocalibrate) against a fresh
+-- character. CAVEAT, read before trusting these:
+--   * level     (dat+0x5c) read 3 on a 1/1/1 character == combat+explore+trade,
+--                i.e. the OVERALL level (sum of the three), not max.
+--   * xp_cur/xp_next (dat+0x0c / dat+0x10) read 4/10 == the current-level XP
+--     progress bar. Which discipline it tracks is not yet proven, so it feeds the
+--     overall card, not a per-discipline bar.
+--   * combat/explore/trade (dat+0x104 / +0x108 / +0x10c) are three consecutive
+--     ints that all read 1 on a fresh char. The letter->offset MAPPING is a
+--     HYPOTHESIS: while the disciplines are equal it cannot be proven, so if one
+--     levels and the WRONG letter moves, swap these three offsets.
+-- Every read is guarded (readable + sane range) so a bad pointer never faults;
+-- unknown fields come back nil and the cards fall back to the "--" skeleton.
+function H.stats()
+    local out = {}
+    local m = enb.mem
+    local ctrl = (enb.vitals_ctrl and enb.vitals_ctrl()) or 0
+    if ctrl == 0 or not (m and m.readable(ctrl + 4, 4)) then return out end
+    local data = m.u32(ctrl + 4)
+    if data == 0 or not m.readable(data + 0x114, 4) then return out end
+
+    local function int_at(off, lo, hi)
+        local v = m.u32(data + off)
+        if v >= lo and v <= hi then return v end
+    end
+
+    out.level = int_at(0x5c, 1, 300)             -- overall level (sum of disciplines)
+    local cur, need = m.u32(data + 0x0c), m.u32(data + 0x10)
+    if need > 0 and cur <= need then             -- current-level xp progress
+        out.xp_cur, out.xp_next = cur, need
+        out.xp_pct = need > 0 and (cur / need * 100) or nil
+    end
+    out.combat  = int_at(0x104, 1, 60)           -- mapping unproven on a 1/1/1 char
+    out.explore = int_at(0x108, 1, 60)
+    out.trade   = int_at(0x10c, 1, 60)
+    return out
+end
+
 -- ---- text helpers ----------------------------------------------------------
 function H.measure(s)
     local w, h = enb.measure(s)

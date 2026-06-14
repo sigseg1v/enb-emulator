@@ -117,13 +117,22 @@ local function draw_player_card(L)
     elseif has_flat and me.name and me.name ~= "" then name = me.name end
     H.otext(p.x + CFG.PC_PAD_X, p.y + CFG.PC_PAD_Y, (name or "PILOT"):upper(),
             name and H.INK or H.UNCAL)
-    local lv = "LV --"
-    if has_flat then
+    -- overall level + xp%: live from the controller->data chain (no flat-struct
+    -- calibration needed), falling back to the flat struct, then the skeleton.
+    local st = (H.stats and H.stats()) or {}
+    local lv, lv_known = "LV --", false
+    if st.level then
+        lv, lv_known = "LV " .. st.level, true
+    elseif has_flat then
         lv = "LV " .. math.max(me.combat_lvl or 0, me.explore_lvl or 0, me.trade_lvl or 0)
+        lv_known = true
+    end
+    if lv_known and st.xp_pct then
+        lv = lv .. string.format("  %d%%", math.floor(st.xp_pct + 0.5))
     end
     local lw = H.measure(lv)
     H.otext(p.x + p.w - CFG.PC_PAD_X - lw, p.y + CFG.PC_PAD_Y, lv,
-            has_flat and H.INK_DIM or H.UNCAL)
+            lv_known and H.INK_DIM or H.UNCAL)
 
     -- vitals
     local track_x = p.x + CFG.PC_PAD_X

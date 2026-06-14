@@ -258,6 +258,24 @@ function M.probe_levels(target_pct)
         end
     end
     enb.log(("[lvl] ===== end level/xp probe (%d lines, %d objs) ====="):format(lines, qi - 1))
+
+    -- Focused readout of the offsets the HUD actually consumes (freya_hud.H.stats),
+    -- so a single in-space run confirms/corrects them without reading the 160-line
+    -- dump. To prove the C/E/T mapping: level ONE discipline, re-run, and see which
+    -- of the three combat/explore/trade lines moved.
+    if data ~= 0 and enb.mem.readable(data + 0x114, 4) then
+        local function di(off) return enb.mem.u32(data + off) end
+        enb.log("[lvl] ---- HUD candidates (data object) ----")
+        enb.log(("[lvl]   overall level   dat+0x5c  = %d"):format(di(0x5c)))
+        enb.log(("[lvl]   xp progress     dat+0xc/0x10 = %d / %d (%.0f%%)"):format(
+            di(0x0c), di(0x10), di(0x10) > 0 and di(0x0c) / di(0x10) * 100 or 0))
+        enb.log(("[lvl]   combat  level   dat+0x104 = %d"):format(di(0x104)))
+        enb.log(("[lvl]   explore level   dat+0x108 = %d"):format(di(0x108)))
+        enb.log(("[lvl]   trade   level   dat+0x10c = %d"):format(di(0x10c)))
+        enb.log("[lvl]   ^ compare to your character sheet; if a discipline is")
+        enb.log("[lvl]     mislabelled, the three dat+0x104/0x108/0x10c offsets")
+        enb.log("[lvl]     need reordering in freya_hud.lua H.stats().")
+    end
 end
 
 -- The fields autocalib knows how to persist (mirror of game.h Offsets).
