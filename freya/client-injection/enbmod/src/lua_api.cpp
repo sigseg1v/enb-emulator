@@ -706,17 +706,15 @@ static void call_ref(lua_State* L, int ref, int nargs){
     }
 }
 
-// Echo a line into the game's chat window via the client's local line printer
-// (no packet -- same routine the client uses for its own notices). tick() runs
-// on the game/message-pump thread, the same thread the client prints chat on, so
-// this is safe to call from run_console. Channel 0x13 = local system line.
-typedef void (__stdcall* ChatLocalLineFn)(int channel, const char* msg, int flag);
+// Echo "/run" output. This used to call the client's local chat-line printer
+// (game::addr::ChatLocalLine) so results appeared in the game's chat window, but
+// that routine's address + calling convention were never exercised until the
+// console first ran, and the first real call faulted the client (stack/ABI
+// mismatch -- the signature is unverified). Until ChatLocalLine is verified
+// against the real client, route console output to enbmod.log ONLY: reliable,
+// crash-free, and still fully visible. (Re-enable an in-game echo only after the
+// printer's signature is confirmed -- track it as a CV item.)
 static void chat_echo(const std::string& text){
-    auto send = [](const std::string& s){
-        ((ChatLocalLineFn)game::addr::ChatLocalLine)(0x13, ("[Lua] " + s).c_str(), 0);
-    };
-    // A dumped table is multi-line; the chat printer is one line per call, so
-    // split on '\n' and cap the burst so a huge structure can't flood the window.
     const int kMaxLines = 60;
     size_t start = 0;
     int lines = 0;
@@ -725,8 +723,8 @@ static void chat_echo(const std::string& text){
         std::string seg = text.substr(start, nl == std::string::npos ? std::string::npos
                                                                       : nl - start);
         if (!seg.empty() && seg.back() == '\r') seg.pop_back();
-        if (++lines > kMaxLines) { send("... (output truncated)"); break; }
-        send(seg);
+        if (++lines > kMaxLines) { logf("[run] ... (output truncated)"); break; }
+        logf("[run] %s", seg.c_str());
         if (nl == std::string::npos) break;
         start = nl + 1;
     }
@@ -766,7 +764,6 @@ static void run_console(lua_State* L, const std::string& code){
         if (luaL_loadstring(L, code.c_str()) != LUA_OK){
             std::string e = lua_tostring(L, -1) ? lua_tostring(L, -1) : "?";
             logf("[run] compile error: %s", e.c_str());
-            chat_echo("error: " + e);
             lua_pop(L, 1);
             return;
         }
@@ -775,15 +772,13 @@ static void run_console(lua_State* L, const std::string& code){
     if (lua_pcall(L, 0, LUA_MULTRET, 0) != LUA_OK){
         std::string e = lua_tostring(L, -1) ? lua_tostring(L, -1) : "?";
         logf("[run] error: %s", e.c_str());
-        chat_echo("error: " + e);
         lua_pop(L, 1);
         return;
     }
     int nres = lua_gettop(L) - base;
     for (int i = 1; i <= nres; i++){
         std::string out = result_text(L, base + i);
-        logf("[run] %s", out.c_str());
-        chat_echo(out);
+        chat_echo(out);   // chat_echo logs each line to enbmod.log
     }
     lua_pop(L, nres);
 }

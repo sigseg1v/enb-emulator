@@ -402,6 +402,61 @@ local function hunt_curmax(roots, name, frac)
     enb.log(("[cm] ===== end %s (%d candidate pairs) ====="):format(name, n))
 end
 
+-- ---- exact-value finder (the reliable pin) ---------------------------------
+-- Ratio-matching cur/max produced only a false positive (a transform component
+-- whose ratio happened to equal the hull fraction), and value-typing can't find
+-- the discipline levels/xp because they live behind the aux property bag, not as
+-- flat fields. The unambiguous method is to search for a LITERAL number read off
+-- the character sheet: max hull, max shield, max reactor, a discipline level, an
+-- xp total. findval() scans the data + entity objects AND one pointer-hop out of
+-- each (the property bag is a hop away) for that exact value as int OR float, and
+-- logs every offset that holds it. Run live once "/run" works:
+--   /run require("autocalib").findval(880)      -- e.g. your max hull
+--   /run require("autocalib").findval(54, 0.5)  -- xp% as int 54 or float ~0.54
+-- tol (default 0) widens the float match window; ints always match exactly.
+function M.findval(target, tol, label)
+    tol = tol or 0
+    local ctrl = enb.vitals_ctrl and enb.vitals_ctrl() or 0
+    if ctrl == 0 then enb.log("[find] vitals_ctrl 0 -- not in space"); return end
+    local data   = enb.mem.readable(ctrl + 4, 4) and enb.mem.u32(ctrl + 4) or 0
+    local entity = (data ~= 0 and enb.mem.readable(data + 0x88, 4)) and enb.mem.u32(data + 0x88) or 0
+    enb.log(("[find] ===== target=%s%s (tol=%.3f) ====="):format(
+        tostring(target), label and (" ("..label..")") or "", tol))
+    local n, seen = 0, {}
+    -- roots: data, entity, and a pointer-hop out of each.
+    local roots = { { data, "dat" }, { entity, "ent" } }
+    for _, r in ipairs({ { data, "dat" }, { entity, "ent" } }) do
+        local base = r[1]
+        if base ~= 0 and enb.mem.readable(base, 4) then
+            for i = 0, 0x7f do
+                local a = base + i * 4
+                if not enb.mem.readable(a, 4) then break end
+                local u = enb.mem.u32(a)
+                if u >= 0x00400000 and enb.mem.readable(u, 8) and not seen[u] then
+                    seen[u] = true
+                    roots[#roots + 1] = { u, ("%s+0x%03x->"):format(r[2], i * 4) }
+                end
+            end
+        end
+    end
+    for _, r in ipairs(roots) do
+        local base, name = r[1], r[2]
+        if base ~= 0 and enb.mem.readable(base, 4) then
+            for i = 0, 0x7f do
+                local a = base + i * 4
+                if not enb.mem.readable(a, 4) then break end
+                local u, f = enb.mem.u32(a), enb.mem.f32(a)
+                if u == target then
+                    enb.log(("[find] %s+0x%03x = %d  (INT match)"):format(name, i * 4, u)); n = n + 1
+                elseif f == f and math.abs(f - target) <= tol + 1e-4 then
+                    enb.log(("[find] %s+0x%03x = %.4f  (FLOAT match)"):format(name, i * 4, f)); n = n + 1
+                end
+            end
+        end
+    end
+    enb.log(("[find] ===== end (%d hits across %d objs) ====="):format(n, #roots))
+end
+
 -- Pull live fractions from the same chain the bars use, then hunt cur/max pairs.
 function M.dump_curmax()
     local ctrl = enb.vitals_ctrl and enb.vitals_ctrl() or 0
@@ -480,6 +535,18 @@ do
             if not rok then enb.log("[raw] error: " .. tostring(rerr)) end
             enb.log("[watch] armed -- fire weapons / boost / take a hit to move a bar")
             enb.log("[cm] armed -- take a hit (drop hull/shield below 90%) for the cur/max hunt")
+            -- Exact-value pin for the vitals MAX numbers the owner read off the
+            -- character sheet (max hull / shield / reactor). Ratio-matching gave
+            -- only a false positive, so search for the literal values instead --
+            -- including one pointer-hop out (the aux property bag is a hop away).
+            -- These are this character's current maxes; re-run live for any value:
+            --   /run require("autocalib").findval(<n>)
+            local cok, cerr = pcall(function()
+                M.findval(11,  0.5, "max hull?")
+                M.findval(45,  0.5, "max shield?")
+                M.findval(142, 0.5, "max reactor?")
+            end)
+            if not cok then enb.log("[find] error: " .. tostring(cerr)) end
         end
         if probed then
             local ok, err = pcall(M.watch_vitals)
