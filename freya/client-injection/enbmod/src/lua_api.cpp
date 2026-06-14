@@ -40,6 +40,12 @@ struct Event { int kind; unsigned a, b; }; // kind: 0 skill, 1 chat
 static std::mutex g_evq_mx;
 static std::deque<Event> g_evq;
 
+// "/run <lua>" console: the chat-send hook (game thread) strips the prefix and
+// pushes the code here; tick() (Lua thread) drains and executes it. Decoupled
+// from g_evq because these carry a string payload, not the two-word Event.
+static std::mutex g_runq_mx;
+static std::vector<std::string> g_runq;
+
 // =====================================================================================
 // enb.mem.*  -- raw guarded memory access
 // =====================================================================================
@@ -314,6 +320,7 @@ void reset_callbacks(lua_State* L){
     if (g_input_ref != LUA_NOREF) { luaL_unref(L, LUA_REGISTRYINDEX, g_input_ref); g_input_ref = LUA_NOREF; }
     hooks::set_input_mask(0);   // stop entering Lua for input until a reload re-registers
     { std::lock_guard<std::mutex> lk(g_evq_mx); g_evq.clear(); }
+    { std::lock_guard<std::mutex> lk(g_runq_mx); g_runq.clear(); }
 }
 
 static int l_on_tick(lua_State* L){
@@ -676,6 +683,17 @@ void open(lua_State* L){
         std::lock_guard<std::mutex> lk(g_evq_mx); g_evq.push_back({1,a,b}); });
     // input handler runs synchronously on the game thread (returns swallow bool).
     hooks::set_on_input(run_input);
+    // "/run <lua>" chat console: swallow any typed line starting with "/run " and
+    // queue the remainder for execution on the tick thread. The decision (swallow
+    // or pass through) is pure string work -- no Lua here, so it is safe on the
+    // game thread. Returning true tells the hook to skip the real chat send.
+    hooks::set_on_chat_send([](const char* line)->bool{
+        if (!line || std::strncmp(line, "/run ", 5) != 0) return false;
+        const char* code = line + 5;
+        std::lock_guard<std::mutex> lk(g_runq_mx);
+        g_runq.emplace_back(code);
+        return true;
+    });
 }
 
 static void call_ref(lua_State* L, int ref, int nargs){
@@ -688,7 +706,40 @@ static void call_ref(lua_State* L, int ref, int nargs){
     }
 }
 
+// Execute one "/run" snippet on the Lua thread. Tries it as an expression first
+// (`return <code>`) so a bare value or function call echoes its result, then
+// falls back to running it as a statement. Errors and results both go to the log.
+static void run_console(lua_State* L, const std::string& code){
+    std::string expr = "return " + code;
+    if (luaL_loadstring(L, expr.c_str()) != LUA_OK){
+        lua_pop(L, 1);  // discard the expr compile error; try as a statement
+        if (luaL_loadstring(L, code.c_str()) != LUA_OK){
+            logf("[run] compile error: %s", lua_tostring(L, -1));
+            lua_pop(L, 1);
+            return;
+        }
+    }
+    int base = lua_gettop(L) - 1;  // index below the loaded chunk
+    if (lua_pcall(L, 0, LUA_MULTRET, 0) != LUA_OK){
+        logf("[run] error: %s", lua_tostring(L, -1));
+        lua_pop(L, 1);
+        return;
+    }
+    int nres = lua_gettop(L) - base;
+    for (int i = 1; i <= nres; i++){
+        int idx = base + i;
+        if (lua_isstring(L, idx)) logf("[run] %s", lua_tostring(L, idx));
+        else logf("[run] <%s>", luaL_typename(L, idx));
+    }
+    lua_pop(L, nres);
+}
+
 void tick(lua_State* L){
+    // run any queued "/run" console snippets (game thread enqueued; we run here)
+    std::vector<std::string> runs;
+    { std::lock_guard<std::mutex> lk(g_runq_mx); runs.swap(g_runq); }
+    for (auto& code : runs) run_console(L, code);
+
     // drain queued events first
     std::deque<Event> local;
     { std::lock_guard<std::mutex> lk(g_evq_mx); local.swap(g_evq); }

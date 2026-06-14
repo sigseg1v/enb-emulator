@@ -9,6 +9,7 @@ namespace enb { namespace hooks {
 static std::function<void()> g_tick;
 static std::function<void(unsigned, unsigned)> g_on_skill, g_on_chat;
 static std::function<bool(unsigned, unsigned, long)> g_on_input;
+static std::function<bool(const char*)> g_on_chat_send;
 static unsigned g_input_mask = 0;
 static bool g_event_hooks_on = false;
 
@@ -77,6 +78,23 @@ static BOOL WINAPI hk_GetMessageA(LPMSG m, HWND h, UINT min, UINT max) {
         }
     }
     return r;
+}
+
+// ---- chat send-line interception (cdecl) ------------------------------------
+// game::addr::ChatSend takes the raw typed chat line as its only argument, by
+// cdecl (caller-cleaned `ret`, no `ret 4`), so a plain typed C detour forwards
+// it correctly -- no naked trampoline needed. We give the Lua layer first refusal
+// on the line via g_on_chat_send; if it returns true the line is consumed (we
+// return without calling the real function, so no chat packet is ever built).
+typedef int (__cdecl* ChatSend_t)(const char*);
+static ChatSend_t real_ChatSend = nullptr;
+
+static int __cdecl hk_ChatSend(const char* line) {
+    // g_on_chat_send only inspects text + enqueues (no Lua, no throw). On true we
+    // swallow: skip the real send and report "handled" (1). The original return
+    // value is a success flag the caller does not act on for typed input.
+    if (g_on_chat_send && line && g_on_chat_send(line)) return 1;
+    return real_ChatSend(line);
 }
 
 // ---- game __thiscall event hooks --------------------------------------------
@@ -211,6 +229,7 @@ void set_tick(std::function<void()> cb) { g_tick = std::move(cb); }
 void set_on_skill(std::function<void(unsigned, unsigned)> cb) { g_on_skill = std::move(cb); }
 void set_on_chat (std::function<void(unsigned, unsigned)> cb) { g_on_chat  = std::move(cb); }
 void set_on_input(std::function<bool(unsigned, unsigned, long)> cb) { g_on_input = std::move(cb); }
+void set_on_chat_send(std::function<bool(const char*)> cb) { g_on_chat_send = std::move(cb); }
 void set_input_mask(unsigned mask) { g_input_mask = mask; }
 
 bool enable_event_hooks() {
@@ -220,8 +239,11 @@ bool enable_event_hooks() {
                       &real_Skill_tramp) != MH_OK) { logf("hook SkillLifecycle failed"); ok = false; }
     if (MH_CreateHook((void*)game::addr::ChatChannel, (void*)&hk_Chat,
                       &real_Chat_tramp) != MH_OK) { logf("hook ChatChannel failed"); ok = false; }
+    if (MH_CreateHook((void*)game::addr::ChatSend, (void*)&hk_ChatSend,
+                      (void**)&real_ChatSend) != MH_OK) { logf("hook ChatSend failed"); ok = false; }
     MH_EnableHook((void*)game::addr::SkillLifecycle);
     MH_EnableHook((void*)game::addr::ChatChannel);
+    MH_EnableHook((void*)game::addr::ChatSend);
     g_event_hooks_on = ok;
     logf("event hooks %s", ok ? "enabled" : "partially enabled");
     return ok;
@@ -230,6 +252,7 @@ bool enable_event_hooks() {
 void disable_event_hooks() {
     MH_DisableHook((void*)game::addr::SkillLifecycle);
     MH_DisableHook((void*)game::addr::ChatChannel);
+    MH_DisableHook((void*)game::addr::ChatSend);
     g_event_hooks_on = false;
 }
 

@@ -71,4 +71,10 @@ unsigned vitals_ctrl();
 void set_on_skill(std::function<void(unsigned /*this*/, unsigned /*arg*/)> cb);
 void set_on_chat (std::function<void(unsigned /*this*/, unsigned /*arg*/)> cb);
 
+// Chat send-line sink. Fires on the game thread with the raw typed line BEFORE
+// it becomes a chat packet. Return true to SWALLOW the line (the real send is
+// skipped entirely, so nothing goes on the wire); false to let it send normally.
+// Must NOT touch Lua directly (Lua lives on the tick thread) -- inspect + enqueue.
+void set_on_chat_send(std::function<bool(const char* /*line*/)> cb);
+
 }} // namespace enb::hooks
