@@ -93,8 +93,20 @@ var touchSessionOK = []byte(
 
 // legacyServer carries the deps the legacy handlers need.
 type legacyServer struct {
-	store *Store
-	cfg   Config
+	store   *Store
+	cfg     Config
+	limiter *ipLimiter // per-IP /AuthLogin throttle (nil disables)
+	argon   *argonGate // global Argon2id concurrency cap (nil disables)
+}
+
+// newLegacyServer wires the AR-1 flood defences from config.
+func newLegacyServer(store *Store, cfg Config) *legacyServer {
+	return &legacyServer{
+		store:   store,
+		cfg:     cfg,
+		limiter: newIPLimiter(float64(cfg.AuthRatePerMin)/60.0, float64(cfg.AuthBurst)),
+		argon:   newArgonGate(cfg.ArgonMaxConcurrent, 2*time.Second),
+	}
 }
 
 // tryLegacy dispatches the legacy game-auth endpoints by substring on the raw
@@ -166,6 +178,25 @@ func (l *legacyServer) handleAuthLogin(r *http.Request, uri string) []byte {
 	if !uok || !pok {
 		return httpResult(fail, "text/plain")
 	}
+
+	// AR-1 layer 1: per-IP brute-force throttle. On throttle return the exact
+	// failed-login bytes -- no new wire surface; the client already tolerates a
+	// Valid=False (retry). Keyed on the relay-trusted client IP, so a NAT'd
+	// household each get their own bucket.
+	ip := clientIP(r)
+	if !l.limiter.allow(ip) {
+		log.Printf("LinuxAuth: rate-limited /AuthLogin from %s (user %q)", ip, user)
+		return httpResult(fail, "text/plain")
+	}
+
+	// AR-1 layer 2: cap concurrent Argon2id verifications (the memory backstop).
+	// Over the cap, reject cheaply (again wire-identical to a failed login)
+	// rather than queue and pile on 64 MiB/hash of pressure.
+	if !l.argon.acquire() {
+		log.Printf("LinuxAuth: Argon2 capacity saturated; shedding /AuthLogin from %s", ip)
+		return httpResult(fail, "text/plain")
+	}
+	defer l.argon.release()
 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()

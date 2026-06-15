@@ -90,9 +90,9 @@ type patcherManifest struct {
 	launcherExe string
 	launcherCfg string
 	proxyExe    string
-	posFeedDll  string // "" when the manifest omits it
-	injectExe   string // "" when the manifest omits it
-	enbmodDll   string // "" when the manifest omits it (Lua mod runtime)
+	posFeedDll  string               // "" when the manifest omits it
+	injectExe   string               // "" when the manifest omits it
+	enbmodDll   string               // "" when the manifest omits it (Lua mod runtime)
 	mods        []manifestModEntry   // optional (id, hash) Lua mods
 	patches     []manifestPatchEntry // optional operator game-data patches
 }

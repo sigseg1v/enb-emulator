@@ -277,6 +277,11 @@ services:
       DOMAIN: "${DOMAIN}"
       FREYA_CERT_DIR: "/app/certs"
       FREYA_WEB_ROOT: "/app/web"
+      # AR-5: prod terminates TLS itself on :443; the plain-HTTP listener is a
+      # dev-only convenience (vite proxy). Disable it entirely so it never binds
+      # (defence in depth -- 8080 is also not published below). An explicit empty
+      # value is honoured by loadConfig (lookupOr), unlike unset = default :8080.
+      FREYA_HTTP_ADDR: ""
       # Raw-relay the legacy game-auth URIs to the net7go login backend.
       # /updateCheck is NOT relayed -- freya-online serves the FreyaLauncher
       # self-update endpoint itself (updatecheck.go).

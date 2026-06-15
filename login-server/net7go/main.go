@@ -42,7 +42,7 @@ func main() {
 	}
 	defer store.Close()
 
-	legacy := &legacyServer{store: store, cfg: cfg}
+	legacy := newLegacyServer(store, cfg)
 
 	// net7go serves ONLY the legacy endpoints. Anything else gets the verbatim
 	// 404 (the same the C++ login returned for unknown paths) -- the Freya

@@ -80,6 +80,18 @@ func (p *legacyProxy) relay(w http.ResponseWriter, r *http.Request) {
 	defer up.Close()
 	_ = up.SetDeadline(time.Now().Add(15 * time.Second))
 
+	// AR-1: hand net7go the real client IP for its per-IP /AuthLogin throttle.
+	// net7go only ever sees this relay as its peer (RemoteAddr), so without this
+	// it could not tell players apart. We are the TLS edge: r.RemoteAddr is the
+	// genuine client IP (no reverse proxy fronts freya-online -- it binds :443
+	// directly). OVERWRITE any client-supplied value with Set so a client cannot
+	// spoof the header to dodge throttling. Must match net7go's clientIPHeader.
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		r.Header.Set("X-Freya-Client-IP", host)
+	} else {
+		r.Header.Set("X-Freya-Client-IP", r.RemoteAddr)
+	}
+
 	// Forward the request. RequestURI is set on server-received requests but
 	// Request.Write rejects it; clear it. Force Close so net7go's single-shot
 	// hijacked response (it closes the conn after writing) terminates our read.

@@ -17,8 +17,19 @@ package main
 
 import (
 	"os"
+	"strconv"
 	"strings"
 )
+
+// envInt reads an integer env var, falling back to def on unset/blank/invalid.
+func envInt(k string, def int) int {
+	if v, ok := os.LookupEnv(k); ok && v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
 
 type Config struct {
 	// Plain-HTTP listener. TLS is terminated upstream (the Go Freya Online
@@ -42,6 +53,15 @@ type Config struct {
 	KeepaliveEnabled bool   // NET7_IPC_KEEPALIVE != "0"
 	IPCSendSock      string // NET7_IPC_SEND_SOCK, default /run/net7-ipc/net7.sock (peer = server)
 	IPCRecvSock      string // NET7_IPC_RECV_SOCK, default /run/net7-ipc/net7SSL.sock (ours)
+
+	// /AuthLogin flood defence (Phase AR-1). Per-IP token bucket bounds
+	// brute-force from one origin; the Argon2 concurrency cap bounds memory.
+	// Tuned for "stop a flood" not "one login per IP" -- a NAT'd household must
+	// still log in (see ratelimit.go). Set the rate <= 0 to disable per-IP
+	// limiting entirely.
+	AuthRatePerMin     int // NET7GO_AUTH_RATE_PER_MIN, default 60 (1/sec sustained)
+	AuthBurst          int // NET7GO_AUTH_BURST, default 20
+	ArgonMaxConcurrent int // NET7GO_ARGON_MAX_CONCURRENT, default 4 (4*64MiB peak)
 }
 
 func env(k, def string) string {
@@ -62,6 +82,9 @@ func loadConfig() Config {
 		KeepaliveEnabled:   env("NET7_IPC_KEEPALIVE", "1") != "0",
 		IPCSendSock:        env("NET7_IPC_SEND_SOCK", "/run/net7-ipc/net7.sock"),
 		IPCRecvSock:        env("NET7_IPC_RECV_SOCK", "/run/net7-ipc/net7SSL.sock"),
+		AuthRatePerMin:     envInt("NET7GO_AUTH_RATE_PER_MIN", 60),
+		AuthBurst:          envInt("NET7GO_AUTH_BURST", 20),
+		ArgonMaxConcurrent: envInt("NET7GO_ARGON_MAX_CONCURRENT", 4),
 	}
 }
 

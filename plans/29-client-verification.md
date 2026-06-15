@@ -1388,3 +1388,30 @@ format & byte order", Trap 2).
     If it crashes, comment the enb.rpg_level use in freya_hud H.stats() lvl() to
     bisect (vitals + the rest of the HUD are independent of it).
 - **Setup**: `just play-local` with `UseClientMods=true`; `just build-enbmod` first.
+
+## CV-AR-1 -- /AuthLogin throttle returns wire-identical Valid=False (low risk)
+
+- **What changed**: Phase AR-1 added a per-IP rate limiter + a global Argon2id
+  concurrency cap in front of net7go's `/AuthLogin` (login-server/net7go/
+  ratelimit.go). On throttle OR Argon2 saturation, handleAuthLogin returns the
+  EXACT same bytes as a normal failed login (`HTTP 200 ... Valid=False\r\n`) --
+  no new status code, no new body, no new wire surface. The legacy wire format
+  stays entirely inside the CC BY-NC-SA net7go binary.
+- **Why this is likely a no-op for the client**: a throttled response is
+  byte-identical to a wrong-password response, which the client already handles
+  (shows "login failed", lets the player retry). So there is no NEW behaviour to
+  the client; this CV exists only to confirm the UX nuance below.
+- **Behavioural nuance to confirm (real client)**:
+  - Under a genuine login flood, a *legitimate* player whose attempt is shed sees
+    the ordinary "login failed / could not log in" message and a retry succeeds
+    (the limiter is per-IP with a generous burst of 20, and the Argon2 cap only
+    sheds momentarily under saturation). Confirm a normal failed-login UX, not a
+    hang or a protocol error dialog.
+  - A normal single login on an idle server is never throttled (burst is full on
+    first sight of an IP).
+- **Tuning knobs** (env, defaults are generous): `NET7GO_AUTH_RATE_PER_MIN=60`,
+  `NET7GO_AUTH_BURST=20`, `NET7GO_ARGON_MAX_CONCURRENT=4`. Raise the burst if a
+  large NAT'd group ever reports spurious failures.
+- **Headless coverage**: net7go ratelimit_test.go pins the limiter/gate logic;
+  the wire-identical Valid=False is exercised by the existing legacy auth tests.
+  The real-client UX under throttle is the only unverified part.

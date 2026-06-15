@@ -36,6 +36,8 @@ type apiServer struct {
 	galaxy  *galaxyCache
 	session *scs.SessionManager
 	cfg     Config
+	limiter *ipLimiter // per-IP /api/login throttle (AR-1)
+	argon   *argonGate // global Argon2id concurrency cap (AR-1)
 }
 
 func newAPIServer(store *Store, status *statusCache, galaxy *galaxyCache, cfg Config) *apiServer {
@@ -55,7 +57,15 @@ func newAPIServer(store *Store, status *statusCache, galaxy *galaxyCache, cfg Co
 	// play-local marker, so drop Secure only there.
 	sm.Cookie.Secure = cfg.Domain != "localhost"
 	sm.Cookie.Path = "/"
-	return &apiServer{store: store, status: status, galaxy: galaxy, session: sm, cfg: cfg}
+	return &apiServer{
+		store:   store,
+		status:  status,
+		galaxy:  galaxy,
+		session: sm,
+		cfg:     cfg,
+		limiter: newIPLimiter(float64(cfg.LoginRatePerMin)/60.0, float64(cfg.LoginBurst)),
+		argon:   newArgonGate(cfg.ArgonMaxConcurrent, 2*time.Second),
+	}
 }
 
 // routes registers the JSON API under /api/. The returned handler must be
@@ -136,6 +146,18 @@ func (s *apiServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 		return
 	}
+
+	// AR-1 layer 1: per-IP brute-force throttle.
+	if !s.limiter.allow(remoteIP(r)) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many attempts, slow down"})
+		return
+	}
+	// AR-1 layer 2: cap concurrent Argon2id verifications (memory backstop).
+	if !s.argon.acquire() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "server busy, try again"})
+		return
+	}
+	defer s.argon.release()
 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
@@ -487,6 +509,15 @@ func (s *apiServer) handleChangePassword(w http.ResponseWriter, r *http.Request)
 			map[string]string{"error": "new password must be at least 8 characters"})
 		return
 	}
+
+	// AR-1: this path runs Argon2id TWICE (verify current + hash new), so it
+	// must respect the same global concurrency cap as login. Authenticated, so
+	// no per-IP throttle.
+	if !s.argon.acquire() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "server busy, try again"})
+		return
+	}
+	defer s.argon.release()
 
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()

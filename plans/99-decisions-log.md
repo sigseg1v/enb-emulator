@@ -8157,3 +8157,55 @@ Three related cleanups around the launcher patcher pipeline:
 Verified: net7go + freya-online build/vet/test green; launcher builds clean
 in both `CHECK_FOR_UPDATES` and the default branch; 86/86 launcher unit
 tests pass.
+
+## 2026-06-14 -- Phase AR login-flood hardening (AR-1/AR-2/AR-5)
+
+- **Throttled both auth binaries, not one.** The AQ-7 cutover split auth into
+  two processes: game-auth in `login-server/net7go` (CC BY-NC-SA) and the
+  website login in `freya/online/server` (MIT). The flood defence therefore
+  had to land in BOTH -- a per-IP token bucket + a global Argon2id concurrency
+  semaphore in front of `/AuthLogin` (net7go) and `/api/login` +
+  `/api/account/password` (freya-online). The Argon2 cap is the real
+  memory backstop (each verify is 64 MiB; an unauthenticated flood is the DoS).
+  The two implementations are independent files under their own licences
+  (`ratelimit.go` in each module) -- net7go's is CC, freya-online's is MIT --
+  NOT a shared package, because the two modules must not cross the
+  CC/MIT boundary.
+
+- **No new dependency.** `golang.org/x/time/rate` is the obvious choice but is
+  NOT in the module cache, and CI builds the Go services only via their docker
+  Dockerfiles (no `go test` job), so adding a dep would be fragile to do
+  autonomously. Implemented a dependency-free token bucket
+  (refill = elapsed*rate capped at burst, map keyed by IP, GC eviction of
+  buckets idle > 15m) + a buffered-channel semaphore (acquire tries
+  non-blocking, then waits up to 2s, then sheds -- never queues unbounded,
+  which would re-introduce the DoS).
+
+- **Per-IP key for game-auth comes from a relay-injected, spoof-proof header.**
+  net7go sits behind the freya-online TLS relay, so its RemoteAddr is always
+  the relay, not the player. The relay (`legacy_proxy.go`) now sets
+  `X-Freya-Client-IP` from its OWN connection's RemoteAddr and OVERWRITES any
+  client-supplied value, so net7go can rate-limit per real IP without trusting
+  a spoofable header. A NAT'd household shares one bucket (generous burst 20)
+  while a single brute-forcer is bounded -- exactly the scope-note tradeoff.
+
+- **Throttle response is wire-identical (server-integrity).** `/AuthLogin` is
+  game-client-facing wire. A throttled request returns the BYTE-IDENTICAL
+  failed-login response (`Valid=False`), introducing no new wire surface the
+  real client hasn't already tolerated. This keeps the change a pure
+  *tightening* (it only ever rejects/slows), the always-welcome direction.
+  Logged as plans/29 CV-AR-1 (low risk) for the real-client UX check.
+
+- **AR-5 surfaced a latent config bug.** Setting `FREYA_HTTP_ADDR=""` to
+  disable the plain-HTTP listener in prod did nothing, because `env()` treats
+  a blank value as "use the default :8080". Added `lookupOr()` (honours an
+  explicitly-set empty string) and switched HTTPAddr to it. Prod compose now
+  sets `FREYA_HTTP_ADDR=""` (8080 was never published anyway).
+
+- **AR-2**: checked multiply guards the int64 overflow in
+  `vendor*int64(stack)` (`store_ah_write.go`) -- rejects the listing rather
+  than wrapping. AR-3/AR-4/AR-6 deferred by design (operational / dev-only /
+  intentional tradeoff -- see plans/45).
+
+Verified: net7go + freya-online both `go build` / `go vet` / `go test ./...`
+green and gofmt-clean.
