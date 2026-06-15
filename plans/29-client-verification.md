@@ -1076,17 +1076,18 @@ format & byte order", Trap 2).
   -- hence raising the slot stack to `MaxStack` is the fix. Vendor stock is
   effectively infinite (`starbase_vender_inventory.quanity == -1` for ~all rows),
   so a full-stack presentation is correct.
-- **Evidence gap (honest)**: there is NO retail (EA) capture of a vendor buy to
-  cite. The only vendor capture on hand
-  (`proxy/local-debug/VendorInvEco-*.pcapng`, opdump
-  `proxy/local-debug/opdump-VendorInvEco.txt`) is against the live **Net-7**
-  reference server, and its 0x0027 buy frame carries `Num == 1` -- but Net-7 is
-  the SAME lineage as our server, so that is consistent with the inherited bug,
-  not proof of correct retail behaviour. The fix rests on the logical proof above
-  (template MaxStack reaches the client yet the slider is 1) plus the known
-  retail UX of buying ammo stacks, NOT on a primary-source capture. The
-  CLI/integration suite also does not yet model the vendor/buy flow, so the
-  "CLI parse + test first" precondition is not satisfied here -- flagged.
+- **Evidence gap CLOSED 2026-06-15.** The live-retail capture this entry lacked now
+  exists: cap1 (purchaseammo-stack-single-sell, cleartext proxy<->server against the
+  retail reference server). It shows the retail vendor buy uses `0x0027`
+  INVENTORY_MOVE (NOT a separate trade opcode), and crucially a STACK buy carries
+  `Num=100` (`FromInv=4 vendor, ToInv=1 cargo, ToSlot=-1`) -- i.e. retail's client
+  DID let the user request a stack of 100, which is only possible if the retail
+  vendor slot was presented as a stack (slider 1..stack), exactly the behaviour this
+  fix restores. Single buys carry `Num=1`. So the earlier Net-7 `Num==1` capture was
+  the inherited bug (or just a 1-qty purchase), and retail confirms multi-qty buys.
+  The CLI `InventoryMoveRecord` decodes all six BE fields; cap1 validates it. The
+  remaining open item is the real-client check below (does OUR slider now run
+  1..stack after the NPCTradeItems fix is deployed) -- PB-3/PB-6 in plans/41.
 - **What to look for (real client)**: dock, open a vendor that sells ammo
   ("bullets"), drag an ammo item toward cargo: the quantity slider must now run
   1..stack (not be stuck at 1). Buy several (e.g. 100). Cargo receives the full
@@ -1124,6 +1125,15 @@ format & byte order", Trap 2).
   solo (not grouped).
 - **Setup**: `just play-cli` (or `play-local`) with at least two characters in
   the same sector, grouped via `group invite <player>` + `group accept`.
+- **Wire side now capture-confirmed (2026-06-15)**: live-retail group-play captures
+  (cap7/cap8 group+target+formation, cap9/cap10 group disband) show the server's
+  `0x00BD` CTA_RESPONSE simply echoes the request's GroupAction selector in field@4
+  (4=Slot Back, 5=Block, 6=Pipe, 7=Form Up, 8=Leave, 9=Break, 12=Request Target)
+  with field@8=Success -- exactly what our inherited handler emits. This RETIRES the
+  earlier (false) "field@4 must be in {13,14,15,17} or the client rejects it / beacon
+  feature broken" theory (see plans/26 Z-1, now resolved as not-a-divergence). So
+  this CV is narrowed to the purely VISUAL/physical check below (do ships snap into
+  formation) -- the wire format is no longer in question.
 
 ### [ ] CV-23 -- Long-idle session can still zone (reliable-UDP resend protocol fix)
 
@@ -1415,3 +1425,50 @@ format & byte order", Trap 2).
 - **Headless coverage**: net7go ratelimit_test.go pins the limiter/gate logic;
   the wire-identical Valid=False is exercised by the existing legacy auth tests.
   The real-client UX under throttle is the only unverified part.
+
+## CV-MAP -- In-game galaxy map renders the full node list (PB-4 / Z-5, proxy serve)
+
+- **What changed**: the proxy now serves the prebuilt galaxy-map node stream.
+  `UDPClient::SendCachedGalaxyMap()` (`proxy/UDPProxyToClient_linux.cpp:643`,
+  previously a no-op stub) reads `GalaxyMap.dat` and re-emits its
+  `[len:u16][opcode:u16=0x0097][body]` records to the client on the `0x2010`
+  DATA_FILE request for inner opcode `0x0097`, then `SetReceivedGalaxyMap()`.
+  docker-compose mounts `./server/data:/app/database:ro` so the committed 305-record
+  `server/data/GalaxyMap.dat` resolves at `./database/GalaxyMap.dat`.
+- **Why a CV is needed**: this is a proxy wire-fabrication change -- the CLI proves
+  the record FORMAT (`GalaxyMapRecord` decodes Types 5/6/7/8/9 with unit tests), but
+  only the real client proves the MAP RENDERS and is navigable. Primary source: cap6
+  (login-opengalaxymap) shows the client's 0x2010/0x0097 request; the retail proxy
+  answered by streaming GalaxyMap.dat.
+- **What to look for (real client)**: launch client.exe through FreyaProxy, log in,
+  open the galaxy map (M). Expect the full node set (~305 nodes -- named systems,
+  sectors, planets, gates/links) to render and be navigable, NOT an empty map with
+  only a "you are here" marker (the PB-4 symptom). Confirm the proxy log shows
+  "served galaxy-map cache ... (305 records ...)" and NO "WARNING ... cannot open
+  galaxy-map cache".
+- **Setup**: `just play-local` (rebuilds the proxy image; the data dir mount is in
+  docker-compose). Distinct from PB-16 (website map colors) and PB-13 (nav/explore).
+
+## CV-MANU -- Analyze/Dismantle no longer hangs the manufacturing UI (PB-14)
+
+- **What changed**: `server/src/PlayerManufacturing.cpp` -- `Player::ManufactureTimedReturn`
+  no longer early-returns out of the dismantle/analyze callback when zero components
+  resolve. The `if (compList.size() == 0) return;` at :962 (which skipped the
+  `SendAuxPlayer`/`SendAuxShip`/`SendAuxManu` reply block) was replaced with a guarded
+  `if (!compList.empty()) { ...sort/shuffle/keep-drop... }` so control ALWAYS falls
+  through to the three replies. The server now always answers a manufacturing action
+  with a `0x001B` AUX_DATA ManufacturingIndex reply.
+- **Why a CV is needed**: the reply emit is a server wire-behaviour change. Primary
+  source: cap3 (analyze-damage/success/fail) + cap4 (analyze-success + dismantle-success,
+  many runs) show the retail server ALWAYS emits a `0x001B` ManufacturingIndex reply on
+  every analyze/dismantle -- there is no consume-and-stay-silent path. CLI: the
+  `0x001B` ManufacturingIndex reply is decoded + pinned in `CliClient.Core`.
+- **What to look for (real client)**: dock at a starbase with a manufacturing/analyze
+  terminal, load an analyzable item, run Analyze and (separately) item breakdown /
+  Dismantle, including on items that resolve no recovered components. The terminal must
+  return a result (success/fail message + updated component grid) and the UI must NOT
+  hang -- the PB-14 symptom was the UI freezing with no reply. Repeat several dismantles
+  back-to-back.
+- **Setup**: `just play-local` (rebuilds the server image with the PlayerManufacturing
+  fix). A character docked at a manufacturing terminal with analyzable/dismantlable
+  items in cargo.

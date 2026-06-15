@@ -1,0 +1,24 @@
+# Retail MVAS capture fixtures -- DECODE path (PacketRecord.DumpToString).
+# Verbatim opcode bodies on the MVAS (Move-Assist) UDP channel, with the
+# 12-byte EnbUdpHeader { u16 size; u16 opcode; u32 player_id; u32 sequence }
+# already stripped (the records parse only the body). Pulled from the retail
+# proxy<->server cleartext leg of the planet land/fly/dock capture. Only the
+# opcode-body bytes are stored here -- no addresses, no header. Consumed by
+# MvasRecordDecodeTests.
+
+[mvas_send_position_full]
+# 0x1004 full 28-byte body (40-byte datagram): pos[3] + heading[3] + trailing u32.
+# Floats (LE): PosX 16603.881, PosY -68833.781, PosZ 3699.977,
+# HeadX -0.864, HeadY 0.289, HeadZ 0.412, Trailing 0.
+provenance: MVAS 0x1004 -- ship flight position+heading (planet land/fly capture)
+opcode: 0x1004
+payload-bytes: 28
+hex: C3 B7 81 46 E4 70 86 C7 A1 3F 67 45 AA 40 5D BF
+      AE 02 94 3E 5E C6 D2 3E 00 00 00 00
+
+[mvas_toggle_send_freq_2]
+# 0x1007 4-byte body (16-byte datagram): u32 Frequency == 2.
+provenance: MVAS 0x1007 -- server send-frequency toggle (planet land/fly capture)
+opcode: 0x1007
+payload-bytes: 4
+hex: 02 00 00 00

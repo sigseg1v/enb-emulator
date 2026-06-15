@@ -63,7 +63,7 @@ Per CLAUDE.md "Server integrity rules":
 Status legend: `[!]` confirmed-but-blocked (cannot resolve at the bar yet),
 `[~]` accepted as-is (cosmetic / by-design), `[x]` resolved, `[gap]` capability gap.
 
-### Z-1 `[!]` 0x00BD CTA_RESPONSE field@4 -- emitter writes request Action; retail varies
+### Z-1 `[x]` 0x00BD CTA_RESPONSE field@4 -- RESOLVED: NOT a divergence (server is correct)
 
 - **Category**: A (wire-value mismatch).
 - **Our emitter**: `Player::HandleCTARequest` (server/src/PlayerConnection.cpp:7733)
@@ -79,67 +79,68 @@ Status legend: `[!]` confirmed-but-blocked (cannot resolve at the bar yet),
   in the paired request) is a different value domain than retail's field@4
   (server-side response/type code, observed 14/15). Our server emits neither the
   template's 0x0F nor a value matching retail -- it emits the raw request Action.
-- **Confirm status**: divergence is real and confirmed. **Client semantics now
-  RESOLVED (2026-06-14, behavioural analysis of the retail client's 0x00BD handler).**
-  The client switches on `(field@4 - 13)` and recognises ONLY field@4 in
-  {13, 14, 15, 17}:
-  - 13 -> acknowledge / no-op (no visual change)
-  - 14 -> clear the Call-To-Arms highlight on the LOCAL player (beacon OFF)
-  - 15 -> set the Call-To-Arms highlight on the LOCAL player (beacon ON)
-  - 17 -> set the Call-To-Arms highlight on the avatar named by SourceID (field@0)
-  Any other value lands in the client's default arm: it logs an error and renders
-  NO effect. The retail-observed 0x0F/0x0E are therefore beacon ON / beacon OFF.
-- **Severity upgrade**: our server echoes the request `Action` (the GroupAction
-  selector, 4..12, or 0 for the no-op arm) into field@4. Every one of those is
-  OUTSIDE {13,14,15,17}, so the retail client REJECTS our 0x00BD and the
-  Call-To-Arms beacon never fires against our server -- this is a live feature
-  break, not a cosmetic value mismatch.
-- **Still blocked on**: deriving the request->response mapping from ONE sample.
-  The paired capture is already decoded -- request `cta_request_groupaction5`
-  (Action=5) pairs with response `cta_response_requesttype0f` (field@4=0x0F=15),
-  same SourceID 1473672. So we know retail mapped (Action 5) -> (beacon ON, 15)
-  in that one exchange, plus an UNPAIRED later 0x0E=14 (beacon OFF). That is not
-  enough to choose between two hypotheses: (a) field@4 is a pure function of the
-  request Action, or (b) it is a STATEFUL toggle (first press ON=15, next OFF=14)
-  independent of Action. Worse, our server routes 0x00BC into GroupAction
-  (server/src/GroupManager.cpp:1233), where Action=5 means "Block" FORMATION --
-  a different domain from the beacon, so retail's 0x00BC handler was likely not
-  our formation path at all. Pinning the formula needs MORE paired 0xBC->0xBD
-  frames (ideally repeated presses to see the toggle). Until then the server stays
-  as-is -- emitting a guessed beacon code blind risks the wrong on/off state. When
-  the server change lands, file a CV entry for the real-client beacon check.
-- **CLI artifact note**: CtaResponseRecord now decodes field@4's recognised meaning
-  (13/14/15/17 -> ack/off/on/on-by-id, else "client rejects") and its class doc
-  records the full client semantics (2026-06-14).
+- **RESOLVED 2026-06-15 -- the divergence was NEVER real; the earlier
+  {13,14,15,17} "beacon / feature-broken" narrative is WITHDRAWN as false.** New
+  cleartext proxy<->server captures of live-retail group play (cap7/cap8 =
+  group+target+formation player1/player2; cap9/cap10 = group disband
+  player1/player2) supply the MANY paired 0xBC->0xBD frames the single-sample
+  analysis lacked, and they show field@4 is simply the **echoed GroupAction
+  selector** from the request, 1:1:
+  - 4 = Slot Back, 5 = Block, 6 = Pipe, 7 = Form Up, 8 = Leave Formation,
+    9 = Break Formation, 12 = Request Target (and the other GroupAction codes).
+  field@8 is a **Success** flag. There is no `(field@4 - 13)` switch and no
+  {13,14,15,17} restriction in the live exchanges -- the retail server echoes the
+  request's GroupAction back, which is EXACTLY what our `Player::HandleCTARequest`
+  already does (`*((int32_t*)&CTAResponse[4]) = myCTARequest->Action`). The old
+  0x0F/0x0E sample was a different action selector echoed back, not a beacon
+  on/off toggle.
+- **Conclusion**: our emitter is correct as-is. No server change, no CV entry.
+  The 0x0F template default at :7733 is dead (always overwritten at :7746) but
+  harmless; leave it. Category downgraded from A (wire-value mismatch) to
+  not-a-bug.
+- **CLI artifact note (2026-06-15)**: `CtaResponseRecord` was rewritten to drop the
+  entire false {13,14,15,17}/"client rejects"/feature-broken narrative; it now
+  decodes field@4 as the echoed GroupAction selector and field@8 as Success,
+  pinned by tests against the cap7/cap9 frames. CtaRequest's ActionRecord enum was
+  extended to the full GroupAction set to match.
 
-### Z-2 `[!]` 0x005F AVATAR_EMOTE_RESPONSE -- two distinct issues, neither resolvable yet
+### Z-2 `[~]` 0x005F AVATAR_EMOTE_RESPONSE -- (b) RESOLVED, (a) RE-SCOPED (wrong opcode in old note)
 
-This is the finding that most needed confirming -- the earlier one-line note
-("retail 0x07 vs our 0x01 at byte@2") conflated two different code paths.
+The earlier note conflated two code paths AND mis-identified the station-chat
+opcode. A dedicated live-retail capture (cap5 = station local chat + 3 emotes,
+cleartext proxy<->server) settles both. **The old "retail relays station chat as
+0x5F byte@2=0x07" claim is WITHDRAWN -- it was a misread of capture_3.**
 
-- **(a) Category C -- station-chat relay missing.** `Player::HandleChatStream`
-  (server/src/PlayerConnection.cpp:10230) sends a 0x5F broadcast ONLY when the
-  request's `message[0] == 0x02` (emote). The `message[0] == 0x01` branch
-  ("Chat in Stations", :10257) is commented out and does nothing. BUT both 0x5F
-  frames in capture_3 (#1211 and the #199841-region frame) are responses to 0x5E
-  requests whose `message[0] == 0x01` (station chat) -- i.e. retail relays station
-  chat as a 0x5F broadcast and our server does not. Missing feature.
-- **(b) Category A -- emote-path byte@2 hardcode, UNVALIDATED.** For the emote path
-  (`message[0] == 0x02`) the emitter sets `buffer[2] = 0x01` (:10244). We have NO
-  capture of an actual emote (`message[0] == 0x02`) to compare, so we cannot say
-  0x01 is wrong. The `byte@2 = 0x07` seen in the captures belongs to path (a)
-  (station chat), NOT this emote path.
-- **Retail observation (capture_3)**: both 0x5F frames carry byte@2 = 0x07, ChatSize
-  + message copied from the request, GameID 11193582. Their 0x5E requests have
-  `message[0] == 0x01` (e.g. #1209: `EE CC AA 00 01 0D 00 01 48 05 00 2F 77 68 6F
-  00 ...` -> the "/who" station-chat line).
-- **Confirm status**: both sub-findings confirmed; neither resolvable. (a) is a
-  feature add (relaying station chat) that touches live chat broadcast -- high
-  blast radius, needs its own design + capture-pinned test. (b) cannot be judged
-  without a `message[0] == 0x02` emote capture.
-- **Unblock criterion**: (a) design the station-chat relay against the two captured
-  0x5F frames as the byte target; (b) obtain an emote-path (`message[0] == 0x02`)
-  capture to validate or correct the 0x01.
+- **(b) Category A -- emote byte@2 hardcode: RESOLVED, server is CORRECT.** cap5
+  carries three real emote responses on `0x005F` (server->client, GameID 0x40039930):
+  `08 00 01 30 99 03 40 02 09 00 00 08 00 00 00`, then `...0A...`, then `...0D...`.
+  byte@2 = **0x01 in all three** (the emote SELECTOR differs at byte@8: 0x09/0x0A/0x0D).
+  Our `Player::HandleChatStream` emote path (`message[0]==0x02`,
+  `server/src/PlayerConnection.cpp:10473`) sets `buffer[2] = 0x01` (:10481) and
+  emits 0x5F via `SendToSector` -- byte-for-byte what retail does. No change.
+- **(a) Category C -- station local chat is 0x001D, NOT 0x5F.** cap5's station local
+  chat line is a single `0x001D` MESSAGE_STRING broadcast (server->client):
+  `1A 00 02 "Guildsman StarstrukkTT: w\0"` -- u16 length, byte@2 = **0x02** (chat
+  color), then the NUL-terminated "<name>: <text>" string. So retail relays station
+  local chat as a `0x001D` MESSAGE_STRING with color 2, NOT as a 0x5F broadcast. Our
+  `SendMessageString` (`PlayerConnection.cpp:11232`) already builds exactly this
+  shape (`buffer[2] = color`, opcode `ENB_OPCODE_001D_MESSAGE_STRING`). The
+  `message[0]==0x01` ("Chat in Stations") branch in HandleChatStream (:10494) is
+  commented out "so local messages aren't sent twice" -- station chat is broadcast
+  through the `ENB_OPCODE_0033_CLIENT_CHAT` path (:514), not HandleChatStream.
+- **Remaining open question (a)**: does our server actually deliver station local
+  chat as `0x001D` color 2 to the OTHER players in the station (not just echo to
+  self)? cap5 only has one client, so it cannot show the cross-player broadcast.
+  This needs a two-client LOCAL repro (two CLI/clients docked in the same station,
+  one types local chat, assert the other receives `0x001D` color 2). NOT a wire
+  emitter format bug -- the emitter shape is already correct -- it is a
+  delivery/routing check.
+- **CLI artifact note (2026-06-15)**: emote 0x5F decode pinned against the cap5
+  three-emote frames (byte@2=0x01, selector@8); 0x001D MESSAGE_STRING decode pinned
+  against the cap5 station-chat frame (color@2=0x02). Tests green.
+- **Unblock criterion (a)**: two-client local station-chat delivery repro; if the
+  other player does NOT receive the 0x001D, that is a routing fix (capture-cited),
+  with a plans/29 CV entry for the real-client cross-player check.
 
 ### Z-3 `[!]` 0x0005 START StartID -- CharacterID vs retail sector-local id
 
@@ -170,10 +171,19 @@ This is the finding that most needed confirming -- the earlier one-line note
   client-visible effect. Emitting +1 would be arbitrary, not a fidelity improvement,
   so it does not meet the bar to change.
 
-### Z-5 `[gap]` 0x0097 GALAXY_MAP -- our server emits only Type 4 (ties to PB-4)
+### Z-5 `[~]` 0x0097 GALAXY_MAP -- PB-4 addressed via PROXY serve; server Type-5..9 emit still a gap
 
-- **Category**: C (capability gap). **This is the likely root cause of PB-4
-  (in-game galaxy map shows nothing) -- see plans/41.**
+- **Category**: C (capability gap). **This is the root cause of PB-4 (in-game
+  galaxy map shows nothing) -- see plans/41.**
+- **PB-4 FIXED 2026-06-15 via path (b) (proxy serve), NOT path (a) (server emit).**
+  `UDPClient::SendCachedGalaxyMap()` (`proxy/UDPProxyToClient_linux.cpp:643`) now
+  reads `GalaxyMap.dat` and streams its `[len][0x0097][body]` records to the client
+  on the `0x2010` DATA_FILE / `0x0097` request, so the in-game map populates from
+  the prebuilt 305-record cache without the server emitting Type-5..9 at all.
+  client.exe check = CV-MAP (plans/29). **The server-side Type-5..9 streaming below
+  remains a separate, still-open gap** -- the proxy serve makes it non-urgent
+  (the map renders), but a server that streams the live sub-types would let the map
+  reflect runtime state rather than the static file. Lower priority now.
 - Retail emits map/nav-detail sub-types 3/5/6/7/8/9 (named star systems "Aragoth"
   etc., nav points); our server (`SendGalaxyMap`) emits only Type 4 ("you are here").
 - **Client-side rendering requirement RESOLVED (2026-06-14, behavioural analysis of

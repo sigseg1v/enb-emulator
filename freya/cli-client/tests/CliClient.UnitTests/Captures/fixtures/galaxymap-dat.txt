@@ -1,0 +1,48 @@
+# GalaxyMap 0x0097 static map-detail records, extracted verbatim from
+# server/data/GalaxyMap.dat (a framed [len:u16][0x0097:u16][record] stream).
+# Each "hex:" block below is the RECORD body only (the 4-byte frame header
+# stripped), which is exactly the 0x0097 packet payload the record decoder
+# receives. These are the compact .dat forms (Type 5/6/7/8 end right after
+# their float block; Type 9 ends right after Name -- no ExtendedTail).
+
+[galaxymap_dat_system_61cygni]
+provenance: GalaxyMap 0x97 Type 5 -- star system '61 Cygni' (server/data/GalaxyMap.dat)
+opcode: 0x97
+payload-bytes: 54
+hex: 05 00 00 00 2e 00 00 00 01 00 00 00 01 00 00 00
+      36 31 20 43 79 67 6e 69 00 00 00 00 00 00 00 80
+      3f 00 00 00 00 cd cc cc 40 33 33 c3 c0 00 00 00
+      00 00 00 80 3f 01
+
+[galaxymap_dat_sector_mercury]
+provenance: GalaxyMap 0x97 Type 6 -- sector 'Mercury' (server/data/GalaxyMap.dat)
+opcode: 0x97
+payload-bytes: 44
+hex: 06 00 00 00 24 00 00 00 35 00 00 00 ed 03 00 00
+      0b 00 00 00 4d 65 72 63 75 72 79 00 06 00 00 00
+      00 00 40 40 00 00 80 bf 00 00 00 00
+
+[galaxymap_dat_planet_norstrand]
+provenance: GalaxyMap 0x97 Type 7 -- planet-sector 'Norstrand Vor Planet' (server/data/GalaxyMap.dat)
+opcode: 0x97
+payload-bytes: 57
+hex: 07 00 00 00 31 00 00 00 9c 00 00 00 1d 05 00 00
+      11 00 00 00 4e 6f 72 73 74 72 61 6e 64 20 56 6f
+      72 20 50 6c 61 6e 65 74 00 07 00 00 00 00 00 00
+      00 00 00 80 3f cd cc cc 3d
+
+[galaxymap_dat_gasgiant_ishuan]
+provenance: GalaxyMap 0x97 Type 8 -- gas-giant-sector 'Ishuan Gas Giant' (server/data/GalaxyMap.dat)
+opcode: 0x97
+payload-bytes: 53
+hex: 08 00 00 00 2d 00 00 00 f2 00 00 00 d8 07 00 00
+      13 00 00 00 49 73 68 75 61 6e 20 47 61 73 20 47
+      69 61 6e 74 00 08 00 00 00 00 00 00 00 00 00 80
+      bf cd cc cc 3d
+
+[galaxymap_dat_gate_mercury]
+provenance: GalaxyMap 0x97 Type 9 -- gate/link 'Mercury' compact form (server/data/GalaxyMap.dat)
+opcode: 0x97
+payload-bytes: 28
+hex: 09 00 00 00 14 00 00 00 36 00 00 00 ed 03 00 00
+      f2 03 00 00 4d 65 72 63 75 72 79 00

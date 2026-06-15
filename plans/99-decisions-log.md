@@ -8248,3 +8248,47 @@ real-client CV check before any wire change).
   trailing carried fields zero-filled). The remaining Phase-AA fabrication is no
   longer blocked on "un-citable fields" -- only on the §3 LIVE harness + a CV check
   (a wrong 0x04 still crashes the Win32 client).
+
+- **2026-06-15 -- 11 live-retail captures analyzed; several plan assumptions
+  OVERTURNED.** The owner captured 11 cleartext proxy<->server sessions against the
+  retail reference server (cap1 buy/sell, cap3/cap4 analyze+dismantle, cap5 station
+  chat + emotes, cap6 login+open-galaxy-map, cap7-cap10 group/target/formation/disband,
+  cap11 land-and-fly-on-planet-dock-undock-crash, cap12 leave-planet-via-gate). opdump
+  was taught LINKTYPE_LINUX_SLL2 so it can read them. Resulting corrections:
+  - **PB-3/PB-6 (vendor buy/stacks):** the "Buy button emits 0x001F TRADE" inference
+    is DISPROVEN -- buy uses `0x0027` INVENTORY_MOVE (25x in cap1, zero 0x001F), with
+    the stack quantity in `InvMove.Num` (single `Num=1`, stack `Num=100`; `FromInv=4`
+    vendor, `ToInv=1` cargo, fields network-order, server ntohl's them). Root reconciles
+    to CV-21 (vendor slot presented as stack-of-1 pinned the slider); cap1 is the
+    live-retail vendor-buy capture CV-21 explicitly lacked.
+  - **Z-1 (0x00BD CTA_RESPONSE):** NOT a divergence. The earlier {13,14,15,17}
+    "beacon / feature-broken" theory is WITHDRAWN as false; cap7/cap9's many paired
+    0xBC->0xBD frames show field@4 is the echoed GroupAction selector + field@8 Success,
+    exactly what our server emits. CtaResponseRecord rewritten to drop the false
+    narrative. CV-22 narrowed to the visual/physical check only.
+  - **Z-2 (0x005F emote / station chat):** (b) RESOLVED -- emote byte@2=0x01 is correct
+    (cap5's three emotes all carry 0x01, selector at byte@8). (a) RE-SCOPED -- station
+    local chat is `0x001D` MESSAGE_STRING color 2, NOT a 0x5F broadcast (the old
+    capture_3 0x5F=station-chat reading was wrong); our SendMessageString already builds
+    that shape. Remaining: a two-client local repro to confirm cross-player delivery.
+  - **PB-7 (planet flight):** CONFIRMED same root as PB-2 -- planet-surface flight uses
+    the IDENTICAL wire protocol as space (cap11: 0x0014 MOVE + 0x1004 MVAS position to
+    udp/3806 x213). No planet-specific protocol; the PB-2 position feed covers it.
+  - **PB-18 (NEW):** client.exe crashes on UNDOCK FROM A PLANET (cap11). Distinct from
+    the fixed undock/dock<->space crash; needs a WINE trace, not a blind server fix.
+
+- **PB-14 (analyze/dismantle hang) -- FIXED (server).** cap3/cap4 prove the retail
+  server ALWAYS emits a `0x001B` ManufacturingIndex reply on every analyze/dismantle.
+  `Player::ManufactureTimedReturn` (PlayerManufacturing.cpp:962) early-returned when a
+  dismantle resolved zero components, skipping the SendAux* reply block and hanging the
+  client UI. Replaced the early-return with a guarded `if (!compList.empty())` so control
+  always falls through to the reply. CV-MANU filed (plans/29). Gated on the real-client
+  check.
+
+- **PB-4 (in-game galaxy map empty) -- FIXED via PROXY serve (path b), not server emit.**
+  Implemented `UDPClient::SendCachedGalaxyMap()` (proxy/UDPProxyToClient_linux.cpp): on
+  the client's 0x2010 DATA_FILE / 0x0097 request, stream the prebuilt 305-record
+  `GalaxyMap.dat` records (byte-equivalent to the retail whole-file blob; per-frame RC4
+  advances the same keystream). docker-compose mounts server/data at the proxy's
+  database path. The server-side Type-5..9 streaming (Z-5) stays a lower-priority gap.
+  CV-MAP filed (plans/29). Primary source cap6.
