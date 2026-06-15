@@ -259,6 +259,12 @@ services:
       - NET7_DTLS_CA=${NET7_DTLS_CA-}
     volumes:
       - ./archive/replay:/app/replay:ro
+      # The proxy serves the cached galaxy-map node data (GalaxyMap.dat) to the
+      # client when the in-game galaxy map is opened (UDPClient::SendCachedGalaxyMap).
+      # SERVER_DATABASE_PATH (proxy/Net7.h) = "./database/" relative to the
+      # proxy CWD (WORKDIR=/app), so mount the repo's server/data there. The
+      # server service mounts the same dir at /database for its own data files.
+      - ./server/data:/app/database:ro
     command: ["sh", "-c", "exec /app/net7proxy ${PROXY_EXTRA_ARGS:-}"]
     restart: unless-stopped
 
