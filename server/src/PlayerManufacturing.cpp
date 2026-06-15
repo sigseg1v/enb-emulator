@@ -959,28 +959,33 @@ void Player::ManufactureTimedReturn(long Action)
 							}
 						}
 					}
-					if (compList.size() == 0) return;
-
-					//oh god, this is going to crash ... and has
-					std::sort(compList.rbegin(),compList.rend());
-					std::vector<dismantleComp>::iterator shuffleStart = compList.begin();
-					shuffleStart++;
-					std::random_shuffle(shuffleStart,compList.end());
-					float chance = 100.0f;
-					float step = 20.0f;;
-					float roll2;
-					for(std::vector<dismantleComp>::iterator iter = compList.begin();
-						iter != compList.end();
-						iter++)
-
+					// Only run the keep/drop component shuffle when we actually resolved
+					// components. This branch used to return early when compList was empty,
+					// which skipped the SendAux* reply below and left the client's
+					// manufacturing UI hanging forever (PB-14). The retail server always
+					// emits a ManufacturingIndex reply on a dismantle attempt, so fall
+					// through to the reply unconditionally.
+					if (!compList.empty())
 					{
-						roll2 = ((rand()%10000)+1)/100.0f;
-						if(roll2 > chance)
+						std::sort(compList.rbegin(),compList.rend());
+						std::vector<dismantleComp>::iterator shuffleStart = compList.begin();
+						shuffleStart++;
+						std::random_shuffle(shuffleStart,compList.end());
+						float chance = 100.0f;
+						float step = 20.0f;
+						float roll2;
+						for(std::vector<dismantleComp>::iterator iter = compList.begin();
+							iter != compList.end();
+							iter++)
 						{
-							ManuIndex()->Components.Item[iter->index].SetItemTemplateID(-1);
+							roll2 = ((rand()%10000)+1)/100.0f;
+							if(roll2 > chance)
+							{
+								ManuIndex()->Components.Item[iter->index].SetItemTemplateID(-1);
+							}
+							chance -= step;
+							step *= 0.5f;
 						}
-						chance -= step;
-						step *= 0.5f;
 					}
 					ManuIndex()->Target.Item[0].Empty(); 
 					ManuIndex()->SetValidity(VALIDITY_ATTEMPT_NORMAL_SUCCESS);
