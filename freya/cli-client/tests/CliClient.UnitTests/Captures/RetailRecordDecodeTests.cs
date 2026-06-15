@@ -2949,6 +2949,10 @@ public sealed class RetailRecordDecodeTests
         Assert.Contains("0x00167C88", d);                          // echoes the request SourceID 1473672
         Assert.Contains("[0004] RequestType", d);
         Assert.Contains("= 15", d);                                // retail 0x0F (NOT the request Action 5)
+        // 15 is the client's "beacon ON (local player)" code; the client only
+        // recognises field@4 in {13,14,15,17} (switch on value-13). Our server
+        // echoes the request Action (4..12), which the client rejects -- Z-1.
+        Assert.Contains("beacon ON (local player)", d);
         Assert.Contains("our emitter writes the request Action here instead", d);
         Assert.Contains("[0008] Success", d);
         Assert.Contains("= 1", d);

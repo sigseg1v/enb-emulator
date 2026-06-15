@@ -8209,3 +8209,42 @@ tests pass.
 
 Verified: net7go + freya-online both `go build` / `go vet` / `go test ./...`
 green and gofmt-clean.
+
+## 2026-06-14 -- Behavioural-analysis pass on three blocked items (Z-1, Z-5/PB-4, AB §4)
+
+Mined the retail client + proxy behaviour (CLAUDE.md primary source: "behavioural
+analysis of the retail client or server binary") to unblock three long-stalled
+items. Outcome is understanding + CLI decode improvements + honest plan updates;
+NO server/proxy wire change shipped (all three still need the live harness + a
+real-client CV check before any wire change).
+
+- **Z-1 (0x00BD CTA_RESPONSE) -- client semantics RESOLVED.** The client switches
+  on `(field@4 - 13)` and recognises ONLY {13,14,15,17} = ack / beacon-OFF /
+  beacon-ON / beacon-ON-by-id; anything else is rejected with no effect. Our server
+  echoes the request Action (4..12), all outside that set, so the Call-To-Arms
+  beacon is BROKEN against our server. Not fixed: deriving the request->response
+  formula from one paired sample (Action 5 -> 0x0F) plus an unpaired 0x0E is
+  ambiguous (pure-function vs stateful-toggle), and our 0x00BC routes to formation
+  GroupAction, a different domain. Needs more paired frames. Improved
+  CtaResponseRecord to decode the code's meaning; pinned in RetailRecordDecodeTests.
+
+- **Z-5 / PB-4 (0x0097 GALAXY_MAP) -- root cause IDENTIFIED.** The client populates
+  its renderable map-node collections (systems/sectors/gates/links) ONLY from record
+  sub-types 5/6/7/8/9 (+0xb). Type 4 -- the only sub-type our server emits -- sets
+  just the "you are here" label + array capacity, adding NO renderable node, so the
+  in-game map draws empty. That is the PB-4 cause. The behavioural read of the
+  per-record byte layout was UNRELIABLE (it mispredicted the Type-9 tail; the
+  in-repo capture fixtures galaxymap_system_aragoth/Type-5 and
+  galaxymap_sector_earth/Type-9 disprove it) -- so the next step is a per-byte pin
+  against those fixtures, NOT the inferred offsets. Also noted the alternative retail
+  path: the proxy can serve a prebuilt GalaxyMap.dat on the 0x2010/0x2011 band.
+
+- **AB §4 (proxy fabrication 0x2013 tractor) -- 4 un-citable fields RESOLVED.** From
+  reading the proxy's CREATE/beam/position builders directly: (1) the 0x04 CREATE
+  has NO scale field (scale is client-derived from the Type byte/template); (2) Type
+  byte = 4 for floating ore (generic-object branch); (3) the tractor 0x0b
+  discriminator is the pair (u16=2, inline name "TRACTOR") vs prospect (0xBF, ""),
+  not a lone EffectDescID; (4) 0x46 order = id, timestamp, x, y, z (prefix solid;
+  trailing carried fields zero-filled). The remaining Phase-AA fabrication is no
+  longer blocked on "un-citable fields" -- only on the §3 LIVE harness + a CV check
+  (a wrong 0x04 still crashes the Win32 client).

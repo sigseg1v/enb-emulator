@@ -79,14 +79,38 @@ Status legend: `[!]` confirmed-but-blocked (cannot resolve at the bar yet),
   in the paired request) is a different value domain than retail's field@4
   (server-side response/type code, observed 14/15). Our server emits neither the
   template's 0x0F nor a value matching retail -- it emits the raw request Action.
-- **Confirm status**: divergence is real and confirmed. The *correct* value is NOT
-  known -- field@4 varies and we have no enum for the CTA response-type domain (the
-  CCE_*/CHEV_* enums in PacketStructures.h are chat, not group/CTA).
-- **Unblock criterion**: locate the CTA / GroupAction response-type enumeration
-  (decomp or doc) AND pair more 0xBC->0xBD frames to learn field@4's formula. Until
-  then the server stays as-is and the decoder pins the retail bytes per-frame.
-- **CLI artifact note**: CtaResponseRecord's prose was tightened (2026-06-03) to say
-  field@4 varies (0x0E/0x0F seen) rather than implying a 0x0F constant.
+- **Confirm status**: divergence is real and confirmed. **Client semantics now
+  RESOLVED (2026-06-14, behavioural analysis of the retail client's 0x00BD handler).**
+  The client switches on `(field@4 - 13)` and recognises ONLY field@4 in
+  {13, 14, 15, 17}:
+  - 13 -> acknowledge / no-op (no visual change)
+  - 14 -> clear the Call-To-Arms highlight on the LOCAL player (beacon OFF)
+  - 15 -> set the Call-To-Arms highlight on the LOCAL player (beacon ON)
+  - 17 -> set the Call-To-Arms highlight on the avatar named by SourceID (field@0)
+  Any other value lands in the client's default arm: it logs an error and renders
+  NO effect. The retail-observed 0x0F/0x0E are therefore beacon ON / beacon OFF.
+- **Severity upgrade**: our server echoes the request `Action` (the GroupAction
+  selector, 4..12, or 0 for the no-op arm) into field@4. Every one of those is
+  OUTSIDE {13,14,15,17}, so the retail client REJECTS our 0x00BD and the
+  Call-To-Arms beacon never fires against our server -- this is a live feature
+  break, not a cosmetic value mismatch.
+- **Still blocked on**: deriving the request->response mapping from ONE sample.
+  The paired capture is already decoded -- request `cta_request_groupaction5`
+  (Action=5) pairs with response `cta_response_requesttype0f` (field@4=0x0F=15),
+  same SourceID 1473672. So we know retail mapped (Action 5) -> (beacon ON, 15)
+  in that one exchange, plus an UNPAIRED later 0x0E=14 (beacon OFF). That is not
+  enough to choose between two hypotheses: (a) field@4 is a pure function of the
+  request Action, or (b) it is a STATEFUL toggle (first press ON=15, next OFF=14)
+  independent of Action. Worse, our server routes 0x00BC into GroupAction
+  (server/src/GroupManager.cpp:1233), where Action=5 means "Block" FORMATION --
+  a different domain from the beacon, so retail's 0x00BC handler was likely not
+  our formation path at all. Pinning the formula needs MORE paired 0xBC->0xBD
+  frames (ideally repeated presses to see the toggle). Until then the server stays
+  as-is -- emitting a guessed beacon code blind risks the wrong on/off state. When
+  the server change lands, file a CV entry for the real-client beacon check.
+- **CLI artifact note**: CtaResponseRecord now decodes field@4's recognised meaning
+  (13/14/15/17 -> ack/off/on/on-by-id, else "client rejects") and its class doc
+  records the full client semantics (2026-06-14).
 
 ### Z-2 `[!]` 0x005F AVATAR_EMOTE_RESPONSE -- two distinct issues, neither resolvable yet
 
@@ -146,13 +170,54 @@ This is the finding that most needed confirming -- the earlier one-line note
   client-visible effect. Emitting +1 would be arbitrary, not a fidelity improvement,
   so it does not meet the bar to change.
 
-### Z-5 `[gap]` 0x0097 GALAXY_MAP -- our server emits only Type 4
+### Z-5 `[gap]` 0x0097 GALAXY_MAP -- our server emits only Type 4 (ties to PB-4)
 
-- **Category**: C (capability gap).
+- **Category**: C (capability gap). **This is the likely root cause of PB-4
+  (in-game galaxy map shows nothing) -- see plans/41.**
 - Retail emits map/nav-detail sub-types 3/5/6/7/8/9 (named star systems "Aragoth"
   etc., nav points); our server (`SendGalaxyMap`) emits only Type 4 ("you are here").
-- Tracked as a feature gap, not a format bug. The CLI decoder
-  (GalaxyMapRecord) already decodes the retail sub-types' header + embedded name.
+- **Client-side rendering requirement RESOLVED (2026-06-14, behavioural analysis of
+  the retail client's 0x0097 parser/renderer)**: the client demuxes on the leading
+  record-type byte. The renderable map-node collections (systems, sectors, gates,
+  links) are populated EXCLUSIVELY by sub-types 5/6/7/8/9 (and 0xb). Type 2 only
+  refreshes already-cached nodes; Type 3 stashes a raw blob; **Type 4 adds NO
+  renderable node -- it only sets the "you are here" label strings and the array
+  capacity counter.** So a server that emits only Type 4 hands the client an empty
+  node set and the map draws nothing but the "you are here" marker. That matches
+  PB-4 exactly.
+- **Per-record wire layout -- partially known, MUST be pinned from capture, NOT
+  guessed.** The behavioural read of the client deserializers gave a rough read
+  ORDER (id(s), then a NUL-string name, then float coordinate block(s)), but it
+  was derived from in-object field offsets and does NOT cleanly match the actual
+  bytes -- it is unreliable for the trailing fields. The in-repo capture fixtures
+  ARE the source of truth and already exist:
+  - Type 5 `galaxymap_system_aragoth` (63B): `Type=5, Size=55, id=3, id2=3,
+    "Aragoth\0"`, then two float coord triples `(0,0.3,1.0)`/`(0,-6,0)`, then a
+    trailing `1.0, u32 3, ...` block that does NOT fit a clean "two u32 flags"
+    tail -- so the exact trailing layout is still open.
+  - Type 9 `galaxymap_sector_earth` (64B): `Type=9, Size=56, id=108, id=1060,
+    id=1015, "Earth\0"`, then `u32 6` + a coordinate block. (The behavioural read
+    wrongly predicted "3 ids only, no name/coords" for Type 9 -- the capture
+    disproves it. Trust the capture.)
+  The CLI decoder (GalaxyMapRecord) therefore decodes only the header + the
+  embedded name for these sub-types and leaves the numeric tail in the hex dump
+  until a careful per-byte pin against the Aragoth/Earth fixtures is done. That
+  per-byte pin is the next CLI step; it is finicky and was deliberately NOT
+  guessed here.
+- **Alternative client path**: the retail proxy also serves a prebuilt
+  `..\database\GalaxyMap.dat` to the client on the 0x2010/0x2011 control band
+  (the file-stream-then-finalize path), independent of server Type-5..9 streaming.
+  PB-4 triage must determine which path our stack is (not) feeding -- whether our
+  proxy ships a GalaxyMap.dat and/or our server should stream the record sub-types.
+- **Unblock criterion**: byte-pin the Type-5/9 records against the EXISTING
+  capture fixtures (`galaxymap_system_aragoth`, `galaxymap_sector_earth` in
+  capture3-records.txt; plus the Type-4 `live_galaxymap_0097.hex`), extend the CLI
+  decode past the name, THEN implement the server emit (or proxy GalaxyMap.dat
+  serve) and file a CV entry. The captures -- not the behavioural read -- pin the
+  byte offsets before any wire change.
+- The CLI decoder (GalaxyMapRecord) currently decodes the Type-4 layout fully and
+  the retail sub-types' header + embedded name (numeric fields left unmodeled until
+  a capture pins them).
 
 ### Z-6 `[gap]` 0x0021 PUSH_MESSAGE -- our server never emits it
 
