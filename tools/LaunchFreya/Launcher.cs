@@ -572,6 +572,7 @@ namespace LaunchFreya
             try
             {
                 var info = AuthLoginPatcher.ReadInformation(_setting.AuthLoginFileName);
+                _warn($"authlogin.dll: detected {info.Build} build.");
                 if (info.Port != LocalAuthRelay.ListenPort || info.UseHttps)
                 {
                     info.Port     = (ushort)LocalAuthRelay.ListenPort;
@@ -585,6 +586,12 @@ namespace LaunchFreya
                     $"authlogin.dll not found at {_setting.AuthLoginFileName}. The standalone " +
                     "package does not ship the client mods -- you need a Net-7-patched Earth & " +
                     "Beyond install (authlogin.dll present in the client's release folder).", e);
+            }
+            catch (InvalidDataException e)
+            {
+                // Unrecognized authlogin.dll build -- surface the patcher's
+                // specific message rather than the generic wrapper below.
+                throw new ApplicationException(e.Message, e);
             }
             catch (UnauthorizedAccessException e)
             {
