@@ -1330,3 +1330,61 @@ format & byte order", Trap 2).
   - Overall level + xp% still show "LV --" (not yet pinned) -- that is expected,
     not a regression.
 - **Setup**: `just play-local` with `UseClientMods=true`.
+
+## CV-AS-RUNJMP -- /run console no longer crashes (Lua error path uses GCC builtins)
+
+- **What changed**: Lua's error handling (`ldo.c` LUAI_THROW / LUAI_TRY) was
+  using libc `setjmp`/`longjmp`. On 32-bit mingw-w64 under Wine that unwind path
+  is unreliable -- the FIRST Lua error (a `/run` syntax error such as the failed
+  `return return 1+1` expr-wrap probe) faulted with unhandled STATUS_SINGLE_STEP
+  (0x80000004) instead of jumping cleanly back to the protected call. Removing
+  the earlier-suspected `ChatLocalLine` echo did NOT change the crash code, which
+  ruled that out and pointed at the jump machinery itself. The build now force-
+  includes `src/lua_build_config.h` into every Lua TU, pointing LUAI_THROW/
+  LUAI_TRY/luai_jmpbuf at `__builtin_setjmp`/`__builtin_longjmp` -- the SAME
+  mechanism `mem.h` already uses and documents as "verified working under Wine".
+- **Why this is the likely fix but UNVERIFIED here**: cannot be exercised without
+  the real Win32 client under Wine; the headless Lua tests run native (libc
+  jmp is fine there) so they cannot reproduce or confirm it.
+- **What to look for (real client)**:
+  - In space, type `/run return 1 + 1` in chat -> no crash; `enbmod.log` shows
+    `[run] 2`.
+  - `/run enb.aux("MaxHullPoints")` etc. echoes the value to `enbmod.log`
+    (this is the intended in-game evaluation path for the aux reads).
+  - A deliberately broken `/run x = (` (syntax error) and `/run error("boom")`
+    (runtime error) both log a `[run] compile error`/`[run] error` line and do
+    NOT crash -- that is the longjmp path that previously took the client down.
+- **Setup**: `just play-local` with `UseClientMods=true`. Rebuild the DLL first
+  (`just build-enbmod`); the Lua objects must be recompiled with the new
+  `-include` (a stale `build/lua/ldo.o` would keep the old libc-jmp behaviour).
+
+## CV-AS-RPGLVL -- discipline levels read off the RPG manager (not the ship entity)
+
+- **What was wrong**: the discipline levels (Combat/Trade/Explore) showed "LV --"
+  because they were read with enb.aux_i on the ship vitals entity. They do NOT
+  live there: RPGInfo is a property bag on the RPG MANAGER object, and the level
+  entries use a different value type than the vitals getter -- so the read missed
+  twice over (wrong object, wrong getter type).
+- **Fix**: a new read-only hook on the client's own discipline-level reader
+  (game.h addr::RpgLevels, __fastcall ECX = the RPG manager) captures the manager
+  pointer live (hooks::rpg_mgr()), exactly like the in-space heartbeat captures
+  the vitals controller. enb.rpg_level(key) resolves the RPGInfo AuxData container
+  at manager+0x12c0 and looks the key up through the level getter (0x00514b60,
+  __cdecl(container, keybuf) -- same shape as the vitals getter, confirmed via the
+  funcmap, different value-type tag). freya_hud H.stats() now uses enb.rpg_level.
+- **Calling convention is load-bearing** (same risk class as CV-AS-AUXNUMS): the
+  capture hook is the proven naked-trampoline pattern (pushal / push ecx / call /
+  popal / jmp trampoline); the getter is __cdecl(container, keybuf), value int at
+  entry+0x84, validity at entry+0x70. Reads are readability- and validity-guarded.
+- **Expected behaviour**: on a FRESH character all three levels are 0, so a
+  correct read shows "0" (not the "--" skeleton). They are nil -> "--" only until
+  the client's RPG level-reader has run at least once (manager pointer still 0).
+- **Headless coverage**: none -- the mock has no RPG manager / aux bag.
+- **What to look for (real client)**:
+  - In space (or once the character/RPG panel has updated), the discipline card
+    shows 0/0/0 on a fresh char, and real numbers that climb as you level a
+    discipline -- never the gray "LV --" skeleton once the reader has fired.
+  - No crash on load / zone / open-character-sheet from the new hook or getter.
+    If it crashes, comment the enb.rpg_level use in freya_hud H.stats() lvl() to
+    bisect (vitals + the rest of the HUD are independent of it).
+- **Setup**: `just play-local` with `UseClientMods=true`; `just build-enbmod` first.

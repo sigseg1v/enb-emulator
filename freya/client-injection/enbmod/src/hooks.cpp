@@ -158,6 +158,30 @@ extern "C" __attribute__((naked)) void hk_InSpace() {
     );
 }
 
+// ---- RPG manager capture ----------------------------------------------------
+// game.h::addr::RpgLevels (0x0074bfb0) is the client's own discipline-level
+// reader: __fastcall(ECX = the RPG manager), which resolves RPGInfo Combat/Trade/
+// Explore off the AuxData container at manager + rpg::container_off. The
+// discipline levels live on THIS manager, not the ship vitals controller, so we
+// capture its `this` (ECX) here -- exactly the read-only pattern of hk_InSpace --
+// and lua_api reads the levels off it (hooks::rpg_mgr()). Forwards every argument
+// untouched via the trampoline; never alters game behaviour.
+static volatile unsigned g_rpg_mgr = 0;   // ECX (this) of the RPG level reader
+extern "C" {
+    void* real_RpgLevels_tramp = nullptr;
+    void notify_rpg(unsigned thisp) { g_rpg_mgr = thisp; }
+}
+extern "C" __attribute__((naked)) void hk_RpgLevels() {
+    __asm__ __volatile__(
+        "pushal\n\t"
+        "pushl %ecx\n\t"            // this (RPG manager)
+        "call _notify_rpg\n\t"
+        "addl $4, %esp\n\t"
+        "popal\n\t"
+        "jmp *_real_RpgLevels_tramp\n\t"
+    );
+}
+
 // At naked entry: [esp]=return addr, [esp+4]=arg0, ECX=this. After `pushal` (32 bytes) the return
 // addr sits at 0x20(%esp) and arg0 at 0x24(%esp). We push arg0 then this for cdecl notify(this,arg0).
 extern "C" __attribute__((naked)) void hk_Skill() {
@@ -241,9 +265,12 @@ bool enable_event_hooks() {
                       &real_Chat_tramp) != MH_OK) { logf("hook ChatChannel failed"); ok = false; }
     if (MH_CreateHook((void*)game::addr::ChatSend, (void*)&hk_ChatSend,
                       (void**)&real_ChatSend) != MH_OK) { logf("hook ChatSend failed"); ok = false; }
+    if (MH_CreateHook((void*)game::addr::RpgLevels, (void*)&hk_RpgLevels,
+                      &real_RpgLevels_tramp) != MH_OK) { logf("hook RpgLevels failed"); ok = false; }
     MH_EnableHook((void*)game::addr::SkillLifecycle);
     MH_EnableHook((void*)game::addr::ChatChannel);
     MH_EnableHook((void*)game::addr::ChatSend);
+    MH_EnableHook((void*)game::addr::RpgLevels);
     g_event_hooks_on = ok;
     logf("event hooks %s", ok ? "enabled" : "partially enabled");
     return ok;
@@ -253,6 +280,7 @@ void disable_event_hooks() {
     MH_DisableHook((void*)game::addr::SkillLifecycle);
     MH_DisableHook((void*)game::addr::ChatChannel);
     MH_DisableHook((void*)game::addr::ChatSend);
+    MH_DisableHook((void*)game::addr::RpgLevels);
     g_event_hooks_on = false;
 }
 
@@ -279,5 +307,6 @@ bool enable_inspace_hook() {
 
 unsigned long last_inspace_tick() { return g_last_inspace_tick; }
 unsigned vitals_ctrl() { return g_vitals_ctrl; }
+unsigned rpg_mgr()     { return g_rpg_mgr; }
 
 }} // namespace enb::hooks

@@ -87,14 +87,14 @@ function H.vis()
 end
 
 -- ---- live character stats (vitals numbers / discipline levels) -------------
--- The numeric current/max vitals and the discipline levels do NOT live at flat
--- struct offsets -- the client keeps them in a string-keyed property bag on the
--- player ship entity. We read them through the client's own getter, exposed as
--- enb.aux(key) (float) / enb.aux_i(key) (int), which resolve the key on the live
--- vitals-controller entity. So this needs NO flat-struct calibration; it works
--- the instant we are in space, exactly like the bar fractions + name do, and is
--- nil out of space (controller == 0). Keys observed at runtime in the vitals
--- updater + level reader. Each is range-guarded so a stale read never shows junk.
+-- None of these live at flat struct offsets -- the client keeps them in
+-- string-keyed property bags, read through its own getters (NO flat-struct
+-- calibration needed). They split across TWO objects:
+--   * numeric vitals (hull/shield/reactor cur+max) are on the ship entity, read
+--     via enb.aux(key) (float). nil out of space (controller == 0).
+--   * discipline levels are on the RPG manager, read via enb.rpg_level(key)
+--     (int). nil until the client's RPG level-reader has run at least once.
+-- Each is range-guarded so a stale read never shows junk.
 --
 -- Hull is stored absolute (HullPoints / MaxHullPoints). Shield + reactor store
 -- only the max (MaxShieldPower / MaxEnergyPower); their current is max * the live
@@ -112,7 +112,7 @@ function H.stats()
         if v and v >= lo and v <= hi then return v end
     end
     local function lvl(key)
-        local v = enb.aux_i and enb.aux_i(key)
+        local v = enb.rpg_level and enb.rpg_level(key)
         if v and v >= 0 and v <= 100 then return v end
     end
 

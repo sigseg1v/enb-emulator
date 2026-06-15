@@ -29,7 +29,9 @@ LUA_SRC := $(filter-out $(LUA_DIR)/lua.c $(LUA_DIR)/luac.c,$(wildcard $(LUA_DIR)
 LUA_OBJ := $(patsubst $(LUA_DIR)/%.c,$(BUILD)/lua/%.o,$(LUA_SRC))
 LUA_LIB := $(BUILD)/liblua.a
 # luaconf.h auto-selects the Windows config because mingw defines _WIN32. No LUA_USE_POSIX.
-LUA_CFLAGS := -O2 -fno-strict-aliasing -Wall -Wextra -Wno-unused-parameter
+# -include lua_build_config.h forces Lua's error handling onto __builtin_setjmp/longjmp
+# (libc setjmp/longjmp's unwind is broken under mingw32+Wine -- see lua_build_config.h).
+LUA_CFLAGS := -O2 -fno-strict-aliasing -Wall -Wextra -Wno-unused-parameter -include $(CURDIR)/src/lua_build_config.h
 
 # ---- MinHook (static) -------------------------------------------------------
 # hde32.c provides the length-disassembler trampoline.c needs (hde32_disasm). 32-bit -> hde32 only.

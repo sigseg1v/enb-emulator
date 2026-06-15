@@ -166,7 +166,18 @@ resource "digitalocean_project" "enb" {
   description = "Earth & Beyond emulator preservation server."
   purpose     = "Service or API"
   environment = "Production"
-  resources   = [digitalocean_droplet.enb.urn]
+  # The reserved IP and the pgdata volume are project members too (both follow
+  # the droplet). List them explicitly so a droplet replace does not make
+  # terraform try to evict them from the project -- DO rejects moving a reserved
+  # IP or an attached volume that has an associated droplet ("Move the Droplet
+  # instead").
+  resources = concat(
+    [
+      digitalocean_droplet.enb.urn,
+      digitalocean_reserved_ip.enb.urn,
+    ],
+    var.manage_db_volume ? [digitalocean_volume.pgdata[0].urn] : [],
+  )
 }
 
 # ---------------------------------------------------------------------------

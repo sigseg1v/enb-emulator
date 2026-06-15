@@ -461,12 +461,38 @@ static int l_aux(lua_State* L){
     lua_pushnumber(L, v);
     return 1;
 }
-// enb.aux_i(key [, entity]) -> integer | nil. The same slot as an INT. Use for the
-// discipline levels: "RPGInfo CombatLevel" / "RPGInfo TradeLevel" / "RPGInfo ExploreLevel".
+// enb.aux_i(key [, entity]) -> integer | nil. The same slot as an INT. For aux
+// keys whose value is an integer. NOTE: the discipline levels are NOT here -- they
+// live on the RPG manager, not the ship entity, behind a different getter; use
+// enb.rpg_level() for those.
 static int l_aux_i(lua_State* L){
     uintptr_t a = aux_value_addr(L, 1, 2);
     if (!a) return 0;
     lua_pushinteger(L, (lua_Integer)mem::i32(a));
+    return 1;
+}
+
+// enb.rpg_level(key) -> integer | nil. Discipline levels off the RPG manager
+// captured by the RpgLevels hook (hooks::rpg_mgr()): resolve the RPGInfo AuxData
+// container at manager+container_off, then look the key up through the level
+// getter (same __cdecl(obj, keybuf) shape as get_value, different value type).
+// Keys: "RPGInfo CombatLevel" / "RPGInfo TradeLevel" / "RPGInfo ExploreLevel".
+// nil until the RPG reader has run at least once (manager == 0) or on any miss.
+// Returns 0 (not nil) on a fresh character -- a real, valid level of 0.
+static int l_rpg_level(lua_State* L){
+    const char* key = luaL_checkstring(L, 1);
+    uintptr_t mgr = hooks::rpg_mgr();
+    if (!mgr || !mem::readable((void*)(mgr + game::rpg::container_off), 4)) return 0;
+    uintptr_t cont = mem::ptr(mgr + game::rpg::container_off);
+    if (!cont || !mem::readable((void*)cont, 4)) return 0;
+
+    unsigned char keybuf[game::aux::keybuf_sz];
+    memset(keybuf, 0, sizeof(keybuf));
+    ((AuxBuildKey_t)game::aux::build_key)(keybuf, key);
+    int entry = ((AuxGetValue_t)game::rpg::get_entry)((int)cont, keybuf);
+    if (!entry || !mem::readable((void*)(uintptr_t)entry, game::aux::val_off + 4)) return 0;
+    if (mem::i32((uintptr_t)entry + game::aux::valid_off) == 0) return 0;   // not set
+    lua_pushinteger(L, (lua_Integer)mem::i32((uintptr_t)entry + game::aux::val_off));
     return 1;
 }
 
@@ -684,6 +710,7 @@ void open(lua_State* L){
         {"vitals", l_vitals},
         {"aux", l_aux},
         {"aux_i", l_aux_i},
+        {"rpg_level", l_rpg_level},
         {"tap", l_tap},
         {"key", l_key},
         {"char", l_char},
