@@ -50,10 +50,9 @@ const STAR_PATH = 'M0,-13 L3.2,-4.5 L12.4,-4 L5.2,1.7 L7.6,10.5 L0,5.5 '
 // ---- factions: OKLCH lightness / chroma / hue per territory ----
 const F: Record<string, { label: string; L: number; C: number; H: number }> = {
   jenquai: { label: 'Jenquai', L: 0.62, C: 0.150, H: 300 },
-  neutral: { label: 'Neutral', L: 0.70, C: 0.018, H: 250 },
-  infiniticorp: { label: 'InfinitiCorp', L: 0.64, C: 0.150, H: 150 },
+  neutral: { label: 'Neutral', L: 0.64, C: 0.105, H: 256 },
+  terran: { label: 'Terran', L: 0.64, C: 0.150, H: 150 },
   progen: { label: 'Progen', L: 0.58, C: 0.195, H: 26 },
-  terran: { label: 'Terran', L: 0.64, C: 0.135, H: 256 },
   pirate: { label: 'Pirate', L: 0.74, C: 0.140, H: 72 },
 };
 const col = (f: string, L: number, a?: number) =>
@@ -71,19 +70,19 @@ const SYSTEMS: Sys[] = [
   { name: 'Mazzaroth Maelstrom', f: 'neutral', cx: 165, cy: 481, r: 66 },
   { name: 'Unknown', f: 'neutral', cx: 82, cy: 646, r: 66 },
   { name: 'Mondara Maelstrom', f: 'neutral', cx: 1103, cy: 150, r: 66 },
-  { name: 'Sol', f: 'terran', cx: 993, cy: 508, r: 287 },
-  { name: 'Beta Hydri', f: 'terran', cx: 248, cy: 867, r: 199 },
-  { name: 'Tau Ceti', f: 'infiniticorp', cx: 662, cy: 757, r: 154 },
-  { name: 'Alpha Centauri', f: 'infiniticorp', cx: 1075, cy: 922, r: 132 },
+  { name: 'Sol', f: 'neutral', cx: 993, cy: 508, r: 287 },
+  { name: 'Beta Hydri', f: 'neutral', cx: 248, cy: 867, r: 199 },
+  { name: 'Tau Ceti', f: 'terran', cx: 662, cy: 757, r: 154 },
+  { name: 'Alpha Centauri', f: 'terran', cx: 1075, cy: 922, r: 132 },
   { name: 'Aquitaine', f: 'neutral', cx: 1296, cy: 1088, r: 66 },
-  { name: 'Proxima Centauri', f: 'neutral', cx: 1324, cy: 812, r: 110 },
-  { name: '61 Cygni', f: 'infiniticorp', cx: 772, cy: 1005, r: 110 },
+  { name: 'Proxima Centauri', f: 'terran', cx: 1324, cy: 812, r: 110 },
+  { name: '61 Cygni', f: 'terran', cx: 772, cy: 1005, r: 110 },
   { name: 'Smugglers Run', f: 'pirate', cx: 524, cy: 1143, r: 110 },
   { name: 'Vega', f: 'progen', cx: 1351, cy: 177, r: 132 },
   { name: 'Gallina', f: 'progen', cx: 1737, cy: 260, r: 154 },
   { name: 'Altair', f: 'progen', cx: 1434, cy: 508, r: 132 },
   { name: 'Deneb', f: 'progen', cx: 1655, cy: 619, r: 66 },
-  { name: 'Aragoth', f: 'progen', cx: 1682, cy: 977, r: 265 },
+  { name: 'Aragoth', f: 'neutral', cx: 1682, cy: 977, r: 265 },
 ];
 
 // ---- sectors: [name, x, y] -- authored chart coordinates. Apostrophes are
@@ -403,7 +402,7 @@ const GRID = (() => {
   return { v, h };
 })();
 
-const FACTION_LEGEND = ['jenquai', 'progen', 'terran', 'pirate', 'infiniticorp', 'neutral'];
+const FACTION_LEGEND = ['jenquai', 'terran', 'progen', 'neutral', 'pirate'];
 
 type Highlight = { kind: 'faction'; f: string } | { kind: 'online' } | null;
 
