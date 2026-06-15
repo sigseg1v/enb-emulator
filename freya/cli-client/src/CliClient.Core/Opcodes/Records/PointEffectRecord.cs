@@ -20,8 +20,6 @@ namespace N7.CliClient.Opcodes.Records;
 ///   [1C] float  HSV[0]
 ///   [20] float  HSV[1]
 ///   [24] float  HSV[2]
-/// Source: Player::PointEffect (server/src/PlayerConnection.cpp:1018), which
-/// builds the buffer field-by-field at exactly these offsets.
 /// </summary>
 public sealed class PointEffectRecord : PacketRecord
 {

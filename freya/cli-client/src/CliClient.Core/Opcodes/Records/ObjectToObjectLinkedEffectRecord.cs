@@ -23,7 +23,6 @@ namespace N7.CliClient.Opcodes.Records;
 ///   [26] float Scale        -- 1.0
 ///   [2A] float HSVShift[3]
 ///   [36] float Speedup      -- link travel-speed multiplier
-/// Source: Player::SendObjectToObjectLinkedEffect (server/src/PlayerConnection.cpp:914).
 /// </summary>
 public sealed class ObjectToObjectLinkedEffectRecord : PacketRecord
 {

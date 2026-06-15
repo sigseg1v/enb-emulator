@@ -16,9 +16,6 @@ namespace N7.CliClient.Opcodes.Records;
 /// applied in order by InvSortFunc (1 = name, 5 = category, 10 = value; 4/8 are
 /// secondary/tertiary keys the server treats as no-ops). Reverse != 0 inverts
 /// the comparison.
-/// Source: struct InvSort (PacketStructures.h:253), Player::HandleInventorySort
-/// + InvSortFunc (PlayerConnection.cpp:3285/3249). Pinned to capture_3.rar
-/// (Client->Server).
 /// </summary>
 public sealed class InventorySortRecord : PacketRecord
 {

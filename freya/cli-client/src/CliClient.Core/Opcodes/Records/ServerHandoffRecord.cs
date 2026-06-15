@@ -19,8 +19,6 @@ namespace N7.CliClient.Opcodes.Records;
 /// the wire (Player::SendServerHandoff). Every other MasterJoin field is host
 /// (little-endian).
 /// AddString = u16 length (LE) + raw chars, no NUL.
-/// Source: Player::SendServerHandoff (PlayerConnection.cpp:10159),
-///         struct ServerHandoff / MasterJoin (PacketStructures.h:950 / 309).
 /// </summary>
 public sealed class ServerHandoffRecord : PacketRecord
 {

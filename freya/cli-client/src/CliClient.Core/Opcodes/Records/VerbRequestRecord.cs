@@ -16,8 +16,6 @@ namespace N7.CliClient.Opcodes.Records;
 /// VERB_UPDATE. Confirmed against capture_3.rar Packet 1479: SubjectID/ObjectID
 /// read BE equal the SAME player's 0x0017 REQUEST_TARGET ids read LE
 /// (8708585 / 2617), and Action reads 1 LE -- exactly the UpdateVerbs(true) trigger.
-/// Source: struct VerbRequest (PacketStructures.h), Player::HandleVerbRequest
-/// (PlayerConnection.cpp: ntohl(pkt->SubjectID), ntohl(pkt->ObjectID), pkt->Action == 1).
 /// </summary>
 public sealed class VerbRequestRecord : PacketRecord
 {

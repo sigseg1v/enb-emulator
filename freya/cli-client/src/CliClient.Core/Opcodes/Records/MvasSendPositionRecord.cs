@@ -22,9 +22,6 @@ namespace N7.CliClient.Opcodes.Records;
 ///     this -- functionally server-equivalent).
 ///   * 16-byte form: pos[3] + u32.
 ///   * 12-byte position-only form: pos[3].
-///
-/// Source: retail proxy&lt;-&gt;server captures (planet land/fly/dock leg),
-/// server/src/UDP_MVAS.cpp HandleMVASPosReturn, freya MvasClient.BuildDatagram.
 /// </summary>
 public sealed class MvasSendPositionRecord : PacketRecord
 {

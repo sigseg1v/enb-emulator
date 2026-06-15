@@ -11,7 +11,6 @@ namespace N7.CliClient.Opcodes.Records;
 ///   int32 GameID (BE -- emitter applies ntohl);
 ///   int32 NumSubParts (BE);
 ///   NumSubParts pairs: NUL-terminated bone path + int32 asset ID (BE).
-/// Source: PlayerClass.cpp SendSubparts().
 /// </summary>
 public sealed class SubpartsRecord : PacketRecord
 {

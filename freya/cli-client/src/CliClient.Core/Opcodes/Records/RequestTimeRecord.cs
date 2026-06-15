@@ -14,9 +14,6 @@ namespace N7.CliClient.Opcodes.Records;
 /// *((int32_t*) data) with no ntohl, so it is little-endian, then calls
 /// SendClientSetTime(tick). Across a session the value climbs monotonically
 /// (it is the client's uptime tick, not a wall clock).
-/// Source: Player::HandleRequestTime (PlayerConnection.cpp:1629). Pinned to
-/// capture_3.rar (Client->Server). The 0x34 reply is decoded by
-/// <see cref="ClientSetTimeRecord"/>.
 /// </summary>
 public sealed class RequestTimeRecord : PacketRecord
 {

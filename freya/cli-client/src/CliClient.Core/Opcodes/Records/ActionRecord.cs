@@ -16,8 +16,6 @@ namespace N7.CliClient.Opcodes.Records;
 /// GroupAction code (see <see cref="DescribeAction"/>).
 /// (The string-carrying ActionPacket2 form is variable-length and arrives via a
 /// different path; the fixed 16-byte body here is the plain ACTION.)
-/// Source: struct ActionPacket (PacketStructures.h), Player::HandleAction
-/// (PlayerConnection.cpp).
 /// </summary>
 public sealed class ActionRecord : PacketRecord
 {

@@ -19,8 +19,6 @@ namespace N7.CliClient.Opcodes.Records;
 /// (0x05), which already documents StartID as a little-endian sector-assigned id.
 /// HandleStartAck itself discards the payload (it only toggles Active), so the
 /// field meaning rests on the 0x05<->0x06 round-trip, not on a server-side read.
-/// Source: Player::HandleStartAck (PlayerConnection.cpp:1613), StartRecord (0x05).
-/// Pinned to capture_3.rar.
 /// </summary>
 public sealed class StartAckRecord : PacketRecord
 {

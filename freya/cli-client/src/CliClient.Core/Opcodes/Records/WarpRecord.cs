@@ -19,9 +19,6 @@ namespace N7.CliClient.Opcodes.Records;
 /// order. The server masks GameID with 0x00FFFFFF when logging, i.e. the low 24
 /// bits are the object id and the top byte is a marker; the hex view below
 /// shows all four bytes.
-/// Source: struct WarpPacket (PacketStructures.h), Player::HandleWarp +
-/// Player::SetupWarpNavs (PlayerConnection.cpp / PlayerClass.cpp). Pinned to
-/// capture_3.rar (Client->Server).
 /// </summary>
 public sealed class WarpRecord : PacketRecord
 {

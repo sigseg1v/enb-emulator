@@ -17,8 +17,6 @@ namespace N7.CliClient.Opcodes.Records;
 /// SubjectID/ObjectID, applied uniformly here (no LE field). FromInv/ToInv select
 /// the container (the handler switches FromInv: 1 = cargo, 2 = equip, ...);
 /// ToSlot/Num == -1 are sentinels the client sends for "unspecified".
-/// Source: struct InvMove (PacketStructures.h), Player::HandleInventoryMove
-/// (PlayerConnection.cpp). Pinned to capture_3.rar (Client->Server).
 /// </summary>
 public sealed class InventoryMoveRecord : PacketRecord
 {

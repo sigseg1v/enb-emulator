@@ -17,9 +17,6 @@ namespace N7.CliClient.Opcodes.Records;
 /// change.Orient = p->m_Orient; change.Position = ...; change.Room = p->m_Room),
 /// so every field is host-order LE. This is the single most common undecoded
 /// server->client opcode in the capture corpus.
-/// Source: struct StarbaseAvatarChange_S2C (PacketStructures.h),
-/// Player::SendStarbaseAvatarChange (PlayerConnection.cpp). Pinned to capture_3.rar
-/// Packet 14227 (Server->Client).
 /// </summary>
 public sealed class StarbaseAvatarChangeS2CRecord : PacketRecord
 {

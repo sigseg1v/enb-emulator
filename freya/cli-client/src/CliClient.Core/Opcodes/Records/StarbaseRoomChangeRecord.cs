@@ -22,9 +22,6 @@ namespace N7.CliClient.Opcodes.Records;
 /// OldRoom == -1 with NewRoom == 0 is the "just entered the station" case; a
 /// NewRoom == -1 (seen on 0xA0) is a player leaving the room. The struct field
 /// order is AvatarID, NewRoom, OldRoom -- NewRoom precedes OldRoom on the wire.
-/// Source: struct StarbaseRoomChange (PacketStructures.h:805),
-/// Player::HandleStarbaseRoomChange (PlayerClass.cpp:631) + the three 0xA0
-/// emitters (PlayerClass.cpp:662/739/753). Pinned to capture_3.rar.
 /// </summary>
 public sealed class StarbaseRoomChangeRecord : PacketRecord
 {
