@@ -42,11 +42,6 @@ type Config struct {
 	KeepaliveEnabled bool   // NET7_IPC_KEEPALIVE != "0"
 	IPCSendSock      string // NET7_IPC_SEND_SOCK, default /run/net7-ipc/net7.sock (peer = server)
 	IPCRecvSock      string // NET7_IPC_RECV_SOCK, default /run/net7-ipc/net7SSL.sock (ours)
-
-	// Patcher self-update (/updateCheck). Empty manifest URL -> 503, matching
-	// the C++ behaviour when the manifest cache is cold (fail-closed).
-	PatcherManifestURL string // NET7_PATCHER_MANIFEST_URL
-	PatcherDLBase      string // NET7_PATCHER_DL_BASE
 }
 
 func env(k, def string) string {
@@ -67,8 +62,6 @@ func loadConfig() Config {
 		KeepaliveEnabled:   env("NET7_IPC_KEEPALIVE", "1") != "0",
 		IPCSendSock:        env("NET7_IPC_SEND_SOCK", "/run/net7-ipc/net7.sock"),
 		IPCRecvSock:        env("NET7_IPC_RECV_SOCK", "/run/net7-ipc/net7SSL.sock"),
-		PatcherManifestURL: env("NET7_PATCHER_MANIFEST_URL", ""),
-		PatcherDLBase:      strings.TrimRight(env("NET7_PATCHER_DL_BASE", ""), "/"),
 	}
 }
 

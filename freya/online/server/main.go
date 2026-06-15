@@ -71,14 +71,29 @@ func main() {
 	api := newAPIServer(store, status, galaxy, cfg)
 	legacy := &legacyProxy{upstream: cfg.LoginUpstream}
 	if cfg.LoginUpstream == "" {
-		log.Printf("freya-online: WARNING FREYA_LOGIN_UPSTREAM unset; legacy game-auth endpoints (AuthLogin, updateCheck, ...) are NOT relayed and will fall through to the SPA. Point it at the net7go service (e.g. net7go:8085).")
+		log.Printf("freya-online: WARNING FREYA_LOGIN_UPSTREAM unset; legacy game-auth endpoints (AuthLogin, ...) are NOT relayed and will fall through to the SPA. Point it at the net7go service (e.g. net7go:8085).")
 	}
+
+	// FreyaLauncher self-update endpoint (/updateCheck). Original Freya work, so
+	// it is served HERE (MIT), not relayed to net7go. Loaded once at startup;
+	// refreshed lazily per-request (TTL-bounded) so a client-only patch is picked
+	// up without a restart.
+	manifest := newPatcherManifest(cfg)
+	if !manifest.Load() {
+		log.Printf("freya-online: patcher manifest not loaded at startup; /updateCheck reports DOWN until a manifest is reachable (set FREYA_PATCHER_MANIFEST_URL)")
+	}
+
 	spa := newSPAHandler(cfg.WebRoot)
 
-	// Top-level handler: legacy first (raw-relayed byte-exact to net7go), then
-	// the API (session-wrapped), then the SPA.
+	// Top-level handler: /updateCheck (Freya, local) first, then the legacy
+	// game-auth endpoints (raw-relayed byte-exact to net7go), then the API
+	// (session-wrapped), then the SPA.
 	apiHandler := api.session.LoadAndSave(api.routes())
 	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.RequestURI(), "/updateCheck") {
+			manifest.handleUpdateCheck(w, r)
+			return
+		}
 		if legacy.tryLegacy(w, r) {
 			return
 		}
@@ -137,7 +152,7 @@ func startServers(cfg Config, handler http.Handler) []*http.Server {
 			}
 		}()
 	} else {
-		log.Printf("freya-online: no cert at %s; TLS listener disabled (set NET7SSL_CERT_DIR/DOMAIN)", certFile)
+		log.Printf("freya-online: no cert at %s; TLS listener disabled (set FREYA_CERT_DIR/DOMAIN)", certFile)
 	}
 
 	if cfg.HTTPAddr != "" {

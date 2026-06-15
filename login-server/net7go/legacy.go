@@ -20,7 +20,6 @@ package main
 
 import (
 	"context"
-	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -80,14 +79,6 @@ var legacyNotFound = []byte(
 		"\r\n" +
 		"\r\n")
 
-// MakeServiceUnavailable -- verbatim 503.
-var legacyServiceUnavailable = []byte(
-	"HTTP/1.1 503 Service Unavailable\r\n" +
-		"Server: AuthServer/2.5\r\n" +
-		"Content-Length: 0\r\n" +
-		"Connection: Keep-Alive\r\n" +
-		"\r\n")
-
 // touchSessionOK -- verbatim chunked "Success" body.
 var touchSessionOK = []byte(
 	"HTTP/1.1 200 \r\n" +
@@ -102,9 +93,8 @@ var touchSessionOK = []byte(
 
 // legacyServer carries the deps the legacy handlers need.
 type legacyServer struct {
-	store    *Store
-	cfg      Config
-	manifest *PatcherManifest
+	store *Store
+	cfg   Config
 }
 
 // tryLegacy dispatches the legacy game-auth endpoints by substring on the raw
@@ -131,9 +121,10 @@ func (l *legacyServer) tryLegacy(w http.ResponseWriter, r *http.Request) bool {
 	case strings.Contains(uri, "certificate.html"):
 		l.writeRaw(w, l.handleCertificate())
 		return true
-	case strings.Contains(uri, "/updateCheck"):
-		l.writeRaw(w, l.handleUpdateCheck(r))
-		return true
+	// NOTE: /updateCheck is NOT handled here. The FreyaLauncher self-update
+	// endpoint is original Freya work (not Net7SSL), so it lives in the MIT
+	// freya-online binary (freya/online/server/updatecheck.go), which serves it
+	// directly instead of relaying to net7go.
 	case strings.Contains(uri, "/who.cgi"):
 		// Linux no-op by design (see LinuxAuth.cpp) -> 404 fall-through.
 		l.writeRaw(w, legacyNotFound)
@@ -252,125 +243,4 @@ func (l *legacyServer) handleCertificate() []byte {
 		"</body>\r\n" +
 		"</html>\r\n"
 	return httpResult(body, "text/html")
-}
-
-// hashEq is case-insensitive hex equality for SHA-512 strings. Empty never
-// matches (a missing local hash from the client must read as a mismatch).
-func hashEq(a, b string) bool {
-	if a == "" || b == "" || len(a) != len(b) {
-		return false
-	}
-	return strings.EqualFold(a, b)
-}
-
-// handleUpdateCheck -- HandleUpdateCheck. POST body:
-//
-//	{"launcherHash","proxyHash","posFeedHash","injectHash","enbmodHash"}
-//
-// Compares the client's local hashes to the manifest cache and replies
-// UP_TO_DATE when all match, else UPDATE_NEEDED with a conditional file list.
-// Cache miss (manifest not loaded) -> 503 (fail-closed). Mirrors the C++
-// LinuxAuth.cpp HandleUpdateCheck byte-for-byte in the JSON it emits.
-func (l *legacyServer) handleUpdateCheck(r *http.Request) []byte {
-	mf := l.manifest
-	if mf == nil {
-		return legacyServiceUnavailable
-	}
-	// Lazily re-fetch (TTL-bounded) so a client-only patch -- which never
-	// changes the login image, so never triggers a restart on deploy -- is
-	// still picked up here without a manual bounce.
-	mf.refreshIfStale()
-	if mf.Empty() {
-		return legacyServiceUnavailable
-	}
-
-	body := readBody(r)
-	clientLauncher := jsonField(body, "launcherHash")
-	clientProxy := jsonField(body, "proxyHash")
-	clientPosFeed := jsonField(body, "posFeedHash")
-	clientInject := jsonField(body, "injectHash")
-	clientEnbmod := jsonField(body, "enbmodHash")
-
-	launcherSrv, cfgSrv, proxySrv, posFeedSrv, injectSrv, enbmodSrv, base := mf.snapshot()
-
-	launcherOk := hashEq(clientLauncher, launcherSrv)
-	proxyOk := hashEq(clientProxy, proxySrv)
-	// The MVAS pair and enbmod.dll are checked INDEPENDENTLY, like the proxy. An
-	// unpublished file (empty server hash) is treated as up-to-date: there is
-	// nothing to ship and we never emit a file the manifest does not vouch for.
-	posFeedOk := posFeedSrv == "" || hashEq(clientPosFeed, posFeedSrv)
-	injectOk := injectSrv == "" || hashEq(clientInject, injectSrv)
-	enbmodOk := enbmodSrv == "" || hashEq(clientEnbmod, enbmodSrv)
-
-	var json string
-	if launcherOk && proxyOk && posFeedOk && injectOk && enbmodOk {
-		json = `{"status":"UP_TO_DATE"}`
-	} else {
-		var files []string
-		add := func(rel, url, hash string) {
-			files = append(files, `{"relativePath":"`+rel+`","url":"`+url+`","hash":"`+hash+`"}`)
-		}
-		if !launcherOk {
-			add(relLauncherExe, base+"/FreyaLauncher.exe", launcherSrv)
-			// The cfg has no independent hash and rides with the launcher.
-			add(relLauncherCfg, base+"/FreyaLauncher.cfg", cfgSrv)
-		}
-		if !proxyOk {
-			add(relProxyExe, base+"/FreyaProxy.exe", proxySrv)
-		}
-		if !posFeedOk {
-			add(relPosFeedDll, base+"/FreyaPosFeed.dll", posFeedSrv)
-		}
-		if !injectOk {
-			add(relInjectExe, base+"/FreyaInject.exe", injectSrv)
-		}
-		if !enbmodOk {
-			add(relEnbmodDll, base+"/enbmod.dll", enbmodSrv)
-		}
-		json = `{"status":"UPDATE_NEEDED","files":[` + strings.Join(files, ",") + `]}`
-	}
-
-	return httpResult(json, "application/json")
-}
-
-// readBody slurps the (capped) request body once. The launcher's /updateCheck
-// POST is a tiny fixed JSON blob.
-func readBody(r *http.Request) string {
-	if r.Body == nil {
-		return ""
-	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
-	r.Body.Close()
-	if err != nil {
-		return ""
-	}
-	return string(body)
-}
-
-// jsonField extracts a JSON string field from the POST body. The launcher sends
-// a fixed, self-describing contract; the extracted value is ONLY ever compared,
-// never reflected into the response. Mirrors LinuxAuth.cpp JsonField.
-func jsonField(text, field string) string {
-	needle := `"` + field + `"`
-	i := strings.Index(text, needle)
-	if i < 0 {
-		return ""
-	}
-	j := strings.IndexByte(text[i+len(needle):], ':')
-	if j < 0 {
-		return ""
-	}
-	p := i + len(needle) + j + 1
-	for p < len(text) && (text[p] == ' ' || text[p] == '\t' || text[p] == '\n' || text[p] == '\r') {
-		p++
-	}
-	if p >= len(text) || text[p] != '"' {
-		return ""
-	}
-	p++
-	end := strings.IndexByte(text[p:], '"')
-	if end < 0 {
-		return ""
-	}
-	return text[p : p+end]
 }

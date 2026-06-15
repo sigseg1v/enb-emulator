@@ -2,12 +2,16 @@
 // Freya Online -- raw byte-exact relay to the standalone net7go login server.
 //
 // The legacy Net7SSL game-auth endpoints (/AuthLogin, /touchsession.jsp,
-// /sectorserver.cgi, certificate.html, /updateCheck, /who.cgi) are NOT
-// implemented here -- that logic is a derivative of Net7SSL and lives in the
-// separate CC BY-NC-SA 3.0 binary at login-server/net7go. Freya Online owns the
-// TLS :443 listener (it terminates TLS for both the website AND these legacy
-// endpoints), so it must forward the decrypted legacy requests to net7go and
-// stream net7go's response back to the client.
+// /sectorserver.cgi, certificate.html, /who.cgi) are NOT implemented here --
+// that logic is a derivative of Net7SSL and lives in the separate CC BY-NC-SA
+// 3.0 binary at login-server/net7go. Freya Online owns the TLS :443 listener (it
+// terminates TLS for both the website AND these legacy endpoints), so it must
+// forward the decrypted legacy requests to net7go and stream net7go's response
+// back to the client.
+//
+// NOTE: /updateCheck is deliberately NOT in this list. The FreyaLauncher
+// self-update endpoint is original Freya work (retail E&B had no launcher
+// self-update), so freya-online serves it directly (MIT) -- see updatecheck.go.
 //
 // The forwarding is a RAW byte relay, deliberately NOT httputil.ReverseProxy:
 // net7go writes a hand-framed HTTP response (exact status line, exact header
@@ -41,7 +45,6 @@ var legacyURIMarkers = []string{
 	"/touchsession.jsp",
 	"/sectorserver.cgi",
 	"certificate.html",
-	"/updateCheck",
 	"/who.cgi",
 }
 

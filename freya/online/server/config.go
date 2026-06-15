@@ -14,9 +14,9 @@ import (
 
 type Config struct {
 	// TLS listener (legacy game auth + website share :443, as the C++ did).
-	BindAddr string // NET7SSL_BIND_ADDR, default ":443"
+	BindAddr string // FREYA_BIND_ADDR, default ":443"
 	Domain   string // DOMAIN, default "localhost"; cert=<domain>.cer key=<domain>.pem
-	CertDir  string // NET7SSL_CERT_DIR, default "/app/certs"
+	CertDir  string // FREYA_CERT_DIR, default "/app/certs"
 
 	// Optional plain-HTTP listener for the website/API behind a separate TLS
 	// terminator (dev: vite proxies here). Empty disables it.
@@ -42,6 +42,13 @@ type Config struct {
 	// is the separate CC BY-NC-SA binary at login-server/net7go.
 	LoginUpstream string // FREYA_LOGIN_UPSTREAM, default "" (e.g. "net7go:8085")
 
+	// FreyaLauncher self-update (/updateCheck). freya-online handles this endpoint
+	// directly (it is original Freya work, not a Net7SSL derivative -- see
+	// updatecheck.go). An empty manifest URL -> 503 (fail-closed). FREYA_-prefixed
+	// because the endpoint and its config are Freya's own, not inherited Net7SSL.
+	PatcherManifestURL string // FREYA_PATCHER_MANIFEST_URL, default ""
+	PatcherDLBase      string // FREYA_PATCHER_DL_BASE, default "" (dl base for launcher files/mods/patches)
+
 	// Treat the game server as ONLINE only if server_status.updated_at is within
 	// this many seconds. The server heartbeats that row.
 	StatusStaleSecs int // FREYA_STATUS_STALE_SECS, default 90
@@ -64,9 +71,9 @@ func loadConfig() Config {
 		stale = 90
 	}
 	return Config{
-		BindAddr:        env("NET7SSL_BIND_ADDR", ":443"),
+		BindAddr:        env("FREYA_BIND_ADDR", ":443"),
 		Domain:          env("DOMAIN", "localhost"),
-		CertDir:         env("NET7SSL_CERT_DIR", "/app/certs"),
+		CertDir:         env("FREYA_CERT_DIR", "/app/certs"),
 		HTTPAddr:        env("FREYA_HTTP_ADDR", ":8080"),
 		DBHost:          env("DB_HOST", "postgres:5432"),
 		DBUser:          env("DB_USER", "net7"),
@@ -75,6 +82,8 @@ func loadConfig() Config {
 		DBContent:       env("FREYA_DB_CONTENT", "net7"),
 		WebRoot:         env("FREYA_WEB_ROOT", "/app/web"),
 		LoginUpstream:   env("FREYA_LOGIN_UPSTREAM", ""),
+		PatcherManifestURL: env("FREYA_PATCHER_MANIFEST_URL", ""),
+		PatcherDLBase:      strings.TrimRight(env("FREYA_PATCHER_DL_BASE", ""), "/"),
 		StatusStaleSecs: stale,
 		AhBotsEnabled:   env("FREYA_AH_BOTS", "") == "1",
 	}

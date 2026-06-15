@@ -10,11 +10,15 @@ game-auth endpoints byte-for-byte:
 | `/touchsession.jsp` | session keepalive (`Success` chunked body) |
 | `/sectorserver.cgi` | sector-server registration check |
 | `certificate.html` | the "certificate installed" landing page |
-| `/updateCheck` | launcher self-update gate (manifest-backed) |
 | `/who.cgi` | Linux no-op (404), as in the C++ |
 
+The launcher self-update gate (`/updateCheck`) is **not** here -- it was never in
+the retail Net7SSL; it is original Freya work and lives in `freya/online`
+(`freya/online/server/updatecheck.go`, MIT). freya-online serves it directly and
+does not relay it to net7go.
+
 It also runs the AF_UNIX `SOCK_DGRAM` server-liveness keepalive (a "Ping" every
-~10s to the game server) and the launcher self-update manifest cache.
+~10s to the game server).
 
 ## License -- CC BY-NC-SA 3.0, NOT MIT
 
@@ -58,8 +62,9 @@ client.exe / launcher / sector server
 | `NET7_IPC_KEEPALIVE` | `1` | set `0` to disable the AF_UNIX keepalive |
 | `NET7_IPC_SEND_SOCK` | `/run/net7-ipc/net7.sock` | game server's recv socket |
 | `NET7_IPC_RECV_SOCK` | `/run/net7-ipc/net7SSL.sock` | net7go's recv socket |
-| `NET7_PATCHER_MANIFEST_URL` | (unset) | manifest.json URL; unset -> `/updateCheck` 503 |
-| `NET7_PATCHER_DL_BASE` | (unset) | CloudFront base for published artifacts |
+
+The patcher manifest env (`FREYA_PATCHER_MANIFEST_URL` / `FREYA_PATCHER_DL_BASE`)
+now belongs to freya-online (it owns `/updateCheck`), not net7go.
 
 ## Build / test
 
