@@ -236,6 +236,7 @@ func botPostOne(ctx context.Context, s *Store) error {
 	}
 
 	var quality *float64
+	var structure *float64
 	if withQuality {
 		q := math.Round(rand.NormFloat64()*botQualityStd + botQualityMean)
 		if q < botQualityMin {
@@ -246,6 +247,16 @@ func botPostOne(ctx context.Context, s *Store) error {
 		}
 		qf := q / 100 // percent points -> game-native fraction (1.0 == 100%)
 		quality = &qf
+
+		// Equipment carries a structural-integrity value on the same
+		// game-native fraction scale (1.0 == 100%). The bot sells brand-new
+		// goods, so seed full structure -- a NULL here flows through the
+		// buyout -> mailbox -> inventory claim and the game reads it as 0%
+		// (PlayerInventory.cpp treats <0.5 as damaged, 0.0 as destroyed), so
+		// purchased items arrived broken (PB-15). Ores/resources (no quality)
+		// have no structure and stay NULL.
+		full := 1.0
+		structure = &full
 	}
 
 	itemValue := cand.vendor * int64(stack)
@@ -264,10 +275,10 @@ func botPostOne(ctx context.Context, s *Store) error {
 
 	_, err := s.user.Exec(ctx, `
 		INSERT INTO auction_listings
-		  (seller_avatar_id, seller_account_id, item_id, stack_size, quality,
+		  (seller_avatar_id, seller_account_id, item_id, stack_size, quality, structure,
 		   item_value, start_bid, current_bid, buyout, deposit_paid, status, expires_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,0,0,$9)`,
-		ahBotAvatarID, ahBotAccountID, cand.id, stack, quality,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8,$9,0,0,$10)`,
+		ahBotAvatarID, ahBotAccountID, cand.id, stack, quality, structure,
 		itemValue, startBid, buyout, expires)
 	return err
 }
