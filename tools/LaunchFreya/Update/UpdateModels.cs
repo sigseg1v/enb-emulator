@@ -51,6 +51,20 @@ namespace LaunchFreya.Update
         [JsonPropertyName("url")]  public string Url  { get; set; }
     }
 
+    // One operator-supplied game-data patch the server vouches for. Unlike a
+    // file/mod, a patch is an EXECUTABLE the launcher runs against the EnB game
+    // install (e.g. enb-patch.exe). The launcher records applied patches in a
+    // patchlevel.txt at the EnB install root (one hash per line) and only runs a
+    // patch whose hash is absent. Name is a single safe path segment; it is both
+    // the URL segment and the staged file name. See deploy/do/README.md
+    // "Operator-provided client patch (enb-patch.exe)".
+    public sealed class PatchUpdate
+    {
+        [JsonPropertyName("name")] public string Name { get; set; }
+        [JsonPropertyName("hash")] public string Hash { get; set; }
+        [JsonPropertyName("url")]  public string Url  { get; set; }
+    }
+
     public sealed class UpdateCheckResponse
     {
         // "UP_TO_DATE" or "UPDATE_NEEDED".
@@ -59,6 +73,10 @@ namespace LaunchFreya.Update
         // The authoritative set of OUR Lua mods (id + hash + zip url). Orthogonal
         // to Status: present in both replies, since mod updates do not gate Play.
         [JsonPropertyName("mods")]   public List<ModUpdate> Mods { get; set; }
+        // The operator-supplied game-data patches (name + hash + exe url). Like
+        // mods, orthogonal to Status -- present in both replies and applied
+        // against the EnB game install, not the launcher dir. See PatchUpdate.
+        [JsonPropertyName("patches")] public List<PatchUpdate> Patches { get; set; }
     }
 
     public static class UpdateStatus

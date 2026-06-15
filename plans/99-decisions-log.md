@@ -8121,3 +8121,39 @@ server+proxy images and the MinGW FreyaProxy.exe build clean; 46/46 server
 gtests; 814/814 CLI unit tests. NOT yet deployed -- containers still run
 the old binaries until the next play-local/rebuild; the online box needs
 the same redeploy.
+
+## /updateCheck -> freya-online, delete dead Net7SSL, play-local patching (2026-06-14)
+
+Three related cleanups around the launcher patcher pipeline:
+
+- **Moved `/updateCheck` out of net7go into freya-online.** It was entirely
+  our Phase-AN addition -- never in the retail Net7SSL -- so it does not
+  belong in the CC-BY-NC-SA net7go port. Moved the endpoint + manifest cache
+  to `freya/online/server/updatecheck.go` (MIT) with its own tests; net7go
+  keeps only the genuine Net7SSL-derived legacy endpoints. freya-online now
+  serves `/updateCheck` directly (intercepts before the legacy relay) and does
+  NOT relay it. Renamed the patcher env `NET7_PATCHER_*` -> `FREYA_PATCHER_*`
+  (and, while there, the freya-online-owned `NET7SSL_BIND_ADDR`/
+  `NET7SSL_CERT_DIR` -> `FREYA_BIND_ADDR`/`FREYA_CERT_DIR`, since they are
+  Freya-authored identifiers and the naming rule forbids the Net7 brand in
+  freya/*). Updated both compose files, Update-Stack.ps1, outputs.tf, READMEs.
+
+- **Deleted the dead C++ Net7SSL.** The AQ-7 cutover (2026-06-10) already
+  removed net7ssl from every deploy path; nothing builds or runs it
+  (`login-server/Dockerfile` only built net7ssl and was orphaned too).
+  `git rm`'d `login-server/Net7SSL/` + `login-server/Dockerfile`. Net7Mysql
+  (a Windows MFC admin GUI, not in the runtime auth flow) was left as-is --
+  the owner's instruction was specifically net7ssl.
+
+- **play-local now patches the client to retail.** `just play-local` has no
+  `/updateCheck`, so the launcher (Debug / `!CHECK_FOR_UPDATES` build) now
+  applies the operator's on-disk `deploy/do/patches/enb-patch.exe` before
+  launch: `Updater.ReconcileLocalPatchAsync` detects "patched" via auth.ini,
+  applies the local exe (through WINE on Linux) + records patchlevel.txt if
+  unpatched, or returns MissingPatch so OnPlayClick blocks Play with a
+  warning textbox when the exe is absent. New unit tests cover the
+  non-executing branches.
+
+Verified: net7go + freya-online build/vet/test green; launcher builds clean
+in both `CHECK_FOR_UPDATES` and the default branch; 86/86 launcher unit
+tests pass.
