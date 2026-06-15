@@ -406,23 +406,30 @@ game ports the cloud exposes.
 
 The Windows **FreyaLauncher** can keep itself and the bundled **FreyaProxy.exe**
 current without the player re-running the installer. At startup it SHA-512s its
-own `FreyaLauncher.exe` and `bin/FreyaProxy.exe` and POSTs both hashes to
-`/updateCheck` (terminated by freya-online, relayed to net7go). net7go compares
-them against a
+own `FreyaLauncher.exe` and `bin/FreyaProxy.exe` (and the MVAS injection pair +
+`enbmod.dll`) and POSTs the hashes to `/updateCheck`. That endpoint is **served
+directly by freya-online** (`freya/online/server/updatecheck.go`) -- it is
+original Freya work, never part of the retail Net7SSL/net7go, so freya-online
+does NOT relay it to net7go. freya-online compares the hashes against a
 `manifest.json` it fetched at boot and replies `UP_TO_DATE` or a list of changed
 files + a base URL. The launcher downloads each changed file from that URL,
 verifies its hash, and self-replaces (rename-self-then-relaunch). `FreyaLauncher.cfg`
 has no independent hash -- it rides along whenever the launcher EXE changes.
 
+The same reply also carries two arrays orthogonal to the launcher version gate:
+`mods` (our published enbmod Lua mods, reconciled into the client mod store) and
+`patches` (operator-supplied game-data patches applied against the EnB install --
+see "Operator-provided client patch" below).
+
 Delivery is a **private S3 bucket fronted by CloudFront** (Origin Access Control,
 so nothing is world-readable from S3 directly), with an ACM cert + Route53
-`dl.<domain>` alias and a single per-source-IP WAF rate rule to cap abuse. net7go
-reads `manifest.json` credential-free over that same CloudFront host.
+`dl.<domain>` alias and a single per-source-IP WAF rate rule to cap abuse.
+freya-online reads `manifest.json` credential-free over that same CloudFront host.
 
 **Entirely opt-in and OFF by default.** With `ENB_PATCHER_PRIVATE_S3_BUCKET`
 blank (the default), `TF_VAR_manage_patcher=false`: terraform creates none of the
-S3/CloudFront/ACM/WAF resources, the net7go container gets empty
-`NET7_PATCHER_*` env, its manifest never loads, and `/updateCheck` fail-closes
+S3/CloudFront/ACM/WAF resources, the freya-online container gets empty
+`FREYA_PATCHER_*` env, its manifest never loads, and `/updateCheck` fail-closes
 (reports the server DOWN to the launcher -- harmless, the launcher just doesn't
 self-update). An existing deploy is untouched until you opt in.
 
@@ -436,18 +443,18 @@ To turn it on:
    propagation can take ~15 min.)
 3. `just update` -- now that the patcher is configured, the `push` leg also runs
    `push-client` (builds the Windows launcher bundle via `package-client-windows`,
-   writes `manifest.json` over the three artifacts, uploads all four to the bucket,
+   writes `manifest.json` over the artifacts, uploads them to the bucket,
    invalidates CloudFront), and the `apply-update` leg threads
-   `NET7_PATCHER_MANIFEST_URL` / `NET7_PATCHER_DL_BASE` (derived from the patcher
-   outputs) into the droplet `.env` and restarts login -- which then loads the
-   freshly-uploaded manifest at boot. The combined order (push, then ship) is why
-   one `just update` is sufficient: artifacts + manifest land before login
-   re-reads them.
+   `FREYA_PATCHER_MANIFEST_URL` / `FREYA_PATCHER_DL_BASE` (derived from the patcher
+   outputs) into the droplet `.env` and restarts freya-online -- which then loads
+   the freshly-uploaded manifest at boot. The combined order (push, then ship) is
+   why one `just update` is sufficient: artifacts + manifest land before
+   freya-online re-reads them.
 
 For every later launcher/proxy build, `just update` again re-pushes the client
-patch and restarts login. To push only the client patch without touching the
-server stack, run `just push-client` on its own, then `just apply-update` so login
-re-reads the manifest.
+patch and restarts freya-online. To push only the client patch without touching
+the server stack, run `just push-client` on its own, then `just apply-update` so
+freya-online re-reads the manifest.
 
 **Update race.** The bucket is unversioned and `just push-client` overwrites in
 place. A launcher mid-download during an overwrite is covered by the launcher's
@@ -455,12 +462,45 @@ post-download hash verify: a mismatched/partial file is rejected and retried on
 the next launch, so an inconsistent set is never applied. The cost is one wasted
 launch, not a broken client.
 
-**Order matters:** artifacts + manifest must be in the bucket before login
+**Order matters:** artifacts + manifest must be in the bucket before freya-online
 re-reads them. `just update` gets this right by construction (its `push` leg runs
 before its `apply-update` leg). Only if you drive the legs by hand does ordering
 bite: run `push-client` (or `push`) before `apply-update`. An `apply-update`
 against a fresh, empty bucket 404s the manifest GET and `/updateCheck` reports
 DOWN until the artifacts land -- no breakage, just no self-update in that window.
+
+## Operator-provided client patch (enb-patch.exe)
+
+The retail Earth & Beyond client must be patched to its final retail build
+before it can play. That patch is shipped as a single ~200MB Win32 executable,
+**`enb-patch.exe`**, which the operator supplies (it is not ours to redistribute,
+so it is **gitignored** and never committed). Drop it at:
+
+```
+deploy/do/patches/enb-patch.exe
+```
+
+How it reaches players depends on the launch path:
+
+- **Cloud / online launcher** -- `just push-client` reconciles the known patch
+  names in `deploy/do/patches/` (currently just `enb-patch.exe`; the allow-list
+  lives in `Push-ClientPatch.ps1`), content-hashes each, and adds them to
+  `manifest.json`'s `patches` array (name + SHA-512 + CloudFront URL), uploading
+  the exe to the patcher bucket only when its hash changed (the ~200MB upload is
+  skipped on an unchanged patch) and recording the hashes in a local
+  `deploy/do/patches/manifest.json` (gitignored). The launcher
+  downloads it on `/updateCheck`, verifies the hash, runs it against the EnB
+  install, and records the applied hash in `patchlevel.txt` at the install root so
+  it never re-runs. A pre-existing `Data/client/ini/auth.ini` (the file the patch
+  creates) is treated as "already applied" and the hash is recorded without
+  re-downloading the executable.
+- **Local `just play-local`** -- there is no `/updateCheck`. The launcher instead
+  looks for `deploy/do/patches/enb-patch.exe` on disk: if the install is not yet
+  patched (no `auth.ini`) it applies that file directly; if the file is missing it
+  blocks Play with a warning telling you to obtain it and place it there.
+
+The patch is a Win32 binary; on Linux the launcher runs it through WINE (paths
+converted with `winepath -w`), exactly as it launches the client.
 
 ## tfstate storage
 
@@ -479,7 +519,7 @@ deploy/do/
   terraform/                    droplet, IP, firewall, DOCR, Route53 record, ACME cert
     cloud-init.yaml.tftpl       droplet bootstrap (registry creds + dirs)
   compose/
-    docker-compose.prod.yml     prod stack (images from DOCR; login on 443:443)
+    docker-compose.prod.yml     prod stack (images from DOCR; freya-online on 443:443)
     Net7Config.cfg              template; __DOMAIN__/__INTERNAL_IP__ filled per deploy
   scripts/                      *.ps1 -- Bootstrap/Deploy/Build-And-Push/Update/Start/Stop/Destroy
   certs-prod/                   (gitignored) LE cert written here by terraform

@@ -22,6 +22,11 @@
 
 ## Quick Start
 
+1. install Earth & Beyond via publicly available eandb_demo.exe
+
+2. patch up to ~retail (see `deploy/do/patches/enb-patch-readme.md` for more info, you need to figure out where to get this, you may be able to find the client patches from other emulators/online/your own retail cd/etc)
+
+3. run the following:
 ```
 just play-local
 just seed-account testclient testpw

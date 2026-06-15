@@ -14,9 +14,9 @@ import (
 
 type Config struct {
 	// TLS listener (legacy game auth + website share :443, as the C++ did).
-	BindAddr string // NET7SSL_BIND_ADDR, default ":443"
+	BindAddr string // FREYA_BIND_ADDR, default ":443"
 	Domain   string // DOMAIN, default "localhost"; cert=<domain>.cer key=<domain>.pem
-	CertDir  string // NET7SSL_CERT_DIR, default "/app/certs"
+	CertDir  string // FREYA_CERT_DIR, default "/app/certs"
 
 	// Optional plain-HTTP listener for the website/API behind a separate TLS
 	// terminator (dev: vite proxies here). Empty disables it.
@@ -42,6 +42,13 @@ type Config struct {
 	// is the separate CC BY-NC-SA binary at login-server/net7go.
 	LoginUpstream string // FREYA_LOGIN_UPSTREAM, default "" (e.g. "net7go:8085")
 
+	// FreyaLauncher self-update (/updateCheck). freya-online handles this endpoint
+	// directly (it is original Freya work, not a Net7SSL derivative -- see
+	// updatecheck.go). An empty manifest URL -> 503 (fail-closed). FREYA_-prefixed
+	// because the endpoint and its config are Freya's own, not inherited Net7SSL.
+	PatcherManifestURL string // FREYA_PATCHER_MANIFEST_URL, default ""
+	PatcherDLBase      string // FREYA_PATCHER_DL_BASE, default "" (dl base for launcher files/mods/patches)
+
 	// Treat the game server as ONLINE only if server_status.updated_at is within
 	// this many seconds. The server heartbeats that row.
 	StatusStaleSecs int // FREYA_STATUS_STALE_SECS, default 90
@@ -49,10 +56,38 @@ type Config struct {
 	// AH faucet bots. When on, the AhBot account keeps the Auction House stocked
 	// with a rarity/quality/price-distributed pool of listings (see bots.go).
 	AhBotsEnabled bool // FREYA_AH_BOTS=1
+
+	// Login-flood defence for the website API (Phase AR-1, see ratelimit.go).
+	// Per-IP token bucket bounds brute-force; the Argon2 concurrency cap bounds
+	// memory. Rate <= 0 disables the per-IP limiter.
+	LoginRatePerMin    int // FREYA_LOGIN_RATE_PER_MIN, default 60 (1/sec sustained)
+	LoginBurst         int // FREYA_LOGIN_BURST, default 20
+	ArgonMaxConcurrent int // FREYA_ARGON_MAX_CONCURRENT, default 4 (4*64MiB peak)
+}
+
+// envInt reads an integer env var, falling back to def on unset/blank/invalid.
+func envInt(k string, def int) int {
+	if v, ok := os.LookupEnv(k); ok && v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
 }
 
 func env(k, def string) string {
 	if v, ok := os.LookupEnv(k); ok && v != "" {
+		return v
+	}
+	return def
+}
+
+// lookupOr returns the env var if it is PRESENT (even when set to the empty
+// string), else def. Unlike env(), an explicitly-set blank value is honoured --
+// used for FREYA_HTTP_ADDR so prod can set it to "" to disable the plain-HTTP
+// listener entirely (AR-5), while an unset var still defaults to :8080 for dev.
+func lookupOr(k, def string) string {
+	if v, ok := os.LookupEnv(k); ok {
 		return v
 	}
 	return def
@@ -64,19 +99,24 @@ func loadConfig() Config {
 		stale = 90
 	}
 	return Config{
-		BindAddr:        env("NET7SSL_BIND_ADDR", ":443"),
-		Domain:          env("DOMAIN", "localhost"),
-		CertDir:         env("NET7SSL_CERT_DIR", "/app/certs"),
-		HTTPAddr:        env("FREYA_HTTP_ADDR", ":8080"),
-		DBHost:          env("DB_HOST", "postgres:5432"),
-		DBUser:          env("DB_USER", "net7"),
-		DBPass:          env("DB_PASS", "net7"),
-		DBUserName:      env("DB_NAME", "net7_user"),
-		DBContent:       env("FREYA_DB_CONTENT", "net7"),
-		WebRoot:         env("FREYA_WEB_ROOT", "/app/web"),
-		LoginUpstream:   env("FREYA_LOGIN_UPSTREAM", ""),
-		StatusStaleSecs: stale,
-		AhBotsEnabled:   env("FREYA_AH_BOTS", "") == "1",
+		BindAddr:           env("FREYA_BIND_ADDR", ":443"),
+		Domain:             env("DOMAIN", "localhost"),
+		CertDir:            env("FREYA_CERT_DIR", "/app/certs"),
+		HTTPAddr:           lookupOr("FREYA_HTTP_ADDR", ":8080"),
+		DBHost:             env("DB_HOST", "postgres:5432"),
+		DBUser:             env("DB_USER", "net7"),
+		DBPass:             env("DB_PASS", "net7"),
+		DBUserName:         env("DB_NAME", "net7_user"),
+		DBContent:          env("FREYA_DB_CONTENT", "net7"),
+		WebRoot:            env("FREYA_WEB_ROOT", "/app/web"),
+		LoginUpstream:      env("FREYA_LOGIN_UPSTREAM", ""),
+		PatcherManifestURL: env("FREYA_PATCHER_MANIFEST_URL", ""),
+		PatcherDLBase:      strings.TrimRight(env("FREYA_PATCHER_DL_BASE", ""), "/"),
+		StatusStaleSecs:    stale,
+		AhBotsEnabled:      env("FREYA_AH_BOTS", "") == "1",
+		LoginRatePerMin:    envInt("FREYA_LOGIN_RATE_PER_MIN", 60),
+		LoginBurst:         envInt("FREYA_LOGIN_BURST", 20),
+		ArgonMaxConcurrent: envInt("FREYA_ARGON_MAX_CONCURRENT", 4),
 	}
 }
 

@@ -29,11 +29,10 @@
 //   3. Data-file streaming (0x2010) -- the server can shove a payload
 //      directly at the client, opcode embedded at offset 2. On Linux,
 //      everything except 0x0097 GALAXY_MAP is forwarded raw via
-//      SendResponse; 0x0097 is logged but not acted on because
-//      SendDataFileToClient (the path that loads cached GalaxyMap.dat
-//      on Win32) is WIN32-walled in ClientToSectorServer.cpp. The
-//      Phase K CLI test client doesn't need the galaxy map; if/when a
-//      real game client lands the cache path needs the Win32 file ported.
+//      SendResponse; 0x0097 GALAXY_MAP is served from the on-disk
+//      GalaxyMap.dat cache by SendCachedGalaxyMap (mirrors the retail
+//      proxy's SendDataFileToClient(GalaxyMap.dat) behaviour), so the
+//      in-game galaxy map renders.
 //
 // Fabrication opcodes -- KNOWN PARITY GAP (Phase AA Wave 3)
 // ---------------------------------------------------------
@@ -102,6 +101,8 @@
 #include <string.h>
 #include <stdint.h>
 #include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <deque>
 #include <vector>
 
@@ -605,18 +606,119 @@ void UDPClient::IncommingOpcodePreProcessing(short opcode, char *msg, short byte
 }
 
 // ---------------------------------------------------------------------------
-// SendCachedGalaxyMap -- Win32 reads GalaxyMap.dat from disk via
-// SendDataFileToClient. That helper lives in ClientToSectorServer.cpp
-// (WIN32-walled at file scope) and depends on Connection::SendDataFile,
-// which isn't on the Linux side yet. The Phase K CLI test client does
-// not request the galaxy map, so this is a logging no-op until a real
-// game client lands.
+// SendCachedGalaxyMap -- serve the cached galaxy-map node data to the client.
+//
+// When the client opens the in-game galaxy map it issues a 0x2010 DATA_FILE
+// request with the inner opcode 0x0097 GALAXY_MAP (SendClientDataFile above).
+// The server itself only emits a Type-4 "you are here" record plus an empty
+// 0x2011 cache marker -- it does NOT stream the node list. The reference proxy
+// (Win32 retail behaviour) answers the request by reading GalaxyMap.dat off
+// disk and pushing its bytes onto the client TCP stream; without that, the
+// in-game map renders empty.
+//
+// GalaxyMap.dat is a flat stream of records already in the client's TCP frame
+// format: repeated [len:u16][opcode:u16 = 0x0097][record body], where `len`
+// INCLUDES the 4-byte frame header (record body length = len - 4). The
+// reference proxy reads the whole file and queues it verbatim to the client
+// send path (which then RC4-encrypts the queued bytes). On Linux we don't have
+// that raw client-send queue, so we walk the [len][0x0097][body] frames and
+// re-emit each record via Connection::SendResponse(0x0097, body, body_len).
+// SendResponse frames exactly [total = body_len + 4][opcode][body] and the
+// per-frame RC4 advances the same contiguous keystream under m_Mutex, so the
+// concatenated ciphertext the client decodes is byte-identical to the retail
+// proxy streaming the whole pre-framed file at once -- only the producer-side
+// chunking differs, not the wire bytes.
+//
+// File-path resolution (the proxy runs in docker-Linux, WINE/Win32, and native
+// modes):
+//   1. FREYA_GALAXY_MAP_PATH env var, if set (full path to GalaxyMap.dat).
+//   2. Otherwise SERVER_DATABASE_PATH "GalaxyMap.dat" -- the same data-file
+//      convention LoadSectorList() uses ("./database/" relative to the proxy
+//      CWD; the retail proxy used "..\\database\\GalaxyMap.dat"). In docker the
+//      repo's server/data is mounted read-only at the proxy's ./database/.
+//
+// A missing/unreadable file is logged as a real WARNING (the map will render
+// empty) -- it is not silently swallowed -- but it never crashes the proxy.
 // ---------------------------------------------------------------------------
 void UDPClient::SendCachedGalaxyMap()
 {
-    LogMessage("UDPClient(Linux): SendCachedGalaxyMap requested -- not implemented "
-               "on Linux yet (SendDataFileToClient lives in WIN32-walled "
-               "ClientToSectorServer.cpp). Resetting packet timer.\n");
+    if (!g_ServerMgr || !g_ServerMgr->m_SectorConnection) return;
+
+    char path[MAX_PATH];
+    const char *env_path = getenv("FREYA_GALAXY_MAP_PATH");
+    if (env_path && env_path[0]) {
+        snprintf(path, sizeof(path), "%s", env_path);
+    } else {
+        snprintf(path, sizeof(path), "%sGalaxyMap.dat", SERVER_DATABASE_PATH);
+    }
+
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        LogMessage("UDPClient(Linux): WARNING SendCachedGalaxyMap: cannot open "
+                   "galaxy-map cache '%s' (errno=%d) -- in-game galaxy map will "
+                   "render empty. Set FREYA_GALAXY_MAP_PATH or mount the data "
+                   "dir at the proxy's database path.\n", path, errno);
+        m_PacketDropThisSession = 0;
+        m_PacketTimer = 100;
+        return;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (file_size <= 0 || file_size >= 0x20000) {
+        LogMessage("UDPClient(Linux): WARNING SendCachedGalaxyMap: galaxy-map "
+                   "cache '%s' has invalid length %ld -- not served.\n",
+                   path, file_size);
+        fclose(f);
+        m_PacketDropThisSession = 0;
+        m_PacketTimer = 100;
+        return;
+    }
+
+    std::vector<unsigned char> buf((size_t) file_size);
+    size_t got = fread(buf.data(), 1, (size_t) file_size, f);
+    fclose(f);
+    if (got != (size_t) file_size) {
+        LogMessage("UDPClient(Linux): WARNING SendCachedGalaxyMap: short read on "
+                   "'%s' (%zu of %ld bytes) -- not served.\n",
+                   path, got, file_size);
+        m_PacketDropThisSession = 0;
+        m_PacketTimer = 100;
+        return;
+    }
+
+    // Walk the [len:u16][opcode:u16][body] frames. `len` includes the 4-byte
+    // header; body length = len - 4. Re-emit each record through SendResponse,
+    // which re-frames it byte-identically to its on-disk form.
+    size_t index   = 0;
+    int    records = 0;
+    while (index + 4 <= buf.size()) {
+        unsigned short frame_len = *((unsigned short *) &buf[index]);
+        unsigned short opcode    = *((unsigned short *) &buf[index + 2]);
+        if (frame_len < 4 || index + frame_len > buf.size()) {
+            LogMessage("UDPClient(Linux): WARNING SendCachedGalaxyMap: malformed "
+                       "frame at offset %zu (len=%u) in '%s' -- stopping after "
+                       "%d records.\n", index, frame_len, path, records);
+            break;
+        }
+        if (opcode != ENB_OPCODE_0097_GALAXY_MAP) {
+            LogMessage("UDPClient(Linux): WARNING SendCachedGalaxyMap: unexpected "
+                       "inner opcode 0x%04x at offset %zu in '%s' -- stopping "
+                       "after %d records.\n", opcode, index, path, records);
+            break;
+        }
+        unsigned short body_len = (unsigned short) (frame_len - 4);
+        g_ServerMgr->m_SectorConnection->SendResponse(
+            ENB_OPCODE_0097_GALAXY_MAP, &buf[index + 4], body_len);
+        index += frame_len;
+        records++;
+    }
+
+    SetReceivedGalaxyMap();
+    LogVMessage("UDPClient(Linux): served galaxy-map cache '%s' (%d records, "
+                "%ld bytes).\n", path, records, file_size);
+
     m_PacketDropThisSession = 0;
     m_PacketTimer = 100;
 }

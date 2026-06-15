@@ -13,9 +13,9 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using LaunchFreya.Config;
+using LaunchFreya.Update;
 #if CHECK_FOR_UPDATES
 using System.Diagnostics;
-using LaunchFreya.Update;
 #endif
 using MsBox.Avalonia;
 using MsBox.Avalonia.Enums;
@@ -520,6 +520,24 @@ namespace LaunchFreya
                 catch (Exception ex) { AppendLog($"mods: reconcile error: {ex.Message}"); }
             }
 
+            // Reconcile operator-supplied game-data patches (e.g. enb-patch.exe)
+            // against the EnB game install. Independent of the mods toggle -- a
+            // patch is game data, not optional content -- but it needs a resolved
+            // EnB install root, and is skipped on the background auto-refresh so a
+            // timer tick never downloads/runs the ~200MB executable.
+            if (!auto && resp.Patches != null && resp.Patches.Count > 0
+                && !string.IsNullOrEmpty(_setting.BaseFolder))
+            {
+                try
+                {
+                    int n = await updater.ReconcilePatchesAsync(resp, _setting.BaseFolder,
+                        msg => Dispatcher.UIThread.Post(() => { if (gen == _statusProbeGen) c_Status.Text = msg; }));
+                    if (gen != _statusProbeGen) return;   // selection changed mid-reconcile
+                    if (n > 0) AppendLog($"patches: {n} patch(es) applied to the EnB install.");
+                }
+                catch (Exception ex) { AppendLog($"patches: reconcile error: {ex.Message}"); }
+            }
+
             if (string.Equals(resp.Status, UpdateStatus.UpToDate, StringComparison.OrdinalIgnoreCase))
             {
                 WriteStatus("ONLINE");
@@ -601,6 +619,67 @@ namespace LaunchFreya
             // needed -- re-probe to confirm we're now up to date and re-gate Play.
             c_Status.Text = "Update applied.";
             UpdateForSelectedHost();
+        }
+#endif
+
+#if !CHECK_FOR_UPDATES
+        // Ensure the EnB install is patched to retail before a local (play-local)
+        // launch. Returns true if it is safe to launch; false if launch must be
+        // blocked (the user was shown why). Online builds gate this through the
+        // /updateCheck patch reconcile instead.
+        async Task<bool> EnsureLocalPatchAsync()
+        {
+            // No resolved install root: let the normal launch path report the
+            // missing/invalid client.exe rather than second-guessing it here.
+            if (string.IsNullOrEmpty(_setting.BaseFolder))
+                return true;
+
+            var updater = new Updater(AppContext.BaseDirectory, Environment.ProcessPath, AppendLog);
+            string localPatch = FindLocalEnbPatch();
+            var result = await updater.ReconcileLocalPatchAsync(_setting.BaseFolder, localPatch,
+                msg => Dispatcher.UIThread.Post(() => c_Status.Text = msg));
+
+            switch (result)
+            {
+                case Updater.LocalPatchResult.AlreadyPatched:
+                case Updater.LocalPatchResult.Applied:
+                    return true;
+
+                case Updater.LocalPatchResult.MissingPatch:
+                    await Err(
+                        "Your Earth & Beyond install is NOT patched to retail.\n\n" +
+                        "The launcher could not find enb-patch.exe at:\n\n" +
+                        "    deploy/do/patches/enb-patch.exe\n\n" +
+                        "You must patch your client to retail before playing the game.\n" +
+                        "Place the retail enb-patch.exe at that path in the repo (it is\n" +
+                        "intentionally not committed) and press Play again.");
+                    return false;
+
+                default:
+                    await Err(
+                        "Patching your Earth & Beyond install to retail failed.\n\n" +
+                        "See the log (Advanced) for details. The install was left as-is; " +
+                        "fix the problem and press Play again.");
+                    return false;
+            }
+        }
+
+        // Locate the operator's on-disk enb-patch.exe for a local launch. The repo
+        // keeps it (gitignored, ~200MB) at deploy/do/patches/enb-patch.exe; walk up
+        // from the launcher's run dir to find the repo and that file. Returns null
+        // if no such file is found (-> the caller shows the missing-patch warning).
+        static string FindLocalEnbPatch()
+        {
+            try
+            {
+                for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
+                {
+                    string cand = Path.Combine(dir.FullName, "deploy", "do", "patches", "enb-patch.exe");
+                    if (File.Exists(cand)) return cand;
+                }
+            }
+            catch { /* best-effort: treat as not found */ }
+            return null;
         }
 #endif
 
@@ -716,6 +795,15 @@ namespace LaunchFreya
             _user.LastEmulatorName   = emu.Name;
             _user.LastServerName     = host.Hostname;
             _user.Save();
+
+#if !CHECK_FOR_UPDATES
+            // play-local (dev) builds have no online /updateCheck, so the
+            // server-driven patch reconcile never runs. Still make sure the EnB
+            // install is patched to retail: apply the repo's on-disk enb-patch.exe
+            // if present, or block launch with a clear warning if it is missing.
+            if (!await EnsureLocalPatchAsync())
+                return;
+#endif
 
             // Relaunch support: the launcher cannot reliably observe the client's
             // exit (in the PB-2 injector mode FreyaInject.exe resumes client.exe

@@ -132,6 +132,8 @@ public static class PacketRecordRegistry
             0x00D0 => new GuildMessageSectorRecord(payload),
             0x00D2 => new GuildPlayerPermissionsRecord(payload),
             0x00D3 => new GuildRankNamesRecord(payload),
+            0x1004 => new MvasSendPositionRecord(payload),
+            0x1007 => new MvasToggleSendFreqRecord(payload),
             0x2011 => new GalaxyMapCacheRecord(payload),
             0x2012 => new StartProspectRecord(payload),
             0x2013 => new TractorOreRecord(payload),

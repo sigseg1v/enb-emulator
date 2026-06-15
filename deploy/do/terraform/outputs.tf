@@ -48,6 +48,6 @@ output "patcher_dl_base" {
 }
 
 output "patcher_manifest_url" {
-  description = "The manifest.json URL the login server GETs at startup (NET7_PATCHER_MANIFEST_URL)."
+  description = "The manifest.json URL freya-online GETs at startup (FREYA_PATCHER_MANIFEST_URL)."
   value       = var.manage_patcher ? "https://${local.patcher_dl_domain}/manifest.json" : ""
 }

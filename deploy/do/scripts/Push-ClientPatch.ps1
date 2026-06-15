@@ -151,11 +151,68 @@ if (Test-Path $modsSrcDir) {
     Write-Host "==> no enbmod mods dir ($modsSrcDir); skipping mod packaging"
 }
 
-# ---- write manifest.json (files: relativePath + sha512; mods: id + hash) ----
-#      The login server synthesizes both the file URLs and the mod zip URLs.
+# ---- operator-supplied game-data patches (deploy/do/patches/<name>) ----------
+#      A patch is a large, operator-provided Win32 EXECUTABLE the launcher runs
+#      against the player's EnB game install (enb-patch.exe is ~200MB). It is
+#      gitignored (every operator supplies their own); we never build it. Each
+#      one is content-hashed (SHA-512), recorded in a local manifest under
+#      deploy/do/patches/manifest.json, and uploaded to s3://<bucket>/patches/<name>
+#      ONLY when its hash differs from what is already in the bucket -- the
+#      bucket object carries the hash as user metadata (sha512), so we skip the
+#      expensive re-upload of an unchanged 200MB file. The login server hands the
+#      {name, sha512} set to the launcher in /updateCheck; the launcher applies a
+#      patch whose hash it has not already recorded in patchlevel.txt at the EnB
+#      install root. See deploy/do/README.md "Operator-provided client patch".
+$patchesDir = Join-Path $script:RepoRoot 'deploy/do/patches'
+$knownPatchNames = @('enb-patch.exe')   # add future patch executables here
+$patchUploads = @()      # @{ Name; Local; Sha; Key } for files that must be (re)uploaded
+$patchManifest = @()     # @{ name; sha512 } for manifest.json + the local record
+if (Test-Path $patchesDir) {
+    Write-Host ""
+    Write-Host "==> reconciling operator patches in $patchesDir"
+    foreach ($name in $knownPatchNames) {
+        if ($name -notmatch '^[A-Za-z0-9._-]+$') {
+            throw "Patch name '$name' is not a safe single path segment ([A-Za-z0-9._-]+)."
+        }
+        $local = Join-Path $patchesDir $name
+        if (-not (Test-Path $local)) {
+            Write-Host "  $name : not present; skipping (operator must supply it)"
+            continue
+        }
+        $sha = (Get-FileHash -Algorithm SHA512 -Path $local).Hash.ToLowerInvariant()
+        $key = "patches/$name"
+        $patchManifest += @{ name = $name; sha512 = $sha }
+
+        # Compare against the hash stored as user metadata on the bucket object.
+        # head-object exits non-zero when the object is absent -- treat that as
+        # "must upload" rather than an error (so do NOT use Invoke-Native here).
+        $remoteSha = (& aws s3api head-object --bucket $bucket --key $key `
+            --query 'Metadata.sha512' --output text 2>$null)
+        if ($LASTEXITCODE -ne 0) { $remoteSha = '' }
+        $remoteSha = ("$remoteSha".Trim())
+        if ($remoteSha -eq 'None') { $remoteSha = '' }   # aws prints None for a missing key
+
+        if ($remoteSha -eq $sha) {
+            Write-Host ("  {0,-16} {1}  (already in bucket; skip upload)" -f $name, $sha)
+        } else {
+            Write-Host ("  {0,-16} {1}  (changed/new; will upload)" -f $name, $sha)
+            $patchUploads += @{ Name = $name; Local = $local; Sha = $sha; Key = $key }
+        }
+    }
+
+    # Local record manifest, so the operator can see what hash the deploy uses.
+    $localPatchManifest = @{ patches = @($patchManifest) } | ConvertTo-Json -Depth 5
+    Set-Content -Path (Join-Path $patchesDir 'manifest.json') -Value $localPatchManifest
+} else {
+    Write-Host "==> no patches dir ($patchesDir); skipping operator patches"
+}
+
+# ---- write manifest.json (files: relativePath + sha512; mods: id + hash;
+#      patches: name + sha512) -- the login server synthesizes all the URLs. ----
 $manifestObj = @{
-    files = @($artifacts | ForEach-Object { @{ relativePath = $_.Rel; sha512 = $_.Sha } })
-    mods  = @($modManifest)
+    files   = @($artifacts | ForEach-Object { @{ relativePath = $_.Rel; sha512 = $_.Sha } })
+    mods    = @($modManifest)
+    patches = @($patchManifest)
 }
 $manifestJson = $manifestObj | ConvertTo-Json -Depth 5
 $manifestPath = Join-Path ([System.IO.Path]::GetTempPath()) ("manifest-" + [System.Guid]::NewGuid().ToString('N') + '.json')
@@ -176,6 +233,15 @@ try {
         Write-Host "==> s3 cp $($m.Key)"
         Invoke-Native aws s3 cp $m.Local "s3://$bucket/$($m.Key)" --content-type 'application/zip' --only-show-errors
     }
+    # Operator patches next (still before the manifest). Only the ones whose hash
+    # changed are uploaded; the hash rides as user metadata so the next deploy can
+    # skip an unchanged 200MB file. --metadata-directive REPLACE is implicit for a
+    # fresh PUT (cp from a local file), so the metadata is written on every upload.
+    foreach ($p in $patchUploads) {
+        Write-Host "==> s3 cp $($p.Key)  (~$([math]::Round((Get-Item $p.Local).Length / 1MB)) MB)"
+        Invoke-Native aws s3 cp $p.Local "s3://$bucket/$($p.Key)" `
+            --content-type 'application/octet-stream' --metadata "sha512=$($p.Sha)" --only-show-errors
+    }
     Write-Host "==> s3 cp manifest.json"
     Invoke-Native aws s3 cp $manifestPath "s3://$bucket/manifest.json" --content-type 'application/json' --only-show-errors
 
@@ -190,9 +256,14 @@ try {
     #      wildcard is the very glob-mangling hazard called out above, and since
     #      each zip's name embeds its hash a changed mod is a NEW key that was
     #      never cached -- so concrete keys are both safe and sufficient.
+    #      Operator patches invalidate by their EXACT key too, and ONLY the ones
+    #      actually re-uploaded this run -- an unchanged patch we skipped is byte-
+    #      identical at the edge, so invalidating it would needlessly re-pull a
+    #      200MB object.
     $invalidationPaths = @('/manifest.json') +
-        ($artifacts | ForEach-Object { "/$($_.Key)" }) +
-        ($modZips   | ForEach-Object { "/$($_.Key)" })
+        ($artifacts    | ForEach-Object { "/$($_.Key)" }) +
+        ($modZips      | ForEach-Object { "/$($_.Key)" }) +
+        ($patchUploads | ForEach-Object { "/$($_.Key)" })
     Write-Host ""
     Write-Host "==> cloudfront create-invalidation $($invalidationPaths -join ' ')"
     $invId = Invoke-Native aws cloudfront create-invalidation `
@@ -220,5 +291,5 @@ finally {
 }
 
 Write-Host ""
-Write-Host "Published manifest + $($artifacts.Count) artifacts + $($modZips.Count) mod zip(s) to $bucket; CloudFront invalidation has fully propagated."
+Write-Host "Published manifest + $($artifacts.Count) artifacts + $($modZips.Count) mod zip(s) + $($patchUploads.Count) patch upload(s) ($($patchManifest.Count) patch(es) in manifest) to $bucket; CloudFront invalidation has fully propagated."
 Write-Host "Restart login to re-read the manifest: just apply-update   (runs automatically next if you used 'just update')."

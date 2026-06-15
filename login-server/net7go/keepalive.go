@@ -31,7 +31,7 @@ import (
 
 const (
 	keepalivePingInterval = 10 * time.Second
-	keepaliveStaleAfter    = 60 * time.Second
+	keepaliveStaleAfter   = 60 * time.Second
 )
 
 // startKeepalive binds the recv socket and runs the ping/drain loop until ctx

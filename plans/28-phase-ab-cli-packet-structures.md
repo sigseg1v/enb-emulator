@@ -266,8 +266,40 @@ either a decoded compact source field or a paired retail capture frame, and a
 wrong layout fails a test instead of crashing a player's client. Without it we
 are guessing at byte layouts that crash on contact.
 
-- [ ] After §1-§3 land, re-open Phase AA's 0x2013/0x2014 fabrication and
+**Update 2026-06-14 -- the four un-citable fields are now RESOLVED** (behavioural
+analysis of the retail proxy's 0x2013 tractor fabrication path + the retail
+client's 0x04 CREATE / 0x46 position parsers). They are no longer guesses:
+
+1. **Floating-ore "Scale": there is NO scale field in the 0x04 CREATE.** The
+   fabricated CREATE payload is 23 bytes: `u32 objectId`, `u32 id2 (= 0x3f800000,
+   the bits of 1.0f, NOT a scale)`, `u16`, `u8 Type`, `12-byte xyz`. The client
+   reads exactly that and derives object scale from the Type byte / object
+   template client-side -- so do NOT add a scale float to 0x04.
+2. **Wire Type byte = the byte at CREATE payload offset 0x0A; the proxy writes
+   `4` for a floating-ore object.** The client branches on it (special cases
+   0x02/0x08/0x0a/0x18/0x1c; everything else, incl. 4, builds the generic object).
+3. **Tractor-beam discriminator on the fabricated 0x0b = the pair `(u16@0x0A = 2,
+   inline NUL-string name = "TRACTOR")`, with the field-presence bitmask = 7.**
+   The prospect beam is `(u16 = 0xBF, name = "")`, bitmask = 3 -- i.e. it is the
+   `(effect-code, effect-name)` pair, not a lone "EffectDescID". (This matches the
+   already-shipped 0x2012->0x000B prospect beam EffectDescID=0x00BF.)
+4. **0x46 position field order: `u32 objectId`, `u32 timestamp/seq`, `float x`,
+   `float y`, `float z`, then carried ids/orientation** (the proxy zero-fills the
+   orientation/velocity middle and sets a 1.0f slot + globals). The id+timestamp+
+   xyz prefix is solid; the trailing carried fields are not fully semantically
+   pinned and stay zero-filled as the proxy emits them.
+
+These came from analysis, not a captured client-leg fixture, so the §3 LIVE
+harness + a real-client (CV) check are STILL required before the proxy
+fabrication change ships -- a wrong 0x04 still crashes the Win32 client. What
+changed is that the layout is now grounded rather than guessed, so the
+implementation can proceed against the harness instead of being blocked on
+"un-citable fields".
+
+- [~] After §1-§3 land, re-open Phase AA's 0x2013/0x2014 fabrication and
       implement each field against the harness (cross-link from plans/27 §3a).
+      Field layouts resolved 2026-06-14 (above); still gated on the LIVE harness
+      + a CV real-client check before the wire change ships.
 
 ## 5. Drift findings surfaced while reading the three copies
 
@@ -312,13 +344,15 @@ CLI -- the server emitter is authoritative per CLAUDE.md):
       undock/dock->space PROVEN live (0x004E Action=1 -> handoff to 1015,
       commits c8c944e3 + aef3ec3c); LIVE mining round-trip now gated only on
       the CLI following the handoff into space (no longer Phase-K-blocked).
-- [ ] §4 gate: the §3 LIVE harness must precede the remaining Phase-AA
-      fabrication (0x2013/0x2014 tractor/loot, 0x2018/0x2019 spawn) -- those
-      have un-citable fields that could break the Win32 client if guessed
-      wrong, so they stay blocked on a captured/observed field layout + the
-      live harness to confirm it -- NOT on any client crash (the undock path
-      is fixed and works). The spec half alone is NOT sufficient to unblock
-      them (a C# spec cannot validate proxy C++ output against the real client).
+- [~] §4 gate: the four un-citable fields (ore Scale, wire Type byte, tractor
+      EffectDescID, 0x46 order) are now RESOLVED via behavioural analysis
+      (2026-06-14, see §4) -- ore has NO scale field, Type byte = 4, tractor 0x0b
+      = `(u16 2, "TRACTOR")`, 0x46 = `id, ts, x, y, z` prefix. The remaining
+      Phase-AA fabrication (0x2013/0x2014 tractor/loot, 0x2018/0x2019 spawn) is
+      no longer blocked on "un-citable fields"; it is now gated only on the §3
+      LIVE harness + a CV real-client check before the proxy wire change ships
+      (a wrong 0x04 still crashes the Win32 client, and a C# spec cannot validate
+      proxy C++ output against the real client).
 - [x] §5 dual-emitter + stale-comment + uncapped-Duration drift findings
       resolved (commits dbe93970, dae171ea).
 - [x] §6 `pcap-inventory` tool + sector-object metadata parity. Built

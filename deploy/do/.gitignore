@@ -20,3 +20,14 @@ override.tf.json
 *.tgz
 
 backup/
+
+# Operator-supplied client patch payload (enb-patch.exe ~200MB) and the generated
+# local hash record (manifest.json) are per-operator and never commit. The dir is
+# kept via .gitkeep so there is a place to drop the patch. enb-patch-readme.md
+# (what the patch must contain) and patches/reference/ (documentation reference
+# deltas) ARE kept in git as documentation -- they are not a deliverable patch.
+patches/*
+!patches/.gitkeep
+!patches/enb-patch-readme.md
+!patches/reference
+!patches/reference/**

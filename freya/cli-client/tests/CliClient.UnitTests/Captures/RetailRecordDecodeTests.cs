@@ -27,6 +27,10 @@ public sealed class RetailRecordDecodeTests
     private static readonly IReadOnlyDictionary<string, CaptureFixture> Frames =
         CaptureFixture.Load("capture3-records.txt");
 
+    // The static GalaxyMap.dat detail records (Type 5/6/7/8/9 compact forms).
+    private static readonly IReadOnlyDictionary<string, CaptureFixture> DatFrames =
+        CaptureFixture.Load("galaxymap-dat.txt");
+
     public RetailRecordDecodeTests()
     {
         // Decode to plain text so the content assertions see no ANSI codes.
@@ -36,6 +40,12 @@ public sealed class RetailRecordDecodeTests
     private static string Dump(string name)
     {
         var f = Frames[name];
+        return PacketRecord.Resolve((ushort)f.Opcode, f.Payload).DumpToString();
+    }
+
+    private static string DatDump(string name)
+    {
+        var f = DatFrames[name];
         return PacketRecord.Resolve((ushort)f.Opcode, f.Payload).DumpToString();
     }
 
@@ -491,32 +501,172 @@ public sealed class RetailRecordDecodeTests
     }
 
     // 0x97 is multiplexed on a leading Type. Our server only emits Type 4, but
-    // retail uses 3/5/6/7/8/9 for nav/map detail -- the record must dispatch and
-    // surface the embedded (verifiable) name instead of mis-reading the Type-4
-    // string layout over them.
+    // the static GalaxyMap.dat detail records (and the live wire) use 5/6/7/8/9.
+    // The record must dispatch to the right per-type layout, not mis-read the
+    // Type-4 string layout over them. Field lines are "<name padded> = <value>";
+    // these assertions pin the name+value pair without depending on the exact
+    // pad width.
 
+    // Type 5 (star system) on the LIVE wire: the capture frame carries the full
+    // spec'd layout PLUS extra trailing bytes the .dat compact form omits, so it
+    // also pins that the ExtendedTail catches them. Aragoth's faction colour
+    // (0, 0.3, 1.0 == blue) is the offset canary -- a shifted Name would garble
+    // these three floats.
     [Fact]
-    public void GalaxyMap_Type5_DecodesStarSystemName()
+    public void GalaxyMap_Type5_LiveAragoth_DecodesSystemFieldsAndColour()
     {
         string d = Dump("galaxymap_system_aragoth");
 
         Assert.Contains("Type", d);
-        Assert.Contains("nav/map-detail subtype", d);
+        Assert.Contains("(star system)", d);
+        Assert.Contains("Id", d);
+        Assert.Contains("Name", d);
         Assert.Contains("\"Aragoth\"", d);
+        Assert.Contains("ColorR", d);
+        Assert.Contains("ColorG", d);
+        Assert.Contains("= 0.3", d);                 // ColorG
+        Assert.Contains("ColorB", d);
+        Assert.Contains("(faction colour)", d);
+        Assert.Contains("PosY", d);
+        Assert.Contains("= -6", d);                  // Aragoth PosY
+        Assert.Contains("Kind", d);
+        // The live frame's surplus trailing bytes are captured, not dropped.
+        Assert.Contains("ExtendedTail", d);
         // Must NOT pretend the Type-4 layout applies.
         Assert.DoesNotContain("map update", d);
         Assert.DoesNotContain("PlayerID", d);
         Assert.DoesNotContain("expected 375", d);
+        Assert.DoesNotContain("???", d);
     }
 
+    // Type 9 (gate/link) on the LIVE wire: the compact LinkId/From/To/Name head
+    // plus a trailing float block captured as ExtendedTail.
     [Fact]
-    public void GalaxyMap_Type9_DecodesSectorName()
+    public void GalaxyMap_Type9_LiveEarth_DecodesLinkFieldsAndExtendedTail()
     {
         string d = Dump("galaxymap_sector_earth");
 
-        Assert.Contains("nav/map-detail subtype", d);
+        Assert.Contains("(gate/link)", d);
+        Assert.Contains("LinkId", d);
+        Assert.Contains("FromSector", d);
+        Assert.Contains("= 1060", d);                // FromSector
+        Assert.Contains("ToSector", d);
+        Assert.Contains("= 1015", d);                // ToSector
+        Assert.Contains("Name", d);
         Assert.Contains("\"Earth\"", d);
+        // 38 trailing bytes on the live wire -> ExtendedTail, no undecoded gap.
+        Assert.Contains("ExtendedTail", d);
+        Assert.Contains("live-wire bytes", d);
         Assert.DoesNotContain("PlayerID", d);
+        Assert.DoesNotContain("???", d);
+    }
+
+    // The compact static forms from server/data/GalaxyMap.dat -- every field
+    // byte-pinned. These are the authoritative source the layouts were derived
+    // from, so they are the regression lock for the decoder.
+
+    [Fact]
+    public void GalaxyMapDat_Type5_61Cygni_DecodesEveryField()
+    {
+        string d = DatDump("galaxymap_dat_system_61cygni");
+
+        Assert.Contains("(star system)", d);
+        Assert.Contains("Name", d);
+        Assert.Contains("\"61 Cygni\"", d);
+        Assert.Contains("ColorR", d);
+        Assert.Contains("ColorG", d);
+        Assert.Contains("ColorB", d);
+        Assert.Contains("PosX", d);
+        Assert.Contains("= 6.4", d);                 // PosX
+        Assert.Contains("PosY", d);
+        Assert.Contains("= -6.1", d);                // PosY
+        Assert.Contains("One", d);
+        Assert.Contains("Kind", d);
+        // Compact .dat form ends right after Kind -- no ExtendedTail, no gap.
+        Assert.DoesNotContain("ExtendedTail", d);
+        Assert.DoesNotContain("???", d);
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void GalaxyMapDat_Type6_Mercury_DecodesSectorFields()
+    {
+        string d = DatDump("galaxymap_dat_sector_mercury");
+
+        Assert.Contains("(sector)", d);
+        Assert.Contains("NodeId", d);
+        Assert.Contains("= 53", d);                  // NodeId
+        Assert.Contains("ParentSystemId", d);
+        Assert.Contains("= 1005", d);                // ParentSystemId
+        Assert.Contains("Kind", d);
+        Assert.Contains("= 11", d);                  // Type 6 Kind
+        Assert.Contains("Name", d);
+        Assert.Contains("\"Mercury\"", d);
+        Assert.Contains("TypeEcho", d);
+        Assert.Contains("(== Type 6)", d);
+        Assert.Contains("PosX", d);
+        Assert.Contains("(map position)", d);
+        Assert.DoesNotContain("???", d);
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    // Type 7's Kind is 17 (NOT the 11 a sector carries) -- proves Kind is a real
+    // decoded value, not pinned to a constant.
+    [Fact]
+    public void GalaxyMapDat_Type7_Norstrand_DecodesPlanetSectorWithKind17()
+    {
+        string d = DatDump("galaxymap_dat_planet_norstrand");
+
+        Assert.Contains("(planet-sector)", d);
+        Assert.Contains("NodeId", d);
+        Assert.Contains("= 156", d);                 // NodeId
+        Assert.Contains("Kind", d);
+        Assert.Contains("= 17", d);                  // Type 7 Kind
+        Assert.Contains("Name", d);
+        Assert.Contains("\"Norstrand Vor Planet\"", d);
+        Assert.Contains("(== Type 7)", d);
+        Assert.DoesNotContain("???", d);
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    // Type 8's Kind is 19. Same layout, different glyph + Kind.
+    [Fact]
+    public void GalaxyMapDat_Type8_Ishuan_DecodesGasGiantWithKind19()
+    {
+        string d = DatDump("galaxymap_dat_gasgiant_ishuan");
+
+        Assert.Contains("(gas-giant-sector)", d);
+        Assert.Contains("NodeId", d);
+        Assert.Contains("= 242", d);                 // NodeId
+        Assert.Contains("Kind", d);
+        Assert.Contains("= 19", d);                  // Type 8 Kind
+        Assert.Contains("Name", d);
+        Assert.Contains("\"Ishuan Gas Giant\"", d);
+        Assert.Contains("(== Type 8)", d);
+        Assert.DoesNotContain("???", d);
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    // Type 9 COMPACT form (.dat): ends right after Name, so no ExtendedTail --
+    // the complement to the live-wire Earth frame above.
+    [Fact]
+    public void GalaxyMapDat_Type9_Mercury_DecodesCompactGateNoTail()
+    {
+        string d = DatDump("galaxymap_dat_gate_mercury");
+
+        Assert.Contains("(gate/link)", d);
+        Assert.Contains("LinkId", d);
+        Assert.Contains("= 54", d);                  // LinkId
+        Assert.Contains("FromSector", d);
+        Assert.Contains("= 1005", d);                // FromSector
+        Assert.Contains("ToSector", d);
+        Assert.Contains("= 1010", d);                // ToSector
+        Assert.Contains("Name", d);
+        Assert.Contains("\"Mercury\"", d);
+        // Compact form: no trailing bytes, no ExtendedTail, no undecoded gap.
+        Assert.DoesNotContain("ExtendedTail", d);
+        Assert.DoesNotContain("???", d);
+        Assert.DoesNotContain("[!]", d);
     }
 
     // ── MessageString 0x1D ───────────────────────────────────────────────────
@@ -2941,15 +3091,14 @@ public sealed class RetailRecordDecodeTests
     }
 
     [Fact]
-    public void CtaResponse_EchoesSourceId_AndPinsRetailRequestType()
+    public void CtaResponse_EchoesSourceId_AndDecodesGroupActionSelector()
     {
         string d = Dump("cta_response_requesttype0f");
 
         Assert.Contains("[0000] SourceID", d);
         Assert.Contains("0x00167C88", d);                          // echoes the request SourceID 1473672
         Assert.Contains("[0004] RequestType", d);
-        Assert.Contains("= 15", d);                                // retail 0x0F (NOT the request Action 5)
-        Assert.Contains("our emitter writes the request Action here instead", d);
+        Assert.Contains("echoed GroupAction selector", d);
         Assert.Contains("[0008] Success", d);
         Assert.Contains("= 1", d);
         Assert.DoesNotContain("???", d);                           // all 9 bytes decoded
@@ -2959,10 +3108,7 @@ public sealed class RetailRecordDecodeTests
     public void Cta_RequestAndResponse_SameSourceId_OnlyLittleEndian()
     {
         // The request/response pairing proof: both frames carry the same SourceID at
-        // offset 0, and only the little-endian read makes it a sane id. The retail
-        // response's RequestType field (0x0F in THIS frame; varies 0x0E/0x0F across
-        // frames -- see Phase Z Z-1) is NOT the request's Action (5), documenting the
-        // server emitter divergence with primary-source bytes.
+        // offset 0, and only the little-endian read makes it a sane id.
         var req = Frames["cta_request_groupaction5"];
         var resp = Frames["cta_response_requesttype0f"];
 
@@ -2970,12 +3116,115 @@ public sealed class RetailRecordDecodeTests
         int respSrcLe = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(resp.Payload.AsSpan(0, 4));
         Assert.Equal(reqSrcLe, respSrcLe);
         Assert.Equal(1473672, reqSrcLe);
+    }
 
-        int reqAction = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(req.Payload.AsSpan(8, 4));
-        int respField4 = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(resp.Payload.AsSpan(4, 4));
-        Assert.Equal(5, reqAction);
-        Assert.Equal(0x0F, respField4);                            // retail value in THIS frame (varies 0x0E/0x0F), != request Action
-        Assert.NotEqual(reqAction, respField4);
+    // ── Group/formation lifecycle: 0xBC request, 0xBD response, 0x2C action ───
+    // Capture-confirmed payload bytes (cleartext proxy<->server leg). The server
+    // echoes the request's GroupAction selector in the 0xBD response field@4 with
+    // Success=1, and the retail client accepts and runs it -- so echoing the
+    // request Action there is CORRECT, not a divergence.
+
+    [Fact]
+    public void Cta_Request_RequestTarget_Action12_TargetMinusOne()
+    {
+        // 0x00BC payload (12 bytes): SourceID, TargetID=-1, Action=12 (Request Target).
+        byte[] p = { 0x30, 0x99, 0x03, 0x40, 0xFF, 0xFF, 0xFF, 0xFF, 0x0C, 0x00, 0x00, 0x00 };
+        var rec = new CtaRequestRecord(p);
+        string d = rec.DumpToString();
+
+        Assert.Equal(unchecked((int)0x40039930),
+            System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(p.AsSpan(0, 4)));
+        Assert.Equal(-1, System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(p.AsSpan(4, 4)));
+        Assert.Equal(12, System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(p.AsSpan(8, 4)));
+
+        Assert.Contains("[0000] SourceID", d);
+        Assert.Contains("0x40039930", d);
+        Assert.Contains("[0004] TargetID", d);
+        Assert.Contains("0xFFFFFFFF", d);
+        Assert.Contains("[0008] Action", d);
+        Assert.Contains("= 12", d);
+        Assert.DoesNotContain("???", d);
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void Cta_Response_EchoesRequestAction6_Pipe_Success1()
+    {
+        // 0x00BD reply (9 bytes): SourceID, RequestType=6 (Pipe, echoed), Success=1.
+        byte[] p = { 0x30, 0x99, 0x03, 0x40, 0x06, 0x00, 0x00, 0x00, 0x01 };
+        var rec = new CtaResponseRecord(p);
+        string d = rec.DumpToString();
+
+        Assert.Equal(unchecked((int)0x40039930),
+            System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(p.AsSpan(0, 4)));
+        Assert.Equal(6, System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(p.AsSpan(4, 4)));
+        Assert.Equal(1, p[8]);
+
+        Assert.Contains("[0000] SourceID", d);
+        Assert.Contains("0x40039930", d);
+        Assert.Contains("[0004] RequestType", d);
+        Assert.Contains("= 6", d);
+        Assert.Contains("Pipe", d);                                 // 6 = Pipe selector
+        Assert.Contains("echoed GroupAction selector", d);
+        Assert.Contains("[0008] Success", d);
+        Assert.Contains("= 1", d);
+        Assert.DoesNotContain("???", d);
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void Action_Group_Accept_Action11()
+    {
+        // 0x002C (16 bytes): GameID, Action=11 (accept), Target=GameID, OptionalVar=0.
+        byte[] p = { 0x2A, 0x99, 0x03, 0x40, 0x0B, 0x00, 0x00, 0x00,
+                     0x2A, 0x99, 0x03, 0x40, 0x00, 0x00, 0x00, 0x00 };
+        var rec = new ActionRecord(p);
+        string d = rec.DumpToString();
+
+        Assert.Equal(unchecked((int)0x4003992A),
+            System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(p.AsSpan(0, 4)));
+        Assert.Equal(11, System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(p.AsSpan(4, 4)));
+        Assert.Equal(unchecked((int)0x4003992A),
+            System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(p.AsSpan(8, 4)));
+        Assert.Equal(0, System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(p.AsSpan(12, 4)));
+
+        Assert.Contains("[0000] GameID", d);
+        Assert.Contains("0x4003992A", d);
+        Assert.Contains("[0004] Action", d);
+        Assert.Contains("= 11", d);
+        Assert.Contains("accept", d);                              // 11 = accept
+        Assert.Contains("[0008] Target", d);
+        Assert.Contains("[000C] OptionalVar", d);
+        Assert.Contains("= 0", d);
+        Assert.DoesNotContain("???", d);
+        Assert.DoesNotContain("[!]", d);
+    }
+
+    [Fact]
+    public void Action_Group_Disband_Action13()
+    {
+        // 0x002C (16 bytes): GameID, Action=13 (disband), Target=GameID, OptionalVar=0.
+        byte[] p = { 0x30, 0x99, 0x03, 0x40, 0x0D, 0x00, 0x00, 0x00,
+                     0x30, 0x99, 0x03, 0x40, 0x00, 0x00, 0x00, 0x00 };
+        var rec = new ActionRecord(p);
+        string d = rec.DumpToString();
+
+        Assert.Equal(unchecked((int)0x40039930),
+            System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(p.AsSpan(0, 4)));
+        Assert.Equal(13, System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(p.AsSpan(4, 4)));
+        Assert.Equal(unchecked((int)0x40039930),
+            System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(p.AsSpan(8, 4)));
+        Assert.Equal(0, System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(p.AsSpan(12, 4)));
+
+        Assert.Contains("[0000] GameID", d);
+        Assert.Contains("0x40039930", d);
+        Assert.Contains("[0004] Action", d);
+        Assert.Contains("= 13", d);
+        Assert.Contains("disband", d);                            // 13 = disband
+        Assert.Contains("[0008] Target", d);
+        Assert.Contains("[000C] OptionalVar", d);
+        Assert.DoesNotContain("???", d);
+        Assert.DoesNotContain("[!]", d);
     }
 
     // ── Manufacture terminal-mode 0x79 ───────────────────────────────────────

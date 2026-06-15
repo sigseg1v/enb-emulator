@@ -93,14 +93,17 @@ C++ source directly). The Go server must reproduce:
 - `/certificate.html` -> "<domain> certificate successfully installed!".
 - `/updateCheck` (POST JSON launcher/proxy SHA512) -> patcher-manifest compare
   -> `{"status":"UP_TO_DATE"}` or `UPDATE_NEEDED` with files; 503 if manifest
-  not loaded. Env: `NET7_PATCHER_MANIFEST_URL`, `NET7_PATCHER_DL_BASE`.
+  not loaded. Env: `FREYA_PATCHER_MANIFEST_URL`, `FREYA_PATCHER_DL_BASE`.
+  NOTE (later): `/updateCheck` is original Freya work (never in retail Net7SSL),
+  so it was moved OUT of net7go into freya-online (`freya/online/server/
+  updatecheck.go`, MIT); freya-online serves it directly and does not relay it.
 - `/who.cgi` -> 404 (deliberate no-op). Unknown -> 404.
 - **AF_UNIX SOCK_DGRAM keepalive**: recv `/run/net7-ipc/net7SSL.sock`, send
   `/run/net7-ipc/net7.sock`; send `"Ping"` ~10s, expect `"pong"`, exit if
   silent ~60s. (Server side already speaks this.)
 - Env contract: `DB_HOST` (def postgres:5432), `DB_USER` (net7), `DB_PASS`
   (net7), `DB_NAME` (net7_user), `DOMAIN` (localhost -> `<domain>.cer/.pem`),
-  `NET7SSL_BIND_ADDR`.
+  `FREYA_BIND_ADDR`.
 - UDP 0x4000-0x4004 player-count opcodes are between server<->login; the C++
   login used them to learn max/current player count. The Go server can either
   speak them or read `server_status.players_online` directly (simpler, and the
@@ -137,7 +140,7 @@ C++ source directly). The Go server must reproduce:
 - [x] `freya/online/` Go module, MIT header (`server/`, go.mod go 1.25.0,
       scs/v2 + pgx/v5 + x/crypto). Two pgxpool pools (net7_user + net7 content).
 - [x] TLS :443 GET HTTP dispatch (main.go startServers; cert/key from
-      NET7SSL_CERT_DIR/<domain>.cer|.pem). Runtime-verified: TLS + HTTP listen.
+      FREYA_CERT_DIR/<domain>.cer|.pem). Runtime-verified: TLS + HTTP listen.
 - [x] /AuthLogin (Argon2id verify, ticket UPSERT) -- byte-exact response.
       RUNTIME-VERIFIED 2026-06-09: bad creds -> 13-byte `Valid=False\r\n`
       (Server: AuthServer/2.5); good creds (freyatest) -> 63-byte

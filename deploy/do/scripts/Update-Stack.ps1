@@ -85,10 +85,10 @@ try {
     $guildId    = Get-EnvOr 'DISCORD_GUILD_ID' ''
     $channelId  = Get-EnvOr 'STATUS_CHANNEL_ID' ''
 
-    # Phase AN: the login server's /updateCheck reads the launcher manifest from
-    # CloudFront. Derive the two NET7_PATCHER_* env vars from the patcher fields;
-    # leave them blank when the patcher is not configured (login then reports the
-    # server DOWN to the launcher, fail-closed -- harmless until the infra is up).
+    # Phase AN/AQ: freya-online's /updateCheck reads the launcher manifest from
+    # CloudFront. Derive the two FREYA_PATCHER_* env vars from the patcher fields;
+    # leave them blank when the patcher is not configured (freya-online then reports
+    # the server DOWN to the launcher, fail-closed -- harmless until the infra is up).
     $patcherBucket = Get-EnvOr 'ENB_PATCHER_PRIVATE_S3_BUCKET' ''
     $patcherManifestUrl = ''
     $patcherDlBase      = ''
@@ -124,8 +124,8 @@ try {
         "DISCORD_BOT_TOKEN=$botToken"
         "DISCORD_GUILD_ID=$guildId"
         "STATUS_CHANNEL_ID=$channelId"
-        "NET7_PATCHER_MANIFEST_URL=$patcherManifestUrl"
-        "NET7_PATCHER_DL_BASE=$patcherDlBase"
+        "FREYA_PATCHER_MANIFEST_URL=$patcherManifestUrl"
+        "FREYA_PATCHER_DL_BASE=$patcherDlBase"
         "BACKUP_S3_BUCKET=$backupBucket"
         "BACKUP_AWS_ACCESS_KEY_ID=$backupAwsKey"
         "BACKUP_AWS_SECRET_ACCESS_KEY=$backupAwsSecret"

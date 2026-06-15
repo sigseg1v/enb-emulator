@@ -88,34 +88,3 @@ func TestVerifyPassword(t *testing.T) {
 		t.Fatal("malformed PHC should error")
 	}
 }
-
-// hashEq is case-insensitive and rejects empty/length-mismatched hashes.
-func TestHashEq(t *testing.T) {
-	if !hashEq("ABCdef", "abcDEF") {
-		t.Fatal("case-insensitive equal hashes should match")
-	}
-	if hashEq("", "abc") || hashEq("abc", "") {
-		t.Fatal("empty hash must never match")
-	}
-	if hashEq("abc", "abcd") {
-		t.Fatal("length-mismatched hashes must not match")
-	}
-}
-
-// jsonField pulls a string field out of the launcher's fixed POST body and
-// never errors on malformed input (returns "").
-func TestJsonField(t *testing.T) {
-	body := `{"launcherHash":"aa11","proxyHash":"bb22","enbmodHash":"cc33"}`
-	if v := jsonField(body, "launcherHash"); v != "aa11" {
-		t.Fatalf("launcherHash: got %q", v)
-	}
-	if v := jsonField(body, "enbmodHash"); v != "cc33" {
-		t.Fatalf("enbmodHash: got %q", v)
-	}
-	if v := jsonField(body, "missing"); v != "" {
-		t.Fatalf("missing field should be empty, got %q", v)
-	}
-	if v := jsonField("not json", "launcherHash"); v != "" {
-		t.Fatalf("malformed body should yield empty, got %q", v)
-	}
-}

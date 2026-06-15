@@ -240,8 +240,14 @@ func (s *Store) PostListing(ctx context.Context, accountID int64, itemID, slot, 
 			return errBadInput
 		}
 
-		// item_value = vendor value for the listed quantity.
+		// item_value = vendor value for the listed quantity. AR-2: guard the
+		// multiply -- an absurd catalogue price * stack could overflow int64 and
+		// wrap negative, corrupting the deposit/credit math. Reject rather than
+		// wrap. (stack is already bounded by storedStack, so this is defensive.)
 		itemValue := vendor * int64(stack)
+		if vendor != 0 && itemValue/vendor != int64(stack) {
+			return errBadInput
+		}
 		deposit := int64(math.Ceil(float64(itemValue) * 0.10))
 
 		// Validate the seller-chosen buyout against the recomputed floor.

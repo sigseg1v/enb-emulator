@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -36,6 +38,15 @@ namespace LaunchFreya.Update
         // The persistent mod store + per-mod version marker. See MOD-STRUCTURE.md.
         public const string ModsDirName = "mods";
         public const string ModHashFileName = "modhash";
+        // Game-data patches: applied against the EnB install root, tracked there
+        // in patchlevel.txt (one applied-patch hash per line).
+        public const string PatchLevelFileName = "patchlevel.txt";
+        // The one patch with the auth.ini special case (see ReconcilePatchesAsync).
+        public const string EnbPatchName = "enb-patch.exe";
+        // Relative to the EnB install root: existence means enb-patch.exe has
+        // already been applied (it is the file that patch creates).
+        public static readonly string AuthIniRelativePath =
+            Path.Combine("Data", "client", "ini", "auth.ini");
 
         readonly HttpClient _http;
         readonly string _baseDir;
@@ -310,6 +321,288 @@ namespace LaunchFreya.Update
 
             if (updated > 0) _log($"mods: updated {updated} mod(s).");
             return updated;
+        }
+
+        // Reconcile the operator-supplied game-data patches against the EnB
+        // install. Unlike files/mods, a patch is an EXECUTABLE run against the
+        // game folder (enbInstallDir, the EnB install root -- NOT the launcher
+        // dir), and the launcher owns the apply-tracking: a patchlevel.txt at
+        // that root lists every applied patch hash, one per line, and a patch
+        // whose hash is already listed is skipped.
+        //
+        // The contract the launcher honours (see deploy/do/README.md):
+        //   - run `<name> "<enbInstallDir>"` to apply (the patch detects e&b.exe
+        //     inside the folder itself);
+        //   - on success, append the hash to patchlevel.txt;
+        //   - SPECIAL CASE for enb-patch.exe ONLY: if Data/client/ini/auth.ini
+        //     already exists, the patch is considered already applied (that file
+        //     is what it produces) -- record the hash WITHOUT re-running the
+        //     ~200MB executable. No other patch has this behaviour.
+        //
+        // Best-effort and per-patch isolated, like mods: one patch's failure is
+        // logged and skipped, never aborts the others, and never throws (a patch
+        // problem must not block the binary update path). Returns the number of
+        // patches newly applied or recorded.
+        public async Task<int> ReconcilePatchesAsync(UpdateCheckResponse resp, string enbInstallDir,
+            Action<string> progress = null, CancellationToken ct = default)
+        {
+            progress ??= _log;
+            if (resp?.Patches == null || resp.Patches.Count == 0) return 0;
+            if (string.IsNullOrWhiteSpace(enbInstallDir) || !Directory.Exists(enbInstallDir))
+            {
+                _log($"patches: EnB install dir '{enbInstallDir}' not found; skipping patch reconcile.");
+                return 0;
+            }
+
+            string patchLevelPath = Path.Combine(enbInstallDir, PatchLevelFileName);
+            string staging = Path.Combine(_baseDir, StagingDirName);
+            int applied = 0;
+
+            foreach (var patch in resp.Patches)
+            {
+                if (patch == null) continue;
+                if (!UpdateLogic.IsSafePatchName(patch.Name))
+                {
+                    _log($"patches: skipping unsafe patch name '{patch.Name}'");
+                    continue;
+                }
+                if (string.IsNullOrEmpty(patch.Hash) || string.IsNullOrEmpty(patch.Url))
+                {
+                    _log($"patches: '{patch.Name}' has no hash/url; skipping");
+                    continue;
+                }
+
+                // Re-read patchlevel.txt each iteration so a hash recorded this
+                // pass is seen by the next patch.
+                var alreadyApplied = UpdateLogic.ParsePatchLevel(ReadTextOrEmpty(patchLevelPath));
+                if (UpdateLogic.IsPatchApplied(alreadyApplied, patch.Hash))
+                    continue;   // already applied
+
+                bool isEnbPatch = string.Equals(patch.Name, EnbPatchName, StringComparison.OrdinalIgnoreCase);
+
+                // enb-patch.exe special case: a pre-existing auth.ini means the
+                // patch was applied before patchlevel.txt tracked it -> record the
+                // hash and do NOT re-download/re-run the big executable.
+                if (isEnbPatch && File.Exists(Path.Combine(enbInstallDir, AuthIniRelativePath)))
+                {
+                    if (RecordPatchHash(patchLevelPath, patch.Hash))
+                    {
+                        applied++;
+                        progress($"Patch {patch.Name} already applied (auth.ini present); recorded {patch.Hash}.");
+                    }
+                    continue;
+                }
+
+                string staged = Path.Combine(staging, patch.Name);
+                try
+                {
+                    Directory.CreateDirectory(staging);
+                    progress($"Downloading patch {patch.Name}...");
+                    await DownloadFileAsync(patch.Url, staged, ct).ConfigureAwait(false);
+
+                    // Verify the download before executing it -- never run an
+                    // executable whose bytes the manifest does not vouch for.
+                    string actual = UpdateLogic.ComputeSha512(staged);
+                    if (!UpdateLogic.HashesEqual(actual, patch.Hash))
+                    {
+                        _log($"patches: hash mismatch for {patch.Name} " +
+                             $"(expected {ShortHash(patch.Hash)}, got {ShortHash(actual)}); not running it.");
+                        continue;
+                    }
+
+                    progress($"Applying patch {patch.Name} (this can take a while)...");
+                    int exit = await RunPatchExecutableAsync(staged, enbInstallDir, ct).ConfigureAwait(false);
+                    if (exit != 0)
+                    {
+                        _log($"patches: '{patch.Name}' exited {exit}; not recording it.");
+                        continue;
+                    }
+
+                    // enb-patch.exe must have produced auth.ini; absence means the
+                    // apply did not really succeed even on a 0 exit.
+                    if (isEnbPatch && !File.Exists(Path.Combine(enbInstallDir, AuthIniRelativePath)))
+                    {
+                        _log($"patches: '{patch.Name}' exited 0 but {AuthIniRelativePath} is missing; not recording it.");
+                        continue;
+                    }
+
+                    if (RecordPatchHash(patchLevelPath, patch.Hash))
+                    {
+                        applied++;
+                        progress($"Applied patch {patch.Name} ({patch.Hash}).");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _log($"patches: failed to apply '{patch.Name}': {ex.Message}");
+                }
+                finally
+                {
+                    try { if (File.Exists(staged)) File.Delete(staged); } catch { /* best-effort */ }
+                }
+            }
+
+            if (applied > 0) _log($"patches: applied/recorded {applied} patch(es).");
+            return applied;
+        }
+
+        // Outcome of a local (play-local / dev) patch reconcile. Online builds get
+        // the patch from the server via ReconcilePatchesAsync; local builds have no
+        // /updateCheck, so they apply the operator's on-disk enb-patch.exe instead.
+        public enum LocalPatchResult
+        {
+            AlreadyPatched, // auth.ini present -> nothing to do
+            Applied,        // ran the local enb-patch.exe and it succeeded
+            MissingPatch,   // not patched AND no enb-patch.exe on disk to apply
+            Failed,         // tried to apply the local patch but it did not succeed
+        }
+
+        // Ensure a local (play-local) EnB install is patched to retail without the
+        // online /updateCheck path. The "patched" signal is auth.ini -- the file
+        // enb-patch.exe creates (same marker ReconcilePatchesAsync uses). If the
+        // install is unpatched and `localPatchExePath` points at an on-disk
+        // enb-patch.exe, run it against the install and record its hash in
+        // patchlevel.txt so the online path never re-runs it. If the install is
+        // unpatched and no local exe exists, returns MissingPatch so the caller can
+        // tell the user to obtain it. Never throws.
+        public async Task<LocalPatchResult> ReconcileLocalPatchAsync(string enbInstallDir,
+            string localPatchExePath, Action<string> progress = null, CancellationToken ct = default)
+        {
+            progress ??= _log;
+
+            if (string.IsNullOrWhiteSpace(enbInstallDir) || !Directory.Exists(enbInstallDir))
+            {
+                _log($"local patch: EnB install dir '{enbInstallDir}' not found.");
+                return LocalPatchResult.Failed;
+            }
+
+            // Already patched? auth.ini is what enb-patch.exe creates.
+            string authIni = Path.Combine(enbInstallDir, AuthIniRelativePath);
+            if (File.Exists(authIni))
+                return LocalPatchResult.AlreadyPatched;
+
+            // Not patched -- do we have the patch executable on disk to apply?
+            if (string.IsNullOrEmpty(localPatchExePath) || !File.Exists(localPatchExePath))
+                return LocalPatchResult.MissingPatch;
+
+            try
+            {
+                progress($"Patching EnB install to retail with {Path.GetFileName(localPatchExePath)} " +
+                         "(this can take a while)...");
+                int exit = await RunPatchExecutableAsync(localPatchExePath, enbInstallDir, ct).ConfigureAwait(false);
+                if (exit != 0)
+                {
+                    _log($"local patch: '{Path.GetFileName(localPatchExePath)}' exited {exit}.");
+                    return LocalPatchResult.Failed;
+                }
+                if (!File.Exists(authIni))
+                {
+                    _log($"local patch: exited 0 but {AuthIniRelativePath} is missing; not recording it.");
+                    return LocalPatchResult.Failed;
+                }
+
+                // Record the applied hash so the online path won't re-run it later.
+                string patchLevelPath = Path.Combine(enbInstallDir, PatchLevelFileName);
+                RecordPatchHash(patchLevelPath, UpdateLogic.ComputeSha512(localPatchExePath));
+                progress("EnB install patched to retail.");
+                return LocalPatchResult.Applied;
+            }
+            catch (Exception ex)
+            {
+                _log($"local patch: failed: {ex.Message}");
+                return LocalPatchResult.Failed;
+            }
+        }
+
+        static string ReadTextOrEmpty(string path)
+        {
+            try { return File.Exists(path) ? File.ReadAllText(path) : ""; }
+            catch { return ""; }
+        }
+
+        // Append `hash` to patchlevel.txt (idempotent). Returns true if it was
+        // actually added (false if it was already present or on an IO error).
+        bool RecordPatchHash(string patchLevelPath, string hash)
+        {
+            try
+            {
+                string before = ReadTextOrEmpty(patchLevelPath);
+                if (UpdateLogic.IsPatchApplied(UpdateLogic.ParsePatchLevel(before), hash))
+                    return false;
+                File.WriteAllText(patchLevelPath, UpdateLogic.AppendPatchHash(before, hash));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _log($"patches: could not update {Path.GetFileName(patchLevelPath)}: {ex.Message}");
+                return false;
+            }
+        }
+
+        // Run a Win32 patch executable as `<exe> "<enbInstallDir>"`. On Windows it
+        // is launched directly; on Linux it runs through WINE (the patch is a
+        // Win32 binary), with both the exe and the folder argument converted to
+        // DOS paths so the Win32 program resolves them. Returns the process exit
+        // code; -1 if it could not be started.
+        async Task<int> RunPatchExecutableAsync(string exePath, string enbInstallDir, CancellationToken ct)
+        {
+            ProcessStartInfo psi;
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                psi = new ProcessStartInfo
+                {
+                    FileName        = exePath,
+                    UseShellExecute = false,
+                    CreateNoWindow  = true,
+                };
+                psi.ArgumentList.Add(enbInstallDir);
+            }
+            else
+            {
+                string exeDos = WinePathToDos(exePath) ?? exePath;
+                string dirDos = WinePathToDos(enbInstallDir) ?? enbInstallDir;
+                psi = new ProcessStartInfo
+                {
+                    FileName        = "wine",
+                    UseShellExecute = false,
+                    CreateNoWindow  = true,
+                };
+                psi.ArgumentList.Add(exeDos);
+                psi.ArgumentList.Add(dirDos);
+            }
+
+            using var p = Process.Start(psi);
+            if (p == null) return -1;
+            await p.WaitForExitAsync(ct).ConfigureAwait(false);
+            return p.ExitCode;
+        }
+
+        // `winepath -w <unix>` -> the DOS path WINE opens the file under. On
+        // native Windows there is no WINE and the path is already a DOS path.
+        // (Mirrors Launcher.WinePathToDos; the updater cannot reach that private.)
+        static string WinePathToDos(string unixPath)
+        {
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return unixPath;
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName               = "wine",
+                    UseShellExecute        = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError  = true,
+                    CreateNoWindow         = true,
+                };
+                psi.ArgumentList.Add("winepath");
+                psi.ArgumentList.Add("-w");
+                psi.ArgumentList.Add(unixPath);
+                using var p = Process.Start(psi);
+                if (p == null) return null;
+                string outp = p.StandardOutput.ReadToEnd().Trim();
+                if (!p.WaitForExit(10000)) { try { p.Kill(); } catch { } return null; }
+                return p.ExitCode == 0 && outp.Length > 0 ? outp : null;
+            }
+            catch { return null; }
         }
 
         async Task DownloadFileAsync(string url, string destPath, CancellationToken ct)

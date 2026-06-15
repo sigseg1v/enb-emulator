@@ -8121,3 +8121,174 @@ server+proxy images and the MinGW FreyaProxy.exe build clean; 46/46 server
 gtests; 814/814 CLI unit tests. NOT yet deployed -- containers still run
 the old binaries until the next play-local/rebuild; the online box needs
 the same redeploy.
+
+## /updateCheck -> freya-online, delete dead Net7SSL, play-local patching (2026-06-14)
+
+Three related cleanups around the launcher patcher pipeline:
+
+- **Moved `/updateCheck` out of net7go into freya-online.** It was entirely
+  our Phase-AN addition -- never in the retail Net7SSL -- so it does not
+  belong in the CC-BY-NC-SA net7go port. Moved the endpoint + manifest cache
+  to `freya/online/server/updatecheck.go` (MIT) with its own tests; net7go
+  keeps only the genuine Net7SSL-derived legacy endpoints. freya-online now
+  serves `/updateCheck` directly (intercepts before the legacy relay) and does
+  NOT relay it. Renamed the patcher env `NET7_PATCHER_*` -> `FREYA_PATCHER_*`
+  (and, while there, the freya-online-owned `NET7SSL_BIND_ADDR`/
+  `NET7SSL_CERT_DIR` -> `FREYA_BIND_ADDR`/`FREYA_CERT_DIR`, since they are
+  Freya-authored identifiers and the naming rule forbids the Net7 brand in
+  freya/*). Updated both compose files, Update-Stack.ps1, outputs.tf, READMEs.
+
+- **Deleted the dead C++ Net7SSL.** The AQ-7 cutover (2026-06-10) already
+  removed net7ssl from every deploy path; nothing builds or runs it
+  (`login-server/Dockerfile` only built net7ssl and was orphaned too).
+  `git rm`'d `login-server/Net7SSL/` + `login-server/Dockerfile`. Net7Mysql
+  (a Windows MFC admin GUI, not in the runtime auth flow) was left as-is --
+  the owner's instruction was specifically net7ssl.
+
+- **play-local now patches the client to retail.** `just play-local` has no
+  `/updateCheck`, so the launcher (Debug / `!CHECK_FOR_UPDATES` build) now
+  applies the operator's on-disk `deploy/do/patches/enb-patch.exe` before
+  launch: `Updater.ReconcileLocalPatchAsync` detects "patched" via auth.ini,
+  applies the local exe (through WINE on Linux) + records patchlevel.txt if
+  unpatched, or returns MissingPatch so OnPlayClick blocks Play with a
+  warning textbox when the exe is absent. New unit tests cover the
+  non-executing branches.
+
+Verified: net7go + freya-online build/vet/test green; launcher builds clean
+in both `CHECK_FOR_UPDATES` and the default branch; 86/86 launcher unit
+tests pass.
+
+## 2026-06-14 -- Phase AR login-flood hardening (AR-1/AR-2/AR-5)
+
+- **Throttled both auth binaries, not one.** The AQ-7 cutover split auth into
+  two processes: game-auth in `login-server/net7go` (CC BY-NC-SA) and the
+  website login in `freya/online/server` (MIT). The flood defence therefore
+  had to land in BOTH -- a per-IP token bucket + a global Argon2id concurrency
+  semaphore in front of `/AuthLogin` (net7go) and `/api/login` +
+  `/api/account/password` (freya-online). The Argon2 cap is the real
+  memory backstop (each verify is 64 MiB; an unauthenticated flood is the DoS).
+  The two implementations are independent files under their own licences
+  (`ratelimit.go` in each module) -- net7go's is CC, freya-online's is MIT --
+  NOT a shared package, because the two modules must not cross the
+  CC/MIT boundary.
+
+- **No new dependency.** `golang.org/x/time/rate` is the obvious choice but is
+  NOT in the module cache, and CI builds the Go services only via their docker
+  Dockerfiles (no `go test` job), so adding a dep would be fragile to do
+  autonomously. Implemented a dependency-free token bucket
+  (refill = elapsed*rate capped at burst, map keyed by IP, GC eviction of
+  buckets idle > 15m) + a buffered-channel semaphore (acquire tries
+  non-blocking, then waits up to 2s, then sheds -- never queues unbounded,
+  which would re-introduce the DoS).
+
+- **Per-IP key for game-auth comes from a relay-injected, spoof-proof header.**
+  net7go sits behind the freya-online TLS relay, so its RemoteAddr is always
+  the relay, not the player. The relay (`legacy_proxy.go`) now sets
+  `X-Freya-Client-IP` from its OWN connection's RemoteAddr and OVERWRITES any
+  client-supplied value, so net7go can rate-limit per real IP without trusting
+  a spoofable header. A NAT'd household shares one bucket (generous burst 20)
+  while a single brute-forcer is bounded -- exactly the scope-note tradeoff.
+
+- **Throttle response is wire-identical (server-integrity).** `/AuthLogin` is
+  game-client-facing wire. A throttled request returns the BYTE-IDENTICAL
+  failed-login response (`Valid=False`), introducing no new wire surface the
+  real client hasn't already tolerated. This keeps the change a pure
+  *tightening* (it only ever rejects/slows), the always-welcome direction.
+  Logged as plans/29 CV-AR-1 (low risk) for the real-client UX check.
+
+- **AR-5 surfaced a latent config bug.** Setting `FREYA_HTTP_ADDR=""` to
+  disable the plain-HTTP listener in prod did nothing, because `env()` treats
+  a blank value as "use the default :8080". Added `lookupOr()` (honours an
+  explicitly-set empty string) and switched HTTPAddr to it. Prod compose now
+  sets `FREYA_HTTP_ADDR=""` (8080 was never published anyway).
+
+- **AR-2**: checked multiply guards the int64 overflow in
+  `vendor*int64(stack)` (`store_ah_write.go`) -- rejects the listing rather
+  than wrapping. AR-3/AR-4/AR-6 deferred by design (operational / dev-only /
+  intentional tradeoff -- see plans/45).
+
+Verified: net7go + freya-online both `go build` / `go vet` / `go test ./...`
+green and gofmt-clean.
+
+## 2026-06-14 -- Behavioural-analysis pass on three blocked items (Z-1, Z-5/PB-4, AB §4)
+
+Mined the retail client + proxy behaviour (CLAUDE.md primary source: "behavioural
+analysis of the retail client or server binary") to unblock three long-stalled
+items. Outcome is understanding + CLI decode improvements + honest plan updates;
+NO server/proxy wire change shipped (all three still need the live harness + a
+real-client CV check before any wire change).
+
+- **Z-1 (0x00BD CTA_RESPONSE) -- client semantics RESOLVED.** The client switches
+  on `(field@4 - 13)` and recognises ONLY {13,14,15,17} = ack / beacon-OFF /
+  beacon-ON / beacon-ON-by-id; anything else is rejected with no effect. Our server
+  echoes the request Action (4..12), all outside that set, so the Call-To-Arms
+  beacon is BROKEN against our server. Not fixed: deriving the request->response
+  formula from one paired sample (Action 5 -> 0x0F) plus an unpaired 0x0E is
+  ambiguous (pure-function vs stateful-toggle), and our 0x00BC routes to formation
+  GroupAction, a different domain. Needs more paired frames. Improved
+  CtaResponseRecord to decode the code's meaning; pinned in RetailRecordDecodeTests.
+
+- **Z-5 / PB-4 (0x0097 GALAXY_MAP) -- root cause IDENTIFIED.** The client populates
+  its renderable map-node collections (systems/sectors/gates/links) ONLY from record
+  sub-types 5/6/7/8/9 (+0xb). Type 4 -- the only sub-type our server emits -- sets
+  just the "you are here" label + array capacity, adding NO renderable node, so the
+  in-game map draws empty. That is the PB-4 cause. The behavioural read of the
+  per-record byte layout was UNRELIABLE (it mispredicted the Type-9 tail; the
+  in-repo capture fixtures galaxymap_system_aragoth/Type-5 and
+  galaxymap_sector_earth/Type-9 disprove it) -- so the next step is a per-byte pin
+  against those fixtures, NOT the inferred offsets. Also noted the alternative retail
+  path: the proxy can serve a prebuilt GalaxyMap.dat on the 0x2010/0x2011 band.
+
+- **AB §4 (proxy fabrication 0x2013 tractor) -- 4 un-citable fields RESOLVED.** From
+  reading the proxy's CREATE/beam/position builders directly: (1) the 0x04 CREATE
+  has NO scale field (scale is client-derived from the Type byte/template); (2) Type
+  byte = 4 for floating ore (generic-object branch); (3) the tractor 0x0b
+  discriminator is the pair (u16=2, inline name "TRACTOR") vs prospect (0xBF, ""),
+  not a lone EffectDescID; (4) 0x46 order = id, timestamp, x, y, z (prefix solid;
+  trailing carried fields zero-filled). The remaining Phase-AA fabrication is no
+  longer blocked on "un-citable fields" -- only on the §3 LIVE harness + a CV check
+  (a wrong 0x04 still crashes the Win32 client).
+
+- **2026-06-15 -- 11 live-retail captures analyzed; several plan assumptions
+  OVERTURNED.** The owner captured 11 cleartext proxy<->server sessions against the
+  retail reference server (cap1 buy/sell, cap3/cap4 analyze+dismantle, cap5 station
+  chat + emotes, cap6 login+open-galaxy-map, cap7-cap10 group/target/formation/disband,
+  cap11 land-and-fly-on-planet-dock-undock-crash, cap12 leave-planet-via-gate). opdump
+  was taught LINKTYPE_LINUX_SLL2 so it can read them. Resulting corrections:
+  - **PB-3/PB-6 (vendor buy/stacks):** the "Buy button emits 0x001F TRADE" inference
+    is DISPROVEN -- buy uses `0x0027` INVENTORY_MOVE (25x in cap1, zero 0x001F), with
+    the stack quantity in `InvMove.Num` (single `Num=1`, stack `Num=100`; `FromInv=4`
+    vendor, `ToInv=1` cargo, fields network-order, server ntohl's them). Root reconciles
+    to CV-21 (vendor slot presented as stack-of-1 pinned the slider); cap1 is the
+    live-retail vendor-buy capture CV-21 explicitly lacked.
+  - **Z-1 (0x00BD CTA_RESPONSE):** NOT a divergence. The earlier {13,14,15,17}
+    "beacon / feature-broken" theory is WITHDRAWN as false; cap7/cap9's many paired
+    0xBC->0xBD frames show field@4 is the echoed GroupAction selector + field@8 Success,
+    exactly what our server emits. CtaResponseRecord rewritten to drop the false
+    narrative. CV-22 narrowed to the visual/physical check only.
+  - **Z-2 (0x005F emote / station chat):** (b) RESOLVED -- emote byte@2=0x01 is correct
+    (cap5's three emotes all carry 0x01, selector at byte@8). (a) RE-SCOPED -- station
+    local chat is `0x001D` MESSAGE_STRING color 2, NOT a 0x5F broadcast (the old
+    capture_3 0x5F=station-chat reading was wrong); our SendMessageString already builds
+    that shape. Remaining: a two-client local repro to confirm cross-player delivery.
+  - **PB-7 (planet flight):** CONFIRMED same root as PB-2 -- planet-surface flight uses
+    the IDENTICAL wire protocol as space (cap11: 0x0014 MOVE + 0x1004 MVAS position to
+    udp/3806 x213). No planet-specific protocol; the PB-2 position feed covers it.
+  - **PB-18 (NEW):** client.exe crashes on UNDOCK FROM A PLANET (cap11). Distinct from
+    the fixed undock/dock<->space crash; needs a WINE trace, not a blind server fix.
+
+- **PB-14 (analyze/dismantle hang) -- FIXED (server).** cap3/cap4 prove the retail
+  server ALWAYS emits a `0x001B` ManufacturingIndex reply on every analyze/dismantle.
+  `Player::ManufactureTimedReturn` (PlayerManufacturing.cpp:962) early-returned when a
+  dismantle resolved zero components, skipping the SendAux* reply block and hanging the
+  client UI. Replaced the early-return with a guarded `if (!compList.empty())` so control
+  always falls through to the reply. CV-MANU filed (plans/29). Gated on the real-client
+  check.
+
+- **PB-4 (in-game galaxy map empty) -- FIXED via PROXY serve (path b), not server emit.**
+  Implemented `UDPClient::SendCachedGalaxyMap()` (proxy/UDPProxyToClient_linux.cpp): on
+  the client's 0x2010 DATA_FILE / 0x0097 request, stream the prebuilt 305-record
+  `GalaxyMap.dat` records (byte-equivalent to the retail whole-file blob; per-frame RC4
+  advances the same keystream). docker-compose mounts server/data at the proxy's
+  database path. The server-side Type-5..9 streaming (Z-5) stays a lower-priority gap.
+  CV-MAP filed (plans/29). Primary source cap6.

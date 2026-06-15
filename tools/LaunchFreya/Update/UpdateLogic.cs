@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -47,6 +48,49 @@ namespace LaunchFreya.Update
                 if (!(char.IsAsciiLetterOrDigit(c) || c == '.' || c == '_' || c == '-'))
                     return false;
             return true;
+        }
+
+        // A patch name has the same constraints as a mod id: a single safe path
+        // segment, since it becomes both a URL segment and a staged file name.
+        // (enb-patch.exe passes -- '.' and '-' are allowed.)
+        public static bool IsSafePatchName(string name) => IsSafeModId(name);
+
+        // Parse a patchlevel.txt body into the set of applied patch hashes: one
+        // hash per line, blank lines and surrounding whitespace ignored, compared
+        // lowercase. The file lives at the EnB install root and records every
+        // patch the launcher has applied so a patch is never re-run.
+        public static List<string> ParsePatchLevel(string content)
+        {
+            var hashes = new List<string>();
+            if (string.IsNullOrEmpty(content)) return hashes;
+            foreach (var raw in content.Split('\n'))
+            {
+                string line = raw.Trim();
+                if (line.Length == 0) continue;
+                hashes.Add(line.ToLowerInvariant());
+            }
+            return hashes;
+        }
+
+        // True if `hash` is already present in the parsed patchlevel list.
+        public static bool IsPatchApplied(IEnumerable<string> applied, string hash)
+        {
+            if (applied == null || string.IsNullOrEmpty(hash)) return false;
+            foreach (var h in applied)
+                if (HashesEqual(h, hash)) return true;
+            return false;
+        }
+
+        // Idempotently append a patch hash to a patchlevel.txt body, returning the
+        // new body. If the hash is already present the body is returned unchanged
+        // (modulo a guaranteed single trailing newline). One hash per line.
+        public static string AppendPatchHash(string existingContent, string hash)
+        {
+            hash = (hash ?? "").Trim().ToLowerInvariant();
+            var applied = ParsePatchLevel(existingContent);
+            if (hash.Length == 0) return existingContent ?? "";
+            if (!IsPatchApplied(applied, hash)) applied.Add(hash);
+            return string.Join("\n", applied) + "\n";
         }
 
         // Path-traversal guard (SECURITY -- the highest-risk item in this phase).
