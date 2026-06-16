@@ -56,7 +56,7 @@ public sealed class ScriptedServer : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(script);
         _listener = new TcpListener(IPAddress.Loopback, 0);
         _listener.Start();
-        Port = ((IPEndPoint) _listener.LocalEndpoint).Port;
+        Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
         _acceptTask = Task.Run(() => RunAsync(script, _cts.Token));
     }
 

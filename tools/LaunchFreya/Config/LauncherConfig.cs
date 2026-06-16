@@ -43,9 +43,9 @@ namespace LaunchFreya.Config
                     if (task.Name != "autoUpdateTask") continue;
                     cfg.AutoUpdateTasks.Add(new AutoUpdateTask
                     {
-                        Name            = task.Attributes?["name"]?.Value ?? "",
-                        BaseUrl         = task.Attributes?["baseUrl"]?.Value ?? "",
-                        FileListName    = task.Attributes?["fileListName"]?.Value ?? "Files.txt",
+                        Name = task.Attributes?["name"]?.Value ?? "",
+                        BaseUrl = task.Attributes?["baseUrl"]?.Value ?? "",
+                        FileListName = task.Attributes?["fileListName"]?.Value ?? "Files.txt",
                         VersionFileName = task.Attributes?["versionFileName"]?.Value ?? "Version.txt",
                     });
                 }
@@ -61,11 +61,11 @@ namespace LaunchFreya.Config
 
                     var s = new ServerConfig
                     {
-                        Name        = srv.Attributes?["name"]?.Value ?? "",
+                        Name = srv.Attributes?["name"]?.Value ?? "",
                         DisplayName = srv.Attributes?["displayName"]?.Value ?? "",
-                        LaunchName  = srv.Attributes?["launchName"]?.Value ?? "",
+                        LaunchName = srv.Attributes?["launchName"]?.Value ?? "",
                     };
-                    s.IsSinglePlayer        = ParseBool(srv.Attributes?["isSinglePlayer"]?.Value);
+                    s.IsSinglePlayer = ParseBool(srv.Attributes?["isSinglePlayer"]?.Value);
                     s.EnableAdvancedSettings = ParseBool(srv.Attributes?["enableAdvancedSettings"]?.Value);
 
                     foreach (XmlNode h in srv.ChildNodes)
@@ -81,7 +81,7 @@ namespace LaunchFreya.Config
                         // variant) is ignored -- there is no plaintext upstream.
                         var host = new HostConfig
                         {
-                            Hostname           = h.Attributes?["hostname"]?.Value ?? "",
+                            Hostname = h.Attributes?["hostname"]?.Value ?? "",
                             AuthenticationPort = ParseInt(h.Attributes?["secureAuthenticationPort"]?.Value, 443),
                         };
                         s.Hosts.Add(host);

@@ -31,10 +31,10 @@ public sealed class StartProspectRecord : PacketRecord
     {
         if (Payload.Length < 20) { Flag(sb, $"START_PROSPECT truncated -- {Payload.Length} bytes, expected 20"); return; }
 
-        FHex(sb,  0, "PlayerGID",    ReadI32LE(Payload, 0));
-        FHex(sb,  4, "AsteroidGID",  ReadI32LE(Payload, 4));
-        FHex(sb,  8, "EffectUID",    ReadI32LE(Payload, 8));
+        FHex(sb, 0, "PlayerGID", ReadI32LE(Payload, 0));
+        FHex(sb, 4, "AsteroidGID", ReadI32LE(Payload, 4));
+        FHex(sb, 8, "EffectUID", ReadI32LE(Payload, 8));
         FHex(sb, 12, "ProspectTick", ReadU32LE(Payload, 12));
-        FDec(sb, 16, "DrainMs",      (int)ReadU32LE(Payload, 16));
+        FDec(sb, 16, "DrainMs", (int)ReadU32LE(Payload, 16));
     }
 }

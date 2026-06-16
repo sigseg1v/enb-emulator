@@ -1,13 +1,13 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.Text;
 using System.IO;
-using CommonTools;
 using System.Xml;
+using CommonTools;
 using MissionEditor.Database;
 
 namespace MissionEditor.Nodes
 {
+    // Ported verbatim from tools/missioneditor/Nodes/Completion.cs.
     public class Completion
     {
         private CompletionType m_completionType;
@@ -15,10 +15,7 @@ namespace MissionEditor.Nodes
         private Int32 m_count;
         private String m_data;
 
-        public Completion()
-        {
-            clear();
-        }
+        public Completion() { clear(); }
 
         public void clear()
         {
@@ -27,25 +24,10 @@ namespace MissionEditor.Nodes
             m_data = "";
         }
 
-        public void setCompletionType(CompletionType id)
-        {
-            m_completionType = id;
-        }
-
-        public CompletionType getCompletionType()
-        {
-            return m_completionType;
-        }
-
-        public void setValue(String value)
-        {
-            m_value = value;
-        }
-
-        public String getValue()
-        {
-            return m_value;
-        }
+        public void setCompletionType(CompletionType id) { m_completionType = id; }
+        public CompletionType getCompletionType() { return m_completionType; }
+        public void setValue(String value) { m_value = value; }
+        public String getValue() { return m_value; }
 
         public String getFormattedValue()
         {
@@ -73,13 +55,6 @@ namespace MissionEditor.Nodes
                 case CompletionType.Obtain_Items:
                 case CompletionType.Possess_Item:
                     return DataConfiguration.getDescription(DataConfiguration.DataType.item, getValue());
-                /*case CompletionType.Obtain_Items_At_Location:
-                case CompletionType.Take_Item_To_Location:
-                    {
-                        String item = DataConfiguration.getDescription(DataConfiguration.DataType.item, getData());
-                        String location = DataConfiguration.getDescription(DataConfiguration.DataType.sector_object, getValue());
-                        return item + " @ " + location;
-                    }*/
                 case CompletionType.Use_Skill_On_Mob_Type:
                     {
                         String skill = DataConfiguration.getDescription(DataConfiguration.DataType.skill, getData());
@@ -98,32 +73,11 @@ namespace MissionEditor.Nodes
             return m_value;
         }
 
-        public void setCount(Int32 count)
-        {
-            m_count = count;
-        }
+        public void setCount(Int32 count) { m_count = count; }
+        public Int32 getCount() { return m_count; }
+        public void setData(String data) { m_data = data; }
+        public String getData() { return m_data; }
 
-        public Int32 getCount()
-        {
-            return m_count;
-        }
-
-        public void setData(String data)
-        {
-            m_data = data;
-        }
-
-        public String getData()
-        {
-            return m_data;
-        }
-
-        /// <summary>
-        /// Test whether a list of Completion items contains an entry of the specified CompletionType
-        /// </summary>
-        /// <param name="completionList">The list of Completion items</param>
-        /// <param name="completionType">The CompletionType to search for</param>
-        /// <returns>Whether the list contains the searched CompletionType</returns>
         public Boolean contains(List<Completion> completionList, CompletionType completionType)
         {
             if (completionList != null)
@@ -131,18 +85,12 @@ namespace MissionEditor.Nodes
                 foreach (Completion completion in completionList)
                 {
                     if (completion.getCompletionType().Equals(completionType))
-                    {
                         return true;
-                    }
                 }
             }
             return false;
         }
 
-        /// <summary>
-        /// Parse the XML nodes
-        /// </summary>
-        /// <param name="xmlNode">The <Completion></Completion> nodes</param>
         public void fromXml(XmlNode xmlNode)
         {
             String value;
@@ -150,23 +98,15 @@ namespace MissionEditor.Nodes
             Xml.getAttribute(xmlNode, XmlAttributes.ID, true, out value);
             CompletionType completionType;
             if (CommonTools.Enumeration.TryParse<CompletionType>(value, out completionType))
-            {
                 setCompletionType(completionType);
-            }
             else
-            {
                 throw (new Exception("Unable to convert '" + value + "' into a CompletionType" + "\n\n" + xmlNode.InnerXml));
-            }
 
             if (Xml.getAttribute(xmlNode, XmlAttributes.COUNT, false, out intValue))
-            {
                 setCount(intValue);
-            }
 
             if (Xml.getAttribute(xmlNode, XmlAttributes.DATA, false, out value))
-            {
                 setData(value);
-            }
 
             Xml.getValue(xmlNode, true, out value);
             setValue(value);
@@ -195,25 +135,14 @@ namespace MissionEditor.Nodes
                     break;
                 case CompletionType.Give_Item:
                     if (getCount() != -1)
-                    {
                         stringWriter.Write(Xml.attribute(XmlAttributes.COUNT, getCount()));
-                    }
                     break;
                 case CompletionType.Nearest_Nav:
                     break;
                 case CompletionType.Obtain_Items:
                     if (getCount() != -1)
-                    {
                         stringWriter.Write(Xml.attribute(XmlAttributes.COUNT, getCount()));
-                    }
                     break;
-                /*case CompletionType.Obtain_Items_At_Location:
-                    if (getCount() != -1)
-                    {
-                        stringWriter.Write(Xml.attribute(XmlAttributes.COUNT, getCount()));
-                    }
-                    stringWriter.Write(Xml.attribute(XmlAttributes.DATA, getData()));
-                    break;*/
                 case CompletionType.Possess_Item:
                     stringWriter.Write(Xml.attribute(XmlAttributes.COUNT, getCount()));
                     break;
@@ -221,10 +150,6 @@ namespace MissionEditor.Nodes
                     break;
                 case CompletionType.Current_Sector:
                     break;
-                /*case CompletionType.Take_Item_To_Location:
-                    stringWriter.Write(Xml.attribute(XmlAttributes.DATA, getData()));
-                    stringWriter.Write(Xml.attribute(XmlAttributes.COUNT, getCount()));
-                    break;*/
                 case CompletionType.Talk_To_Npc:
                     break;
                 case CompletionType.Use_Skill_On_Mob_Type:
@@ -256,10 +181,7 @@ namespace MissionEditor.Nodes
                         DataConfiguration.addValidation(DataConfiguration.DataType.sector_object, getValue());
                         break;
                     case CompletionType.Nav_Message:
-                        if (getCount() == -1)
-                        {
-                            setCount(5000);
-                        }
+                        if (getCount() == -1) setCount(5000);
                         if (getCount() != 5000 && getCount() != 10000 && getCount() != 30000)
                         {
                             DataConfiguration.addValidation("The 3 Nav Message ranges are 5000, 10000 and 30000. You must use one of these ranges to trigger your message.");
@@ -267,70 +189,40 @@ namespace MissionEditor.Nodes
                         DataConfiguration.addValidation(DataConfiguration.DataType.sector_object, getValue());
                         break;
                     case CompletionType.Fight_Mob:
-                        if (getCount() == -1)
-                        {
-                            setCount(1);
-                        }
+                        if (getCount() == -1) setCount(1);
                         if (getCount() < 0 || getCount() > 5000)
-                        {
                             DataConfiguration.addValidation("The number of mobs to fight must be between 1 and 5,000");
-                        }
                         DataConfiguration.addValidation(DataConfiguration.DataType.mob, getValue());
                         break;
                     case CompletionType.Give_Credits:
-                        if (!Int32.TryParse(getValue(), out count)
-                            || count < 0 || count > 25000)
-                        {
+                        if (!Int32.TryParse(getValue(), out count) || count < 0 || count > 25000)
                             DataConfiguration.addValidation("The amount of credits to give must be between 1 and 25,000");
-                        }
                         break;
                     case CompletionType.Give_Item:
-                        if (getCount() == -1)
-                        {
-                            setCount(1);
-                        }
+                        if (getCount() == -1) setCount(1);
                         if (getCount() < 0 || getCount() > 500)
-                        {
                             DataConfiguration.addValidation("The quantity of items to give must be between 1 and 500");
-                        }
                         DataConfiguration.addValidation(DataConfiguration.DataType.item, getValue());
                         break;
                     case CompletionType.Nearest_Nav:
-                        //can only have one nearest Nav for completions
                         DataConfiguration.addValidation(DataConfiguration.DataType.sector_object, getValue());
                         break;
                     case CompletionType.Obtain_Items:
                         DataConfiguration.addValidation(DataConfiguration.DataType.item, getValue());
                         break;
-                    /*case CompletionType.Obtain_Items_At_Location:
-                        DataConfiguration.addValidation(DataConfiguration.DataType.sector_object, getValue());
-                        DataConfiguration.addValidation(DataConfiguration.DataType.item, getData());
-                        break;*/
                     case CompletionType.Possess_Item:
-                        if (getCount() == -1)
-                        {
-                            setCount(1);
-                        }
+                        if (getCount() == -1) setCount(1);
                         if (getCount() < 0 || getCount() > 5000)
-                        {
                             DataConfiguration.addValidation("The quantity must be between 1 and 5,000");
-                        }
                         DataConfiguration.addValidation(DataConfiguration.DataType.item, getValue());
                         break;
                     case CompletionType.Receive_Item:
-                        if (!Int32.TryParse(getValue(), out count)
-                            || count < 0 || count > 10)
-                        {
+                        if (!Int32.TryParse(getValue(), out count) || count < 0 || count > 10)
                             DataConfiguration.addValidation("The quantity must be between 1 and 10");
-                        }
                         break;
                     case CompletionType.Current_Sector:
                         DataConfiguration.addValidation(DataConfiguration.DataType.sector, getValue());
                         break;
-                    /*case CompletionType.Take_Item_To_Location:
-                        DataConfiguration.addValidation(DataConfiguration.DataType.sector_object, getValue());
-                        DataConfiguration.addValidation(DataConfiguration.DataType.item, getData());
-                        break;*/
                     case CompletionType.Talk_To_Npc:
                         DataConfiguration.addValidation(DataConfiguration.DataType.npc, getValue());
                         break;
@@ -351,6 +243,5 @@ namespace MissionEditor.Nodes
             stringWriter.WriteLine("<tr><td>" + m_completionType.ToString() + "</td>");
             stringWriter.WriteLine("<td>" + getFormattedValue() + "</td></tr>");
         }
-
     }
 }

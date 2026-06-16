@@ -11,7 +11,9 @@ namespace LaunchFreya.Tests
     {
         static ModInfo Mod(string id, params string[] deps) => new ModInfo
         {
-            Id = id, Name = id, Dependencies = deps,
+            Id = id,
+            Name = id,
+            Dependencies = deps,
         };
 
         static readonly List<ModInfo> Catalog = new()

@@ -21,9 +21,9 @@ public sealed class DumpOffCommand : ICommandHandler
         _ctx = ctx;
     }
 
-    public string Name    => "dump-off";
+    public string Name => "dump-off";
     public string Summary => "stop the live packet tail (chat still echoes)";
-    public string Usage   => "dump-off";
+    public string Usage => "dump-off";
 
     // Only worth offering while a dump is actually running.
     public bool Available => _ctx.DumpEnabled;

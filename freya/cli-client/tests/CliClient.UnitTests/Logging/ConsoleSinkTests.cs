@@ -88,7 +88,7 @@ public sealed class ConsoleSinkTests
         var sw = new StringWriter();
         var sink = new ConsoleSink(sw);
         sink.Packet(PacketDirection.Outbound, Packet.ForOpcode(0x0035, Array.Empty<byte>()));
-        sink.Packet(PacketDirection.Inbound,  Packet.ForOpcode(0x0036, Array.Empty<byte>()));
+        sink.Packet(PacketDirection.Inbound, Packet.ForOpcode(0x0036, Array.Empty<byte>()));
         string output = sw.ToString();
         Assert.Contains("→", output);
         Assert.Contains("←", output);

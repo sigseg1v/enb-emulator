@@ -4,86 +4,338 @@
    markup (page*, hud-*, btn*, empty*, vgrid, vslot*, icon__glyph) stay plain
    strings -- they live in base.css / app.css. */
 
-.mbx { display: grid; grid-template-columns: 380px 1fr; gap: 18px; flex: 1; min-height: 0; padding: 0 28px 28px; }
-.mbx__list { display: flex; flex-direction: column; min-height: 0; }
-.mbx__listhead { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px;
-  border-bottom: 1px solid var(--line); font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.1em;
-  text-transform: uppercase; color: var(--text-faint); flex: none; }
-.mbx__scroll { overflow-y: auto; flex: 1; }
+.mbx {
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    gap: 18px;
+    flex: 1;
+    min-height: 0;
+    padding: 0 28px 28px;
+}
+.mbx__list {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+.mbx__listhead {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--line);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    flex: none;
+}
+.mbx__scroll {
+    overflow-y: auto;
+    flex: 1;
+}
 
-.mail { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 13px 14px;
-  border-bottom: 1px solid oklch(0.45 0.04 248 / 0.14); cursor: pointer; transition: background .12s; position: relative; }
-.mail:hover { background: oklch(1 0 0 / 0.025); }
-.mail--active { background: oklch(0.82 0.125 205 / 0.08); }
-.mail--active::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
-.mail__unread { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 7px var(--accent); }
-.mail__unread--read { background: transparent; box-shadow: none; border: 1px solid var(--line-strong); }
-.mail__main { min-width: 0; }
-.mail__subj { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mail__subj--unread { font-weight: 600; }
-.mail__from { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); margin-top: 3px; }
-.mail__right { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
-.mail__clip { font-size: 13px; color: var(--warm); }
+.mail {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 10px;
+    align-items: center;
+    padding: 13px 14px;
+    border-bottom: 1px solid oklch(0.45 0.04 248 / 0.14);
+    cursor: pointer;
+    transition: background 0.12s;
+    position: relative;
+}
+.mail:hover {
+    background: oklch(1 0 0 / 0.025);
+}
+.mail--active {
+    background: oklch(0.82 0.125 205 / 0.08);
+}
+.mail--active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+}
+.mail__unread {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 7px var(--accent);
+}
+.mail__unread--read {
+    background: transparent;
+    box-shadow: none;
+    border: 1px solid var(--line-strong);
+}
+.mail__main {
+    min-width: 0;
+}
+.mail__subj {
+    font-size: 13px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.mail__subj--unread {
+    font-weight: 600;
+}
+.mail__from {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-faint);
+    margin-top: 3px;
+}
+.mail__right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 5px;
+}
+.mail__clip {
+    font-size: 13px;
+    color: var(--warm);
+}
 
-.mread { display: flex; flex-direction: column; min-height: 0; }
-.mread__head { position: relative; padding: 20px 24px 16px; border-bottom: 1px solid var(--line); flex: none; }
+.mread {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+.mread__head {
+    position: relative;
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid var(--line);
+    flex: none;
+}
 .mread__del {
-  position: absolute; top: 16px; right: 20px;
-  border-color: oklch(0.66 0.18 28 / 0.5);
-  color: var(--danger);
-  background: oklch(0.66 0.18 28 / 0.08);
+    position: absolute;
+    top: 16px;
+    right: 20px;
+    border-color: oklch(0.66 0.18 28 / 0.5);
+    color: var(--danger);
+    background: oklch(0.66 0.18 28 / 0.08);
 }
 .mread__del:hover:not(:disabled) {
-  border-color: var(--danger);
-  background: oklch(0.66 0.18 28 / 0.18);
+    border-color: var(--danger);
+    background: oklch(0.66 0.18 28 / 0.18);
 }
-.mread__subj { font-family: var(--font-display); font-size: 17px; margin: 0 0 12px; letter-spacing: 0.02em; }
-.mread__meta { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-family: var(--font-mono); font-size: 11.5px; }
-.mread__meta dt { color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; align-self: center; }
-.mread__meta dd { margin: 0; color: var(--text-dim); }
-.mread__body { padding: 20px 24px; overflow-y: auto; flex: 1; font-size: 13.5px; line-height: 1.7; color: var(--text-dim); white-space: pre-wrap; }
+.mread__subj {
+    font-family: var(--font-display);
+    font-size: 17px;
+    margin: 0 0 12px;
+    letter-spacing: 0.02em;
+}
+.mread__meta {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 14px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+}
+.mread__meta dt {
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 10px;
+    align-self: center;
+}
+.mread__meta dd {
+    margin: 0;
+    color: var(--text-dim);
+}
+.mread__body {
+    padding: 20px 24px;
+    overflow-y: auto;
+    flex: 1;
+    font-size: 13.5px;
+    line-height: 1.7;
+    color: var(--text-dim);
+    white-space: pre-wrap;
+}
 
-.mread__warn { display: flex; gap: 10px; align-items: flex-start; margin: 0 24px 18px; padding: 11px 14px;
-  border: 1px solid oklch(0.80 0.125 72 / 0.4); border-radius: var(--r-sm); background: oklch(0.80 0.125 72 / 0.07);
-  font-size: 11.5px; line-height: 1.5; color: var(--warm); }
-.mread__warn b { color: var(--warm); }
+.mread__warn {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin: 0 24px 18px;
+    padding: 11px 14px;
+    border: 1px solid oklch(0.8 0.125 72 / 0.4);
+    border-radius: var(--r-sm);
+    background: oklch(0.8 0.125 72 / 0.07);
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--warm);
+}
+.mread__warn b {
+    color: var(--warm);
+}
 
-.attach { padding: 18px 24px; border-top: 1px solid var(--line); flex: none; }
-.attach__title { font-family: var(--font-display); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); margin: 0 0 12px; }
-.attach__grid { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-start; }
-.aslot { width: 76px; cursor: pointer; }
-.aslot__sq { width: 76px; height: 76px; border-radius: var(--r-sm); display: grid; place-items: center; position: relative;
-  border: 1px solid var(--rcolor, var(--line-strong)); background: radial-gradient(circle at 38% 30%, oklch(1 0 0 / 0.05), oklch(0 0 0 / 0.3));
-  color: var(--rcolor, var(--warm)); transition: transform .12s, box-shadow .12s; }
-.aslot:hover .aslot__sq { transform: translateY(-2px); box-shadow: 0 6px 18px oklch(0 0 0 / 0.5), inset 0 0 16px var(--rglow, transparent); }
-.aslot__sq :global(.icon__glyph) { font-size: 32px; }
-.aslot__cr { font-family: var(--font-mono); font-size: 21px; color: var(--warm); }
-.aslot__qty { position: absolute; bottom: 3px; right: 5px; font-family: var(--font-mono); font-size: 11px; color: var(--text); text-shadow: 0 1px 3px #000; }
-.aslot__name { font-size: 10.5px; color: var(--text-dim); margin-top: 6px; text-align: center; line-height: 1.25; }
-.aslot__loot { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); text-align: center; margin-top: 3px; opacity: 0; transition: opacity .12s; }
-.aslot:hover .aslot__loot { opacity: 1; }
-.attach__all { margin-top: 14px; }
+.attach {
+    padding: 18px 24px;
+    border-top: 1px solid var(--line);
+    flex: none;
+}
+.attach__title {
+    font-family: var(--font-display);
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 12px;
+}
+.attach__grid {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: flex-start;
+}
+.aslot {
+    width: 76px;
+    cursor: pointer;
+}
+.aslot__sq {
+    width: 76px;
+    height: 76px;
+    border-radius: var(--r-sm);
+    display: grid;
+    place-items: center;
+    position: relative;
+    border: 1px solid var(--rcolor, var(--line-strong));
+    background: radial-gradient(circle at 38% 30%, oklch(1 0 0 / 0.05), oklch(0 0 0 / 0.3));
+    color: var(--rcolor, var(--warm));
+    transition:
+        transform 0.12s,
+        box-shadow 0.12s;
+}
+.aslot:hover .aslot__sq {
+    transform: translateY(-2px);
+    box-shadow:
+        0 6px 18px oklch(0 0 0 / 0.5),
+        inset 0 0 16px var(--rglow, transparent);
+}
+.aslot__sq :global(.icon__glyph) {
+    font-size: 32px;
+}
+.aslot__cr {
+    font-family: var(--font-mono);
+    font-size: 21px;
+    color: var(--warm);
+}
+.aslot__qty {
+    position: absolute;
+    bottom: 3px;
+    right: 5px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text);
+    text-shadow: 0 1px 3px #000;
+}
+.aslot__name {
+    font-size: 10.5px;
+    color: var(--text-dim);
+    margin-top: 6px;
+    text-align: center;
+    line-height: 1.25;
+}
+.aslot__loot {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    text-align: center;
+    margin-top: 3px;
+    opacity: 0;
+    transition: opacity 0.12s;
+}
+.aslot:hover .aslot__loot {
+    opacity: 1;
+}
+.attach__all {
+    margin-top: 14px;
+}
 
 /* ---- Mail composer ---- */
-.compose { display: flex; flex-direction: column; gap: 14px; padding: 16px; overflow-y: auto; }
-.compose__field { display: flex; flex-direction: column; gap: 6px; }
-.compose__lbl { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-faint); }
-.compose__input { background: var(--bg-input); border: 1px solid var(--line-strong); border-radius: var(--r-sm);
-  color: var(--text); font-family: var(--font-body); font-size: 13px; padding: 9px 11px; width: 100%; }
-.compose__input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-glow); }
-.compose__body { font-family: var(--font-body); resize: vertical; min-height: 90px; }
+.compose {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 16px;
+    overflow-y: auto;
+}
+.compose__field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.compose__lbl {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.compose__input {
+    background: var(--bg-input);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-sm);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 13px;
+    padding: 9px 11px;
+    width: 100%;
+}
+.compose__input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent-glow);
+}
+.compose__body {
+    font-family: var(--font-body);
+    resize: vertical;
+    min-height: 90px;
+}
 
 /* ===== responsive (see breakpoints.css) ===== */
 /* md (768px): drop the two-pane master/detail to a single stacked column. The
    message list is capped so the reader/composer below it stays reachable; the
    page itself scrolls (base.css relaxes .page height + shell__body overflow). */
 @media (max-width: 48rem) {
-  .mbx { grid-template-columns: 1fr; gap: 14px; padding: 0 14px 22px; min-height: 0; }
-  .mbx__list { min-height: 30vh; max-height: 46vh; }
-  .mread { min-height: 56vh; }
-  .mread__head { padding: 16px 16px 14px; }
-  .mread__del { top: 14px; right: 14px; }
-  .mread__body { padding: 16px; }
-  .mread__warn { margin: 0 16px 16px; }
-  .attach { padding: 16px; }
+    .mbx {
+        grid-template-columns: 1fr;
+        gap: 14px;
+        padding: 0 14px 22px;
+        min-height: 0;
+    }
+    .mbx__list {
+        min-height: 30vh;
+        max-height: 46vh;
+    }
+    .mread {
+        min-height: 56vh;
+    }
+    .mread__head {
+        padding: 16px 16px 14px;
+    }
+    .mread__del {
+        top: 14px;
+        right: 14px;
+    }
+    .mread__body {
+        padding: 16px;
+    }
+    .mread__warn {
+        margin: 0 16px 16px;
+    }
+    .attach {
+        padding: 16px;
+    }
 }

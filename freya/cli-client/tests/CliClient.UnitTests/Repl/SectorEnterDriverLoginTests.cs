@@ -46,7 +46,7 @@ public sealed class SectorEnterDriverLoginTests
         var pkt = SectorEnterDriver.BuildLoginPacket("user-deadbeef", 0x40000010, luna, alphaCentauri);
         var span = pkt.Payload.Span;
 
-        Assert.Equal(luna,          BinaryPrimitives.ReadInt32BigEndian(span.Slice(ToSectorIdOffset, 4)));
+        Assert.Equal(luna, BinaryPrimitives.ReadInt32BigEndian(span.Slice(ToSectorIdOffset, 4)));
         Assert.Equal(alphaCentauri, BinaryPrimitives.ReadInt32BigEndian(span.Slice(FromSectorIdOffset, 4)));
     }
 }

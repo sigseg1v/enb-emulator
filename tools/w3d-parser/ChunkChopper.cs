@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -33,7 +33,7 @@ namespace WestWood3D
             {
                 this.processMainChunks(mainChunk);
             }
-            
+
             //printChunkHeirarchy(mainChunk, 0);
         }
 
@@ -46,7 +46,7 @@ namespace WestWood3D
             //Parse Headers and setup local variables
             int chunkID = _bw.ReadInt32();
             int currentChunkLength = _bw.ReadInt32() & 0x7FFFFFFF;
-            int endLength = (int) _bw.BaseStream.Position + currentChunkLength; 
+            int endLength = (int)_bw.BaseStream.Position + currentChunkLength;
 
             // Lookup and create the new chunk class
             Chunk chk = _chkMap.getChunk(chunkID);
@@ -61,7 +61,7 @@ namespace WestWood3D
             else
             {
                 //if(_debug) 
-                    Console.Out.WriteLine("File: " + _filename + "\t : \tSkipping Chunk: \t " + chunkID);
+                Console.Out.WriteLine("File: " + _filename + "\t : \tSkipping Chunk: \t " + chunkID);
 
                 //Chunk will be skipped if its not initialized in the chunkmap
                 _bw.BaseStream.Seek(currentChunkLength, SeekOrigin.Current); //Advance to the next chunk
@@ -69,7 +69,7 @@ namespace WestWood3D
 
             while (_bw.BaseStream.Position < endLength)
             {
-                processMainChunks(chk); 
+                processMainChunks(chk);
             }
         } // End of processMainChunks
 
@@ -81,7 +81,7 @@ namespace WestWood3D
 
             while (Enumerator.MoveNext())
             {
-                Chunk tmpChunk = (Chunk) Enumerator.Value;
+                Chunk tmpChunk = (Chunk)Enumerator.Value;
                 String tab = "";
                 switch (_level)
                 {

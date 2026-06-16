@@ -21,9 +21,11 @@ std::string Errno(const std::string& where) {
     return where + ": " + std::strerror(errno);
 }
 
-}  // namespace
+} // namespace
 
-TcpClient::~TcpClient() { Close(); }
+TcpClient::~TcpClient() {
+    Close();
+}
 
 void TcpClient::Close() {
     if (fd_ >= 0) {
@@ -62,7 +64,8 @@ bool TcpClient::Connect(const std::string& host, uint16_t port, int timeout_ms) 
     int sock = -1;
     for (addrinfo* a = res; a; a = a->ai_next) {
         sock = ::socket(a->ai_family, a->ai_socktype, a->ai_protocol);
-        if (sock < 0) continue;
+        if (sock < 0)
+            continue;
 
         // Non-blocking connect so we can apply timeout_ms.
         int flags = ::fcntl(sock, F_GETFL, 0);
@@ -117,7 +120,8 @@ int TcpClient::Send(const void* buffer, int length) {
     while (sent < length) {
         int n = ::send(fd_, p + sent, length - sent, MSG_NOSIGNAL);
         if (n < 0) {
-            if (errno == EINTR) continue;
+            if (errno == EINTR)
+                continue;
             last_error_ = Errno("send");
             return -1;
         }
@@ -131,19 +135,21 @@ bool TcpClient::RecvExact(void* buffer, int length, int timeout_ms) {
         last_error_ = "RecvExact: socket not open";
         return false;
     }
-    if (!SetRecvTimeout(timeout_ms)) return false;
+    if (!SetRecvTimeout(timeout_ms))
+        return false;
     int got = 0;
     char* p = static_cast<char*>(buffer);
     while (got < length) {
         int n = ::recv(fd_, p + got, length - got, 0);
         if (n < 0) {
-            if (errno == EINTR) continue;
+            if (errno == EINTR)
+                continue;
             last_error_ = Errno("recv");
             return false;
         }
         if (n == 0) {
-            last_error_ = "RecvExact: peer closed (got " + std::to_string(got) +
-                          " of " + std::to_string(length) + " bytes)";
+            last_error_ = "RecvExact: peer closed (got " + std::to_string(got) + " of " +
+                          std::to_string(length) + " bytes)";
             return false;
         }
         got += n;
@@ -156,7 +162,8 @@ int TcpClient::RecvSome(void* buffer, int length, int timeout_ms) {
         last_error_ = "RecvSome: socket not open";
         return -1;
     }
-    if (!SetRecvTimeout(timeout_ms)) return -1;
+    if (!SetRecvTimeout(timeout_ms))
+        return -1;
     int n = ::recv(fd_, buffer, length, 0);
     if (n < 0) {
         last_error_ = Errno("recv");
@@ -165,4 +172,4 @@ int TcpClient::RecvSome(void* buffer, int length, int timeout_ms) {
     return n;
 }
 
-}  // namespace enbtest
+} // namespace enbtest

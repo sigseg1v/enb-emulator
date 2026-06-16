@@ -1,7 +1,5 @@
 using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Text;
 
 namespace N7.Props
 {
@@ -10,9 +8,7 @@ namespace N7.Props
         private bool is_cap_ship;
         private bool is_dockable;
 
-        public StarbaseProps()
-        {
-        }
+        public StarbaseProps() { }
 
         public void fillBaseProps(BaseProps bp)
         {
@@ -36,17 +32,9 @@ namespace N7.Props
         }
 
         [CategoryAttribute("Starbase Object Props"), DescriptionAttribute("Is this starbase object a Capital Ship ?")]
-        public bool IsCapShip
-        {
-            get { return is_cap_ship; }
-            set { is_cap_ship = value; }
-        }
+        public bool IsCapShip { get { return is_cap_ship; } set { is_cap_ship = value; } }
 
         [CategoryAttribute("Starbase Object Props"), DescriptionAttribute("Is this starbase dockable by players?")]
-        public bool IsDockable
-        {
-            get { return is_dockable; }
-            set { is_dockable = value; }
-        }
+        public bool IsDockable { get { return is_dockable; } set { is_dockable = value; } }
     }
 }

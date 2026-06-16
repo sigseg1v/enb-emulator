@@ -400,21 +400,21 @@ public static class SectorEnterDriver
     /// </summary>
     internal static string GlobalErrorMessage(int code) => code switch
     {
-        0  => "account banned",
-        1  => "that character name is already taken",
-        2  => "name contains invalid characters",
-        3  => "name too short (minimum 3 characters)",
-        4  => "name needs at least one vowel (a/e/i/o/u/y)",
-        5  => "name has more than 3 repeating characters",
-        6  => "character name is on the restricted list",
-        7  => "login ticket invalid or expired",
-        8  => "auth server unavailable",
-        9  => "account inactive",
+        0 => "account banned",
+        1 => "that character name is already taken",
+        2 => "name contains invalid characters",
+        3 => "name too short (minimum 3 characters)",
+        4 => "name needs at least one vowel (a/e/i/o/u/y)",
+        5 => "name has more than 3 repeating characters",
+        6 => "character name is on the restricted list",
+        7 => "login ticket invalid or expired",
+        8 => "auth server unavailable",
+        9 => "account inactive",
         10 => "ship name is on the restricted list",
         11 => "server internal error",
         12 => "server closed (stress-test gate)",
         13 => "account already in use (another session is logged in -- log it out first)",
         14 => "server is shutting down",
-        _  => "unknown reason",
+        _ => "unknown reason",
     };
 }

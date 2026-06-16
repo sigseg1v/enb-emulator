@@ -1,7 +1,5 @@
 using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Text;
 
 namespace N7.Props
 {
@@ -16,9 +14,7 @@ namespace N7.Props
         private float tilt_angle;
         private bool is_landable;
 
-        public PlanetProps()
-        {
-        }
+        public PlanetProps() { }
 
         public void fillBaseProps(BaseProps bp)
         {
@@ -42,59 +38,27 @@ namespace N7.Props
         }
 
         [CategoryAttribute("Planet Object Props"), DescriptionAttribute("The orbit ID of this object")]
-        public int OrbitID
-        {
-            get { return orbit_id; }
-            set { orbit_id = value; }
-        }
+        public int OrbitID { get { return orbit_id; } set { orbit_id = value; } }
 
         [CategoryAttribute("Planet Object Props"), DescriptionAttribute("The orbit distance")]
-        public float OrbitDist
-        {
-            get { return orbit_dist; }
-            set { orbit_dist = value; }
-        }
+        public float OrbitDist { get { return orbit_dist; } set { orbit_dist = value; } }
 
         [CategoryAttribute("Planet Object Props"), DescriptionAttribute("The orbit angle")]
-        public float OrbitAngle
-        {
-            get { return orbit_angle; }
-            set { orbit_angle = value; }
-        }
+        public float OrbitAngle { get { return orbit_angle; } set { orbit_angle = value; } }
 
         [CategoryAttribute("Planet Object Props"), DescriptionAttribute("The orbit rate")]
-        public float OrbitRate
-        {
-            get { return orbit_rate; }
-            set { orbit_rate = value; }
-        }
+        public float OrbitRate { get { return orbit_rate; } set { orbit_rate = value; } }
 
         [CategoryAttribute("Planet Object Props"), DescriptionAttribute("The rotational rate")]
-        public float RotateRate
-        {
-            get { return rotate_rate; }
-            set { rotate_rate = value; }
-        }
+        public float RotateRate { get { return rotate_rate; } set { rotate_rate = value; } }
 
         [CategoryAttribute("Planet Object Props"), DescriptionAttribute("The rotation angle")]
-        public float RotateAngle
-        {
-            get { return rotate_angle; }
-            set { rotate_angle = value; }
-        }
+        public float RotateAngle { get { return rotate_angle; } set { rotate_angle = value; } }
 
         [CategoryAttribute("Planet Object Props"), DescriptionAttribute("The angle of tilt")]
-        public float TiltAngle
-        {
-            get { return tilt_angle; }
-            set { tilt_angle = value; }
-        }
+        public float TiltAngle { get { return tilt_angle; } set { tilt_angle = value; } }
 
         [CategoryAttribute("Planet Object Props"), DescriptionAttribute("Is this planet landable ?")]
-        public bool IsLandable
-        {
-            get { return is_landable; }
-            set { is_landable = value; }
-        }
+        public bool IsLandable { get { return is_landable; } set { is_landable = value; } }
     }
 }

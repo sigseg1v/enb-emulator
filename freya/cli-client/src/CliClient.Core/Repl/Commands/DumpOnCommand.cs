@@ -24,9 +24,9 @@ public sealed class DumpOnCommand : ICommandHandler
         _ctx = ctx;
     }
 
-    public string Name    => "dump-on";
+    public string Name => "dump-on";
     public string Summary => "live-print every packet to/from the active connection";
-    public string Usage   => "dump-on";
+    public string Usage => "dump-on";
 
     public Task<int> ExecuteAsync(
         IReadOnlyList<string> args, TextWriter output, CancellationToken ct)

@@ -58,9 +58,9 @@ public sealed class GateCommand : ICommandHandler
     private readonly SessionContext _ctx;
     public GateCommand(SessionContext ctx) { ArgumentNullException.ThrowIfNull(ctx); _ctx = ctx; }
 
-    public string Name    => "gate";
+    public string Name => "gate";
     public string Summary => "jump through a stargate to its destination sector (0x002C ACTION 18 -> 19)";
-    public string Usage   =>
+    public string Usage =>
         "gate <name-or-gid>\n" +
         "  Target = a tracked stargate name (with spaces, e.g. `gate Mars Gate`)\n" +
         "  or its gid (0x.. / decimal). Tab-completes from `navs`. Sends the\n" +
@@ -171,9 +171,9 @@ public sealed class GateCommand : ICommandHandler
     public static byte[] BuildActionFrame(int gameId, int action, int target, int optionalVar)
     {
         var payload = new byte[16];
-        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0),  gameId);
-        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4),  action);
-        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(8),  target);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0), gameId);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4), action);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(8), target);
         BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(12), optionalVar);
         return payload;
     }

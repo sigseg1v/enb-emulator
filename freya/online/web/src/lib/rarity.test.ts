@@ -10,48 +10,48 @@ import { describe, it, expect } from 'vitest';
 import { rarityFor, qualityClass } from './rarity';
 
 describe('rarityFor', () => {
-  it('treats a null quality as common regardless of level', () => {
-    expect(rarityFor(1, null)).toBe('common');
-    expect(rarityFor(99, null)).toBe('common');
-  });
+    it('treats a null quality as common regardless of level', () => {
+        expect(rarityFor(1, null)).toBe('common');
+        expect(rarityFor(99, null)).toBe('common');
+    });
 
-  it('maps quality thresholds to tiers (uncapped, high level)', () => {
-    // Quality is the game-native fraction (1.0 == 100%).
-    const lvl = 10; // above every cap, so tier == raw tier
-    expect(rarityFor(lvl, 1.29)).toBe('common');
-    expect(rarityFor(lvl, 1.30)).toBe('uncommon');
-    expect(rarityFor(lvl, 1.49)).toBe('uncommon');
-    expect(rarityFor(lvl, 1.50)).toBe('rare');
-    expect(rarityFor(lvl, 1.79)).toBe('rare');
-    expect(rarityFor(lvl, 1.80)).toBe('epic');
-    expect(rarityFor(lvl, 2.55)).toBe('epic');
-  });
+    it('maps quality thresholds to tiers (uncapped, high level)', () => {
+        // Quality is the game-native fraction (1.0 == 100%).
+        const lvl = 10; // above every cap, so tier == raw tier
+        expect(rarityFor(lvl, 1.29)).toBe('common');
+        expect(rarityFor(lvl, 1.3)).toBe('uncommon');
+        expect(rarityFor(lvl, 1.49)).toBe('uncommon');
+        expect(rarityFor(lvl, 1.5)).toBe('rare');
+        expect(rarityFor(lvl, 1.79)).toBe('rare');
+        expect(rarityFor(lvl, 1.8)).toBe('epic');
+        expect(rarityFor(lvl, 2.55)).toBe('epic');
+    });
 
-  it('caps a high-quality item by its level', () => {
-    // quality 2.00 is epic-tier, but the level cap pulls it down.
-    expect(rarityFor(1, 2.00)).toBe('uncommon'); // L1-3 -> uncommon cap
-    expect(rarityFor(3, 2.00)).toBe('uncommon');
-    expect(rarityFor(4, 2.00)).toBe('rare'); // L4-6 -> rare cap
-    expect(rarityFor(6, 2.00)).toBe('rare');
-    expect(rarityFor(7, 2.00)).toBe('epic'); // L7+ -> epic reachable
-  });
+    it('caps a high-quality item by its level', () => {
+        // quality 2.00 is epic-tier, but the level cap pulls it down.
+        expect(rarityFor(1, 2.0)).toBe('uncommon'); // L1-3 -> uncommon cap
+        expect(rarityFor(3, 2.0)).toBe('uncommon');
+        expect(rarityFor(4, 2.0)).toBe('rare'); // L4-6 -> rare cap
+        expect(rarityFor(6, 2.0)).toBe('rare');
+        expect(rarityFor(7, 2.0)).toBe('epic'); // L7+ -> epic reachable
+    });
 
-  it('never raises a low tier to the cap (cap is a ceiling, not a floor)', () => {
-    expect(rarityFor(10, 1.30)).toBe('uncommon'); // not forced up to epic
-    expect(rarityFor(1, 1.30)).toBe('uncommon'); // tier == cap
-    expect(rarityFor(1, 1.00)).toBe('common'); // below tier threshold
-  });
+    it('never raises a low tier to the cap (cap is a ceiling, not a floor)', () => {
+        expect(rarityFor(10, 1.3)).toBe('uncommon'); // not forced up to epic
+        expect(rarityFor(1, 1.3)).toBe('uncommon'); // tier == cap
+        expect(rarityFor(1, 1.0)).toBe('common'); // below tier threshold
+    });
 });
 
 describe('qualityClass', () => {
-  it('buckets quality into the CSS class bands', () => {
-    expect(qualityClass(1.70)).toBe('qual--exc');
-    expect(qualityClass(2.00)).toBe('qual--exc');
-    expect(qualityClass(1.30)).toBe('qual--high');
-    expect(qualityClass(1.69)).toBe('qual--high');
-    expect(qualityClass(1.00)).toBe('qual--ok');
-    expect(qualityClass(1.29)).toBe('qual--ok');
-    expect(qualityClass(0.99)).toBe('qual--low');
-    expect(qualityClass(0)).toBe('qual--low');
-  });
+    it('buckets quality into the CSS class bands', () => {
+        expect(qualityClass(1.7)).toBe('qual--exc');
+        expect(qualityClass(2.0)).toBe('qual--exc');
+        expect(qualityClass(1.3)).toBe('qual--high');
+        expect(qualityClass(1.69)).toBe('qual--high');
+        expect(qualityClass(1.0)).toBe('qual--ok');
+        expect(qualityClass(1.29)).toBe('qual--ok');
+        expect(qualityClass(0.99)).toBe('qual--low');
+        expect(qualityClass(0)).toBe('qual--low');
+    });
 });

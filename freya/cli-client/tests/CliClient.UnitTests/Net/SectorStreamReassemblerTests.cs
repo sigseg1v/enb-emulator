@@ -18,9 +18,9 @@ namespace N7.CliClient.UnitTests.Net;
 /// </summary>
 public sealed class SectorStreamReassemblerTests
 {
-    private const ushort PacketSequence  = 0x2016;
+    private const ushort PacketSequence = 0x2016;
     private const ushort PacketCSequence = 0x201A;
-    private const ushort ToggleSendFreq  = 0x1007;
+    private const ushort ToggleSendFreq = 0x1007;
 
     /// <summary>Wrap a payload in a 12-byte EnbUdpHeader with the given UDP opcode.</summary>
     private static byte[] Datagram(ushort udpOpcode, params byte[] payload)

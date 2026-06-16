@@ -6,4 +6,4 @@ namespace enb {
 void log_init();
 void logf(const char* fmt, ...);
 void logs(const std::string& s);
-}
+} // namespace enb

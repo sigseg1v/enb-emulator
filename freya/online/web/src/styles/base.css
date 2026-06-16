@@ -8,129 +8,508 @@
    files. Keep cross-screen things here so a screen module never has to reach
    into another screen's styles. Breakpoint literals follow breakpoints.css. */
 
-.app-root { height: 100vh; width: 100vw; overflow: hidden; }
+.app-root {
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+}
 
 /* ---------- APP SHELL ---------- */
-.shell { display: flex; flex-direction: column; height: 100dvh; background: var(--bg-void); }
+.shell {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    background: var(--bg-void);
+}
 /* Brief splash while we rehydrate the session cookie on first load, so a
    logged-in refresh doesn't flash the Login form before bootstrap resolves. */
-.boot-splash { display: grid; place-items: center; height: 100dvh; background: var(--bg-void); }
+.boot-splash {
+    display: grid;
+    place-items: center;
+    height: 100dvh;
+    background: var(--bg-void);
+}
 
-.topbar { display: flex; align-items: center; gap: 36px; padding: 0 28px; height: 64px; flex: none;
-  background: linear-gradient(180deg, var(--bg-panel), var(--bg-void-2));
-  border-bottom: 1px solid var(--line); position: relative; z-index: 10; }
-.topbar::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px;
-  background: linear-gradient(90deg, transparent, var(--line-glow) 30%, var(--line-glow) 70%, transparent); }
+.topbar {
+    display: flex;
+    align-items: center;
+    gap: 36px;
+    padding: 0 28px;
+    height: 64px;
+    flex: none;
+    background: linear-gradient(180deg, var(--bg-panel), var(--bg-void-2));
+    border-bottom: 1px solid var(--line);
+    position: relative;
+    z-index: 10;
+}
+.topbar::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 1px;
+    background: linear-gradient(
+        90deg,
+        transparent,
+        var(--line-glow) 30%,
+        var(--line-glow) 70%,
+        transparent
+    );
+}
 
-.tabs { display: flex; gap: 4px; height: 100%; align-items: stretch; }
-.tab { display: flex; align-items: center; gap: 9px; padding: 0 22px; background: none; border: 0; white-space: nowrap;
-  font-family: var(--font-display); font-size: 13px; letter-spacing: 0.08em; color: var(--text-faint);
-  cursor: pointer; position: relative; transition: color .15s; }
-.tab:hover { color: var(--text-dim); }
-.tab--active { color: var(--text); }
-.tab--active::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: 0; height: 2px;
-  background: var(--accent); box-shadow: 0 0 10px var(--accent); }
-.tab__glyph { font-size: 15px; opacity: 0.8; }
-.tab__badge { font-family: var(--font-mono); font-size: 10px; min-width: 17px; height: 17px; padding: 0 4px;
-  display: inline-grid; place-items: center; border-radius: 999px; background: var(--warm); color: oklch(0.16 0.02 60); font-weight: 600; }
+.tabs {
+    display: flex;
+    gap: 4px;
+    height: 100%;
+    align-items: stretch;
+}
+.tab {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 0 22px;
+    background: none;
+    border: 0;
+    white-space: nowrap;
+    font-family: var(--font-display);
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    color: var(--text-faint);
+    cursor: pointer;
+    position: relative;
+    transition: color 0.15s;
+}
+.tab:hover {
+    color: var(--text-dim);
+}
+.tab--active {
+    color: var(--text);
+}
+.tab--active::after {
+    content: '';
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 0;
+    height: 2px;
+    background: var(--accent);
+    box-shadow: 0 0 10px var(--accent);
+}
+.tab__glyph {
+    font-size: 15px;
+    opacity: 0.8;
+}
+.tab__badge {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    display: inline-grid;
+    place-items: center;
+    border-radius: 999px;
+    background: var(--warm);
+    color: oklch(0.16 0.02 60);
+    font-weight: 600;
+}
 
-.topbar__spacer { flex: 1; }
-.topbar__acct { display: flex; align-items: center; gap: 14px; font-family: var(--font-mono); font-size: 12px; }
-.topbar__credits { color: var(--text); }
-.topbar__sep { width: 1px; height: 26px; background: var(--line); }
-.topbar__user { display: flex; flex-direction: column; line-height: 1.3; text-align: right; }
-.topbar__user b { font-family: var(--font-body); font-size: 12.5px; color: var(--text); font-weight: 500; }
-.topbar__user span { font-size: 10px; color: var(--text-faint); letter-spacing: 0.06em; }
+.topbar__spacer {
+    flex: 1;
+}
+.topbar__acct {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+.topbar__credits {
+    color: var(--text);
+}
+.topbar__sep {
+    width: 1px;
+    height: 26px;
+    background: var(--line);
+}
+.topbar__user {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.3;
+    text-align: right;
+}
+.topbar__user b {
+    font-family: var(--font-body);
+    font-size: 12.5px;
+    color: var(--text);
+    font-weight: 500;
+}
+.topbar__user span {
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.06em;
+}
 /* Top-bar character selector: the avatar dropdown styled to read like the
    plain name it replaced (no chrome until hovered), with the shared .vsel
    arrow pulled in tight against the right edge. */
-.topbar__charsel { align-self: flex-end; }
+.topbar__charsel {
+    align-self: flex-end;
+}
 /* Doubled-up selector (.topbar__charsel.vsel) so these win over the generic
    .vsel select rules below -- same single-class specificity would otherwise
    let the later .vsel rule take over. */
-.topbar__charsel.vsel select { appearance: none; background: none; border: none;
-  font-family: var(--font-body); font-size: 12.5px; font-weight: 500; color: var(--text);
-  text-align: right; padding: 1px 15px 1px 6px; cursor: pointer; transition: color .15s; }
-.topbar__charsel.vsel select:hover, .topbar__charsel.vsel select:focus { outline: none; color: var(--accent); }
-.topbar__charsel.vsel::after { right: 2px; }
-.topbar__logout { background: none; border: 1px solid var(--line); color: var(--text-faint); cursor: pointer;
-  width: 32px; height: 32px; border-radius: var(--r-sm); font-size: 14px; transition: all .15s; }
-.topbar__logout:hover { border-color: var(--danger); color: var(--danger); }
+.topbar__charsel.vsel select {
+    appearance: none;
+    background: none;
+    border: none;
+    font-family: var(--font-body);
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text);
+    text-align: right;
+    padding: 1px 15px 1px 6px;
+    cursor: pointer;
+    transition: color 0.15s;
+}
+.topbar__charsel.vsel select:hover,
+.topbar__charsel.vsel select:focus {
+    outline: none;
+    color: var(--accent);
+}
+.topbar__charsel.vsel::after {
+    right: 2px;
+}
+.topbar__logout {
+    background: none;
+    border: 1px solid var(--line);
+    color: var(--text-faint);
+    cursor: pointer;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--r-sm);
+    font-size: 14px;
+    transition: all 0.15s;
+}
+.topbar__logout:hover {
+    border-color: var(--danger);
+    color: var(--danger);
+}
 
-.shell__body { flex: 1; overflow: hidden; position: relative; }
-.shell__bg { position: absolute; inset: 0; pointer-events: none;
-  background: radial-gradient(80% 60% at 50% -10%, oklch(0.20 0.03 250 / 0.5), transparent 70%); }
+.shell__body {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+}
+.shell__bg {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(80% 60% at 50% -10%, oklch(0.2 0.03 250 / 0.5), transparent 70%);
+}
 
 /* ---------- PAGE SCAFFOLD ---------- */
-.page { position: relative; height: 100%; display: flex; flex-direction: column; max-width: 1480px; margin: 0 auto; }
-.page__head { display: flex; align-items: flex-end; justify-content: space-between; padding: 24px 28px 16px; flex: none; }
-.page__title { font-family: var(--font-display); font-size: 22px; letter-spacing: 0.04em; margin: 0; }
-.page__sub { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-faint); letter-spacing: 0.04em; margin-top: 6px; }
+.page {
+    position: relative;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    max-width: 1480px;
+    margin: 0 auto;
+}
+.page__head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    padding: 24px 28px 16px;
+    flex: none;
+}
+.page__title {
+    font-family: var(--font-display);
+    font-size: 22px;
+    letter-spacing: 0.04em;
+    margin: 0;
+}
+.page__sub {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--text-faint);
+    letter-spacing: 0.04em;
+    margin-top: 6px;
+}
 
 /* ---------- FORM FIELD (login + account) ---------- */
-.field { display: block; margin-bottom: 16px; }
-.field__label { display: block; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.14em;
-  text-transform: uppercase; color: var(--text-faint); margin-bottom: 6px; }
-.field__input { width: 100%; background: var(--bg-input); border: 1px solid var(--line-strong);
-  border-radius: var(--r-sm); color: var(--text); font-size: 14px; padding: 11px 12px; transition: border-color .15s, box-shadow .15s; }
-.field__input::placeholder { color: var(--text-faint); }
-.field__input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-glow), inset 0 0 12px oklch(0 0 0 / 0.4); }
+.field {
+    display: block;
+    margin-bottom: 16px;
+}
+.field__label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    margin-bottom: 6px;
+}
+.field__input {
+    width: 100%;
+    background: var(--bg-input);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-sm);
+    color: var(--text);
+    font-size: 14px;
+    padding: 11px 12px;
+    transition:
+        border-color 0.15s,
+        box-shadow 0.15s;
+}
+.field__input::placeholder {
+    color: var(--text-faint);
+}
+.field__input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow:
+        0 0 0 1px var(--accent-glow),
+        inset 0 0 12px oklch(0 0 0 / 0.4);
+}
 
 /* ---------- EMPTY STATE ---------- */
-.empty { flex: 1; display: grid; place-items: center; color: var(--text-faint); font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.05em; }
-.empty__inner { text-align: center; }
-.empty__glyph { font-size: 40px; opacity: 0.3; margin-bottom: 14px; }
+.empty {
+    flex: 1;
+    display: grid;
+    place-items: center;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.05em;
+}
+.empty__inner {
+    text-align: center;
+}
+.empty__glyph {
+    font-size: 40px;
+    opacity: 0.3;
+    margin-bottom: 14px;
+}
 
 /* ---------- TOAST ---------- */
-.toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%); z-index: 100;
-  background: var(--bg-elevated); border: 1px solid var(--accent); border-radius: var(--r-sm);
-  padding: 12px 20px; font-family: var(--font-mono); font-size: 12px; color: var(--text);
-  box-shadow: 0 0 24px var(--accent-glow), var(--shadow-panel); animation: toastIn .25s ease; }
+.toast {
+    position: fixed;
+    bottom: 26px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    background: var(--bg-elevated);
+    border: 1px solid var(--accent);
+    border-radius: var(--r-sm);
+    padding: 12px 20px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text);
+    box-shadow:
+        0 0 24px var(--accent-glow),
+        var(--shadow-panel);
+    animation: toastIn 0.25s ease;
+}
 
-@keyframes toastIn { from { opacity: 0; transform: translate(-50%, 12px); } }
+@keyframes toastIn {
+    from {
+        opacity: 0;
+        transform: translate(-50%, 12px);
+    }
+}
 
 /* ---------- SUBTABS (e.g. AH Buy / Sell) ---------- */
-.subtabs { display: flex; gap: 4px; align-items: stretch; height: 34px; }
-.subtab { display: inline-flex; align-items: center; gap: 8px; padding: 0 18px; background: none; border: 0; border-bottom: 2px solid transparent;
-  font-family: var(--font-display); font-size: 12px; letter-spacing: 0.08em; color: var(--text-faint); cursor: pointer; transition: color .15s, border-color .15s; }
-.subtab:hover { color: var(--text-dim); }
-.subtab--active { color: var(--text); border-bottom-color: var(--accent); box-shadow: 0 2px 10px -4px var(--accent); }
-.subtab__glyph { font-size: 13px; opacity: 0.8; }
+.subtabs {
+    display: flex;
+    gap: 4px;
+    align-items: stretch;
+    height: 34px;
+}
+.subtab {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 18px;
+    background: none;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    font-family: var(--font-display);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    color: var(--text-faint);
+    cursor: pointer;
+    transition:
+        color 0.15s,
+        border-color 0.15s;
+}
+.subtab:hover {
+    color: var(--text-dim);
+}
+.subtab--active {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+    box-shadow: 0 2px 10px -4px var(--accent);
+}
+.subtab__glyph {
+    font-size: 13px;
+    opacity: 0.8;
+}
 
 /* ---------- SELECT WRAPPER ---------- */
-.vsel { position: relative; }
-.vsel select { appearance: none; background: var(--bg-input); border: 1px solid var(--line-strong); border-radius: var(--r-sm);
-  color: var(--text); font-family: var(--font-mono); font-size: 12px; padding: 7px 28px 7px 11px; cursor: pointer; }
-.vsel select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-glow); }
-.vsel::after { content: "\25BE"; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--accent); font-size: 10px; pointer-events: none; }
+.vsel {
+    position: relative;
+}
+.vsel select {
+    appearance: none;
+    background: var(--bg-input);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-sm);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 7px 28px 7px 11px;
+    cursor: pointer;
+}
+.vsel select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent-glow);
+}
+.vsel::after {
+    content: '\25BE';
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--accent);
+    font-size: 10px;
+    pointer-events: none;
+}
 /* The open dropdown list (the <option>s) inherits a light system background
    otherwise -- the transparent top-bar select makes that especially jarring.
    Paint the options black so the popup matches the deep-space theme. */
-.vsel select option { background: #000; color: var(--text); }
+.vsel select option {
+    background: #000;
+    color: var(--text);
+}
 
-.dash { color: var(--text-faint); }
+.dash {
+    color: var(--text-faint);
+}
 
 /* ---------- VAULT ITEM GRID (shared by Vault screen + AH sell) ---------- */
-.vault { display: flex; flex-direction: column; flex: none; }
-.vault__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--line); flex: none; }
-.vault__title { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-faint); }
+.vault {
+    display: flex;
+    flex-direction: column;
+    flex: none;
+}
+.vault__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--line);
+    flex: none;
+}
+.vault__title {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
 /* The active avatar is chosen in the top bar now; show it here read-only. */
-.vault__avatar { font-family: var(--font-body); font-size: 12.5px; font-weight: 500; color: var(--accent); }
-.vgrid { padding: 14px; overflow-y: auto; max-height: 38vh; display: grid; grid-template-columns: repeat(auto-fill, 64px); gap: 10px; align-content: start; }
-.vslot { width: 64px; height: 64px; border-radius: var(--r-sm); display: grid; place-items: center; position: relative; cursor: pointer;
-  border: 1px solid var(--rcolor, var(--line-strong)); background: radial-gradient(circle at 38% 30%, oklch(1 0 0 / 0.05), oklch(0 0 0 / 0.3));
-  color: var(--rcolor, var(--text)); transition: transform .12s, box-shadow .12s; }
-.vslot:hover { transform: translateY(-2px); box-shadow: 0 6px 16px oklch(0 0 0 / 0.5), inset 0 0 14px var(--rglow, transparent); }
-.vslot--sel { box-shadow: 0 0 0 1px var(--accent), 0 0 16px var(--accent-glow); }
-.vslot--sel::after { content: ""; position: absolute; inset: -4px; border: 1px solid var(--accent); border-radius: var(--r-sm); pointer-events: none; }
-.vslot .icon__glyph { font-size: 28px; }
-.vslot__qty { position: absolute; bottom: 3px; right: 5px; font-family: var(--font-mono); font-size: 11px; color: var(--text); text-shadow: 0 1px 3px #000; }
+.vault__avatar {
+    font-family: var(--font-body);
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--accent);
+}
+.vgrid {
+    padding: 14px;
+    overflow-y: auto;
+    max-height: 38vh;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, 64px);
+    gap: 10px;
+    align-content: start;
+}
+.vslot {
+    width: 64px;
+    height: 64px;
+    border-radius: var(--r-sm);
+    display: grid;
+    place-items: center;
+    position: relative;
+    cursor: pointer;
+    border: 1px solid var(--rcolor, var(--line-strong));
+    background: radial-gradient(circle at 38% 30%, oklch(1 0 0 / 0.05), oklch(0 0 0 / 0.3));
+    color: var(--rcolor, var(--text));
+    transition:
+        transform 0.12s,
+        box-shadow 0.12s;
+}
+.vslot:hover {
+    transform: translateY(-2px);
+    box-shadow:
+        0 6px 16px oklch(0 0 0 / 0.5),
+        inset 0 0 14px var(--rglow, transparent);
+}
+.vslot--sel {
+    box-shadow:
+        0 0 0 1px var(--accent),
+        0 0 16px var(--accent-glow);
+}
+.vslot--sel::after {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    border: 1px solid var(--accent);
+    border-radius: var(--r-sm);
+    pointer-events: none;
+}
+.vslot .icon__glyph {
+    font-size: 28px;
+}
+.vslot__qty {
+    position: absolute;
+    bottom: 3px;
+    right: 5px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text);
+    text-shadow: 0 1px 3px #000;
+}
 /* Not-Tradable vault items: dimmed, desaturated, not selectable for listing.
    The server rejects them regardless; this just stops the click up front. */
-.vslot--locked { opacity: 0.4; filter: grayscale(0.8); cursor: not-allowed; }
-.vslot--locked:hover { transform: none; box-shadow: none; }
-.vslot__lock { position: absolute; top: 3px; left: 5px; font-size: 13px; color: var(--danger); text-shadow: 0 1px 3px #000; }
-.vslot__pick { position: absolute; top: 3px; right: 5px; font-size: 13px; color: var(--accent); text-shadow: 0 1px 3px #000; }
+.vslot--locked {
+    opacity: 0.4;
+    filter: grayscale(0.8);
+    cursor: not-allowed;
+}
+.vslot--locked:hover {
+    transform: none;
+    box-shadow: none;
+}
+.vslot__lock {
+    position: absolute;
+    top: 3px;
+    left: 5px;
+    font-size: 13px;
+    color: var(--danger);
+    text-shadow: 0 1px 3px #000;
+}
+.vslot__pick {
+    position: absolute;
+    top: 3px;
+    right: 5px;
+    font-size: 13px;
+    color: var(--accent);
+    text-shadow: 0 1px 3px #000;
+}
 
 /* ============================================================
    RESPONSIVE -- app chrome (see breakpoints.css)
@@ -139,29 +518,75 @@
 /* md (768px): the whole app scrolls vertically; the top bar reflows to two
    rows with the tab strip swiping horizontally on its own line. */
 @media (max-width: 48rem) {
-  .shell__body { overflow: hidden auto; }
-  /* Desktop pins .page to the viewport and lets inner panes scroll; on mobile
+    .shell__body {
+        overflow: hidden auto;
+    }
+    /* Desktop pins .page to the viewport and lets inner panes scroll; on mobile
      the whole shell scrolls instead, so let the page grow to its content. */
-  .page { height: auto; min-height: 100%; }
+    .page {
+        height: auto;
+        min-height: 100%;
+    }
 
-  .topbar { flex-wrap: wrap; height: auto; min-height: 56px; gap: 10px 16px; padding: 8px 14px; }
-  .topbar__spacer { display: none; }
-  /* tab strip onto its own full-width row, horizontally scrollable */
-  .tabs { order: 3; width: 100%; gap: 0; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
-  .tabs::-webkit-scrollbar { display: none; }
-  .tab { padding: 0 14px; height: 44px; font-size: 12px; flex: none; }
-  /* push the account cluster to the right of row 1 (spacer is hidden) */
-  .topbar__acct { margin-left: auto; gap: 10px; }
+    .topbar {
+        flex-wrap: wrap;
+        height: auto;
+        min-height: 56px;
+        gap: 10px 16px;
+        padding: 8px 14px;
+    }
+    .topbar__spacer {
+        display: none;
+    }
+    /* tab strip onto its own full-width row, horizontally scrollable */
+    .tabs {
+        order: 3;
+        width: 100%;
+        gap: 0;
+        overflow-x: auto;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+    }
+    .tabs::-webkit-scrollbar {
+        display: none;
+    }
+    .tab {
+        padding: 0 14px;
+        height: 44px;
+        font-size: 12px;
+        flex: none;
+    }
+    /* push the account cluster to the right of row 1 (spacer is hidden) */
+    .topbar__acct {
+        margin-left: auto;
+        gap: 10px;
+    }
 
-  .page__head { padding: 16px 14px 12px; flex-wrap: wrap; gap: 10px 16px; }
-  .page__title { font-size: 19px; }
+    .page__head {
+        padding: 16px 14px 12px;
+        flex-wrap: wrap;
+        gap: 10px 16px;
+    }
+    .page__title {
+        font-size: 19px;
+    }
 
-  .vgrid { max-height: none; }
+    .vgrid {
+        max-height: none;
+    }
 }
 
 /* sm (480px): tightest phones -- trim chrome further. */
 @media (max-width: 30rem) {
-  .topbar { gap: 8px 10px; padding: 8px 10px; }
-  .topbar__credits, .topbar__sep { display: none; }
-  .tab { padding: 0 12px; }
+    .topbar {
+        gap: 8px 10px;
+        padding: 8px 10px;
+    }
+    .topbar__credits,
+    .topbar__sep {
+        display: none;
+    }
+    .tab {
+        padding: 0 12px;
+    }
 }

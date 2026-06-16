@@ -179,6 +179,6 @@ public sealed class SelfGroupStateTests
         Assert.Equal(12, p.Length);
         Assert.Equal(sourceId, BinaryPrimitives.ReadInt32LittleEndian(p.AsSpan(0, 4)));   // SourceID
         Assert.Equal(sourceId, BinaryPrimitives.ReadInt32LittleEndian(p.AsSpan(4, 4)));   // TargetID == SourceID
-        Assert.Equal(action,   BinaryPrimitives.ReadInt32LittleEndian(p.AsSpan(8, 4)));   // Action
+        Assert.Equal(action, BinaryPrimitives.ReadInt32LittleEndian(p.AsSpan(8, 4)));   // Action
     }
 }

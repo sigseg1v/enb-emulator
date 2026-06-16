@@ -84,7 +84,7 @@ just launch                   # central Avalonia tool launcher (recommended)
 just launch-sector-editor     # or jump straight to a specific editor
 ```
 
-The Phase L Avalonia ports (`tools/<name>-avalonia/`) run natively on Linux — no WINE. The legacy WinForms ports (`tools/<name>/`) still cross-compile but only run on Windows / WINE. `tools/itemeditor/` is the only un-ported editor (no upstream csproj). See `tools/README.md` for the per-tool table.
+All user-facing editors are Avalonia 11 / .NET 10 ports that run natively on Linux -- no WINE. The original WinForms projects have been removed. See `tools/README.md` for the per-tool table.
 
 ### CLI packet inspector
 

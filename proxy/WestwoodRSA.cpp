@@ -8,51 +8,47 @@
 #include <openssl/rsa.h>
 #include <openssl/engine.h>
 
-WestwoodRSA::WestwoodRSA()
-{
-	p = BN_new();
-	q = BN_new();
-	N = BN_new();
-	d = BN_new();
-	e = BN_new();
-	temp = BN_CTX_new();
-	if(!p || !q || !N || !d || !e || !temp)
-		LogMessage("ABORT: Failed to allocate BIGNUMs in WestwoodRSA.\n");
- 
-	BN_dec2bn(&p, WWRSA_p);
-	BN_dec2bn(&q, WWRSA_q);
-	BN_dec2bn(&N, WWRSA_N);
-	BN_dec2bn(&d, WWRSA_d);
-	BN_dec2bn(&e, WWRSA_e);
+WestwoodRSA::WestwoodRSA() {
+    p = BN_new();
+    q = BN_new();
+    N = BN_new();
+    d = BN_new();
+    e = BN_new();
+    temp = BN_CTX_new();
+    if (!p || !q || !N || !d || !e || !temp)
+        LogMessage("ABORT: Failed to allocate BIGNUMs in WestwoodRSA.\n");
+
+    BN_dec2bn(&p, WWRSA_p);
+    BN_dec2bn(&q, WWRSA_q);
+    BN_dec2bn(&N, WWRSA_N);
+    BN_dec2bn(&d, WWRSA_d);
+    BN_dec2bn(&e, WWRSA_e);
 }
 
-WestwoodRSA::~WestwoodRSA()
-{
-	BN_free(p);
-	BN_free(q);
-	BN_free(N);
-	BN_free(d);
-	BN_free(e);
-	BN_CTX_free(temp);
+WestwoodRSA::~WestwoodRSA() {
+    BN_free(p);
+    BN_free(q);
+    BN_free(N);
+    BN_free(d);
+    BN_free(e);
+    BN_CTX_free(temp);
 }
 
-unsigned int WestwoodRSA::GetModulus(unsigned char **p_out_buffer)
-{
-    unsigned char * out_buffer = *p_out_buffer;
+unsigned int WestwoodRSA::GetModulus(unsigned char** p_out_buffer) {
+    unsigned char* out_buffer = *p_out_buffer;
     *out_buffer++ = 0x00;
     *out_buffer++ = 0x00;
     *out_buffer++ = 0x00;
     *out_buffer++ = 0x41;
-	*out_buffer++ = 0x00;
-	BN_bn2bin(N, out_buffer);
-	out_buffer += 64;
+    *out_buffer++ = 0x00;
+    BN_bn2bin(N, out_buffer);
+    out_buffer += 64;
     *p_out_buffer = out_buffer;
     return (69);
 }
 
-unsigned int WestwoodRSA::GetPublicExponent(unsigned char **p_out_buffer)
-{
-    unsigned char * out_buffer = *p_out_buffer;
+unsigned int WestwoodRSA::GetPublicExponent(unsigned char** p_out_buffer) {
+    unsigned char* out_buffer = *p_out_buffer;
     *out_buffer++ = 0x00;
     *out_buffer++ = 0x00;
     *out_buffer++ = 0x00;
@@ -65,26 +61,23 @@ unsigned int WestwoodRSA::GetPublicExponent(unsigned char **p_out_buffer)
     return (5);
 }
 
-bool WestwoodRSA::Encrypt(unsigned char *in_buffer, unsigned int length, unsigned char *out_buffer)
-{
+bool WestwoodRSA::Encrypt(unsigned char* in_buffer, unsigned int length,
+                          unsigned char* out_buffer) {
     bool success = false;
-    if (length > 0)
-    {
+    if (length > 0) {
         // OpenSSL 3.x: BIGNUM is opaque; BN_init() is gone. Heap-allocate.
-        BIGNUM *M = BN_new();
-        BIGNUM *C = BN_new();
+        BIGNUM* M = BN_new();
+        BIGNUM* C = BN_new();
         unsigned int offset = 0;
         unsigned int remaining = length;
-        while (remaining >= WWRSA_BLOCK_SIZE)
-        {
+        while (remaining >= WWRSA_BLOCK_SIZE) {
             BN_bin2bn(in_buffer + offset, WWRSA_BLOCK_SIZE, M);
             BN_mod_exp(C, M, e, N, temp);
             BN_bn2bin(C, out_buffer + offset);
             offset += WWRSA_BLOCK_SIZE;
             remaining -= WWRSA_BLOCK_SIZE;
         }
-        if (remaining > 0)
-        {
+        if (remaining > 0) {
             unsigned char buffer[WWRSA_BLOCK_SIZE];
             memcpy(buffer, in_buffer + offset, remaining);
             memset(buffer + remaining, 0, WWRSA_BLOCK_SIZE - remaining);
@@ -100,45 +93,38 @@ bool WestwoodRSA::Encrypt(unsigned char *in_buffer, unsigned int length, unsigne
     return success;
 };
 
-bool WestwoodRSA::Decrypt(unsigned char *in_buffer, unsigned int length, unsigned char *out_buffer)
-{
+bool WestwoodRSA::Decrypt(unsigned char* in_buffer, unsigned int length,
+                          unsigned char* out_buffer) {
     bool success = false;
     unsigned int blocks = length / WWRSA_BLOCK_SIZE;
-    if (blocks * WWRSA_BLOCK_SIZE == length)
-    {
+    if (blocks * WWRSA_BLOCK_SIZE == length) {
         // OpenSSL 3.x: BIGNUM is opaque; BN_init() is gone. Heap-allocate.
-        BIGNUM *C = BN_new();
-        BIGNUM *M = BN_new();
+        BIGNUM* C = BN_new();
+        BIGNUM* M = BN_new();
         unsigned int offset = 0;
-        for (unsigned int i = 0; i < blocks; i++)
-        {
+        for (unsigned int i = 0; i < blocks; i++) {
             BN_bin2bn(in_buffer + offset, WWRSA_BLOCK_SIZE, C);
             BN_mod_exp(M, C, d, N, temp);
 
             int size = BN_bn2bin(M, out_buffer + offset);
 
-            if ((size < 0) || (size > WWRSA_BLOCK_SIZE))
-            {
+            if ((size < 0) || (size > WWRSA_BLOCK_SIZE)) {
                 printf("Unexpected error in WestwoodRSA::Decrypt\n");
                 BN_free(C);
                 BN_free(M);
                 return false;
-            }
-            else if (size == 0)
-            {
-            	memset((out_buffer + offset), 0, WWRSA_BLOCK_SIZE);
-            }
-            else if(size < WWRSA_BLOCK_SIZE)
-            {
-			    // Need this cause BN_bn2bin will yield at the beginning
-			    // of the buffer, unlike Integer::Encode which, because
-			    // it is passed size as a parameter (WWRSA_BLOCK_SIZE),
-			    // will place the data at the end of the buffer.
-            	unsigned char temp[WWRSA_BLOCK_SIZE];
-            	int diff = WWRSA_BLOCK_SIZE - size;
-            	memcpy(temp, (out_buffer + offset), size);
-            	memset((out_buffer + offset), 0, WWRSA_BLOCK_SIZE - size);
-            	memcpy((out_buffer + offset + diff), temp, size);
+            } else if (size == 0) {
+                memset((out_buffer + offset), 0, WWRSA_BLOCK_SIZE);
+            } else if (size < WWRSA_BLOCK_SIZE) {
+                // Need this cause BN_bn2bin will yield at the beginning
+                // of the buffer, unlike Integer::Encode which, because
+                // it is passed size as a parameter (WWRSA_BLOCK_SIZE),
+                // will place the data at the end of the buffer.
+                unsigned char temp[WWRSA_BLOCK_SIZE];
+                int diff = WWRSA_BLOCK_SIZE - size;
+                memcpy(temp, (out_buffer + offset), size);
+                memset((out_buffer + offset), 0, WWRSA_BLOCK_SIZE - size);
+                memcpy((out_buffer + offset + diff), temp, size);
             }
 
             offset += WWRSA_BLOCK_SIZE;

@@ -34,21 +34,21 @@ namespace LaunchFreya
 
         public string BaseFolder { get; private set; }
 
-        public string AuthLoginFileName  => Path.Combine(BaseFolder ?? "", "release", "authlogin.dll");
-        public string IniDirectoryName    => Path.Combine(BaseFolder ?? "", "Data", "client", "ini");
+        public string AuthLoginFileName => Path.Combine(BaseFolder ?? "", "release", "authlogin.dll");
+        public string IniDirectoryName => Path.Combine(BaseFolder ?? "", "Data", "client", "ini");
         public string CommonDirectoryName => Path.Combine(BaseFolder ?? "", "Data", "common");
 
-        public int    AuthenticationPort       { get; set; } = 443;
-        public string Hostname                 { get; set; }
-        public string RegistrationHostname     { get; set; }
-        public string LaunchName               { get; set; }
+        public int AuthenticationPort { get; set; } = 443;
+        public string Hostname { get; set; }
+        public string RegistrationHostname { get; set; }
+        public string LaunchName { get; set; }
 
         // PB-2: inject the in-client MVAS position-feed DLL into client.exe.
-        public bool   EnablePositionFeed       { get; set; }
+        public bool EnablePositionFeed { get; set; }
 
         // Inject the enbmod Lua mod runtime (enbmod.dll) into client.exe, enabling
         // client-side UI mods without patching the game. Experimental; opt-in.
-        public bool   EnableClientMods         { get; set; }
+        public bool EnableClientMods { get; set; }
 
         // Per-mod enable state by mod id (scripts/mods/<id>). A mod absent from the
         // map is enabled. StageClientMods stages only enabled mods. Mirrors
@@ -197,9 +197,9 @@ namespace LaunchFreya
                 return new ProcessStartInfo
                 {
                     WorkingDirectory = workingDir,
-                    FileName         = exePath,
-                    Arguments        = arguments ?? "",
-                    UseShellExecute  = true,
+                    FileName = exePath,
+                    Arguments = arguments ?? "",
+                    UseShellExecute = true,
                 };
             }
             else
@@ -207,8 +207,8 @@ namespace LaunchFreya
                 return new ProcessStartInfo
                 {
                     WorkingDirectory = workingDir,
-                    FileName         = "wine",
-                    Arguments        = string.IsNullOrEmpty(arguments)
+                    FileName = "wine",
+                    Arguments = string.IsNullOrEmpty(arguments)
                         ? $"\"{exePath}\""
                         : $"\"{exePath}\" {arguments}",
                     UseShellExecute = false,
@@ -253,9 +253,9 @@ namespace LaunchFreya
                     info = new ProcessStartInfo
                     {
                         WorkingDirectory = dir,
-                        FileName         = _injectorExe,
-                        Arguments        = injectArgs,
-                        UseShellExecute  = false,
+                        FileName = _injectorExe,
+                        Arguments = injectArgs,
+                        UseShellExecute = false,
                     };
                 }
                 else
@@ -263,9 +263,9 @@ namespace LaunchFreya
                     info = new ProcessStartInfo
                     {
                         WorkingDirectory = dir,
-                        FileName         = "wine",
-                        Arguments        = $"\"{_injectorExe}\" {injectArgs}",
-                        UseShellExecute  = false,
+                        FileName = "wine",
+                        Arguments = $"\"{_injectorExe}\" {injectArgs}",
+                        UseShellExecute = false,
                     };
                 }
             }
@@ -335,10 +335,10 @@ namespace LaunchFreya
             // (WINE won't allocate a console when stdout/stderr are inherited).
             // We drain and discard the pipes so the proxy never blocks on a full
             // buffer -- the file log is the real record.
-            info.UseShellExecute        = false;
-            info.CreateNoWindow         = true;
+            info.UseShellExecute = false;
+            info.CreateNoWindow = true;
             info.RedirectStandardOutput = true;
-            info.RedirectStandardError  = true;
+            info.RedirectStandardError = true;
 
             try
             {
@@ -347,7 +347,7 @@ namespace LaunchFreya
                 if (p != null)
                 {
                     p.OutputDataReceived += (_, __) => { };
-                    p.ErrorDataReceived  += (_, __) => { };
+                    p.ErrorDataReceived += (_, __) => { };
                     p.BeginOutputReadLine();
                     p.BeginErrorReadLine();
                 }
@@ -497,8 +497,8 @@ namespace LaunchFreya
 
         void PatchNetworkIniFile(string host)
         {
-            var file       = Path.Combine(_setting.CommonDirectoryName, "network.ini");
-            var backup     = Path.Combine(_setting.CommonDirectoryName, "network.ini.orig");
+            var file = Path.Combine(_setting.CommonDirectoryName, "network.ini");
+            var backup = Path.Combine(_setting.CommonDirectoryName, "network.ini.orig");
 
             if (!File.Exists(file) && File.Exists(backup)) File.Copy(backup, file);
 
@@ -525,7 +525,7 @@ namespace LaunchFreya
 
         void PatchAuthIniFile()
         {
-            var file   = Path.Combine(_setting.IniDirectoryName, "auth.ini");
+            var file = Path.Combine(_setting.IniDirectoryName, "auth.ini");
             var backup = Path.Combine(_setting.IniDirectoryName, "auth.ini.orig");
             if (!File.Exists(file) && File.Exists(backup)) File.Copy(backup, file);
 
@@ -547,32 +547,32 @@ namespace LaunchFreya
             var lkeyUrl = new UriBuilder
             {
                 Scheme = "https",
-                Host   = _setting.EffectiveRegistrationHostname,
-                Path   = "misc/touchsession.jsp",
-                Query  = "lkey=%s",
+                Host = _setting.EffectiveRegistrationHostname,
+                Path = "misc/touchsession.jsp",
+                Query = "lkey=%s",
             }.ToString();
 
             bool needPatch =
-                !string.Equals(IniFile.GetValue(file, "General", "AAIUrl"),  authHost, StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(IniFile.GetValue(file, "General", "LKeyUrl"), lkeyUrl,  StringComparison.OrdinalIgnoreCase);
+                !string.Equals(IniFile.GetValue(file, "General", "AAIUrl"), authHost, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(IniFile.GetValue(file, "General", "LKeyUrl"), lkeyUrl, StringComparison.OrdinalIgnoreCase);
 
             if (!needPatch) return;
             if (File.Exists(file)) File.Copy(file, backup, true);
-            IniFile.SetValue(file, "General", "AAIUrl",  authHost);
+            IniFile.SetValue(file, "General", "AAIUrl", authHost);
             IniFile.SetValue(file, "General", "LKeyUrl", lkeyUrl);
         }
 
         void PatchRegDataFile()
         {
-            var file   = Path.Combine(_setting.IniDirectoryName, "rg_regdata.ini");
+            var file = Path.Combine(_setting.IniDirectoryName, "rg_regdata.ini");
             var backup = Path.Combine(_setting.IniDirectoryName, "rg_regdata.ini.orig");
             if (!File.Exists(file) && File.Exists(backup)) File.Copy(backup, file);
 
             var url = new UriBuilder
             {
                 Scheme = "https",
-                Host   = _setting.EffectiveRegistrationHostname,
-                Path   = "subsxml",
+                Host = _setting.EffectiveRegistrationHostname,
+                Path = "subsxml",
             }.ToString();
 
             if (string.Equals(IniFile.GetValue(file, "Connection", "regserverurl"), url, StringComparison.OrdinalIgnoreCase))
@@ -605,7 +605,7 @@ namespace LaunchFreya
                 _warn($"authlogin.dll: detected {info.Build} build.");
                 if (info.Port != LocalAuthRelay.ListenPort || info.UseHttps)
                 {
-                    info.Port     = (ushort)LocalAuthRelay.ListenPort;
+                    info.Port = (ushort)LocalAuthRelay.ListenPort;
                     info.UseHttps = false;
                     AuthLoginPatcher.WriteInformation(_setting.AuthLoginFileName, info);
                 }
@@ -643,7 +643,7 @@ namespace LaunchFreya
                 AuthRelay = LocalAuthRelay.Start(
                     upstreamHost: _setting.Hostname,
                     upstreamPort: _setting.AuthenticationPort,
-                    log:          _warn);
+                    log: _warn);
             }
             catch (Exception e)
             {
@@ -992,11 +992,11 @@ namespace LaunchFreya
             {
                 var psi = new ProcessStartInfo
                 {
-                    FileName               = "wine",
-                    UseShellExecute        = false,
+                    FileName = "wine",
+                    UseShellExecute = false,
                     RedirectStandardOutput = true,
-                    RedirectStandardError  = true,
-                    CreateNoWindow         = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
                 };
                 psi.ArgumentList.Add("winepath");
                 psi.ArgumentList.Add("-w");
@@ -1032,11 +1032,11 @@ namespace LaunchFreya
             // WINEPREFIX from the launching process (set by `just play-local`).
             var psi = new ProcessStartInfo
             {
-                FileName               = "wine",
-                UseShellExecute        = false,
+                FileName = "wine",
+                UseShellExecute = false,
                 RedirectStandardOutput = true,
-                RedirectStandardError  = true,
-                CreateNoWindow         = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
             };
             psi.ArgumentList.Add("reg");
             psi.ArgumentList.Add("add");

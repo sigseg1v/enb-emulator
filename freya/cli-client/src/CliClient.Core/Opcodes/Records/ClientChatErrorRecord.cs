@@ -19,10 +19,10 @@ public sealed class ClientChatErrorRecord : PacketRecord
     {
         if (Payload.Length < 8) { Flag(sb, $"CLIENT_CHAT_ERROR truncated -- {Payload.Length} bytes, expected >= 8"); return; }
         FDec(sb, 0, "Reason", ReadI32LE(Payload, 0));
-        FDec(sb, 4, "Type",   ReadI32LE(Payload, 4));
+        FDec(sb, 4, "Type", ReadI32LE(Payload, 4));
         int off = 8;
-        if (!TryReadAddDataLS(sb, ref off, "Player"))  return;
+        if (!TryReadAddDataLS(sb, ref off, "Player")) return;
         if (!TryReadAddDataLS(sb, ref off, "Channel")) return;
-        if (!TryReadAddDataLS(sb, ref off, "Other"))   return;
+        if (!TryReadAddDataLS(sb, ref off, "Other")) return;
     }
 }

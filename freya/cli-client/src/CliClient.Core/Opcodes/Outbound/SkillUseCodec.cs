@@ -73,8 +73,8 @@ public sealed class SkillUseCodec : IOpcodeCodec
         }
 
         return new SkillUseMessage(
-            GameId:       BinaryPrimitives.ReadInt32LittleEndian(payload[0..4]),
-            Action:       BinaryPrimitives.ReadInt32LittleEndian(payload[4..8]),
+            GameId: BinaryPrimitives.ReadInt32LittleEndian(payload[0..4]),
+            Action: BinaryPrimitives.ReadInt32LittleEndian(payload[4..8]),
             AbilityIndex: BinaryPrimitives.ReadInt32LittleEndian(payload[8..12]));
     }
 

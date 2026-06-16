@@ -17,16 +17,16 @@ namespace LaunchFreya.Update
     public sealed class UpdateCheckRequest
     {
         [JsonPropertyName("launcherHash")] public string LauncherHash { get; set; }
-        [JsonPropertyName("proxyHash")]    public string ProxyHash    { get; set; }
-        [JsonPropertyName("posFeedHash")]  public string PosFeedHash  { get; set; }
-        [JsonPropertyName("injectHash")]   public string InjectHash   { get; set; }
+        [JsonPropertyName("proxyHash")] public string ProxyHash { get; set; }
+        [JsonPropertyName("posFeedHash")] public string PosFeedHash { get; set; }
+        [JsonPropertyName("injectHash")] public string InjectHash { get; set; }
         // enbmod.dll -- the optional Lua mod runtime. Hashed and shipped
         // INDEPENDENTLY, exactly like the MVAS pair: it rides with the launcher
         // set but a runtime-only patch reaches existing installs on its own
         // mismatch. The Lua SCRIPTS are deliberately NOT hashed here -- they are
         // user-editable mod content (init.lua hot-reloads) and the self-updater
         // would clobber local edits; they ship as a one-time seed in the zip.
-        [JsonPropertyName("enbmodHash")]   public string EnbmodHash   { get; set; }
+        [JsonPropertyName("enbmodHash")] public string EnbmodHash { get; set; }
         // GalaxyMap.dat -- the proxy's cached galaxy-map node data. Hashed and
         // shipped INDEPENDENTLY, exactly like the MVAS pair and enbmod runtime:
         // the WINE proxy serves it to the client for the in-game galaxy map and
@@ -42,8 +42,8 @@ namespace LaunchFreya.Update
         // launcher install dir or below -- enforced by the path-traversal guard
         // before anything is written.
         [JsonPropertyName("relativePath")] public string RelativePath { get; set; }
-        [JsonPropertyName("url")]          public string Url          { get; set; }
-        [JsonPropertyName("hash")]         public string Hash         { get; set; }
+        [JsonPropertyName("url")] public string Url { get; set; }
+        [JsonPropertyName("hash")] public string Hash { get; set; }
     }
 
     // One published enbmod Lua mod the server vouches for. The launcher compares
@@ -52,9 +52,9 @@ namespace LaunchFreya.Update
     // never touched. See freya/client-injection/enbmod/MOD-STRUCTURE.md.
     public sealed class ModUpdate
     {
-        [JsonPropertyName("id")]   public string Id   { get; set; }
+        [JsonPropertyName("id")] public string Id { get; set; }
         [JsonPropertyName("hash")] public string Hash { get; set; }
-        [JsonPropertyName("url")]  public string Url  { get; set; }
+        [JsonPropertyName("url")] public string Url { get; set; }
     }
 
     // One operator-supplied game-data patch the server vouches for. Unlike a
@@ -68,17 +68,17 @@ namespace LaunchFreya.Update
     {
         [JsonPropertyName("name")] public string Name { get; set; }
         [JsonPropertyName("hash")] public string Hash { get; set; }
-        [JsonPropertyName("url")]  public string Url  { get; set; }
+        [JsonPropertyName("url")] public string Url { get; set; }
     }
 
     public sealed class UpdateCheckResponse
     {
         // "UP_TO_DATE" or "UPDATE_NEEDED".
         [JsonPropertyName("status")] public string Status { get; set; }
-        [JsonPropertyName("files")]  public List<UpdateFile> Files { get; set; }
+        [JsonPropertyName("files")] public List<UpdateFile> Files { get; set; }
         // The authoritative set of OUR Lua mods (id + hash + zip url). Orthogonal
         // to Status: present in both replies, since mod updates do not gate Play.
-        [JsonPropertyName("mods")]   public List<ModUpdate> Mods { get; set; }
+        [JsonPropertyName("mods")] public List<ModUpdate> Mods { get; set; }
         // The operator-supplied game-data patches (name + hash + exe url). Like
         // mods, orthogonal to Status -- present in both replies and applied
         // against the EnB game install, not the launcher dir. See PatchUpdate.
@@ -87,7 +87,7 @@ namespace LaunchFreya.Update
 
     public static class UpdateStatus
     {
-        public const string UpToDate     = "UP_TO_DATE";
+        public const string UpToDate = "UP_TO_DATE";
         public const string UpdateNeeded = "UPDATE_NEEDED";
     }
 }

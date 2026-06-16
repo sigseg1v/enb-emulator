@@ -53,9 +53,9 @@ internal static class Program
         {
             switch (args[i])
             {
-                case "--input":   input = args[++i]; break;
-                case "--output":  output = args[++i]; break;
-                case "--ip":      ip = args[++i]; break;
+                case "--input": input = args[++i]; break;
+                case "--output": output = args[++i]; break;
+                case "--ip": ip = args[++i]; break;
                 case "--stop-at": stopOpcode = ParseHexU16(args[++i]); break;
                 case "--print-frames": printFrames = true; break;
                 case "-h": case "--help": PrintUsage(); return 0;
@@ -308,14 +308,14 @@ internal static class Program
     {
         var metaSb = new StringBuilder();
         if (meta.CaptureSource is not null) metaSb.AppendLine($"capture={meta.CaptureSource}");
-        if (meta.TargetIp is not null)      metaSb.AppendLine($"target_ip={meta.TargetIp}");
+        if (meta.TargetIp is not null) metaSb.AppendLine($"target_ip={meta.TargetIp}");
         metaSb.AppendLine($"stop_opcode=0x{meta.StopOpcode:X4}");
         metaSb.AppendLine($"frame_count={meta.FrameCount}");
-        if (meta.AvatarId is uint a)        metaSb.AppendLine($"avatar_id=0x{a:X8}");
-        if (meta.AvatarName is not null)    metaSb.AppendLine($"avatar_name={meta.AvatarName}");
-        if (meta.ShipName is not null)      metaSb.AppendLine($"ship_name={meta.ShipName}");
-        if (meta.StationId is ushort st)    metaSb.AppendLine($"station_id=0x{st:X4}");
-        if (meta.SectorId is ushort sec)    metaSb.AppendLine($"sector_id={sec}");
+        if (meta.AvatarId is uint a) metaSb.AppendLine($"avatar_id=0x{a:X8}");
+        if (meta.AvatarName is not null) metaSb.AppendLine($"avatar_name={meta.AvatarName}");
+        if (meta.ShipName is not null) metaSb.AppendLine($"ship_name={meta.ShipName}");
+        if (meta.StationId is ushort st) metaSb.AppendLine($"station_id=0x{st:X4}");
+        if (meta.SectorId is ushort sec) metaSb.AppendLine($"sector_id={sec}");
         var metaBytes = Encoding.ASCII.GetBytes(metaSb.ToString());
 
         using var fs = File.Create(path);

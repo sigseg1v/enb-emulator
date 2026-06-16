@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -32,47 +32,53 @@ namespace WestWood3D.Chunks
             HeaderName = ChunkHeader.W3D_CHUNK_EMITTER_PROPS.ToString();
 
             color_key_frames = br.ReadInt32();
-    	    opacity_key_frames = br.ReadInt32();
-    	    size_key_frames = br.ReadInt32();
+            opacity_key_frames = br.ReadInt32();
+            size_key_frames = br.ReadInt32();
 
             int R = br.ReadByte();
             int G = br.ReadByte();
             int B = br.ReadByte();
             int A = br.ReadByte();
-        	
-    	    color_random = Color.FromArgb(A, R, G, B);
-    	    opacity_random = br.ReadSingle();
-    	    size_random = br.ReadSingle();
-        	
-    	    int[] reserved = new int[4];
-		    for (int i = 0; i < 4; i++) {
-			    reserved[i] = br.ReadInt32();
-		    }    	
-    		
-		    if(dbg){
-			    Console.Out.WriteLine("\t Color Key Frames: "+color_key_frames);
-			    Console.Out.WriteLine("\t Opacity Key Frames: "+opacity_key_frames);
-			    Console.Out.WriteLine("\t Size Key Frames: "+size_key_frames);
-			    Console.Out.WriteLine("\t Color Random: "+color_random);
-			    Console.Out.WriteLine("\t Opacity Random: "+opacity_random);
-			    Console.Out.WriteLine("\t Size Random: "+size_random);
-		    }
-    		
-		    if(color_key_frames == 0){
-			    color_key_frames = 1;
-		    }
-		    if(opacity_key_frames == 0){
-			    opacity_key_frames = 1;
-		    }
-		    if(size_key_frames == 0){
-			    size_key_frames = 1;
-		    }
+
+            color_random = Color.FromArgb(A, R, G, B);
+            opacity_random = br.ReadSingle();
+            size_random = br.ReadSingle();
+
+            int[] reserved = new int[4];
+            for (int i = 0; i < 4; i++)
+            {
+                reserved[i] = br.ReadInt32();
+            }
+
+            if (dbg)
+            {
+                Console.Out.WriteLine("\t Color Key Frames: " + color_key_frames);
+                Console.Out.WriteLine("\t Opacity Key Frames: " + opacity_key_frames);
+                Console.Out.WriteLine("\t Size Key Frames: " + size_key_frames);
+                Console.Out.WriteLine("\t Color Random: " + color_random);
+                Console.Out.WriteLine("\t Opacity Random: " + opacity_random);
+                Console.Out.WriteLine("\t Size Random: " + size_random);
+            }
+
+            if (color_key_frames == 0)
+            {
+                color_key_frames = 1;
+            }
+            if (opacity_key_frames == 0)
+            {
+                opacity_key_frames = 1;
+            }
+            if (size_key_frames == 0)
+            {
+                size_key_frames = 1;
+            }
 
             color_keyframe_data = new object[color_key_frames][];
             opacity_keyframe_data = new object[opacity_key_frames][];
             size_keyframe_data = new object[size_key_frames][];
-    		
-		    for (int i = 0; i < color_key_frames; i++) {
+
+            for (int i = 0; i < color_key_frames; i++)
+            {
                 float colorTime = br.ReadSingle();
 
                 int cR = br.ReadByte();
@@ -88,14 +94,16 @@ namespace WestWood3D.Chunks
 
                 color_keyframe_data[i] = tmp;
 
-			    if(dbg){
-				    Console.Out.WriteLine("\t  ********** Color KeyFrame "+i+"**********");
-	        	    Console.Out.WriteLine("\t  Color Time: "+colorTime);
-	    		    Console.Out.WriteLine("\t  Color: "+color);
-			    }
-		    }		
-    		
-		    for (int i = 0; i < opacity_key_frames; i++) {
+                if (dbg)
+                {
+                    Console.Out.WriteLine("\t  ********** Color KeyFrame " + i + "**********");
+                    Console.Out.WriteLine("\t  Color Time: " + colorTime);
+                    Console.Out.WriteLine("\t  Color: " + color);
+                }
+            }
+
+            for (int i = 0; i < opacity_key_frames; i++)
+            {
                 float opacityTime = br.ReadSingle();
                 float opacity = br.ReadSingle();
 
@@ -104,15 +112,17 @@ namespace WestWood3D.Chunks
                 tmp[1] = opacity;
 
                 opacity_keyframe_data[i] = tmp;
-    			
-			    if(dbg){
-				    Console.Out.WriteLine("\t  ********** Opacity KeyFrame "+i+"**********");
-	        	    Console.Out.WriteLine("\t  Opacity Time: "+opacityTime);
-	    		    Console.Out.WriteLine("\t  Opacity: "+opacity);
-			    }
-		    }		
-    		
-		    for (int i = 0; i < size_key_frames; i++) {
+
+                if (dbg)
+                {
+                    Console.Out.WriteLine("\t  ********** Opacity KeyFrame " + i + "**********");
+                    Console.Out.WriteLine("\t  Opacity Time: " + opacityTime);
+                    Console.Out.WriteLine("\t  Opacity: " + opacity);
+                }
+            }
+
+            for (int i = 0; i < size_key_frames; i++)
+            {
                 float sizeTime = br.ReadSingle();
                 float size = br.ReadSingle();
 
@@ -122,12 +132,13 @@ namespace WestWood3D.Chunks
 
                 size_keyframe_data[i] = tmp;
 
-			    if(dbg){
-				    Console.Out.WriteLine("\t  ********** Size KeyFrame "+i+"**********");
-	        	    Console.Out.WriteLine("\t  Size Time: "+sizeTime);
-	    		    Console.Out.WriteLine("\t  Size: "+size);
-			    }
-		    }
+                if (dbg)
+                {
+                    Console.Out.WriteLine("\t  ********** Size KeyFrame " + i + "**********");
+                    Console.Out.WriteLine("\t  Size Time: " + sizeTime);
+                    Console.Out.WriteLine("\t  Size: " + size);
+                }
+            }
         }
 
         [CategoryAttribute("Chunk Values"), ReadOnlyAttribute(true), DescriptionAttribute("The Count of color keyframes.")]

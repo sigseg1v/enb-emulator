@@ -17,7 +17,7 @@ namespace LaunchFreya.Tests
         // (build name, scheme-byte offset, port u16 offset) -- mirrors
         // AuthLoginPatcher.Layouts.
         const int RetailScheme = 0x8328, RetailPort = 0x82AD;
-        const int DemoScheme   = 0x22BA, DemoPort   = 0x20A3;
+        const int DemoScheme = 0x22BA, DemoPort = 0x20A3;
 
         // Build a fake authlogin.dll: zero-filled, with the flags-push signature
         // written so the scheme byte lands at schemeOffset, and a port immediate

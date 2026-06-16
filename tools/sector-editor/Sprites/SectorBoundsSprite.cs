@@ -1,65 +1,60 @@
-using System;
-using System.Collections.Generic;
-using System.Text;
+// SPDX-License-Identifier: CC-BY-NC-SA-3.0
+// Part of the Earth & Beyond emulator preservation project.
+// Ported from N7.Sprites.SectorBoundsSprite under Net-7 Entertainment's
+// CC BY-NC-SA 3.0; preservation modifications inherit under ShareAlike.
+
 using System.Drawing;
-using System.IO;
-using System.Drawing.Drawing2D;
+using SectorEditor.PiccoloShim;
 
-using UMD.HCIL.Piccolo;
-using UMD.HCIL.Piccolo.Event;
-using UMD.HCIL.Piccolo.Nodes;
-using UMD.HCIL.Piccolo.Util;
-
-namespace N7.Sprites
+namespace SectorEditor.Sprites
 {
-    class SectorBoundsSprite
+    // Renders a single sector's coordinate frame (XY axes + bounds rect)
+    // inside SectorWindow at sector-local scale.
+    public class SectorBoundsSprite
     {
         public SectorBoundsSprite(PLayer layer, float x_min, float y_min, float x_max, float y_max)
         {
-            float width = (x_max-x_min)/100;
-            float height = (y_max-y_min)/100;
+            float width = (x_max - x_min) / 100;
+            float height = (y_max - y_min) / 100;
             float x = -(width / 2);
             float y = -(height / 2);
 
-            Pen boundsPen = new Pen(Color.Red, 10.0F);
-            boundsPen.DashStyle = DashStyle.DashDotDot;
-            Pen xEdgePen = new Pen(Color.White, 2.5F);
-            xEdgePen.DashStyle = DashStyle.Solid;
-            Pen yEdgePen = new Pen(Color.White, 2.5F);
-            yEdgePen.DashStyle = DashStyle.Solid;
+            var boundsPen = new Pen(Color.Red, 10.0F) { DashStyle = DashStyle.DashDotDot };
+            var xEdgePen = new Pen(Color.White, 2.5F) { DashStyle = DashStyle.Solid };
 
-            PPath boundsRectangle = PPath.CreateRectangle(x, y, width, height);
+            var boundsRectangle = PPath.CreateRectangle(x, y, width, height);
             boundsRectangle.Brush = Brushes.Transparent;
             boundsRectangle.Pen = boundsPen;
 
-            PPath xEdge = new PPath();
+            var xEdge = new PPath();
             xEdge.AddLine(-50, 0, 50, 0);
             xEdge.Pen = xEdgePen;
 
-            PPath yEdge = new PPath();
+            var yEdge = new PPath();
             yEdge.AddLine(0, -50, 0, 50);
             yEdge.Pen = xEdgePen;
 
-            PText xy = new PText();
-            xy.TextBrush = Brushes.White;
-            xy.TextAlignment = StringAlignment.Center;
-            xy.Text = "0,0";
-            xy.X = 5;
-            xy.Y = 5;
-
-            PText posX = new PText();
-            posX.TextBrush = Brushes.White;
-            posX.TextAlignment = StringAlignment.Center;
-            posX.Text = "+X";
-            posX.X = 52;
-            posX.Y = -9;
-
-            PText posY = new PText();
-            posY.TextBrush = Brushes.White;
-            posY.TextAlignment = StringAlignment.Center;
-            posY.Text = "+Y";
-            posY.X = -12;
-            posY.Y = 52;
+            var xy = new PText("0,0")
+            {
+                TextBrush = Brushes.White,
+                TextAlignment = StringAlignment.Center,
+                X = 5,
+                Y = 5,
+            };
+            var posX = new PText("+X")
+            {
+                TextBrush = Brushes.White,
+                TextAlignment = StringAlignment.Center,
+                X = 52,
+                Y = -9,
+            };
+            var posY = new PText("+Y")
+            {
+                TextBrush = Brushes.White,
+                TextAlignment = StringAlignment.Center,
+                X = -12,
+                Y = 52,
+            };
 
             boundsRectangle.AddChild(xy);
             boundsRectangle.AddChild(posX);

@@ -143,11 +143,11 @@ namespace LaunchFreya.Update
         {
             var req = new UpdateCheckRequest
             {
-                LauncherHash  = launcherHash,
-                ProxyHash     = proxyHash,
-                PosFeedHash   = posFeedHash,
-                InjectHash    = injectHash,
-                EnbmodHash    = enbmodHash,
+                LauncherHash = launcherHash,
+                ProxyHash = proxyHash,
+                PosFeedHash = posFeedHash,
+                InjectHash = injectHash,
+                EnbmodHash = enbmodHash,
                 GalaxyMapHash = galaxyMapHash,
             };
             return JsonSerializer.Serialize(req);

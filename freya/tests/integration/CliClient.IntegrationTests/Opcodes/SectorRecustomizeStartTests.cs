@@ -213,7 +213,7 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 public sealed class SectorRecustomizeStartTests : SectorIntegrationTest
 {
     private const int ExpectedAvatarStartSize = 60;   // 14*int32 + int32
-    private const int ExpectedShipStartSize   = 262;  // 194 ShipData + 12*int32 + int32 + 4*int32
+    private const int ExpectedShipStartSize = 262;  // 194 ShipData + 12*int32 + int32 + 4*int32
 
     public SectorRecustomizeStartTests(ServerFixture server) : base(server) { }
 

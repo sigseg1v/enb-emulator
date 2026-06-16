@@ -57,7 +57,7 @@ namespace LaunchFreya.Patching
             // Locate section bounds. End is exclusive (the line index where
             // the next [Section] header sits, or lines.Count).
             int sectionStart = -1;
-            int sectionEnd   = lines.Count;
+            int sectionEnd = lines.Count;
             for (int i = 0; i < lines.Count; i++)
             {
                 var t = lines[i].Trim();

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -49,23 +49,23 @@ namespace WestWood3D.Chunks
             fade_time = br.ReadSingle();
             gravity = br.ReadSingle();
             elasticity = br.ReadSingle();
-            
+
             velocity = new Vector3();
             velocity.X = br.ReadSingle();
             velocity.Y = br.ReadSingle();
             velocity.Z = br.ReadSingle();
-            
+
             acceleration = new Vector3();
             acceleration.X = br.ReadSingle();
             acceleration.Y = br.ReadSingle();
             acceleration.Z = br.ReadSingle();
-            
+
             start_color = Color.FromArgb(br.ReadByte(), br.ReadByte(), br.ReadByte(), br.ReadByte());
             end_color = Color.FromArgb(br.ReadByte(), br.ReadByte(), br.ReadByte(), br.ReadByte());
-            
-            if(dbg)
+
+            if (dbg)
             {
-			    Console.Out.WriteLine("\t Texture Name: " + texture_name);
+                Console.Out.WriteLine("\t Texture Name: " + texture_name);
                 Console.Out.WriteLine("\t Start Size: " + start_size);
                 Console.Out.WriteLine("\t End Size: " + end_size);
                 Console.Out.WriteLine("\t Lifetime: " + life_time);

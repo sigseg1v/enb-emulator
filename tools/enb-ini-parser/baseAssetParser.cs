@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -20,12 +20,12 @@ namespace EnBIniParser
                 try
                 {
                     IniFileReader reader = new IniFileReader("C:\\Documents and Settings\\Josh\\Desktop\\basset.ini");
-                    IniFileSectionStart test = reader.GotoSection("BASE-"+i);
+                    IniFileSectionStart test = reader.GotoSection("BASE-" + i);
                     List<IniFileValue> test2 = reader.ReadSectionValues();
 
                     foreach (IniFileValue r in test2)
                     {
-                        if(r.Key == "RSLID")
+                        if (r.Key == "RSLID")
                         {
                             rslid = int.Parse(r.Value.ToString());
                         }
@@ -33,7 +33,7 @@ namespace EnBIniParser
 
                     int id = int.Parse(test.SectionName.Replace("BASE-", ""));
 
-                    String query = "UPDATE assets SET rslid='"+rslid+"' where base_id='"+id+"';";
+                    String query = "UPDATE assets SET rslid='" + rslid + "' where base_id='" + id + "';";
 
                     DataTable insert = Database.executeQuery(Database.DatabaseName.net7, query);
                     Console.Out.WriteLine(query);

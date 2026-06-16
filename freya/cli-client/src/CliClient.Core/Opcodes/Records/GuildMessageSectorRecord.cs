@@ -40,6 +40,6 @@ public sealed class GuildMessageSectorRecord : PacketRecord
 
         int off = 4;
         if (!TryReadAddDataLS(sb, ref off, "OtherName")) return;
-        if (!TryReadAddDataLS(sb, ref off, "GuildName"))  return;
+        if (!TryReadAddDataLS(sb, ref off, "GuildName")) return;
     }
 }

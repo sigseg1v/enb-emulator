@@ -34,10 +34,10 @@ public static class AuxSchemas
     });
 
     // ═══ player tree (AuxPlayerIndex.cpp + nested) ════════════════════════════
-    public static readonly AuxSchema SecureInv   = new("SecureInv",   96,  Item);
-    public static readonly AuxSchema VendorInv   = new("VendorInv",   128, Item);
-    public static readonly AuxSchema RewardInv   = new("RewardInv",   2,   Item);
-    public static readonly AuxSchema OverflowInv = new("OverflowInv", 8,   Item);
+    public static readonly AuxSchema SecureInv = new("SecureInv", 96, Item);
+    public static readonly AuxSchema VendorInv = new("VendorInv", 128, Item);
+    public static readonly AuxSchema RewardInv = new("RewardInv", 2, Item);
+    public static readonly AuxSchema OverflowInv = new("OverflowInv", 8, Item);
 
     public static readonly AuxSchema Skill = new("Skill", new[]
     {
@@ -179,10 +179,10 @@ public static class AuxSchemas
         F(0, "Scale", F32), F(1, "Attachments", Nested, Attachments),
     });
 
-    public static readonly AuxSchema Inventory40   = new("Inventory40", 40, Item);
-    public static readonly AuxSchema Inventory20   = new("Inventory20", 20, Item);
-    public static readonly AuxSchema Inventory6    = new("Inventory6",  6,  Item);
-    public static readonly AuxSchema Inventory1    = new("Inventory1",  1,  Item);
+    public static readonly AuxSchema Inventory40 = new("Inventory40", 40, Item);
+    public static readonly AuxSchema Inventory20 = new("Inventory20", 20, Item);
+    public static readonly AuxSchema Inventory6 = new("Inventory6", 6, Item);
+    public static readonly AuxSchema Inventory1 = new("Inventory1", 1, Item);
 
     // AuxMounts: container of 20, each present slot emits 12 inline bytes (Mount3).
     public static readonly AuxSchema MountsCont = MakeMounts();
@@ -265,7 +265,7 @@ public static class AuxSchemas
     {
         F(0, "ItemName", Str), F(1, "ItemID", U32), F(2, "TechLevel", U32),
     });
-    public static readonly AuxSchema KnownFormulas    = new("KnownFormulas", 500, KnownFormula);
+    public static readonly AuxSchema KnownFormulas = new("KnownFormulas", 500, KnownFormula);
     public static readonly AuxSchema PreviousAttempts = new("PreviousAttempts", 16, KnownFormula);
 
     // flagNums per AuxManufacturingIndex::BuildPacket + Reset()/SetData Init() ids.

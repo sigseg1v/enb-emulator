@@ -65,10 +65,10 @@ namespace LaunchFreya
 
         // Liveness-label colours, matched to the website's status dots
         // (freya/online/web/src/styles/app.css: --ok / --danger / --warm / --text-dim).
-        static readonly IBrush StatusOkBrush     = new SolidColorBrush(Color.Parse("#FF5FD37F"));
+        static readonly IBrush StatusOkBrush = new SolidColorBrush(Color.Parse("#FF5FD37F"));
         static readonly IBrush StatusDangerBrush = new SolidColorBrush(Color.Parse("#FFEC5C50"));
-        static readonly IBrush StatusWarmBrush   = new SolidColorBrush(Color.Parse("#FFEFB05C"));
-        static readonly IBrush StatusDimBrush    = new SolidColorBrush(Color.Parse("#FFA2ACB6"));
+        static readonly IBrush StatusWarmBrush = new SolidColorBrush(Color.Parse("#FFEFB05C"));
+        static readonly IBrush StatusDimBrush = new SolidColorBrush(Color.Parse("#FFA2ACB6"));
 
         // Set the server-status label text and colour it to match: green when
         // reachable/ready, red when offline, amber while checking or when an
@@ -120,20 +120,6 @@ namespace LaunchFreya
                 host = new HostConfig { Hostname = name, AuthenticationPort = port };
             }
             return true;
-        }
-
-        // Strip a URL scheme / path so a value like "https://enb.sigsegv.land"
-        // resolves: the proxy + client speak raw DNS/TCP, not HTTP, so only the
-        // bare host survives to Dns.GetHostAddresses / TcpClient.ConnectAsync.
-        static string NormalizeHost(string raw)
-        {
-            if (string.IsNullOrWhiteSpace(raw)) return raw;
-            var s = raw.Trim();
-            int scheme = s.IndexOf("://", StringComparison.Ordinal);
-            if (scheme >= 0) s = s.Substring(scheme + 3);
-            int slash = s.IndexOf('/');
-            if (slash >= 0) s = s.Substring(0, slash);
-            return s.Trim();
         }
 
         // ---- lifecycle ----
@@ -210,7 +196,7 @@ namespace LaunchFreya
             if (emu == null || emu.IsSinglePlayer) return;
             if (!TryGetSelectedHost(out _, out var host)) return;
             int gen = ++_statusProbeGen;
-            _ = KickServerProbe(NormalizeHost(host.Hostname), GetProbePort(host), gen, auto: true);
+            _ = KickServerProbe(HostResolver.NormalizeHost(host.Hostname), GetProbePort(host), gen, auto: true);
         }
 
         static string ResolveConfigPath()
@@ -397,7 +383,7 @@ namespace LaunchFreya
                 SetServerStatus("CHECKING");
                 c_Button_Check.IsEnabled = true;
                 GatePlay(false);
-                _ = KickServerProbe(NormalizeHost(host.Hostname), GetProbePort(host), gen);
+                _ = KickServerProbe(HostResolver.NormalizeHost(host.Hostname), GetProbePort(host), gen);
             }
             _lastSelectedHost = host;
         }
@@ -689,7 +675,7 @@ namespace LaunchFreya
             int gen = ++_statusProbeGen;
             c_ServerStatus.Text = "CHECKING";
             GatePlay(false);
-            _ = KickServerProbe(NormalizeHost(host.Hostname), GetProbePort(host), gen);
+            _ = KickServerProbe(HostResolver.NormalizeHost(host.Hostname), GetProbePort(host), gen);
         }
 
         // Open the Freya Online website for the currently-selected server. The
@@ -699,24 +685,7 @@ namespace LaunchFreya
         // so the site is https://<host>.
         void OnWebsiteClick(object sender, RoutedEventArgs e)
         {
-            OpenUrl(WebsiteUrlFor(c_ComboBox_Servers.Text ?? ""));
-        }
-
-        // Map a server hostname/URL to its website URL. Empty or loopback ->
-        // the play-local dev site; anything else -> https on the same host.
-        static string WebsiteUrlFor(string rawServer)
-        {
-            var host = NormalizeHost(rawServer);
-            int colon = host.IndexOf(':');          // drop a typed-in :port
-            if (colon >= 0) host = host.Substring(0, colon);
-
-            if (string.IsNullOrEmpty(host) ||
-                host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
-                host == "127.0.0.1")
-            {
-                return "http://localhost:8088";
-            }
-            return "https://" + host;
+            OpenUrl(HostResolver.WebsiteUrlFor(c_ComboBox_Servers.Text ?? ""));
         }
 
         static void OpenUrl(string url)
@@ -783,17 +752,17 @@ namespace LaunchFreya
             _setting.AuthenticationPort = port;
             // Normalize away any scheme/path the user typed (https://host -> host)
             // so the raw DNS/TCP paths in Launcher resolve it.
-            _setting.Hostname           = NormalizeHost(host.Hostname);
-            _setting.LaunchName         = emu.GetLaunchName();
+            _setting.Hostname = HostResolver.NormalizeHost(host.Hostname);
+            _setting.LaunchName = emu.GetLaunchName();
             _setting.EnablePositionFeed = _user.UsePositionFeed;   // PB-2
-            _user.UseClientMods         = c_CheckBox_LuaMods.IsChecked == true;
-            _setting.EnableClientMods   = _user.UseClientMods;     // enbmod Lua mods
-            _setting.ModStates          = _user.ModStates;         // per-mod enable/disable
+            _user.UseClientMods = c_CheckBox_LuaMods.IsChecked == true;
+            _setting.EnableClientMods = _user.UseClientMods;     // enbmod Lua mods
+            _setting.ModStates = _user.ModStates;         // per-mod enable/disable
 
             // Persist (keep the raw typed value so the box redisplays it verbatim)
             _user.AuthenticationPort = c_TextBox_Port.Text;
-            _user.LastEmulatorName   = emu.Name;
-            _user.LastServerName     = host.Hostname;
+            _user.LastEmulatorName = emu.Name;
+            _user.LastServerName = host.Hostname;
             _user.Save();
 
 #if !CHECK_FOR_UPDATES
@@ -828,8 +797,8 @@ namespace LaunchFreya
                 var launcher = new Launcher(_setting, AppendLog);
                 launcher.Launch();
                 _activeLauncher = launcher;
-                _clientRunning  = true;   // pause the periodic status re-probe
-                c_Status.Text   = "Client running. Press Play to relaunch, or Quit to tear everything down.";
+                _clientRunning = true;   // pause the periodic status re-probe
+                c_Status.Text = "Client running. Press Play to relaunch, or Quit to tear everything down.";
             }
             catch (Exception ex)
             {
@@ -847,10 +816,10 @@ namespace LaunchFreya
         // the source does not exist yet); Render tails it to the last LogTail.
         sealed class LogTab
         {
-            public string         Header;
-            public Func<string>   ReadAll;
-            public string         EmptyMsg;
-            public TextBox        Box;
+            public string Header;
+            public Func<string> ReadAll;
+            public string EmptyMsg;
+            public TextBox Box;
         }
 
         async void OnAdvancedClick(object sender, RoutedEventArgs e)
@@ -858,7 +827,7 @@ namespace LaunchFreya
             // Where the spawned children write. The proxy runs with WorkingDir =
             // <launcher>/bin and logs there as _YYYY_MM_DD.log; enbmod writes
             // enbmod.log next to the client exe (where the DLL is staged).
-            string proxyDir  = Path.Combine(AppContext.BaseDirectory, "bin");
+            string proxyDir = Path.Combine(AppContext.BaseDirectory, "bin");
             string clientDir = string.IsNullOrEmpty(_setting.ClientPath)
                 ? null : Path.GetDirectoryName(_setting.ClientPath);
 
@@ -875,20 +844,20 @@ namespace LaunchFreya
                 new LogTab
                 {
                     Header   = "E&B",
-                    ReadAll  = ReadLogFile(() => FindClientLog(clientDir)),
+                    ReadAll  = LauncherLogFiles.ReadLogFile(() => LauncherLogFiles.FindClientLog(clientDir)),
                     EmptyMsg = "(no Earth & Beyond client log found)",
                 },
                 new LogTab
                 {
                     Header   = "Proxy",
-                    ReadAll  = ReadLogFile(() => NewestLogFile(proxyDir, "*.log")),
+                    ReadAll  = LauncherLogFiles.ReadLogFile(() => LauncherLogFiles.NewestLogFile(proxyDir, "*.log")),
                     EmptyMsg = "(no proxy log yet -- launch the game first)",
                 },
                 new LogTab
                 {
                     Header   = "Mods",
-                    ReadAll  = ReadLogFile(() => clientDir == null
-                        ? null : ExistingFile(Path.Combine(clientDir, "enbmod.log"))),
+                    ReadAll  = LauncherLogFiles.ReadLogFile(() => clientDir == null
+                        ? null : LauncherLogFiles.ExistingFile(Path.Combine(clientDir, "enbmod.log"))),
                     EmptyMsg = "(no enbmod log -- enable Client Mods and launch)",
                 },
             };
@@ -898,18 +867,18 @@ namespace LaunchFreya
             {
                 t.Box = new TextBox
                 {
-                    IsReadOnly    = true,
+                    IsReadOnly = true,
                     AcceptsReturn = true,
-                    TextWrapping  = Avalonia.Media.TextWrapping.NoWrap,
-                    FontFamily    = "Cascadia Mono,Consolas,monospace",
-                    Margin        = new Avalonia.Thickness(0, 8, 0, 0),
+                    TextWrapping = Avalonia.Media.TextWrapping.NoWrap,
+                    FontFamily = "Cascadia Mono,Consolas,monospace",
+                    Margin = new Avalonia.Thickness(0, 8, 0, 0),
                 };
                 tabControl.Items.Add(new TabItem { Header = t.Header, Content = t.Box });
             }
 
             var refresh = new Button
             {
-                Content             = "↻ Refresh",   // ↻
+                Content = "↻ Refresh",   // ↻
                 HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
             };
             refresh.Click += (_, __) =>
@@ -932,9 +901,9 @@ namespace LaunchFreya
 
             var dlg = new Window
             {
-                Title   = "Freya - Advanced Logs",
-                Width   = 820,
-                Height  = 560,
+                Title = "Freya - Advanced Logs",
+                Width = 820,
+                Height = 560,
                 Content = root,
             };
 
@@ -965,10 +934,10 @@ namespace LaunchFreya
             }
 
             // Row card backgrounds (faint white tint; brighter on hover).
-            var rowBg      = new SolidColorBrush(Color.Parse("#0FFFFFFF"));
+            var rowBg = new SolidColorBrush(Color.Parse("#0FFFFFFF"));
             var rowBgHover = new SolidColorBrush(Color.Parse("#1FFFFFFF"));
             var rowBorderClr = new SolidColorBrush(Color.Parse("#1AFFFFFF"));
-            var badgeBg    = new SolidColorBrush(Color.Parse("#33EC5C50"));   // ~20% red
+            var badgeBg = new SolidColorBrush(Color.Parse("#33EC5C50"));   // ~20% red
 
             // Per-row widgets we restyle when dependency state changes.
             var rowNames = new List<(ModInfo Mod, TextBlock Name, Border Badge, TextBlock BadgeText)>();
@@ -1085,7 +1054,7 @@ namespace LaunchFreya
                     Padding = new Avalonia.Thickness(12, 9, 12, 9),
                 };
                 rowBorder.PointerEntered += (_, __) => rowBorder.Background = rowBgHover;
-                rowBorder.PointerExited  += (_, __) => rowBorder.Background = rowBg;
+                rowBorder.PointerExited += (_, __) => rowBorder.Background = rowBg;
                 if (!string.IsNullOrEmpty(m.Description))
                     ToolTip.SetTip(rowBorder, m.Description);
                 list.Children.Add(rowBorder);
@@ -1153,7 +1122,7 @@ namespace LaunchFreya
             }
 
             var lines = full.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
-            var tail  = lines.Length > LogTail
+            var tail = lines.Length > LogTail
                 ? lines.Skip(lines.Length - LogTail)
                 : lines;
             t.Box.Text = string.Join("\n", tail);
@@ -1173,57 +1142,6 @@ namespace LaunchFreya
             Dispatcher.UIThread.Post(Pin, DispatcherPriority.Loaded);
         }
 
-        // Wrap a path resolver into a full-text reader. Opens with FileShare
-        // ReadWrite because the proxy / enbmod hold the file open for appending.
-        static Func<string> ReadLogFile(Func<string> resolve) => () =>
-        {
-            string path;
-            try { path = resolve(); } catch { path = null; }
-            if (string.IsNullOrEmpty(path) || !File.Exists(path)) return null;
-            try
-            {
-                using var fs = new FileStream(
-                    path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                using var sr = new StreamReader(fs);
-                return sr.ReadToEnd();
-            }
-            catch (Exception ex)
-            {
-                return "(could not read " + Path.GetFileName(path) + ": " + ex.Message + ")";
-            }
-        };
-
-        static string ExistingFile(string path)
-            => File.Exists(path) ? path : null;
-
-        // Newest file matching `pattern` in `dir` by last-write time. The proxy's
-        // daily log is _YYYY_MM_DD.log, so "most recent" == newest mtime.
-        static string NewestLogFile(string dir, string pattern)
-        {
-            try
-            {
-                if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return null;
-                return new DirectoryInfo(dir).GetFiles(pattern)
-                    .OrderByDescending(f => f.LastWriteTimeUtc)
-                    .Select(f => f.FullName)
-                    .FirstOrDefault();
-            }
-            catch { return null; }
-        }
-
-        // The EnB client has no standard text log; probe the names it might use
-        // and report none rather than mis-grabbing an unrelated *.log (enbmod's
-        // log lives in the same folder).
-        static string FindClientLog(string clientDir)
-        {
-            if (string.IsNullOrEmpty(clientDir)) return null;
-            foreach (var name in new[] { "client.log", "Net7.log", "clientlog.txt", "eb.log" })
-            {
-                var p = Path.Combine(clientDir, name);
-                if (File.Exists(p)) return p;
-            }
-            return null;
-        }
 
         void OnCancelClick(object sender, RoutedEventArgs e) => Close();
 

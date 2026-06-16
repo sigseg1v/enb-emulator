@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -38,18 +38,20 @@ namespace WestWood3D.Chunks
             creation_volume_2 = br.ReadSingle();
             creation_volume_3 = br.ReadSingle();
 
-		    for (int i = 0; i < 4; i++) {
-			    int padding = br.ReadInt32();
-		    }
+            for (int i = 0; i < 4; i++)
+            {
+                int padding = br.ReadInt32();
+            }
 
             vel_random_volume_classID = br.ReadInt32();
             vel_random_volume_1 = br.ReadSingle();
             vel_random_volume_2 = br.ReadSingle();
             vel_random_volume_3 = br.ReadSingle();
 
-            for (int i = 0; i < 4; i++) {
-			    int padding = br.ReadInt32();
-		    }
+            for (int i = 0; i < 4; i++)
+            {
+                int padding = br.ReadInt32();
+            }
 
             outward_velocity = br.ReadSingle();
             velocity_inherit = br.ReadSingle();
@@ -76,7 +78,8 @@ namespace WestWood3D.Chunks
             //    int padding = br.ReadInt32();
             //}  
 
-		    if(dbg){
+            if (dbg)
+            {
                 Console.Out.WriteLine("\t Burst Size: " + burst_size);
                 Console.Out.WriteLine("\t Creation Volume Class ID: " + creation_volume_classID);
                 Console.Out.WriteLine("\t Creation Volume Value 1: " + creation_volume_1);
@@ -100,7 +103,7 @@ namespace WestWood3D.Chunks
                 //Console.Out.WriteLine("\t Shader Alpha Test: " + ShaderDepthCompare);
                 //Console.Out.WriteLine("\t Rendor Mode: " + rendorMode);
                 //Console.Out.WriteLine("\t Frame Mode: " + frameMode);
-		    }
+            }
         }
 
         [CategoryAttribute("Chunk Values"), ReadOnlyAttribute(true), DescriptionAttribute("The size of the emitter's burst.")]

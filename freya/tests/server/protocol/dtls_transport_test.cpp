@@ -25,10 +25,10 @@
 #include <string>
 #include <vector>
 
-using net7::DtlsTransport;
+using net7::DtlsPeerKey;
 using net7::DtlsRole;
 using net7::DtlsStep;
-using net7::DtlsPeerKey;
+using net7::DtlsTransport;
 
 namespace {
 
@@ -36,22 +36,32 @@ constexpr const char* kHost = "dtls.test.local";
 
 // Generate a self-signed EC P-256 cert with SAN=DNS:kHost; write PEM cert + key
 // to the given paths. Returns false on any OpenSSL failure.
-bool GenSelfSigned(const std::string& cert_path, const std::string& key_path)
-{
+bool GenSelfSigned(const std::string& cert_path, const std::string& key_path) {
     bool ok = false;
     EVP_PKEY* pkey = nullptr;
-    X509*     x509 = nullptr;
+    X509* x509 = nullptr;
     EVP_PKEY_CTX* pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, nullptr);
-    if (!pctx) return false;
-    if (EVP_PKEY_keygen_init(pctx) != 1) { EVP_PKEY_CTX_free(pctx); return false; }
-    if (EVP_PKEY_CTX_set_ec_paramgen_curve_nid(pctx, NID_X9_62_prime256v1) != 1) {
-        EVP_PKEY_CTX_free(pctx); return false;
+    if (!pctx)
+        return false;
+    if (EVP_PKEY_keygen_init(pctx) != 1) {
+        EVP_PKEY_CTX_free(pctx);
+        return false;
     }
-    if (EVP_PKEY_keygen(pctx, &pkey) != 1) { EVP_PKEY_CTX_free(pctx); return false; }
+    if (EVP_PKEY_CTX_set_ec_paramgen_curve_nid(pctx, NID_X9_62_prime256v1) != 1) {
+        EVP_PKEY_CTX_free(pctx);
+        return false;
+    }
+    if (EVP_PKEY_keygen(pctx, &pkey) != 1) {
+        EVP_PKEY_CTX_free(pctx);
+        return false;
+    }
     EVP_PKEY_CTX_free(pctx);
 
     x509 = X509_new();
-    if (!x509) { EVP_PKEY_free(pkey); return false; }
+    if (!x509) {
+        EVP_PKEY_free(pkey);
+        return false;
+    }
     X509_set_version(x509, 2); // v3
     ASN1_INTEGER_set(X509_get_serialNumber(x509), 1);
     X509_gmtime_adj(X509_getm_notBefore(x509), 0);
@@ -59,27 +69,32 @@ bool GenSelfSigned(const std::string& cert_path, const std::string& key_path)
     X509_set_pubkey(x509, pkey);
 
     X509_NAME* name = X509_get_subject_name(x509);
-    X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
-                               (const unsigned char*) kHost, -1, -1, 0);
+    X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (const unsigned char*)kHost, -1, -1, 0);
     X509_set_issuer_name(x509, name); // self-signed
 
     // SAN: DNS:kHost -- this is what SSL_set1_host matches against.
     {
         std::string san = std::string("DNS:") + kHost;
-        X509_EXTENSION* ext = X509V3_EXT_conf_nid(nullptr, nullptr,
-                                                  NID_subject_alt_name, san.c_str());
-        if (ext) { X509_add_ext(x509, ext, -1); X509_EXTENSION_free(ext); }
+        X509_EXTENSION* ext =
+            X509V3_EXT_conf_nid(nullptr, nullptr, NID_subject_alt_name, san.c_str());
+        if (ext) {
+            X509_add_ext(x509, ext, -1);
+            X509_EXTENSION_free(ext);
+        }
     }
 
-    if (X509_sign(x509, pkey, EVP_sha256()) == 0) goto done;
+    if (X509_sign(x509, pkey, EVP_sha256()) == 0)
+        goto done;
 
     {
         FILE* cf = std::fopen(cert_path.c_str(), "wb");
-        if (!cf) goto done;
+        if (!cf)
+            goto done;
         PEM_write_X509(cf, x509);
         std::fclose(cf);
         FILE* kf = std::fopen(key_path.c_str(), "wb");
-        if (!kf) goto done;
+        if (!kf)
+            goto done;
         PEM_write_PrivateKey(kf, pkey, nullptr, nullptr, 0, nullptr, nullptr);
         std::fclose(kf);
     }
@@ -94,26 +109,28 @@ done:
 // the round cap. Returns true on mutual establishment.
 bool RunHandshake(DtlsTransport& client, DtlsTransport& server,
                   uint64_t srv_peer /*server addr from client's view*/,
-                  uint64_t cli_peer /*client addr from server's view*/)
-{
+                  uint64_t cli_peer /*client addr from server's view*/) {
     DtlsStep s = client.ClientHandshake(srv_peer);
-    if (s.fatal) return false;
+    if (s.fatal)
+        return false;
 
     for (int round = 0; round < 32; ++round) {
         if (!s.to_send.empty()) {
             // Deliver client's bytes -> server.
             DtlsStep r = server.Feed(cli_peer, s.to_send.data(), s.to_send.size());
-            if (r.fatal) return false;
+            if (r.fatal)
+                return false;
             if (!r.to_send.empty()) {
                 s = client.Feed(srv_peer, r.to_send.data(), r.to_send.size());
-                if (s.fatal) return false;
+                if (s.fatal)
+                    return false;
             } else {
                 s.to_send.clear();
             }
         }
-        if (client.Established(srv_peer) && server.Established(cli_peer)) return true;
-        if (s.to_send.empty() &&
-            !client.Established(srv_peer) && !server.Established(cli_peer)) {
+        if (client.Established(srv_peer) && server.Established(cli_peer))
+            return true;
+        if (s.to_send.empty() && !client.Established(srv_peer) && !server.Established(cli_peer)) {
             // No progress and not done -> stuck.
             return false;
         }
@@ -128,20 +145,18 @@ struct CertFiles {
         char* d = mkdtemp(tmpl);
         std::string dir = d ? d : "/tmp";
         cert = dir + "/cert.pem";
-        key  = dir + "/key.pem";
+        key = dir + "/key.pem";
     }
 };
 
 } // namespace
 
-TEST(DtlsTransport, HandshakeAndBidirectionalRoundTrip)
-{
+TEST(DtlsTransport, HandshakeAndBidirectionalRoundTrip) {
     CertFiles cf;
     ASSERT_TRUE(GenSelfSigned(cf.cert, cf.key)) << "cert generation failed";
 
     DtlsTransport server(DtlsRole::Server);
-    ASSERT_TRUE(server.LoadServerCert(cf.cert.c_str(), cf.key.c_str()))
-        << server.LastError();
+    ASSERT_TRUE(server.LoadServerCert(cf.cert.c_str(), cf.key.c_str())) << server.LastError();
     ASSERT_TRUE(server.Ok());
 
     DtlsTransport client(DtlsRole::Client);
@@ -153,14 +168,13 @@ TEST(DtlsTransport, HandshakeAndBidirectionalRoundTrip)
     const uint64_t cli_peer = DtlsPeerKey(0x0A0000FEu, 50000);
 
     ASSERT_TRUE(RunHandshake(client, server, srv_peer, cli_peer))
-        << "handshake failed: client=" << client.LastError()
-        << " server=" << server.LastError();
+        << "handshake failed: client=" << client.LastError() << " server=" << server.LastError();
 
     // Client -> server application datagram.
     const std::string c2s = "hello-from-proxy\x00\x01\x02 with NULs";
     {
-        DtlsStep s = client.SendApp(srv_peer,
-            reinterpret_cast<const uint8_t*>(c2s.data()), c2s.size());
+        DtlsStep s =
+            client.SendApp(srv_peer, reinterpret_cast<const uint8_t*>(c2s.data()), c2s.size());
         ASSERT_FALSE(s.fatal) << client.LastError();
         ASSERT_FALSE(s.to_send.empty());
         DtlsStep r = server.Feed(cli_peer, s.to_send.data(), s.to_send.size());
@@ -173,8 +187,8 @@ TEST(DtlsTransport, HandshakeAndBidirectionalRoundTrip)
     // Server -> client application datagram.
     const std::string s2c = "reply-from-server-\xFF\xFE";
     {
-        DtlsStep s = server.SendApp(cli_peer,
-            reinterpret_cast<const uint8_t*>(s2c.data()), s2c.size());
+        DtlsStep s =
+            server.SendApp(cli_peer, reinterpret_cast<const uint8_t*>(s2c.data()), s2c.size());
         ASSERT_FALSE(s.fatal) << server.LastError();
         ASSERT_FALSE(s.to_send.empty());
         DtlsStep r = client.Feed(srv_peer, s.to_send.data(), s.to_send.size());
@@ -190,8 +204,7 @@ TEST(DtlsTransport, HandshakeAndBidirectionalRoundTrip)
 
 // A client that never set a verify hostname must REFUSE to start a handshake
 // (err-on-security: no unauthenticated channel).
-TEST(DtlsTransport, ClientRefusesHandshakeWithoutVerifyHostname)
-{
+TEST(DtlsTransport, ClientRefusesHandshakeWithoutVerifyHostname) {
     DtlsTransport client(DtlsRole::Client);
     ASSERT_TRUE(client.Ok());
     DtlsStep s = client.ClientHandshake(DtlsPeerKey(0x7F000001u, 3810));
@@ -200,8 +213,7 @@ TEST(DtlsTransport, ClientRefusesHandshakeWithoutVerifyHostname)
 }
 
 // A wrong verify hostname must make the handshake fail (no silent accept).
-TEST(DtlsTransport, HandshakeFailsOnHostnameMismatch)
-{
+TEST(DtlsTransport, HandshakeFailsOnHostnameMismatch) {
     CertFiles cf;
     ASSERT_TRUE(GenSelfSigned(cf.cert, cf.key));
 
@@ -221,19 +233,18 @@ TEST(DtlsTransport, HandshakeFailsOnHostnameMismatch)
 }
 
 // Opt-out policy: required by default, tripped ONLY by the exact sentinel.
-TEST(DtlsTransport, PlaintextOptOutRequiresExactSentinel)
-{
+TEST(DtlsTransport, PlaintextOptOutRequiresExactSentinel) {
     unsetenv(net7::kDtlsOptOutEnv);
-    EXPECT_FALSE(net7::DtlsPlaintextOptedOut());          // default: required
+    EXPECT_FALSE(net7::DtlsPlaintextOptedOut()); // default: required
 
     setenv(net7::kDtlsOptOutEnv, "1", 1);
-    EXPECT_FALSE(net7::DtlsPlaintextOptedOut());          // stray "1" ignored
+    EXPECT_FALSE(net7::DtlsPlaintextOptedOut()); // stray "1" ignored
 
     setenv(net7::kDtlsOptOutEnv, "true", 1);
-    EXPECT_FALSE(net7::DtlsPlaintextOptedOut());          // "true" ignored
+    EXPECT_FALSE(net7::DtlsPlaintextOptedOut()); // "true" ignored
 
     setenv(net7::kDtlsOptOutEnv, net7::kDtlsOptOutSentinel, 1);
-    EXPECT_TRUE(net7::DtlsPlaintextOptedOut());           // exact value opts out
+    EXPECT_TRUE(net7::DtlsPlaintextOptedOut()); // exact value opts out
 
     unsetenv(net7::kDtlsOptOutEnv);
 }

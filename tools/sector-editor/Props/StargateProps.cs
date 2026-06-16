@@ -1,7 +1,5 @@
 using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Text;
 
 using N7.Utilities;
 
@@ -12,9 +10,7 @@ namespace N7.Props
         private bool is_class_specific;
         private String faction_id;
 
-        public StargateProps()
-        {
-        }
+        public StargateProps() { }
 
         public void fillBaseProps(BaseProps bp)
         {
@@ -38,37 +34,21 @@ namespace N7.Props
         }
 
         [CategoryAttribute("Stargate Object Props"), DescriptionAttribute("Is this stargate limited to a certain class ?")]
-        public bool IsClassSpecific
-        {
-            get { return is_class_specific; }
-            set { is_class_specific = value; }
-        }
+        public bool IsClassSpecific { get { return is_class_specific; } set { is_class_specific = value; } }
 
         [CategoryAttribute("Stargate Object Props"), DescriptionAttribute("The faction ID of the faction that controls this stargate")]
         [Browsable(true)]
-        [TypeConverter(typeof(FactionConverter))]
         public string FactionID
         {
-            //When first loaded set property with the first item in the list.
             get
             {
-                string S = "";
-                if (faction_id != null)
+                if (faction_id != null) return faction_id;
+                if (HE_GlobalVars._ListofFactions != null && HE_GlobalVars._ListofFactions.Length > 0)
                 {
-                    S = faction_id;
+                    Array.Sort(HE_GlobalVars._ListofFactions);
+                    return HE_GlobalVars._ListofFactions[0];
                 }
-                else
-                {
-                    if (HE_GlobalVars._ListofFactions.Length > 0)
-                    {
-                        //Sort the list before displaying it
-                        Array.Sort(HE_GlobalVars._ListofFactions);
-
-                        S = HE_GlobalVars._ListofFactions[0];
-                    }
-                }
-
-                return S;
+                return "";
             }
             set { faction_id = value; }
         }

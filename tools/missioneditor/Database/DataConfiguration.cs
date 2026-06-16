@@ -1,26 +1,28 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using CommonTools.Database;
 using System.Data;
+using System.Threading.Tasks;
+using Avalonia.Controls;
+using CommonTools;
+using CommonTools.Database;
 using CommonTools.Gui;
-using System.Xml;
 
 namespace MissionEditor.Database
 {
+    // Ported from tools/missioneditor/Database/DataConfiguration.cs.
+    // search() is async to match Avalonia's ShowDialog<T>(Window).
     public class DataConfiguration
     {
         public enum DataType { faction, item, mob, sector_object, npc, sector, skill, mission };
         private Net7.Tables m_table;
         private Enum m_id;
         private Enum[] m_description;
-        private static DlgSearch m_dlgSearch = new DlgSearch();
 
         private static Dictionary<DataConfiguration.DataType, DataConfiguration> m_DataConfigurations;
 
         public static void init()
         {
+            if (m_DataConfigurations != null) return;
             m_DataConfigurations = new Dictionary<DataConfiguration.DataType, DataConfiguration>();
             m_DataConfigurations.Add(DataConfiguration.DataType.faction,
                                      new DataConfiguration(Net7.Tables.factions,
@@ -37,7 +39,7 @@ namespace MissionEditor.Database
             m_DataConfigurations.Add(DataConfiguration.DataType.sector_object,
                                      new DataConfiguration(Net7.Tables.sector_objects,
                                                            Net7.Table_sector_objects._sector_object_id,
-                                                           new Enum[] { Net7.Table_sector_objects._name })); //TODO: also used Net7.Table_sector_objects._sector_id's name for this item's description
+                                                           new Enum[] { Net7.Table_sector_objects._name }));
             m_DataConfigurations.Add(DataConfiguration.DataType.npc,
                                      new DataConfiguration(Net7.Tables.starbase_npcs,
                                                            Net7.Table_starbase_npcs._npc_Id,
@@ -60,13 +62,8 @@ namespace MissionEditor.Database
         {
             DataConfiguration dataConfiguration;
             if (m_DataConfigurations.TryGetValue(dataType, out dataConfiguration))
-            {
                 return dataConfiguration.isValid(code);
-            }
-            else
-            {
-                throw (new Exception("Unable to convert '" + dataType.ToString() + "' into a DataConfiguration.DataType"));
-            }
+            throw (new Exception("Unable to convert '" + dataType.ToString() + "' into a DataConfiguration.DataType"));
         }
 
         class DataValidation
@@ -114,7 +111,6 @@ namespace MissionEditor.Database
 
             foreach (DataValidation dataValidation in listDataValidations)
             {
-                // Hack to allow non-database validations to feed into this system
                 if ((dataValidation.dataConfiguration == null && dataValidation.code == null))
                 {
                     errorMessage = dataValidation.errorMessage;
@@ -122,35 +118,39 @@ namespace MissionEditor.Database
                 }
 
                 parameter = dataValidation.dataConfiguration.m_id.ToString() + queryCount.ToString();
-                if (query.Length != 0)
-                {
-                    query += " UNION ";
-                }
-                query += DB.SELECT
-                       + queryCount.ToString()
-                       + ","
-                       + ColumnData.GetName(dataValidation.dataConfiguration.m_id)
-                       + DB.FROM
-                       + dataValidation.dataConfiguration.m_table
-                       + DB.WHERE
-                       + ColumnData.GetName(dataValidation.dataConfiguration.m_id)
-                       + DB.EQUALS
-                       + DB.QueryParameterCharacter
-                       + parameter;
+                String idCol = ColumnData.GetQuotedName(dataValidation.dataConfiguration.m_id);
+                String table = dataValidation.dataConfiguration.m_table.ToString();
+                // Table/column are schema identifiers (enum-derived), not user
+                // values; the only value -- the referenced code -- is bound as @parameter.
+                if (query.Length != 0) query += " UNION ";
+                query += "SELECT " + queryCount + ", " + idCol
+                       + " FROM " + table + " WHERE " + idCol + " = @" + parameter;
                 parameters.Add(parameter);
                 values.Add(dataValidation.code);
                 dbDataValidations.Add(dataValidation);
                 queryCount++;
             }
 
-            if (errorMessage.Length == 0
-                && query.Length != 0)
+            if (errorMessage.Length == 0 && query.Length != 0)
             {
                 DataTable dataTable = DB.Instance.executeQuery(query, parameters.ToArray(), values.ToArray());
+
+                // Each sub-SELECT tags its row with its validation index in
+                // column 0, but the rows come back through a UNION -- which
+                // guarantees NO row order and may dedup. The old code matched
+                // positionally (Rows[i][0] == i), so any out-of-order or missing
+                // row misaligned every check and reported the WRONG entity as
+                // missing (e.g. "npc 41 does not exist" when 41 exists but some
+                // other referenced code did not, or when 41 was referenced
+                // twice). Match by membership instead: a validation passed iff a
+                // row tagged with its index came back.
+                var presentIndices = new HashSet<string>();
+                foreach (DataRow row in dataTable.Rows)
+                    presentIndices.Add(row[0].ToString());
+
                 for (int validation = 0; validation < dbDataValidations.Count; validation++)
                 {
-                    if (dataTable.Rows.Count <= validation
-                        || !dataTable.Rows[validation][0].ToString().Equals(validation.ToString()))
+                    if (!presentIndices.Contains(validation.ToString()))
                     {
                         errorMessage = dbDataValidations[validation].errorMessage;
                         break;
@@ -161,19 +161,19 @@ namespace MissionEditor.Database
             return errorMessage.Length == 0;
         }
 
-        public static String search(DataType dataType)
+        public static async Task<String> search(DataType dataType, Window owner)
         {
             DataConfiguration dataConfiguration;
-            if (m_DataConfigurations.TryGetValue(dataType, out dataConfiguration))
-            {
-                m_dlgSearch.configure(dataConfiguration.m_table);
-                m_dlgSearch.ShowDialog();
-                return m_dlgSearch.getSelectedId();
-            }
-            else
-            {
+            if (!m_DataConfigurations.TryGetValue(dataType, out dataConfiguration))
                 throw (new Exception("Unable to convert '" + dataType.ToString() + "' into a DataConfiguration.DataType"));
-            }
+
+            // A fresh dialog per search: an Avalonia Window cannot be re-shown
+            // once closed ("Cannot re-show a closed window"), so caching one
+            // static instance threw on the second search.
+            var dlgSearch = new DlgSearch();
+            dlgSearch.configure(dataConfiguration.m_table);
+            await dlgSearch.ShowDialog(owner);
+            return dlgSearch.getSelectedId();
         }
 
         public static String getDescription(DataType dataType, String id)
@@ -181,38 +181,33 @@ namespace MissionEditor.Database
             DataConfiguration dataConfiguration;
             if (m_DataConfigurations.TryGetValue(dataType, out dataConfiguration))
             {
-                String query = "";
+                // Description columns and the id column are schema identifiers
+                // (enum-derived), not user values; the id is bound as @id.
+                String columns = "";
                 foreach (Enum field in dataConfiguration.m_description)
                 {
-                    if (query.Length == 0)
-                    {
-                        query += DB.SELECT;
-                    }
-                    else
-                    {
-                        query += ",";
-                    }
-                    query += ColumnData.GetName(field);
+                    if (columns.Length != 0) columns += ", ";
+                    columns += ColumnData.GetQuotedName(field);
                 }
 
-                String parameter = "id";
-                query += DB.FROM
-                       + dataConfiguration.m_table.ToString()
-                       + DB.WHERE
-                       + ColumnData.GetName(dataConfiguration.m_id)
-                       + DB.EQUALS
-                       + DB.QueryParameterCharacter
-                       + parameter;
-                DataTable dataTable = DB.Instance.executeQuery(query, new String[] { parameter }, new String[] { id });
+                String query = "SELECT " + columns
+                             + " FROM " + dataConfiguration.m_table.ToString()
+                             + " WHERE " + ColumnData.GetQuotedName(dataConfiguration.m_id) + " = @id";
+                DataTable dataTable;
+                try
+                {
+                    dataTable = DB.Instance.executeQuery(query, new String[] { "id" }, new String[] { id });
+                }
+                catch
+                {
+                    return id;
+                }
                 String description = "";
                 if (dataTable.Rows.Count == 1)
                 {
                     foreach (DataColumn column in dataTable.Columns)
                     {
-                        if (description.Length != 0)
-                        {
-                            description += " ";
-                        }
+                        if (description.Length != 0) description += " ";
                         description += dataTable.Rows[0][column].ToString();
                     }
                 }
@@ -233,13 +228,8 @@ namespace MissionEditor.Database
 
         public Boolean isValid(String code)
         {
-            DataTable dataTable = DB.Instance.select(new Enum[] { m_id },
-                                                     m_table,
-                                                     m_id,
-                                                     code);
+            DataTable dataTable = DB.Instance.select(new Enum[] { m_id }, m_table, m_id, code);
             return dataTable.Rows.Count != 0;
         }
-
     }
-
 }

@@ -74,8 +74,8 @@ public sealed class SectorGateHandoffFollowTests : SectorIntegrationTest
         var account = TestAccounts.New(_server);
         const int slot = 0;
         const int stationSectorId = 10151;   // Luna Station (Terran Warrior start)
-        const int lunaSpaceId     = 1015;    // 10151 / 10
-        const int earthSpaceId    = 1060;    // "Sector Gate to Earth" destination
+        const int lunaSpaceId = 1015;    // 10151 / 10
+        const int earthSpaceId = 1060;    // "Sector Gate to Earth" destination
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(180));
 

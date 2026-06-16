@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -35,7 +35,7 @@ namespace CommonTools
 
             if (required)
             {
-                throw(new XmlException("The mandatory XML attribute '"
+                throw (new XmlException("The mandatory XML attribute '"
                                      + xmlTag
                                      + "' was not specified in the node.\n\n"
                                      + xmlNode.InnerXml));
@@ -90,7 +90,7 @@ namespace CommonTools
                 && xmlNode.ChildNodes.Count == 1
                 && xmlNode.FirstChild != null
                 && xmlNode.FirstChild.NodeType.Equals(XmlNodeType.Text))*/
-            if(xmlNode.InnerText != null)
+            if (xmlNode.InnerText != null)
             {
                 //value = xmlNode.FirstChild.Value;
                 value = xmlNode.InnerText;

@@ -27,9 +27,9 @@ public sealed class LoginCommand : ICommandHandler
         _ctx = ctx;
     }
 
-    public string Name    => "login";
+    public string Name => "login";
     public string Summary => "TLS login + global channel + show characters";
-    public string Usage   => "login <user>            (prompts for password, masked)\n" +
+    public string Usage => "login <user>            (prompts for password, masked)\n" +
                              "login <user> <pass>     (password inline, for scripts/pipes)";
     // Only the username completes; the password is prompted, never ghost-hinted.
     public string? Placeholder => "<user>";

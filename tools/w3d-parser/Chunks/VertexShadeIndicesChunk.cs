@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -25,7 +25,7 @@ namespace WestWood3D.Chunks
 
             int NumVertexShades = chunkLength / 4;
             vertexShadeIndices = new int[NumVertexShades + 2];
-            
+
             for (int i = 0; i < NumVertexShades; i++)
             {
                 vertexShadeIndices[i] = br.ReadInt32();

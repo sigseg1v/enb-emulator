@@ -38,13 +38,10 @@ at the end.
   effective in-game value is `column * (quality / 100.0)`.
 - "Editor" cross-references the C# tool under `tools/` that primarily edits
   the table. "(none)" means it is read-only seed data with no dedicated
-  editor. Editor paths below name the legacy WinForms `tools/<name>/`
-  directory for brevity; the cross-platform Avalonia ports live alongside
-  as `tools/<name>-avalonia/` and run natively on Linux (see
-  `tools/README.md` and the cross-reference table in
-  `docs/07-tools-toolchain.md`). The Item Editor is ported as
-  `tools/item-editor-avalonia/` (the legacy WinForms project remains at
-  `tools/itemeditor/`).
+  editor. Editor paths name the Avalonia port (`tools/<name>/`),
+  which runs natively on Linux (see `tools/README.md` and the
+  cross-reference table in `docs/07-tools-toolchain.md`). The original
+  WinForms projects have been removed.
 
 ## Group: world geometry
 
@@ -337,7 +334,7 @@ Template row for every item. Categories are referenced numerically into
   `price`, `man_cost*` (manufacture cost fields), pricing modifiers,
   `quality_mod`.
 - Referenced by: every `item_*` subtype table.
-- Editor: Item Editor (`tools/item-editor-avalonia/`).
+- Editor: Item Editor (`tools/item-editor/`).
 
 ### `item_categories`, `item_subcategories`, `item_type`
 
@@ -936,7 +933,7 @@ Guild flow: `guilds` -> `guild_ranks` -> `guild_members`.
 |---|---|
 | Sector Editor (`tools/sector-editor/`) | `systems`, `sectors`, `sector_objects` and all `sector_objects_*` subtype tables, `sector_nav_points`, `sector_allocation`, `base_ore_list` |
 | Mob Editor (`tools/mob-editor/`) | `mob_base`, `mob_items`, `mob_spawn_group`, plus references to `sector_objects_mob` |
-| Item Editor (`tools/item-editor-avalonia/`) | `item_base`, all `item_*` subtype tables (`item_ammo`, `item_beam`, `item_engine`, `item_shield`, `item_reactor`, `item_device`, `item_missile`, `item_projectile`, `item_manufacture`, `item_other_req`, `item_refine`, `item_effects`) |
+| Item Editor (`tools/item-editor/`) | `item_base`, all `item_*` subtype tables (`item_ammo`, `item_beam`, `item_engine`, `item_shield`, `item_reactor`, `item_device`, `item_missile`, `item_projectile`, `item_manufacture`, `item_other_req`, `item_refine`, `item_effects`) |
 | Effect Editor (`tools/effect-editor/`) | `effects`, `item_effect_base`, `item_effect_container`, `item_effect_stats`, `buffs` |
 | Faction Editor (`tools/faction-editor/`) | `factions`, `faction_matrix`, `manufacturers` |
 | Station Tools (`tools/station-tools/`) | `starbases`, `starbase_rooms`, `starbase_npcs`, `starbase_npc_avatar_templates`, `starbase_terminals`, `starbase_vendors`, `starbase_vender_groups`, `starbase_vender_inventory` |

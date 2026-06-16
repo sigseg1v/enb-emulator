@@ -28,6 +28,36 @@ jobs:
       - name: No U+FFFD replacement chars in tracked source
         run: bash tools/check_no_mojibake.sh
 
+  format-check:
+    name: "format-check (Phase AT: just fmt-check)"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install .NET 10 SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install just + clang-format 18
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends just clang-format-18
+          sudo ln -sf "$(command -v clang-format-18)" /usr/local/bin/clang-format
+          clang-format --version
+      - name: Install web deps (prettier / stylelint)
+        run: npm ci
+        working-directory: freya/online/web
+      - name: Verify formatting (C# / C++ / Go / web) + no mojibake
+        run: just fmt-check
+
   sql-injection-audit:
     name: sql-injection-audit (parameterised-query gate)
     runs-on: ubuntu-24.04

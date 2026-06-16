@@ -1,22 +1,18 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-using CommonTools;
+using System;
 using System.Xml;
+using CommonTools;
 using MissionEditor.Database;
 
 namespace MissionEditor.Nodes
 {
+    // Ported verbatim from tools/missioneditor/Nodes/Reward.cs.
     public class Reward
     {
         private RewardType m_rewardType;
         private String m_value;
         private String m_flag;
 
-        public Reward()
-        {
-            clear();
-        }
+        public Reward() { clear(); }
 
         public void clear()
         {
@@ -25,25 +21,10 @@ namespace MissionEditor.Nodes
             m_flag = "";
         }
 
-        public void setRewardType(RewardType rewardType)
-        {
-            m_rewardType = rewardType;
-        }
-
-        public RewardType getRewardType()
-        {
-            return m_rewardType;
-        }
-
-        public void setValue(String value)
-        {
-            m_value = value;
-        }
-
-        public String getValue()
-        {
-            return m_value;
-        }
+        public void setRewardType(RewardType rewardType) { m_rewardType = rewardType; }
+        public RewardType getRewardType() { return m_rewardType; }
+        public void setValue(String value) { m_value = value; }
+        public String getValue() { return m_value; }
 
         public String getFormattedValue()
         {
@@ -59,25 +40,10 @@ namespace MissionEditor.Nodes
             return m_value;
         }
 
-        public void setFlag(String flag)
-        {
-            m_flag = flag;
-        }
+        public void setFlag(String flag) { m_flag = flag; }
+        public Boolean hasFlag() { return m_flag != null && m_flag.Length != 0; }
+        public String getFlag() { return m_flag; }
 
-        public Boolean hasFlag()
-        {
-            return m_flag != null && m_flag.Length != 0;
-        }
-
-        public String getFlag()
-        {
-            return m_flag;
-        }
-
-        /// <summary>
-        /// Parse the XML nodes
-        /// </summary>
-        /// <param name="xmlNode">The <Reward></Reward> nodes</param>
         public void fromXml(XmlNode xmlNode)
         {
             String value;
@@ -85,13 +51,9 @@ namespace MissionEditor.Nodes
             Xml.getAttribute(xmlNode, XmlAttributes.ID, true, out value);
             RewardType rewardType;
             if (Enumeration.TryParse<RewardType>(value, out rewardType))
-            {
                 setRewardType(rewardType);
-            }
             else
-            {
                 throw (new Exception("Unable to convert '" + value + "' into a RewardType" + "\n\n" + xmlNode.InnerXml));
-            }
 
             switch (rewardType)
             {
@@ -120,9 +82,7 @@ namespace MissionEditor.Nodes
             }
 
             if (Xml.getAttribute(xmlNode, XmlAttributes.FLAGS, false, out value))
-            {
                 setFlag(value);
-            }
 
             addValidations();
         }
@@ -153,29 +113,20 @@ namespace MissionEditor.Nodes
                     case RewardType.Explore_XP:
                     case RewardType.Combat_XP:
                     case RewardType.Trade_XP:
-                        if (!Int32.TryParse(getValue(), out intValue)
-                            || intValue < 0 || intValue > 500000)
-                        {
+                        if (!Int32.TryParse(getValue(), out intValue) || intValue < 0 || intValue > 500000)
                             DataConfiguration.addValidation("The reward quantity '" + getValue() + "' must be between 1 and 500,000");
-                        }
                         break;
                     case RewardType.Faction:
-                        if (!Int32.TryParse(getValue(), out intValue)
-                            || intValue < 0 || intValue > 500000)
-                        {
+                        if (!Int32.TryParse(getValue(), out intValue) || intValue < 0 || intValue > 500000)
                             DataConfiguration.addValidation("The reward quantity '" + getValue() + "' must be between 1 and 500,000");
-                        }
                         DataConfiguration.addValidation(DataConfiguration.DataType.faction, getFlag());
                         break;
                     case RewardType.Item_ID:
                         DataConfiguration.addValidation(DataConfiguration.DataType.item, getValue());
                         break;
                     case RewardType.Hull_Upgrade:
-                        if (!Int32.TryParse(getValue(), out intValue)
-                            || intValue < 0 || intValue > 6)
-                        {
+                        if (!Int32.TryParse(getValue(), out intValue) || intValue < 0 || intValue > 6)
                             DataConfiguration.addValidation("The quantity '" + getValue() + "' must be between 1 and 6");
-                        }
                         break;
                     case RewardType.Advance_Mission:
                         DataConfiguration.addValidation(DataConfiguration.DataType.mission, getValue());
@@ -185,7 +136,6 @@ namespace MissionEditor.Nodes
                 }
             }
         }
-
 
         internal void getReport(System.IO.StringWriter stringWriter)
         {

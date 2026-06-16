@@ -1,280 +1,287 @@
 using System;
 using System.Collections.Generic;
-using System.Windows.Forms;
-using System.Text;
 using System.Data;
 
 namespace N7.Sql
 {
+    // Parameterised port of tools/sector-editor/Sql/SectorObjectsSql.cs — the
+    // 280-LOC monster with ~70 sprintf SQL sites across sector_objects +
+    // sector_nav_points + per-type subtables (mob/planets/stargates/starbases/
+    // harvestable). One typed-DataRow column per parameter; every value rides
+    // a @name placeholder so Npgsql binds it.
+    //
+    // Object-type discriminator (preserved from the WinForms original):
+    //   0  → mob spawn          (sector_objects_mob       , mob_id)
+    //   3  → planet             (sector_objects_planets   , planet_id)
+    //   11 → stargate           (sector_objects_stargates , stargate_id)
+    //   12 → starbase           (sector_objects_starbases , starbase_id)
+    //   37 → (no subtable — nav-point only)
+    //   38 → harvestable field  (sector_objects_harvestable , resource_id)
     public class SectorObjectsSql
     {
         private DataTable sectorObjects;
         private String sectorID;
 
+        private const int TYPE_MOB = 0;
+        private const int TYPE_PLANET = 3;
+        private const int TYPE_STARGATE = 11;
+        private const int TYPE_STARBASE = 12;
+        private const int TYPE_NAV_ONLY = 37;
+        private const int TYPE_HARVESTABLE = 38;
+
         public SectorObjectsSql(String sectorName)
         {
-            String sectorName2 = sectorName.Replace("'", "''");
-            String sectorIDQuery = "SELECT sector_id FROM sectors where name='"+sectorName2+"';";
-
-            DataTable tmp = Database.executeQuery(Database.DatabaseName.net7, sectorIDQuery);
+            DataTable tmp = Database.executeQuery(Database.DatabaseName.net7,
+                "SELECT sector_id FROM sectors where name=@name",
+                new String[] { "name" },
+                new String[] { sectorName });
 
             foreach (DataRow r in tmp.Rows)
             {
                 sectorID = r["sector_id"].ToString();
-                String soQuery = "SELECT * FROM sector_objects left join sector_nav_points"+
-                                    " on sector_objects.sector_object_id = sector_nav_points.sector_object_id" +
-                                    " left join sector_objects_harvestable" +
-                                    " on sector_objects.sector_object_id = sector_objects_harvestable.resource_id" +
-                                    " left join sector_objects_planets" +
-                                    " on sector_objects.sector_object_id = sector_objects_planets.planet_id" +
-                                    " left join sector_objects_starbases" +
-                                    " on sector_objects.sector_object_id = sector_objects_starbases.starbase_id" +
-                                    " left join sector_objects_stargates" +
-                                    " on sector_objects.sector_object_id = sector_objects_stargates.stargate_id" +
-                                    " left join sector_objects_mob" +
-                                    " on sector_objects.sector_object_id = sector_objects_mob.mob_id" +
-                                    " where sector_objects.sector_id='" + sectorID + "' order by sector_objects.type;";
-                sectorObjects = Database.executeQuery(Database.DatabaseName.net7, soQuery);
+                String soQuery =
+                    "SELECT * FROM sector_objects" +
+                    " left join sector_nav_points on sector_objects.sector_object_id = sector_nav_points.sector_object_id" +
+                    " left join sector_objects_harvestable on sector_objects.sector_object_id = sector_objects_harvestable.resource_id" +
+                    " left join sector_objects_planets on sector_objects.sector_object_id = sector_objects_planets.planet_id" +
+                    " left join sector_objects_starbases on sector_objects.sector_object_id = sector_objects_starbases.starbase_id" +
+                    " left join sector_objects_stargates on sector_objects.sector_object_id = sector_objects_stargates.stargate_id" +
+                    " left join sector_objects_mob on sector_objects.sector_object_id = sector_objects_mob.mob_id" +
+                    " where sector_objects.sector_id=@sid order by sector_objects.type;";
+                sectorObjects = Database.executeQuery(Database.DatabaseName.net7,
+                    soQuery,
+                    new String[] { "sid" },
+                    new String[] { sectorID });
             }
             tmp.Dispose();
         }
 
+        public DataTable getSectorObject() => sectorObjects;
+
+        // --- mutations ----------------------------------------------------
+
+        private static readonly String[] NavPointCols = new String[]
+        {
+            "nav_type", "signature", "is_huge", "base_xp", "exploration_range"
+        };
+
+        private static readonly String[] SectorObjCols = new String[]
+        {
+            "base_asset_id", "h", "s", "v", "type", "scale",
+            "position_x", "position_y", "position_z",
+            "orientation_u", "orientation_v", "orientation_w", "orientation_z",
+            "name", "appears_in_radar", "radar_range", "gate_to",
+            "sound_effect_id", "sound_effect_range"
+        };
+
+        private static readonly String[] MobCols = { "mob_count", "mob_spawn_radius", "respawn_time", "delayed_spawn" };
+        private static readonly String[] PlanetCols = { "orbit_id", "orbit_dist", "orbit_angle", "orbit_rate",
+                                                           "rotate_angle", "rotate_rate", "tilt_angle", "is_landable" };
+        private static readonly String[] StargateCols = { "classSpecific", "faction_id" };
+        private static readonly String[] StarbaseCols = { "capShip", "dockable" };
+        private static readonly String[] HarvCols = { "level", "field", "res_count", "spawn_radius",
+                                                           "pop_rock_chance", "max_field_radius" };
+
         public void updateRow(DataRow r)
         {
-            int isHuge = Convert.ToInt32(r["is_huge"]);
-            int air = Convert.ToInt32(r["appears_in_radar"]);
             int type = int.Parse(r["type"].ToString());
 
-            String name = r["name"].ToString().Replace("'","''");
+            // sector_nav_points UPDATE
+            execUpdate("sector_nav_points", NavPointCols, "sector_object_id",
+                       r, "sector_object_id");
 
-            String navPointQuery = "UPDATE sector_nav_points SET nav_type='"+r["nav_type"].ToString()+"', "+
-            "signature='"+r["signature"].ToString()+"', is_huge='"+isHuge+"', "+
-            "base_xp='" + r["base_xp"].ToString() + "', exploration_range='" + r["exploration_range"].ToString() + "' " +
-            "where sector_object_id='" + r["sector_object_id"].ToString() +"';";
+            // sector_objects UPDATE
+            execUpdate("sector_objects", SectorObjCols, "sector_object_id",
+                       r, "sector_object_id");
 
-            String sectorObQuery = "UPDATE sector_objects SET base_asset_id='" + r["base_asset_id"].ToString() + "', " +
-            "h='" + r["h"].ToString() + "', s='" + r["s"].ToString() + "' ,v='" + r["v"].ToString() + "', " +
-            "type='" + r["type"].ToString() + "', scale='" + r["scale"].ToString() + "', position_x='" + r["position_x"].ToString() + "', " +
-            "position_y='" + r["position_y"].ToString() + "', position_z='" + r["position_z"].ToString() + "', " +
-            "orientation_u='" + r["orientation_u"].ToString() + "', orientation_v='" + r["orientation_v"].ToString() + "', " +
-            "orientation_w='" + r["orientation_w"].ToString() + "', orientation_z='" + r["orientation_z"].ToString() + "', " +
-            "name='" + name + "', appears_in_radar='" + air + "', " +
-            "radar_range='" + r["radar_range"].ToString() + "', gate_to='" + r["gate_to"].ToString() + "', " +
-            "sound_effect_id='" + r["sound_effect_id"].ToString() + "', sound_effect_range='" + r["sound_effect_range"].ToString() + "' " +
-            "where sector_object_id='" + r["sector_object_id"].ToString() + "';";
-
-            try
+            // per-type subtable UPDATE
+            switch (type)
             {
-                Database.executeQuery(Database.DatabaseName.net7, navPointQuery);
-                Database.executeQuery(Database.DatabaseName.net7, sectorObQuery);
-
-                String specialQuery = "";
-                switch (type)
-                {
-                    case 0:
-                        
-                        int delayed_spawn = Convert.ToInt32(r["delayed_spawn"]); 
-                        specialQuery = "UPDATE sector_objects_mob SET "+
-                        "mob_count='" + r["mob_count"].ToString() + "', " +
-                        "mob_spawn_radius='" + r["mob_spawn_radius"].ToString() + "', "+
-                        "respawn_time='" + r["respawn_time"].ToString() + "', " +
-                        "delayed_spawn='" + delayed_spawn + "' " +
-                        "where mob_id='" + r["mob_id"].ToString() + "';";
-                        break;
-                    case 3:
-                        int isLandable = Convert.ToInt32(r["is_landable"]);
-
-                        specialQuery = "UPDATE sector_objects_planets SET orbit_id='" + r["orbit_id"].ToString() + "', orbit_dist='" + r["orbit_dist"].ToString() + "', " +
-                        "orbit_angle='" + r["orbit_angle"].ToString() + "', orbit_rate='" + r["orbit_rate"].ToString() + "', rotate_angle='" + r["rotate_angle"].ToString() + "', " +
-                        "rotate_rate='" + r["rotate_rate"].ToString() + "', tilt_angle='" + r["tilt_angle"].ToString() + "', is_landable='" + isLandable + "' " +
-                        "where planet_id='" + r["planet_id"].ToString() + "';";
-                        break;
-                    case 11: //stargate
-                        int isClassSpecific = Convert.ToInt32(r["classSpecific"]);
-
-                        specialQuery = "UPDATE sector_objects_stargates SET classSpecific='" + isClassSpecific + "', " +
-                        "faction_id='" + r["faction_id"].ToString() + "' where stargate_id='" + r["stargate_id"].ToString() + "';";
-                        break;
-                    case 12: //starbase
-                        int isCapShip = Convert.ToInt32(r["capShip"]);
-                        int isDockable = Convert.ToInt32(r["dockable"]);
-
-                        specialQuery = "UPDATE sector_objects_starbases SET capShip='"+isCapShip+"', "+
-                        "dockable='" + isDockable + "' where starbase_id='" + r["starbase_id"].ToString() + "';";
-                        break;
-                    case 38:
-                        specialQuery = "UPDATE sector_objects_harvestable SET level='" + r["level"].ToString() + "', " +
-                        "field='" + r["field"].ToString() + "', res_count='" + r["res_count"].ToString() + "', " +
-                        "spawn_radius='" + r["spawn_radius"].ToString() + "', pop_rock_chance='" + r["pop_rock_chance"].ToString() + "', " +
-                        "max_field_radius='" + r["max_field_radius"].ToString() + "' " +
-                        "where resource_id='" + r["resource_id"].ToString() + "';";
-                        break;
-                }
-
-                if (type != 37)
-                {
-                    Database.executeQuery(Database.DatabaseName.net7, specialQuery);
-                }
-            }
-            catch (Exception e)
-            {
-                MessageBox.Show(e + "\n" + e.StackTrace);
+                case TYPE_MOB:
+                    execUpdate("sector_objects_mob", MobCols, "mob_id", r, "mob_id");
+                    break;
+                case TYPE_PLANET:
+                    execUpdate("sector_objects_planets", PlanetCols, "planet_id", r, "planet_id");
+                    break;
+                case TYPE_STARGATE:
+                    execUpdate("sector_objects_stargates", StargateCols, "stargate_id", r, "stargate_id");
+                    break;
+                case TYPE_STARBASE:
+                    execUpdate("sector_objects_starbases", StarbaseCols, "starbase_id", r, "starbase_id");
+                    break;
+                case TYPE_HARVESTABLE:
+                    execUpdate("sector_objects_harvestable", HarvCols, "resource_id", r, "resource_id");
+                    break;
+                case TYPE_NAV_ONLY:
+                    // nav-point only, nothing else to update
+                    break;
             }
         }
 
         public void deleteRow(int id, int type)
         {
-            String navPointQuery = "DELETE FROM sector_nav_points where sector_object_id='"+id+"';";
-            String sectorObQuery = "DELETE FROM sector_objects where sector_object_id='" + id + "';";
+            String idParam = "id";
+            String[] paramNames = new String[] { idParam };
+            String[] paramValues = new String[] { id.ToString() };
 
-            String specialQuery = "";
-            String mobGroupQuery = "";
-            String harvGroupQuery = "";
+            // Per-type subtable deletes (do these first to keep FK constraints happy).
             switch (type)
             {
-                case 0:
-                    specialQuery = "DELETE FROM sector_objects_mob where mob_id='" + id + "';";
-                    mobGroupQuery = "DELETE FROM mob_spawn_group where spawn_group_id='" + id + "';";
+                case TYPE_MOB:
+                    Database.executeCommand(Database.DatabaseName.net7,
+                        "DELETE FROM mob_spawn_group where spawn_group_id=@" + idParam, paramNames, paramValues);
+                    Database.executeCommand(Database.DatabaseName.net7,
+                        "DELETE FROM sector_objects_mob where mob_id=@" + idParam, paramNames, paramValues);
                     break;
-                case 3:
-                    specialQuery = "DELETE FROM sector_objects_planets where planet_id='" + id + "';";
+                case TYPE_PLANET:
+                    Database.executeCommand(Database.DatabaseName.net7,
+                        "DELETE FROM sector_objects_planets where planet_id=@" + idParam, paramNames, paramValues);
                     break;
-                case 11: //stargate
-                    specialQuery = "DELETE FROM sector_objects_stargates where stargate_id='" + id + "';";
+                case TYPE_STARGATE:
+                    Database.executeCommand(Database.DatabaseName.net7,
+                        "DELETE FROM sector_objects_stargates where stargate_id=@" + idParam, paramNames, paramValues);
                     break;
-                case 12: //starbase
-                    specialQuery = "DELETE FROM sector_objects_starbases where starbase_id='" + id + "';";
+                case TYPE_STARBASE:
+                    Database.executeCommand(Database.DatabaseName.net7,
+                        "DELETE FROM sector_objects_starbases where starbase_id=@" + idParam, paramNames, paramValues);
                     break;
-                case 38:
-                    specialQuery = "DELETE FROM sector_objects_harvestable where resource_id='" + id + "';";
-                    harvGroupQuery = "DELETE FROM sector_objects_harvestable_restypes where group_id='" + id + "';";
-                    mobGroupQuery = "DELETE FROM mob_spawn_group where spawn_group_id='" + id + "';";
+                case TYPE_HARVESTABLE:
+                    Database.executeCommand(Database.DatabaseName.net7,
+                        "DELETE FROM mob_spawn_group where spawn_group_id=@" + idParam, paramNames, paramValues);
+                    Database.executeCommand(Database.DatabaseName.net7,
+                        "DELETE FROM sector_objects_harvestable_restypes where group_id=@" + idParam, paramNames, paramValues);
+                    Database.executeCommand(Database.DatabaseName.net7,
+                        "DELETE FROM sector_objects_harvestable where resource_id=@" + idParam, paramNames, paramValues);
+                    break;
+                case TYPE_NAV_ONLY:
                     break;
             }
 
-            try
-            {
-                if (type == 0 || type == 38)
-                {
-                    Database.executeQuery(Database.DatabaseName.net7, mobGroupQuery);
-                }
-                if (type == 38)
-                {
-                    Database.executeQuery(Database.DatabaseName.net7, harvGroupQuery);
-                }
-                if (type != 37)
-                {
-                    Database.executeQuery(Database.DatabaseName.net7, specialQuery);
-                }
-
-                Database.executeQuery(Database.DatabaseName.net7, navPointQuery);
-                Database.executeQuery(Database.DatabaseName.net7, sectorObQuery);
-            }
-            catch (Exception)
-            {
-                
-                throw;
-            }
+            // Always clean up the nav-point row and the parent sector_objects row.
+            Database.executeCommand(Database.DatabaseName.net7,
+                "DELETE FROM sector_nav_points where sector_object_id=@" + idParam, paramNames, paramValues);
+            Database.executeCommand(Database.DatabaseName.net7,
+                "DELETE FROM sector_objects where sector_object_id=@" + idParam, paramNames, paramValues);
         }
 
         public void newRow(DataRow r)
         {
-            int isHuge = Convert.ToInt32(r["is_huge"]);
-            int air = Convert.ToInt32(r["appears_in_radar"]);
             int type = int.Parse(r["type"].ToString());
 
-            String name = r["name"].ToString().Replace("'", "''");
-            Console.Out.WriteLine(r["sound_effect_id"].ToString());
+            // INSERT into sector_objects with the sector linkage.
+            // sector_object_id is GENERATED BY DEFAULT AS IDENTITY; the insert
+            // RETURNs the freshly-minted parent id, which every child row below
+            // (nav-point + per-type subtable) is keyed to. A nav point IS a
+            // sector object, so sector_nav_points.sector_object_id is that same
+            // id supplied explicitly.
+            String[] objCols = new String[SectorObjCols.Length + 1];
+            objCols[0] = "sector_id";
+            Array.Copy(SectorObjCols, 0, objCols, 1, SectorObjCols.Length);
+            long lastInsertID = execInsertReturning("sector_objects", objCols, r, "sector_object_id");
 
-            String sectorObQuery = "INSERT INTO sector_objects SET base_asset_id='" + r["base_asset_id"].ToString() + "', " +
-            "h='" + r["h"].ToString() + "', s='" + r["s"].ToString() + "' ,v='" + r["v"].ToString() + "', " +
-            "type='" + r["type"].ToString() + "', scale='" + r["scale"].ToString() + "', position_x='" + r["position_x"].ToString() + "', " +
-            "position_y='" + r["position_y"].ToString() + "', position_z='" + r["position_z"].ToString() + "', " +
-            "orientation_u='" + r["orientation_u"].ToString() + "', orientation_v='" + r["orientation_v"].ToString() + "', " +
-            "orientation_w='" + r["orientation_w"].ToString() + "', orientation_z='" + r["orientation_z"].ToString() + "', " +
-            "name='" + name + "', appears_in_radar='" + air + "', sector_id='"+r["sector_id"].ToString()+"', " +
-            "radar_range='" + r["radar_range"].ToString() + "', gate_to='" + r["gate_to"].ToString() + "', "+
-            "sound_effect_id='" + r["sound_effect_id"].ToString() + "', sound_effect_range='" + r["sound_effect_range"].ToString() + "';";
-
-            int lastInsertID = 0;
-            try
+            // INSERT into sector_nav_points using the freshly-minted id.
+            List<String> navParamNames = new List<String> { "sector_object_id", "sector_id" };
+            List<String> navParamValues = new List<String> { lastInsertID.ToString(), r["sector_id"].ToString() };
+            String navCols = "\"sector_object_id\", \"sector_id\"";
+            String navVals = "@sector_object_id, @sector_id";
+            foreach (String c in NavPointCols)
             {
-                Database.executeQuery(Database.DatabaseName.net7, sectorObQuery);
-
-                DataTable tmp = Database.executeQuery(Database.DatabaseName.net7, "SELECT LAST_INSERT_ID()");
-                foreach (DataRow z in tmp.Rows)
-                {
-                    lastInsertID = int.Parse(z["LAST_INSERT_ID()"].ToString());
-                }
+                navParamNames.Add(c);
+                navParamValues.Add(r[c].ToString());
+                navCols += ", \"" + c + "\"";
+                navVals += ", @" + c;
             }
-            catch (Exception)
+            Database.executeCommand(Database.DatabaseName.net7,
+                "INSERT INTO sector_nav_points (" + navCols + ") VALUES (" + navVals + ")",
+                navParamNames.ToArray(), navParamValues.ToArray());
+
+            // INSERT into the per-type subtable.
+            switch (type)
             {
-                throw;
+                case TYPE_MOB:
+                    execInsertWithId("sector_objects_mob", "mob_id", lastInsertID, MobCols, r);
+                    break;
+                case TYPE_PLANET:
+                    execInsertWithId("sector_objects_planets", "planet_id", lastInsertID, PlanetCols, r);
+                    break;
+                case TYPE_STARGATE:
+                    execInsertWithId("sector_objects_stargates", "stargate_id", lastInsertID, StargateCols, r);
+                    break;
+                case TYPE_STARBASE:
+                    execInsertWithId("sector_objects_starbases", "starbase_id", lastInsertID, StarbaseCols, r);
+                    break;
+                case TYPE_HARVESTABLE:
+                    execInsertWithId("sector_objects_harvestable", "resource_id", lastInsertID, HarvCols, r);
+                    break;
+                case TYPE_NAV_ONLY:
+                    break;
             }
 
-            String navPointQuery = "INSERT INTO sector_nav_points SET sector_object_id='" + lastInsertID + "', nav_type='" + r["nav_type"].ToString() + "', " +
-                "signature='" + r["signature"].ToString() + "', is_huge='" + isHuge + "', sector_id='" + r["sector_id"].ToString() + "', " +
-                "base_xp='" + r["base_xp"].ToString() + "', exploration_range='" + r["exploration_range"].ToString() + "';";
-
-            try
-            {
-                Database.executeQuery(Database.DatabaseName.net7, navPointQuery);
-
-                String specialQuery = "";
-                switch (type)
-                {
-                    case 0:
-                        int delayed_spawn = Convert.ToInt32(r["delayed_spawn"]); 
-                        specialQuery = "INSERT INTO sector_objects_mob SET mob_id='" + lastInsertID + "', " +
-                        "mob_count='" + r["mob_count"].ToString() + "', " +
-                        "mob_spawn_radius='" + r["mob_spawn_radius"].ToString() + "', " +
-                        "respawn_time='" + r["respawn_time"].ToString() + "', " +
-                        "delayed_spawn='" + delayed_spawn + "';";
-                        break;
-                    case 3:
-                        int isLandable = Convert.ToInt32(r["is_landable"]);
-
-                        specialQuery = "INSERT INTO sector_objects_planets SET planet_id='" + lastInsertID + "', orbit_id='" + r["orbit_id"].ToString() + "', orbit_dist='" + r["orbit_dist"].ToString() + "', " +
-                        "orbit_angle='" + r["orbit_angle"].ToString() + "', orbit_rate='" + r["orbit_rate"].ToString() + "', rotate_angle='" + r["rotate_angle"].ToString() + "', " +
-                        "rotate_rate='" + r["rotate_rate"].ToString() + "', tilt_angle='" + r["tilt_angle"].ToString() + "', is_landable='" + isLandable + "';";
-                        break;
-                    case 11: //stargate
-                        int isClassSpecific = Convert.ToInt32(r["classSpecific"]);
-
-                        specialQuery = "INSERT INTO sector_objects_stargates SET stargate_id='" + lastInsertID + "', classSpecific='" + isClassSpecific + "', " +
-                        "faction_id='" + r["faction_id"].ToString() + "';";
-                        break;
-                    case 12: //starbase
-                        int isCapShip = Convert.ToInt32(r["capShip"]);
-                        int isDockable = Convert.ToInt32(r["dockable"]);
-
-                        specialQuery = "INSERT INTO sector_objects_starbases SET starbase_id='" + lastInsertID + "', capShip='" + isCapShip + "', " +
-                        "dockable='" + isDockable + "';";
-                        break;
-                    case 38:
-                        specialQuery = "INSERT INTO sector_objects_harvestable SET resource_id='" + lastInsertID + "', level='" + r["level"].ToString() + "', " +
-                        "field='" + r["field"].ToString() + "', res_count='" + r["res_count"].ToString() + "', " +
-                        "spawn_radius='" + r["spawn_radius"].ToString() + "', pop_rock_chance='" + r["pop_rock_chance"].ToString() + "', " +
-                        "max_field_radius='" + r["max_field_radius"].ToString() + "';";
-                        break;
-                }
-                if (type != 37)
-                {
-                    Database.executeQuery(Database.DatabaseName.net7, specialQuery);
-                }
-
-                r["sector_object_id"] = lastInsertID;
-                r.AcceptChanges();
-            }
-            catch (Exception)
-            {
-                throw;
-            }
+            r["sector_object_id"] = lastInsertID;
+            r.AcceptChanges();
         }
 
-        public DataTable getSectorObject()
+        // --- private helpers ---------------------------------------------
+
+        private static void execUpdate(String table, String[] cols, String whereCol, DataRow r, String whereSource)
         {
-            return sectorObjects;
+            String[] paramNames = new String[cols.Length + 1];
+            String[] paramValues = new String[cols.Length + 1];
+            String setClause = "";
+            for (int i = 0; i < cols.Length; i++)
+            {
+                paramNames[i] = cols[i];
+                paramValues[i] = r[cols[i]].ToString();
+                if (setClause.Length > 0) setClause += ", ";
+                setClause += "\"" + cols[i] + "\"=@" + cols[i];
+            }
+            paramNames[cols.Length] = whereCol;
+            paramValues[cols.Length] = r[whereSource].ToString();
+
+            String query = "UPDATE " + table + " SET " + setClause + " WHERE \"" + whereCol + "\"=@" + whereCol;
+            Database.executeCommand(Database.DatabaseName.net7, query, paramNames, paramValues);
+        }
+
+        // INSERT that returns a GENERATED-AS-IDENTITY pk via RETURNING (Postgres
+        // has no LAST_INSERT_ID()). Runs through executeQuery so the row comes
+        // back and the ChangeTracker still records the mutation.
+        private static long execInsertReturning(String table, String[] cols, DataRow r, String pkCol)
+        {
+            String[] paramNames = new String[cols.Length];
+            String[] paramValues = new String[cols.Length];
+            String colList = "";
+            String valList = "";
+            for (int i = 0; i < cols.Length; i++)
+            {
+                paramNames[i] = cols[i];
+                paramValues[i] = r[cols[i]].ToString();
+                if (colList.Length > 0) { colList += ", "; valList += ", "; }
+                colList += "\"" + cols[i] + "\"";
+                valList += "@" + cols[i];
+            }
+            String query = "INSERT INTO " + table + " (" + colList + ") VALUES (" + valList
+                         + ") RETURNING \"" + pkCol + "\" AS id";
+            DataTable res = Database.executeQuery(Database.DatabaseName.net7, query, paramNames, paramValues);
+            return Convert.ToInt64(res.Rows[0]["id"]);
+        }
+
+        private static void execInsertWithId(String table, String idCol, long idValue, String[] cols, DataRow r)
+        {
+            String[] paramNames = new String[cols.Length + 1];
+            String[] paramValues = new String[cols.Length + 1];
+            paramNames[0] = idCol;
+            paramValues[0] = idValue.ToString();
+            String colList = "\"" + idCol + "\"";
+            String valList = "@" + idCol;
+            for (int i = 0; i < cols.Length; i++)
+            {
+                paramNames[i + 1] = cols[i];
+                paramValues[i + 1] = r[cols[i]].ToString();
+                colList += ", \"" + cols[i] + "\"";
+                valList += ", @" + cols[i];
+            }
+            String query = "INSERT INTO " + table + " (" + colList + ") VALUES (" + valList + ")";
+            Database.executeCommand(Database.DatabaseName.net7, query, paramNames, paramValues);
         }
     }
 }

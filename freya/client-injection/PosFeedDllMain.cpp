@@ -31,44 +31,43 @@
 // True only when the current process image is client.exe. AppInit_DLLs is
 // prefix-global, so without this the feed thread would also spin up inside any
 // other user32 process in the prefix.
-static bool HostIsClientExe()
-{
+static bool HostIsClientExe() {
     char path[MAX_PATH];
-    DWORD n = GetModuleFileNameA(NULL, path, (DWORD) sizeof(path));
-    if (n == 0 || n >= sizeof(path)) return false;
+    DWORD n = GetModuleFileNameA(NULL, path, (DWORD)sizeof(path));
+    if (n == 0 || n >= sizeof(path))
+        return false;
 
     // Compare the trailing filename, case-insensitively (WINE paths are
     // case-preserving but the client may be invoked as Client.exe / CLIENT.EXE).
-    const char *base = path;
-    for (const char *p = path; *p; ++p)
-        if (*p == '\\' || *p == '/') base = p + 1;
+    const char* base = path;
+    for (const char* p = path; *p; ++p)
+        if (*p == '\\' || *p == '/')
+            base = p + 1;
 
     return _stricmp(base, "client.exe") == 0;
 }
 
-BOOL APIENTRY DllMain(HANDLE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
-{
-    (void) lpReserved;
-    switch (ul_reason_for_call)
-    {
-        case DLL_PROCESS_ATTACH:
-            // We never need thread-attach/detach notifications; suppressing them
-            // avoids per-thread DllMain overhead in the client's many threads.
-            DisableThreadLibraryCalls((HMODULE) hModule);
-            if (HostIsClientExe())
-            {
-                // Loader-lock-safe confirmation that injection actually landed in
-                // client.exe -- visible in the WINE console / a debugger even
-                // before the engine read is filled (when the feed sends nothing).
-                OutputDebugStringA("[FreyaPosFeed] attached to client.exe; starting MVAS position feed\n");
-                FreyaClientPosFeed_Start();   // inert until the owner seam is filled
-            }
-            break;
+BOOL APIENTRY DllMain(HANDLE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
+    (void)lpReserved;
+    switch (ul_reason_for_call) {
+    case DLL_PROCESS_ATTACH:
+        // We never need thread-attach/detach notifications; suppressing them
+        // avoids per-thread DllMain overhead in the client's many threads.
+        DisableThreadLibraryCalls((HMODULE)hModule);
+        if (HostIsClientExe()) {
+            // Loader-lock-safe confirmation that injection actually landed in
+            // client.exe -- visible in the WINE console / a debugger even
+            // before the engine read is filled (when the feed sends nothing).
+            OutputDebugStringA(
+                "[FreyaPosFeed] attached to client.exe; starting MVAS position feed\n");
+            FreyaClientPosFeed_Start(); // inert until the owner seam is filled
+        }
+        break;
 
-        case DLL_PROCESS_DETACH:
-            // Safe to call unconditionally: Stop() is a no-op if Start() never ran.
-            FreyaClientPosFeed_Stop();
-            break;
+    case DLL_PROCESS_DETACH:
+        // Safe to call unconditionally: Stop() is a no-op if Start() never ran.
+        FreyaClientPosFeed_Stop();
+        break;
     }
     return TRUE;
 }

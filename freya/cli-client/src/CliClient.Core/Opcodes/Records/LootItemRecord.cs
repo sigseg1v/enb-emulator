@@ -28,11 +28,11 @@ public sealed class LootItemRecord : PacketRecord
     {
         if (Payload.Length < 20) { Flag(sb, $"LOOT_ITEM truncated -- {Payload.Length} bytes, expected >= 20"); return; }
 
-        FHex(sb,  0, "GameID",           ReadI32LE(Payload, 0));
-        FHex(sb,  4, "ArticleUID",       ReadI32LE(Payload, 4));
-        FHex(sb,  8, "ArticleEffectUID", ReadI32LE(Payload, 8));
-        FDec(sb, 12, "BaseAsset",        ReadI16LE(Payload, 12));
-        FHex(sb, 14, "LootTick",         ReadU32LE(Payload, 14));
+        FHex(sb, 0, "GameID", ReadI32LE(Payload, 0));
+        FHex(sb, 4, "ArticleUID", ReadI32LE(Payload, 4));
+        FHex(sb, 8, "ArticleEffectUID", ReadI32LE(Payload, 8));
+        FDec(sb, 12, "BaseAsset", ReadI16LE(Payload, 12));
+        FHex(sb, 14, "LootTick", ReadU32LE(Payload, 14));
 
         short nameLen = ReadI16LE(Payload, 18);
         FDec(sb, 18, "NameLen", nameLen);
@@ -42,8 +42,8 @@ public sealed class LootItemRecord : PacketRecord
 
         int off = 20 + nameLen;
         if (off + 20 > Payload.Length) { Flag(sb, $"LOOT_ITEM missing tractor/position trailer -- {Payload.Length - off} bytes left"); return; }
-        FHex(sb,   off,      "TractorTime",  ReadU32LE(Payload, off));
-        FFloat(sb, off + 4,  "TractorSpeed", ReadF32LE(Payload, off + 4));
+        FHex(sb, off, "TractorTime", ReadU32LE(Payload, off));
+        FFloat(sb, off + 4, "TractorSpeed", ReadF32LE(Payload, off + 4));
         float px = ReadF32LE(Payload, off + 8);
         float py = ReadF32LE(Payload, off + 12);
         float pz = ReadF32LE(Payload, off + 16);

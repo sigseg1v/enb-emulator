@@ -1,8 +1,6 @@
 using System;
-using System.Collections.Generic;
-using System.Windows.Forms;
-using System.Text;
 using System.Data;
+using CommonTools.Database;
 
 namespace N7.Sql
 {
@@ -12,8 +10,7 @@ namespace N7.Sql
 
         public Systems()
         {
-            String systemsQuery = "Select * from systems";
-            systems = Database.executeQuery(Database.DatabaseName.net7, systemsQuery);
+            systems = Database.executeQuery(Database.DatabaseName.net7, "Select * from systems");
         }
 
         public DataTable getSystemTable()
@@ -22,11 +19,6 @@ namespace N7.Sql
         }
 
         public DataRow[] findRowsByName(String name)
-        {
-            DataRow[] foundRows;
-            foundRows = systems.Select("name Like '" + name + "'");
-
-            return foundRows;
-        }
+            => systems.WhereTextEquals("name", name);
     }
 }

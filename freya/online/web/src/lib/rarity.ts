@@ -20,38 +20,58 @@
 
 import type { RarityKey } from '../types';
 
-export interface RarityDef { key: RarityKey; label: string; color: string; glow: string; }
+export interface RarityDef {
+    key: RarityKey;
+    label: string;
+    color: string;
+    glow: string;
+}
 
 export const RARITY: Record<RarityKey, RarityDef> = {
-  common:    { key: 'common',    label: 'Common',    color: 'var(--r-common)',    glow: 'var(--r-common-glow)' },
-  uncommon:  { key: 'uncommon',  label: 'Uncommon',  color: 'var(--r-uncommon)',  glow: 'var(--r-uncommon-glow)' },
-  rare:      { key: 'rare',      label: 'Rare',      color: 'var(--r-rare)',      glow: 'var(--r-rare-glow)' },
-  epic:      { key: 'epic',      label: 'Epic',      color: 'var(--r-epic)',      glow: 'var(--r-epic-glow)' },
-  legendary: { key: 'legendary', label: 'Legendary', color: 'var(--r-legendary)', glow: 'var(--r-legendary-glow)' },
+    common: {
+        key: 'common',
+        label: 'Common',
+        color: 'var(--r-common)',
+        glow: 'var(--r-common-glow)',
+    },
+    uncommon: {
+        key: 'uncommon',
+        label: 'Uncommon',
+        color: 'var(--r-uncommon)',
+        glow: 'var(--r-uncommon-glow)',
+    },
+    rare: { key: 'rare', label: 'Rare', color: 'var(--r-rare)', glow: 'var(--r-rare-glow)' },
+    epic: { key: 'epic', label: 'Epic', color: 'var(--r-epic)', glow: 'var(--r-epic-glow)' },
+    legendary: {
+        key: 'legendary',
+        label: 'Legendary',
+        color: 'var(--r-legendary)',
+        glow: 'var(--r-legendary-glow)',
+    },
 };
 
 const ORDER: RarityKey[] = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
 
 export function rarityFor(level: number, quality: number | null): RarityKey {
-  if (quality == null) return 'common';
+    if (quality == null) return 'common';
 
-  let tier: RarityKey;
-  if (quality >= 1.80) tier = 'epic';
-  else if (quality >= 1.50) tier = 'rare';
-  else if (quality >= 1.30) tier = 'uncommon';
-  else tier = 'common';
+    let tier: RarityKey;
+    if (quality >= 1.8) tier = 'epic';
+    else if (quality >= 1.5) tier = 'rare';
+    else if (quality >= 1.3) tier = 'uncommon';
+    else tier = 'common';
 
-  let cap: RarityKey;
-  if (level <= 3) cap = 'uncommon';
-  else if (level <= 6) cap = 'rare';
-  else cap = 'epic';
+    let cap: RarityKey;
+    if (level <= 3) cap = 'uncommon';
+    else if (level <= 6) cap = 'rare';
+    else cap = 'epic';
 
-  return ORDER.indexOf(tier) > ORDER.indexOf(cap) ? cap : tier;
+    return ORDER.indexOf(tier) > ORDER.indexOf(cap) ? cap : tier;
 }
 
 export function qualityClass(q: number): string {
-  if (q >= 1.70) return 'qual--exc';
-  if (q >= 1.30) return 'qual--high';
-  if (q >= 1.00) return 'qual--ok';
-  return 'qual--low';
+    if (q >= 1.7) return 'qual--exc';
+    if (q >= 1.3) return 'qual--high';
+    if (q >= 1.0) return 'qual--ok';
+    return 'qual--low';
 }

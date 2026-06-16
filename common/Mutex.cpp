@@ -47,8 +47,7 @@
 
 #include <net7/Mutex.h>
 
-Mutex::Mutex()
-{
+Mutex::Mutex() {
     pthread_mutexattr_t attr;
     pthread_mutexattr_init(&attr);
     pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
@@ -56,17 +55,14 @@ Mutex::Mutex()
     pthread_mutexattr_destroy(&attr);
 }
 
-Mutex::~Mutex()
-{
+Mutex::~Mutex() {
     pthread_mutex_destroy(&m_Mutex);
 }
 
-void Mutex::Lock()
-{
+void Mutex::Lock() {
     pthread_mutex_lock(&m_Mutex);
 }
 
-void Mutex::Unlock()
-{
+void Mutex::Unlock() {
     pthread_mutex_unlock(&m_Mutex);
 }

@@ -31,8 +31,8 @@ public static class AuxSchemaRegistry
 
     public static bool GateMatches(IdGate gate, uint gameId) => gate switch
     {
-        IdGate.Zero    => gameId == 0,
+        IdGate.Zero => gameId == 0,
         IdGate.NonZero => gameId != 0,
-        _              => true,
+        _ => true,
     };
 }

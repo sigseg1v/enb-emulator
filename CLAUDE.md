@@ -46,7 +46,7 @@ The source of truth for "what's done / what's next" across invocations is the `p
 │   ├── third_party/   vendored libs (boost subset, cryptopp, etc.)
 │   ├── CMakeLists.txt modern CMake
 │   └── Makefile.legacy tada-o's original Makefile, kept for reference
-├── login-server/      Net7Mysql + Net7SSL — auth/login flow
+├── login-server/      net7go (Go auth/login) -- the dead C++ Net7SSL/Net7Mysql were removed
 ├── proxy/             FreyaProxy
 ├── launcher/          MVASlaunch
 ├── client/
@@ -108,10 +108,10 @@ under `freya/` is MIT. **Before adding project code, decide the bucket and put
 it in the right place first** (move existing tooling under `freya/` only if it
 is genuinely self-contained new code with no Net-7 compile dependency).
 
-Note what is deliberately NOT under `freya/`: `login-server/` (Net7Mysql /
-Net7SSL) and `proxy/` are inherited Net-7 code (the proxy compiles against
-`common/include/net7/`), so they stay put under CC BY-NC-SA 3.0 even though we
-have heavily edited them. New code that links Net-7 headers is a *modification*,
+Note what is deliberately NOT under `freya/`: `login-server/net7go` (the Go
+auth/login server extracted from the old Net7SSL) and `proxy/` are inherited
+Net-7 derivatives (the proxy compiles against `common/include/net7/`), so they
+stay put under CC BY-NC-SA 3.0 even though we have heavily edited them. New code that links Net-7 headers is a *modification*,
 not new independent work.
 
 **SPDX header for `freya/*` files: MIT, always.** Every source file under
@@ -137,7 +137,7 @@ RSA/RC4 handshake primitives the CLI links against).
 - **Naming new code "Freya", not "Net7"**: the inherited upstream code carries the `Net7` brand (Net-7 / tada-o) -- leave those existing names alone (renaming live symbols/files churns the merge and breaks cross-refs). But anything **new** -- a new system, subsystem, tool, DLL, rewrite, or replacement for an old Net7 component -- gets the **Freya** name (`FreyaProxy`, `FreyaPosFeed.dll`, `FreyaInject.exe`, `tools/LaunchFreya`, ...). Rule of thumb: if you're writing it fresh or rewriting an old piece, it's Freya; if you're editing inherited code in place, keep its Net7 name.
   - **Inside `freya/*`, ALL identifiers/macros/symbols we author use `Freya`/`FREYA`, never `Net7`/`NET7`.** Code under `freya/` is new, self-contained, MIT work -- it is not Net7 code, so it must not carry the Net7 brand. A symbol/macro/struct/function we invented gets `Freya`/`FREYA` (e.g. `FreyaClientPosFeed_Start`, `FREYA_CLIENT_POS_PORT`, `FreyaClientPosDatagram`) -- including symbols that a CC-BY-NC-SA file outside `freya/` (the proxy, etc.) consumes by including a `freya/` header: rename our invented symbol everywhere it is used, the consumer's reference included. The ONLY `Net7`/`NET7` tokens allowed to remain inside `freya/*` are references to genuinely inherited, pre-existing things we did NOT author (`Net-7` the project, `Net7Proxy` the real proxy binary, `NET7MP` the multiplayer mode). Test before renaming: did we invent this name (check `git log -S`)? If yes -> rename it Freya. If it was already there in upstream -> leave it.
 - **C++**: target Linux first, Windows second. New code must compile on g++ 13+ with `-Wall -Wextra`. Don't reintroduce Win32 APIs in new code; use shims in `server/compat/` or POSIX directly.
-- **"Runs on Linux" scope** — this means the *server* runs **natively** on Linux (no WINE). The Win32 cleanup applies to **server-native code only**: `server/src/`, `login-server/Net7Mysql/`, `login-server/Net7SSL/`, `proxy/`. It does **NOT** apply to:
+- **"Runs on Linux" scope** — this means the *server* runs **natively** on Linux (no WINE). The Win32 cleanup applies to **server-native code only**: `server/src/` and `proxy/` (the C++ login-server components Net7SSL/Net7Mysql were removed; `login-server/net7go` is Go and already cross-platform). It does **NOT** apply to:
   - **`client/**`** — the EnB client is a Win32 binary that runs under WINE (or on Windows). It's allowed and expected to use Win32 APIs. `client/mods/`, the linux-installer's WINE prefix, and the in-client injection unit `freya/client-injection/` (FreyaInject.exe + FreyaPosFeed.dll) — all stay Win32. Document this in any client-touching plan.
   - **`server/third_party/**` and vendored deps (boost, cryptopp, zlib, lua, MySQL Connector/C)** — we *consume* these libraries; we don't rewrite them. boost::interprocess on Linux uses real POSIX primitives through the same boost API; cryptopp / openssl / etc. likewise. Anything that looks like a Win32 symbol *inside* `third_party/` or a vendored header is upstream's concern, not ours.
 - **SQL**: target Postgres syntax in new code. Existing MySQL-flavoured SQL is being migrated. Don't add new MySQL-isms.
@@ -164,7 +164,7 @@ Two things stay non-negotiable:
 
 2. **A server change must be a CORRECTNESS change, proven against a primary source.** A change that makes us diverge from the real server's observable behaviour destroys preservation value. A change is allowed only when a primary source shows the server is currently WRONG (or incomplete) measured against the real server-and-client pair.
 
-**When you MAY change the server.** You may change `server/src/`, `login-server/Net7Mysql/`, `login-server/Net7SSL/` (and `proxy/`) when ALL THREE of these hold:
+**When you MAY change the server.** You may change `server/src/`, `login-server/net7go/` (and `proxy/`) when ALL THREE of these hold:
 
 **A. Primary-source proof** that the change is what correctness requires. Acceptable sources, in roughly decreasing order of weight:
 - A **packet capture** of the live retail server (the RARs in `archive/kyp-snapshot/capturedPackets/` are the canonical set), or a local cleartext proxy<->server capture, showing the real behaviour.

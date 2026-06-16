@@ -15,19 +15,17 @@
 #include <libpq-fe.h>
 
 TEST(PostgresSmoke, ConnectsAndSelectsOne) {
-    const char *dsn = std::getenv("NET7_TEST_DB_DSN");
+    const char* dsn = std::getenv("NET7_TEST_DB_DSN");
     if (!dsn || !*dsn) {
         GTEST_SKIP() << "NET7_TEST_DB_DSN not set; skipping live DB smoke test";
     }
 
-    PGconn *conn = PQconnectdb(dsn);
+    PGconn* conn = PQconnectdb(dsn);
     ASSERT_NE(conn, nullptr);
-    ASSERT_EQ(PQstatus(conn), CONNECTION_OK)
-        << "PQconnectdb failed: " << PQerrorMessage(conn);
+    ASSERT_EQ(PQstatus(conn), CONNECTION_OK) << "PQconnectdb failed: " << PQerrorMessage(conn);
 
-    PGresult *res = PQexec(conn, "SELECT 1");
-    ASSERT_EQ(PQresultStatus(res), PGRES_TUPLES_OK)
-        << "SELECT 1 failed: " << PQerrorMessage(conn);
+    PGresult* res = PQexec(conn, "SELECT 1");
+    ASSERT_EQ(PQresultStatus(res), PGRES_TUPLES_OK) << "SELECT 1 failed: " << PQerrorMessage(conn);
     ASSERT_EQ(PQntuples(res), 1);
     ASSERT_EQ(PQnfields(res), 1);
     EXPECT_STREQ(PQgetvalue(res, 0, 0), "1");

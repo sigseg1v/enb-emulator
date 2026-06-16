@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -39,10 +39,10 @@ namespace WestWood3D.Chunks
                 if (dbg)
                 {
                     Console.Out.WriteLine("\t\t dcg[" + i + "]: " + dcgColor);
-                } 
+                }
             }
 
-            
+
         }
 
         [CategoryAttribute("Chunk Values"), ReadOnlyAttribute(true), DescriptionAttribute("An array of per-vertex diffuse color values (ARGB)")]

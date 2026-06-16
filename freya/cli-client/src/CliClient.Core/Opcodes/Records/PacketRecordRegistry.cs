@@ -142,7 +142,7 @@ public static class PacketRecordRegistry
             0x2019 => new ResourceObjectCreateRecord(payload),
             0x2020 => new LoginStageRecord(payload),
             0x2025 => new Opcode2025Record(payload),
-            _      => new GenericRecord(opcode, payload),
+            _ => new GenericRecord(opcode, payload),
         };
     }
 }

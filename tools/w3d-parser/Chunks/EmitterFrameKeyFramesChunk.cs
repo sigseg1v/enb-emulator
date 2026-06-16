@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -27,16 +27,18 @@ namespace WestWood3D.Chunks
 
             key_frame_count = br.ReadInt32();
             random = br.ReadSingle();
-        	
-    	    int[] reserved = new int[2];
-		    for (int i = 0; i < 2; i++) {
+
+            int[] reserved = new int[2];
+            for (int i = 0; i < 2; i++)
+            {
                 reserved[i] = br.ReadInt32();
-		    }    
-    		
-		    if(dbg){
+            }
+
+            if (dbg)
+            {
                 Console.Out.WriteLine("\t  Key Frame Count: " + key_frame_count);
-			    Console.Out.WriteLine("\t  Random: "+random);
-		    }
+                Console.Out.WriteLine("\t  Random: " + random);
+            }
 
             if (key_frame_count == 0)
             {
@@ -46,29 +48,34 @@ namespace WestWood3D.Chunks
 
                 frame_index[0] = br.ReadSingle();
                 time[0] = br.ReadSingle();
-    			
-			    if(dbg){
-	        	    Console.Out.WriteLine("\t  ********** Frame KeyFrame 0 **********");
-	        	    Console.Out.WriteLine("\t  Time: "+time[0]);
+
+                if (dbg)
+                {
+                    Console.Out.WriteLine("\t  ********** Frame KeyFrame 0 **********");
+                    Console.Out.WriteLine("\t  Time: " + time[0]);
                     Console.Out.WriteLine("\t  Frame (sub-texture Index): " + frame_index[0]);
-			    }
-        		
-    	    }else{
+                }
+
+            }
+            else
+            {
                 int Count = (chunkLength - 16) / 8;
-    		    time = new float[Count];
+                time = new float[Count];
                 frame_index = new float[Count];
-            	
-        	    for (int i = 0; i < Count; i++) {
+
+                for (int i = 0; i < Count; i++)
+                {
                     frame_index[i] = br.ReadSingle();
                     time[i] = br.ReadSingle();
-        			
-    			    if(dbg){
-	    			    Console.Out.WriteLine("\t  ********** Frame KeyFrame "+i+"**********");
-	            	    Console.Out.WriteLine("\t  Time: "+time[i]);
+
+                    if (dbg)
+                    {
+                        Console.Out.WriteLine("\t  ********** Frame KeyFrame " + i + "**********");
+                        Console.Out.WriteLine("\t  Time: " + time[i]);
                         Console.Out.WriteLine("\t  Frame (sub-texture Index): " + frame_index[i]);
-        		    }
-    		    }    
-    	    }
+                    }
+                }
+            }
         }
 
         [CategoryAttribute("Chunk Values"), ReadOnlyAttribute(true), DescriptionAttribute("The amount of keyframes affected by the blur time.")]

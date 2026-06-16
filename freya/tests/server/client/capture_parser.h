@@ -31,7 +31,7 @@ enum class Direction {
 
 struct Packet {
     int sequence = 0;
-    int declared_length = 0;          // bytes reported in the header line
+    int declared_length = 0; // bytes reported in the header line
     Direction direction = Direction::kClientToServer;
     std::string peer_ip;
     uint16_t peer_port = 0;
@@ -45,4 +45,4 @@ std::vector<Packet> ParseCapture(const std::string& text);
 // Convenience: load file then parse.
 std::vector<Packet> ParseCaptureFile(const std::string& path);
 
-}  // namespace enbtest
+} // namespace enbtest

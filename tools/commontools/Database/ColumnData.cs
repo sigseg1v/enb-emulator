@@ -52,6 +52,21 @@ namespace CommonTools.Database
         }
 
         /// <summary>
+        ///   The column name wrapped in Postgres double-quotes, for use inside
+        ///   SQL. Postgres folds unquoted identifiers to lowercase, but the net7
+        ///   schema has case-sensitive columns ("mission_XML", "npc_Id",
+        ///   "EName", ...) -- an unquoted reference folds and hits a column that
+        ///   does not exist (the same 42703 class as the old version-check bug).
+        ///   Display code wants the bare name (GetName); SQL must quote it. The
+        ///   ColName attribute is generated from the schema, so it already
+        ///   matches the stored case exactly -- quoting it is always correct.
+        /// </summary>
+        public static String GetQuotedName(Enum enumValue)
+        {
+            return "\"" + GetName(enumValue) + "\"";
+        }
+
+        /// <summary>
         ///   <para>Retrieve the DataType attribute from an attribute.</para>
         /// </summary>
         /// <returns>The DataType of the column.</returns>
@@ -125,6 +140,6 @@ namespace CommonTools.Database
 
             return (Data == "true" || Data == "1");
         }
-    
+
     }
 }

@@ -35,8 +35,7 @@
 #     are all walled; they fall into this category until Phase J
 #     unwalls them.
 #   * Vendored / archived trees (third_party/, archive/, kyp-snapshot/,
-#     server/src/openssl/, server/src/mysql/, server/src/LUA/,
-#     login-server/Net7Mysql/mysql/).
+#     server/src/openssl/, server/src/LUA/).
 #   * Comments — lines whose flagged occurrence sits inside a //... or
 #     /* ... */ comment context (best-effort, line-based).
 #
@@ -66,7 +65,7 @@ ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
 ROOTS=(server/src login-server proxy)
-EXCLUDE_RE='(server/third_party/|server/src/openssl/|server/src/mysql/|server/src/LUA/|login-server/Net7Mysql/mysql/|archive/|/bin/|/obj/)'
+EXCLUDE_RE='(server/third_party/|server/src/openssl/|server/src/LUA/|archive/|/bin/|/obj/)'
 
 SQL_KW='SELECT|INSERT|UPDATE|DELETE|REPLACE|CALL'
 UNSAFE_BUILD='sprintf|snprintf|strcat|strncat|stpcpy'

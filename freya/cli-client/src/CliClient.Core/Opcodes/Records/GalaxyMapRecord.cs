@@ -78,8 +78,8 @@ public sealed class GalaxyMapRecord : PacketRecord
             return;
         }
         int playerId = ReadI32LE(Payload, 8);
-        FDec(sb, 0, "Type",     4, "(map update)");
-        FDec(sb, 4, "Size",     size, "(variable data size, excl. 8-byte Type+Size header)");
+        FDec(sb, 0, "Type", 4, "(map update)");
+        FDec(sb, 4, "Size", size, "(variable data size, excl. 8-byte Type+Size header)");
         FHex(sb, 8, "PlayerID", playerId);
 
         int off = 12;
@@ -112,7 +112,7 @@ public sealed class GalaxyMapRecord : PacketRecord
         FDec(sb, 4, "Size", size, "(body size, excl. 8-byte Type+Size header)");
         if (Payload.Length < 16) { Flag(sb, "GALAXY_MAP type 5 truncated -- need >= 16 bytes for the two IDs"); return; }
 
-        FDec(sb,  8, "Id",  ReadI32LE(Payload, 8));
+        FDec(sb, 8, "Id", ReadI32LE(Payload, 8));
         FDec(sb, 12, "Id2", ReadI32LE(Payload, 12));
 
         int off = 16;
@@ -123,14 +123,14 @@ public sealed class GalaxyMapRecord : PacketRecord
             Flag(sb, $"GALAXY_MAP type 5 truncated -- need 29 bytes after Name, only {Payload.Length - off} remain");
             return;
         }
-        FFloat(sb, off,      "ColorR", ReadF32LE(Payload, off));
-        FFloat(sb, off + 4,  "ColorG", ReadF32LE(Payload, off + 4));
-        FFloat(sb, off + 8,  "ColorB", ReadF32LE(Payload, off + 8), "(faction colour)");
-        FFloat(sb, off + 12, "PosX",   ReadF32LE(Payload, off + 12));
-        FFloat(sb, off + 16, "PosY",   ReadF32LE(Payload, off + 16));
-        FFloat(sb, off + 20, "PosZ",   ReadF32LE(Payload, off + 20), "(map position)");
-        FFloat(sb, off + 24, "One",    ReadF32LE(Payload, off + 24), "(expected 1.0)");
-        FDec(sb,   off + 28, "Kind",   Payload[off + 28], "(glyph: 0/1/3)");
+        FFloat(sb, off, "ColorR", ReadF32LE(Payload, off));
+        FFloat(sb, off + 4, "ColorG", ReadF32LE(Payload, off + 4));
+        FFloat(sb, off + 8, "ColorB", ReadF32LE(Payload, off + 8), "(faction colour)");
+        FFloat(sb, off + 12, "PosX", ReadF32LE(Payload, off + 12));
+        FFloat(sb, off + 16, "PosY", ReadF32LE(Payload, off + 16));
+        FFloat(sb, off + 20, "PosZ", ReadF32LE(Payload, off + 20), "(map position)");
+        FFloat(sb, off + 24, "One", ReadF32LE(Payload, off + 24), "(expected 1.0)");
+        FDec(sb, off + 28, "Kind", Payload[off + 28], "(glyph: 0/1/3)");
         off += 29;
 
         WriteExtendedTail(sb, off);
@@ -153,9 +153,9 @@ public sealed class GalaxyMapRecord : PacketRecord
         FDec(sb, 4, "Size", size, "(body size, excl. 8-byte Type+Size header)");
         if (Payload.Length < 20) { Flag(sb, "GALAXY_MAP type 6/7/8 truncated -- need >= 20 bytes for the three IDs"); return; }
 
-        FDec(sb,  8, "NodeId",         ReadI32LE(Payload, 8));
+        FDec(sb, 8, "NodeId", ReadI32LE(Payload, 8));
         FDec(sb, 12, "ParentSystemId", ReadI32LE(Payload, 12));
-        FDec(sb, 16, "Kind",           ReadI32LE(Payload, 16), "(11/17/19, type-dependent)");
+        FDec(sb, 16, "Kind", ReadI32LE(Payload, 16), "(11/17/19, type-dependent)");
 
         int off = 20;
         if (!TryReadCString(sb, ref off, "Name")) return;
@@ -168,8 +168,8 @@ public sealed class GalaxyMapRecord : PacketRecord
         int echo = ReadI32LE(Payload, off);
         FDec(sb, off, "TypeEcho", echo, echo == type ? $"(== Type {type})" : null);
         if (echo != type) Flag(sb, $"TypeEcho is {echo}, expected {type}");
-        FFloat(sb, off + 4,  "PosX", ReadF32LE(Payload, off + 4));
-        FFloat(sb, off + 8,  "PosY", ReadF32LE(Payload, off + 8));
+        FFloat(sb, off + 4, "PosX", ReadF32LE(Payload, off + 4));
+        FFloat(sb, off + 8, "PosY", ReadF32LE(Payload, off + 8));
         FFloat(sb, off + 12, "PosZ", ReadF32LE(Payload, off + 12), "(map position)");
         off += 16;
 
@@ -185,9 +185,9 @@ public sealed class GalaxyMapRecord : PacketRecord
         FDec(sb, 4, "Size", size, "(body size, excl. 8-byte Type+Size header)");
         if (Payload.Length < 20) { Flag(sb, "GALAXY_MAP type 9 truncated -- need >= 20 bytes for the three IDs"); return; }
 
-        FDec(sb,  8, "LinkId",     ReadI32LE(Payload, 8));
+        FDec(sb, 8, "LinkId", ReadI32LE(Payload, 8));
         FDec(sb, 12, "FromSector", ReadI32LE(Payload, 12));
-        FDec(sb, 16, "ToSector",   ReadI32LE(Payload, 16));
+        FDec(sb, 16, "ToSector", ReadI32LE(Payload, 16));
 
         int off = 20;
         if (!TryReadCString(sb, ref off, "Name")) return;

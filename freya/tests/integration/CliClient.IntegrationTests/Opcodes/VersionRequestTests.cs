@@ -82,7 +82,7 @@ public sealed class VersionRequestTests
             Assert.NotNull(reply);
             if (reply!.Header.Opcode == OpcodeId.Known.VersionResponse.Value)
             {
-                return (VersionResponse) new VersionResponseCodec()
+                return (VersionResponse)new VersionResponseCodec()
                     .DecodeInbound(reply.Payload.Span);
             }
         }

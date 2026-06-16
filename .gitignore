@@ -99,9 +99,6 @@ pgdata/
 !server/third_party/**
 !server/src/LUA/**/*.lib
 
-# login-server vendored mysql lib
-!login-server/Net7Mysql/libmySQL.lib
-
 # Modded client + auth dll (game binary, no source)
 !client/mods/release/**
 

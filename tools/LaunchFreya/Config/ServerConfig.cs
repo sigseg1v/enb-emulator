@@ -12,7 +12,7 @@ namespace LaunchFreya.Config
         public List<HostConfig> Hosts { get; } = new List<HostConfig>();
 
         public string GetDisplayName() => string.IsNullOrEmpty(DisplayName) ? Name : DisplayName;
-        public string GetLaunchName()  => string.IsNullOrEmpty(LaunchName)  ? Name : LaunchName;
+        public string GetLaunchName() => string.IsNullOrEmpty(LaunchName) ? Name : LaunchName;
 
         public override string ToString() => GetDisplayName();
     }

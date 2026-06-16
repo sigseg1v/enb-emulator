@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -38,7 +38,7 @@ namespace WestWood3D.Chunks
 
             for (int i = 0; i < 8; i++)
             {
-                future_counts[i] = br.ReadInt32(); 
+                future_counts[i] = br.ReadInt32();
             }
 
             lod_min = br.ReadSingle();
@@ -48,7 +48,7 @@ namespace WestWood3D.Chunks
 
             for (int i = 0; i < 32; i++)
             {
-                future_use[i] = br.ReadInt32(); 
+                future_use[i] = br.ReadInt32();
             }
 
             if (dbg)

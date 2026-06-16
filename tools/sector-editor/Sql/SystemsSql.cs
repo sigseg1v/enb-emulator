@@ -1,100 +1,83 @@
 using System;
-using System.Collections.Generic;
-using System.Windows.Forms;
-using System.Text;
 using System.Data;
+using CommonTools.Database;
 
 namespace N7.Sql
 {
+    // Parameterised port of tools/sector-editor/Sql/SystemsSql.cs.
     public class SystemsSql
     {
         private DataTable systems;
 
         public SystemsSql()
         {
-            String systemsQuery = "Select * from systems";
-            systems = Database.executeQuery(Database.DatabaseName.net7, systemsQuery);
+            systems = Database.executeQuery(Database.DatabaseName.net7, "Select * from systems");
         }
 
-        public DataTable getSystemTable()
-        {
-            return systems;
-        }
+        public DataTable getSystemTable() => systems;
 
         public DataRow[] findRowsByName(String name)
-        {
-            DataRow[] foundRows;
-            foundRows = systems.Select("name Like '" + name + "'");
-
-            return foundRows;
-        }
+            => systems.WhereTextEquals("name", name);
 
         public String findRowNameByID(int id)
         {
-            DataRow[] foundRows;
-            foundRows = systems.Select("system_id='" + id + "'");
-            DataRow foundRow = foundRows[0];
-            String name = foundRow["name"].ToString();
-
-            return name;
+            DataRow[] foundRows = systems.WhereIntEquals("system_id", id);
+            return foundRows[0]["name"].ToString();
         }
 
         public int getIDFromName(String name)
         {
-            DataRow[] foundRows;
-            foundRows = systems.Select("name Like '" + name + "'");
-            DataRow foundRow = foundRows[0];
-            int id = int.Parse(foundRow["system_id"].ToString());
-
-            return id;
+            DataRow[] foundRows = systems.WhereTextEquals("name", name);
+            return int.Parse(foundRows[0]["system_id"].ToString());
         }
+
+        private static readonly String[] UpdateCols = new String[]
+        {
+            "name", "galaxy_x", "galaxy_y", "galaxy_z",
+            "color_r", "color_g", "color_b", "notes"
+        };
 
         public void updateRow(DataRow r)
         {
-            String name = r["name"].ToString().Replace("'","''");
-            String notes = r["notes"].ToString().Replace("'", "''");
-
-
-            String systemQuery = "UPDATE systems SET name='"+name+"', galaxy_x='" + r["galaxy_x"].ToString() + "', " +
-            "galaxy_y='" + r["galaxy_y"].ToString() + "', galaxy_z='" + r["galaxy_z"].ToString() + "', "+
-            "color_r='" + r["color_r"].ToString() + "', color_g='" + r["color_g"].ToString() + "', " +
-            "color_b='" + r["color_b"].ToString() + "', notes='" + notes + "' " +
-            "where system_id='" + r["system_id"].ToString() + "';";
-
-            try
+            String[] paramNames = new String[UpdateCols.Length + 1];
+            String[] paramValues = new String[UpdateCols.Length + 1];
+            String setClause = "";
+            for (int i = 0; i < UpdateCols.Length; i++)
             {
-                Database.executeQuery(Database.DatabaseName.net7, systemQuery);
+                paramNames[i] = UpdateCols[i];
+                paramValues[i] = r[UpdateCols[i]].ToString();
+                if (setClause.Length > 0) setClause += ", ";
+                setClause += UpdateCols[i] + "=@" + UpdateCols[i];
             }
-            catch (Exception)
-            {
-                throw;
-            }
+            paramNames[UpdateCols.Length] = "system_id";
+            paramValues[UpdateCols.Length] = r["system_id"].ToString();
+
+            String query = "UPDATE systems SET " + setClause + " WHERE system_id=@system_id";
+            Database.executeCommand(Database.DatabaseName.net7, query, paramNames, paramValues);
         }
 
         public void newRow(DataRow nr)
         {
-            String newSystemQuery = "INSERT INTO systems SET name='"+nr["name"].ToString()+"', "+
-            "notes='"+nr["notes"].ToString()+"', galaxy_x='"+nr["galaxy_x"].ToString()+"', galaxy_y='"+nr["galaxy_y"].ToString()+"', "+
-            "galaxy_z='"+nr["galaxy_z"].ToString()+"', color_r='"+nr["color_r"].ToString()+"', color_g='"+nr["color_g"].ToString()+"', "+
-            "color_b='"+nr["color_b"].ToString()+"';";
-
-            int lastInsertID = 0;
-            try
+            String[] paramNames = new String[UpdateCols.Length];
+            String[] paramValues = new String[UpdateCols.Length];
+            String colList = "";
+            String valList = "";
+            for (int i = 0; i < UpdateCols.Length; i++)
             {
-                Database.executeQuery(Database.DatabaseName.net7, newSystemQuery);
-
-                DataTable tmp = Database.executeQuery(Database.DatabaseName.net7, "SELECT LAST_INSERT_ID()");
-                foreach (DataRow z in tmp.Rows)
-                {
-                    lastInsertID = int.Parse(z["LAST_INSERT_ID()"].ToString());
-                }
-            }
-            catch (Exception)
-            {
-                throw;
+                paramNames[i] = UpdateCols[i];
+                paramValues[i] = nr[UpdateCols[i]].ToString();
+                if (colList.Length > 0) { colList += ", "; valList += ", "; }
+                colList += UpdateCols[i];
+                valList += "@" + UpdateCols[i];
             }
 
-            nr["system_id"] = lastInsertID;
+            // system_id is GENERATED BY DEFAULT AS IDENTITY; RETURNING hands back
+            // the freshly-minted id directly (no LAST_INSERT_ID() round trip).
+            String query = "INSERT INTO systems (" + colList + ") VALUES (" + valList
+                         + ") RETURNING \"system_id\" AS id";
+            DataTable res = Database.executeQuery(Database.DatabaseName.net7, query, paramNames, paramValues);
+
+            nr["system_id"] = Convert.ToInt64(res.Rows[0]["id"]);
         }
     }
 }

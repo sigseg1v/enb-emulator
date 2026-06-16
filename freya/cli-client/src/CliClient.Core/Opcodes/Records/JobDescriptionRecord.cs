@@ -22,7 +22,7 @@ public sealed class JobDescriptionRecord : PacketRecord
         FHex(sb, 0, "JobID", ReadI32LE(Payload, 0));
         FDec(sb, 4, "Available", Payload[4], Payload[4] != 0 ? "(yes)" : "(no)");
         int off = 5;
-        if (!TryReadCString(sb, ref off, "Title"))       return;
+        if (!TryReadCString(sb, ref off, "Title")) return;
         if (!TryReadCString(sb, ref off, "Description")) return;
     }
 }

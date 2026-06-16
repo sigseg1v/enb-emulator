@@ -139,14 +139,14 @@ public sealed class GlobalCreateCharacterTests
 
         // ---- Step 2: GlobalCreateCharacter (slot 0) ----
         byte[] createPayload = BuildCreateCharacterPayload(
-            galaxyId:            1,
-            characterSlot:       0,
-            accountUsername:     account.Username,
-            firstName:           CharacterFirstName,
-            race:                0,  // Terran
-            profession:          0,  // Warrior
-            gender:              0,
-            shipName:            ShipName);
+            galaxyId: 1,
+            characterSlot: 0,
+            accountUsername: account.Username,
+            firstName: CharacterFirstName,
+            race: 0,  // Terran
+            profession: 0,  // Warrior
+            gender: 0,
+            shipName: ShipName);
 
         // Sanity-check the local size matches canonical Win32 wire size
         // -- if the C# builder ever drifts to 571 (the pre-ColorInfo-fix
@@ -284,9 +284,9 @@ public sealed class GlobalCreateCharacterTests
         //   46  ship_name_color[3] floats (unused server-side, zero-filled)
         //   58  8 × ColorInfo (17B each), zero-filled
         const int ShipOffset = 318;
-        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(ShipOffset +  0, 4), race);
-        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(ShipOffset +  4, 4), profession);
-        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(ShipOffset +  8, 4), 0);  // hull (BaseHullAsset[race*3+hull] must be in-range)
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(ShipOffset + 0, 4), race);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(ShipOffset + 4, 4), profession);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(ShipOffset + 8, 4), 0);  // hull (BaseHullAsset[race*3+hull] must be in-range)
         BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(ShipOffset + 12, 4), 0);  // wing
         BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(ShipOffset + 16, 4), 0);  // decal
         var shipNameBytes = Encoding.ASCII.GetBytes(shipName);

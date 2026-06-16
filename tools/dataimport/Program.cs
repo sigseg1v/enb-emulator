@@ -1,46 +1,47 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Windows.Forms;
+using System;
+using Avalonia;
+using Avalonia.Headless;
 
 namespace DataImport
 {
-    static class Program
+    internal class Program
     {
-        enum ApplicationAction { GenerateDatabaseStructure, UpdateVersion, Run };
-        public static DataImport m_dataImport = null;
-
         [STAThread]
-        static void Main()
+        public static int Main(string[] args)
         {
+            // --smoke: headless construction check used by CI/`just` to
+            // catch AXAML regressions without needing a display.
+            if (args.Length > 0 && args[0] == "--smoke")
+                return SmokeTest();
 
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
+            BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+            return 0;
+        }
 
-            ApplicationAction applicationAction = ApplicationAction.Run;
+        public static AppBuilder BuildAvaloniaApp()
+            => AppBuilder.Configure<App>()
+                .UsePlatformDetect()
+                .WithInterFont()
+                .LogToTrace();
 
-            CommonTools.Gui.Login login = new CommonTools.Gui.Login();
-            if (applicationAction.Equals(ApplicationAction.UpdateVersion))
+        static int SmokeTest()
+        {
+            try
             {
-                login.updateVersion();
+                AppBuilder.Configure<App>()
+                    .UseHeadless(new AvaloniaHeadlessPlatformOptions())
+                    .SetupWithoutStarting();
+                var w = new MainWindow();
+                w.Show();
+                Console.WriteLine($"smoke OK: window {w.Width}x{w.Height} title=\"{w.Title}\"");
+                w.Close();
+                return 0;
             }
-            login.ShowDialog();
-            if (login.isValid())
+            catch (Exception ex)
             {
-                switch (applicationAction)
-                {
-                    case ApplicationAction.GenerateDatabaseStructure:
-                        CommonTools.Database.DB.Instance.makeDatabaseVariables();
-                        break;
-                    case ApplicationAction.Run:
-                        {
-                            m_dataImport = new DataImport();
-                            m_dataImport.ShowDialog();
-                        }
-                        break;
-                } // switch (applicationAction)
-            } // if (login.isValid())
-
+                Console.Error.WriteLine("smoke FAIL: " + ex);
+                return 1;
+            }
         }
     }
 }

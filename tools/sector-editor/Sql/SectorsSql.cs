@@ -1,129 +1,98 @@
 using System;
-using System.Collections.Generic;
-using System.Windows.Forms;
-using System.Text;
 using System.Data;
+using CommonTools.Database;
 
 namespace N7.Sql
 {
+    // Parameterised port of tools/sector-editor/Sql/SectorsSql.cs. The original
+    // built UPDATE/INSERT strings with 30+ "'" + r["col"] + "'" concatenations
+    // per call — every one a SQL-injection sink. Here every column rides on a
+    // @param placeholder so Npgsql binds it.
     public class SectorsSql
     {
         private DataTable sectors;
 
         public SectorsSql()
         {
-            String sectorQuery = "SELECT * FROM sectors order by system_id, name";
-            sectors = Database.executeQuery(Database.DatabaseName.net7, sectorQuery);
+            sectors = Database.executeQuery(Database.DatabaseName.net7,
+                "SELECT * FROM sectors order by system_id, name");
         }
 
-        public DataTable getSectorTable()
-        {
-            return sectors;
-        }
+        public DataTable getSectorTable() => sectors;
 
         public DataRow[] findRowsByName(String name)
-        {
-            DataRow[] foundRows;
-            String name2 = name.Replace("'", "''");
-            foundRows = sectors.Select("name Like '"+name2+"'");
-
-            return foundRows;
-        }
+            => sectors.WhereTextEquals("name", name);
 
         public DataRow[] getRowsBySystemID(String systemID)
-        {
-            DataRow[] foundRows;
-            foundRows = sectors.Select("system_id = '" + systemID + "'");
-
-            return foundRows;
-        }
+            => sectors.WhereIntEquals("system_id", long.Parse(systemID));
 
         public DataTable queryBySystemID(String systemID)
         {
-            String sectorQuery = "SELECT * FROM sectors where system_id='"+systemID+"' order by name";
-            DataTable tmp = Database.executeQuery(Database.DatabaseName.net7, sectorQuery);
-
-            return tmp;
+            return Database.executeQuery(Database.DatabaseName.net7,
+                "SELECT * FROM sectors where system_id=@sid order by name",
+                new String[] { "sid" },
+                new String[] { systemID });
         }
 
         public int getIDFromName(String name)
         {
-            DataRow[] foundRows;
-            foundRows = sectors.Select("name Like '" + name + "'");
-            DataRow foundRow = foundRows[0];
-            int id = int.Parse(foundRow["sector_id"].ToString());
-
-            return id;
+            DataRow[] foundRows = sectors.WhereTextEquals("name", name);
+            return int.Parse(foundRows[0]["sector_id"].ToString());
         }
+
+        private static readonly String[] AllCols = new String[]
+        {
+            "name", "x_min", "x_max", "y_min", "y_max", "z_min", "z_max",
+            "grid_x", "grid_y", "grid_z", "fog_near", "fog_far", "debris_mode",
+            "light_backdrop", "fog_backdrop", "swap_backdrop",
+            "backdrop_fog_near", "backdrop_fog_far", "max_tilt", "auto_level",
+            "impulse_rate", "decay_velocity", "decay_spin", "backdrop_asset",
+            "greetings", "notes", "system_id", "galaxy_x", "galaxy_y",
+            "galaxy_z", "sector_type"
+        };
 
         public void updateRow(DataRow r)
         {
-
-            //Retrieve Properties from sql row.
-            String sectorName = r["name"].ToString().Replace("'","''");
-            String greetings = r["greetings"].ToString().Replace("'","''");
-            String notes = r["notes"].ToString().Replace("'","''");
-
-            int lightbackdrop = Convert.ToInt32(r["light_backdrop"]);
-            int swapbackdrop = Convert.ToInt32(r["swap_backdrop"]);
-            int fogbackdrop = Convert.ToInt32(r["fog_backdrop"]);
-            int autolevel = Convert.ToInt32(r["auto_level"]);
-
-            String sectorQuery = "UPDATE sectors SET name='"+sectorName+"', x_min='"+r["x_min"].ToString()+"', x_max='"+r["x_max"].ToString()+"', "+
-            "y_min='"+r["y_min"].ToString()+"', y_max='"+r["y_max"].ToString()+"', z_min='"+r["z_min"].ToString()+"', "+
-            "z_max='"+r["z_max"].ToString()+"', grid_x='"+r["grid_x"].ToString()+"', grid_y='"+r["grid_y"].ToString()+"', "+
-            "grid_z='"+r["grid_z"].ToString()+"', fog_near='"+r["fog_near"].ToString()+"', fog_far='"+r["fog_far"].ToString()+"', "+
-            "debris_mode='"+r["debris_mode"].ToString()+"', light_backdrop='"+lightbackdrop+"', "+
-            "fog_backdrop='"+fogbackdrop+"', swap_backdrop='"+swapbackdrop+"', "+
-            "backdrop_fog_near='"+r["backdrop_fog_near"].ToString()+"', backdrop_fog_far='"+r["backdrop_fog_far"].ToString()+"', "+
-            "max_tilt='"+r["max_tilt"].ToString()+"', auto_level='"+autolevel+"', impulse_rate='"+r["impulse_rate"].ToString()+"', "+
-            "decay_velocity='"+r["decay_velocity"].ToString()+"', decay_spin='"+r["decay_spin"].ToString()+"', "+
-            "backdrop_asset='"+r["backdrop_asset"].ToString()+"', greetings='"+greetings+"', notes='"+notes+"', "+
-            "system_id='"+r["system_id"].ToString()+"', galaxy_x='"+r["galaxy_x"].ToString()+"', galaxy_y='"+r["galaxy_y"].ToString()+"', "+
-            "galaxy_z='"+r["galaxy_z"].ToString()+"', sector_type='+"+r["sector_type"].ToString()+"' where sector_id='"+r["sector_id"].ToString()+"';";
-
-            try
+            String[] paramNames = new String[AllCols.Length + 1];
+            String[] paramValues = new String[AllCols.Length + 1];
+            String setClause = "";
+            for (int i = 0; i < AllCols.Length; i++)
             {
-                Database.executeQuery(Database.DatabaseName.net7, sectorQuery);
+                paramNames[i] = AllCols[i];
+                paramValues[i] = r[AllCols[i]].ToString();
+                if (setClause.Length > 0) setClause += ", ";
+                setClause += AllCols[i] + "=@" + AllCols[i];
             }
-            catch (Exception)
-            {
-                throw;
-            }
+            paramNames[AllCols.Length] = "sector_id";
+            paramValues[AllCols.Length] = r["sector_id"].ToString();
+
+            String query = "UPDATE sectors SET " + setClause + " WHERE sector_id=@sector_id";
+            Database.executeCommand(Database.DatabaseName.net7, query, paramNames, paramValues);
         }
 
         public void newRow(DataRow r)
         {
-            String sectorName = r["name"].ToString().Replace("'", "''");
-            String greetings = r["greetings"].ToString().Replace("'", "''");
-            String notes = r["notes"].ToString().Replace("'", "''");
-
-            int lightbackdrop = Convert.ToInt32(r["light_backdrop"]);
-            int swapbackdrop = Convert.ToInt32(r["swap_backdrop"]);
-            int fogbackdrop = Convert.ToInt32(r["fog_backdrop"]);
-            int autolevel = Convert.ToInt32(r["auto_level"]);
-
-            String sectorQuery = "INSERT INTO sectors SET sector_id='"+r["sector_id"]+"', name='" + sectorName + "', x_min='" + r["x_min"].ToString() + "', x_max='" + r["x_max"].ToString() + "', " +
-            "y_min='" + r["y_min"].ToString() + "', y_max='" + r["y_max"].ToString() + "', z_min='" + r["z_min"].ToString() + "', " +
-            "z_max='" + r["z_max"].ToString() + "', grid_x='" + r["grid_x"].ToString() + "', grid_y='" + r["grid_y"].ToString() + "', " +
-            "grid_z='" + r["grid_z"].ToString() + "', fog_near='" + r["fog_near"].ToString() + "', fog_far='" + r["fog_far"].ToString() + "', " +
-            "debris_mode='" + r["debris_mode"].ToString() + "', light_backdrop='" + lightbackdrop + "', " +
-            "fog_backdrop='" + fogbackdrop + "', swap_backdrop='" + swapbackdrop + "', " +
-            "backdrop_fog_near='" + r["backdrop_fog_near"].ToString() + "', backdrop_fog_far='" + r["backdrop_fog_far"].ToString() + "', " +
-            "max_tilt='" + r["max_tilt"].ToString() + "', auto_level='" + autolevel + "', impulse_rate='" + r["impulse_rate"].ToString() + "', " +
-            "decay_velocity='" + r["decay_velocity"].ToString() + "', decay_spin='" + r["decay_spin"].ToString() + "', " +
-            "backdrop_asset='" + r["backdrop_asset"].ToString() + "', greetings='" + greetings + "', notes='" + notes + "', " +
-            "system_id='" + r["system_id"].ToString() + "', galaxy_x='" + r["galaxy_x"].ToString() + "', galaxy_y='" + r["galaxy_y"].ToString() + "', " +
-            "galaxy_z='" + r["galaxy_z"].ToString() + "', sector_type='+"+r["sector_type"].ToString()+"';";
-
-            try
+            // sector_id is GENERATED BY DEFAULT AS IDENTITY -- do NOT supply it
+            // (the DataRow's value is just the DataTable's auto-increment seed,
+            // not a real id). Let Postgres allocate it and hand it back via
+            // RETURNING, then write the real id onto the row.
+            String[] paramNames = new String[AllCols.Length];
+            String[] paramValues = new String[AllCols.Length];
+            String colList = "";
+            String valList = "";
+            for (int i = 0; i < AllCols.Length; i++)
             {
-                Database.executeQuery(Database.DatabaseName.net7, sectorQuery);
+                paramNames[i] = AllCols[i];
+                paramValues[i] = r[AllCols[i]].ToString();
+                if (colList.Length > 0) { colList += ", "; valList += ", "; }
+                colList += AllCols[i];
+                valList += "@" + AllCols[i];
             }
-            catch (Exception)
-            {
-                throw;
-            }
+
+            String query = "INSERT INTO sectors (" + colList + ") VALUES (" + valList
+                         + ") RETURNING \"sector_id\" AS id";
+            DataTable res = Database.executeQuery(Database.DatabaseName.net7, query, paramNames, paramValues);
+            r["sector_id"] = Convert.ToInt64(res.Rows[0]["id"]);
         }
     }
 }

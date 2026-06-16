@@ -1,8 +1,7 @@
 using System;
-using System.Collections.Generic;
-using System.Windows.Forms;
-using System.Text;
 using System.Data;
+using CommonTools.Database;
+
 namespace N7.Sql
 {
     public class BaseAssetSQL
@@ -11,8 +10,7 @@ namespace N7.Sql
 
         public BaseAssetSQL()
         {
-            String baQuery = "SELECT * FROM assets;";
-            baseAssets = Database.executeQuery(Database.DatabaseName.net7, baQuery);
+            baseAssets = Database.executeQuery(Database.DatabaseName.net7, "SELECT * FROM assets;");
         }
 
         public DataTable getAssetsTable()
@@ -21,11 +19,6 @@ namespace N7.Sql
         }
 
         public DataRow[] getRowsbyCategory(String name)
-        {
-            DataRow[] foundRows;
-            String name2 = name.Replace("'", "''");
-            foundRows = baseAssets.Select("main_cat LIKE '" + name2 + "'");
-            return foundRows;
-        }
+            => baseAssets.WhereTextEquals("main_cat", name);
     }
 }

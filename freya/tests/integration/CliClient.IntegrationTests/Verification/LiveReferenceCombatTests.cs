@@ -47,9 +47,9 @@ public sealed class LiveReferenceCombatTests
         byte[] b = HexFixture.Load("live_object_effect_000B_weapon.hex");
         Assert.Equal(35, b.Length);
 
-        Assert.Equal((short)0x0007,               BinaryPrimitives.ReadInt16LittleEndian(b.AsSpan(0)));
-        Assert.Equal(unchecked((int)0x4003992A),  BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(2)));
-        Assert.Equal(0x000186F5,                  BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(6)));
+        Assert.Equal((short)0x0007, BinaryPrimitives.ReadInt16LittleEndian(b.AsSpan(0)));
+        Assert.Equal(unchecked((int)0x4003992A), BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(2)));
+        Assert.Equal(0x000186F5, BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(6)));
 
         string d = DecodeClean(0x000B, "live_object_effect_000B_weapon.hex", 35, typeof(ObjectToObjectEffectRecord));
         Assert.Contains("~02/~WEAP_02", d);
@@ -61,9 +61,9 @@ public sealed class LiveReferenceCombatTests
         byte[] b = HexFixture.Load("live_object_linked_effect_000E.hex");
         Assert.Equal(58, b.Length);
 
-        Assert.Equal(0x0025417A,                 BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(0)));
+        Assert.Equal(0x0025417A, BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(0)));
         Assert.Equal(unchecked((int)0x4003992A), BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(8)));
-        Assert.Equal(0x000186F5,                 BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(13)));
+        Assert.Equal(0x000186F5, BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(13)));
 
         DecodeClean(0x000E, "live_object_linked_effect_000E.hex", 58, typeof(ObjectToObjectLinkedEffectRecord));
     }
@@ -73,7 +73,7 @@ public sealed class LiveReferenceCombatTests
     // (the original record + server bug) yields a byte-reversed nonsense id.
     [Theory]
     [InlineData("live_attacker_updates_008B_start.hex", 1, 0x000187EC)]
-    [InlineData("live_attacker_updates_008B_stop.hex",  0, 0x000186F5)]
+    [InlineData("live_attacker_updates_008B_stop.hex", 0, 0x000186F5)]
     public void AttackerUpdates_0x008B_MobIdIsBigEndian_LiveCapture(string fixture, int update, int mobId)
     {
         byte[] b = HexFixture.Load(fixture);

@@ -56,14 +56,14 @@ public sealed class ServerFixture : IAsyncLifetime
     private static string Host(string env) =>
         Environment.GetEnvironmentVariable(env) is { Length: > 0 } h ? h : "127.0.0.1";
 
-    public string LoginHost  { get; } = Host("CLI_INTEGRATION_LOGIN_HOST");
-    public int    LoginPort  { get; } = Port("CLI_INTEGRATION_LOGIN_PORT", 4443);   // host-side remap of 443
+    public string LoginHost { get; } = Host("CLI_INTEGRATION_LOGIN_HOST");
+    public int LoginPort { get; } = Port("CLI_INTEGRATION_LOGIN_PORT", 4443);   // host-side remap of 443
     public string GlobalHost { get; } = Host("CLI_INTEGRATION_GLOBAL_HOST");
-    public int    GlobalPort { get; } = Port("CLI_INTEGRATION_GLOBAL_PORT", 3805);  // proxy GLOBAL_SERVER_PORT
+    public int GlobalPort { get; } = Port("CLI_INTEGRATION_GLOBAL_PORT", 3805);  // proxy GLOBAL_SERVER_PORT
     public string MasterHost { get; } = Host("CLI_INTEGRATION_MASTER_HOST");
-    public int    MasterPort { get; } = Port("CLI_INTEGRATION_MASTER_PORT", 3801);  // proxy MASTER_SERVER_PORT
+    public int MasterPort { get; } = Port("CLI_INTEGRATION_MASTER_PORT", 3801);  // proxy MASTER_SERVER_PORT
     public string SectorHost { get; } = Host("CLI_INTEGRATION_SECTOR_HOST");
-    public int    SectorPort { get; } = Port("CLI_INTEGRATION_SECTOR_PORT", 3500);  // proxy SECTOR_SERVER_PORT
+    public int SectorPort { get; } = Port("CLI_INTEGRATION_SECTOR_PORT", 3500);  // proxy SECTOR_SERVER_PORT
 
     // Host-side remap of postgres 5432. docker-compose.yml publishes
     // "${ENB_PG_HOST_PORT:-5434}:5432" and the justfile derives a PER-BRANCH
@@ -165,7 +165,7 @@ public sealed class ServerFixture : IAsyncLifetime
             await RunComposeAsync("up -d --wait", TimeSpan.FromMinutes(5));
         }
 
-        await WaitForPortAsync(LoginHost,  LoginPort,  ReadyTimeout);
+        await WaitForPortAsync(LoginHost, LoginPort, ReadyTimeout);
         await WaitForPortAsync(GlobalHost, GlobalPort, ReadyTimeout);
         await WaitForPortAsync(MasterHost, MasterPort, ReadyTimeout);
         await WaitForPortAsync(SectorHost, SectorPort, ReadyTimeout);

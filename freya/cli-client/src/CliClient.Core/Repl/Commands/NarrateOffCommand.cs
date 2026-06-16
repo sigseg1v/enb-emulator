@@ -20,9 +20,9 @@ public sealed class NarrateOffCommand : ICommandHandler
         _ctx = ctx;
     }
 
-    public string Name    => "narrate-off";
+    public string Name => "narrate-off";
     public string Summary => "stop narrating inbound events";
-    public string Usage   => "narrate-off";
+    public string Usage => "narrate-off";
 
     // Only worth offering while narration is on.
     public bool Available => _ctx.NarrateEnabled;

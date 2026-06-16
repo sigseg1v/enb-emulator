@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -25,14 +25,14 @@ namespace WestWood3D.Chunks
             for (int i = 0; i < chunkLength / 16; i++)
             {
                 byte[] nameArray = br.ReadBytes(16);
-                names[i] = System.Text.ASCIIEncoding.ASCII.GetString(nameArray); 
+                names[i] = System.Text.ASCIIEncoding.ASCII.GetString(nameArray);
             }
 
             if (dbg)
             {
                 for (int i = 0; i < names.Length; i++)
                 {
-                    Console.Out.WriteLine("\t\t RenderObjectName: " + names[i].Trim()); 
+                    Console.Out.WriteLine("\t\t RenderObjectName: " + names[i].Trim());
                 }
             }
         }

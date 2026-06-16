@@ -72,9 +72,9 @@ public sealed class SkillUpCodec : IOpcodeCodec
         }
 
         return new SkillUpMessage(
-            GameId:      BinaryPrimitives.ReadInt32LittleEndian(payload[0..4]),
+            GameId: BinaryPrimitives.ReadInt32LittleEndian(payload[0..4]),
             SkillPoints: BinaryPrimitives.ReadInt32LittleEndian(payload[4..8]),
-            SkillId:     BinaryPrimitives.ReadInt32LittleEndian(payload[8..12]));
+            SkillId: BinaryPrimitives.ReadInt32LittleEndian(payload[8..12]));
     }
 
     public byte[] EncodeOutbound(object message)

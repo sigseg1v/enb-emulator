@@ -21,9 +21,9 @@ public sealed class CreateCommand : ICommandHandler
         _ctx = ctx;
     }
 
-    public string Name    => "create";
+    public string Name => "create";
     public string Summary => "create a character in the first empty slot";
-    public string Usage   =>
+    public string Usage =>
         "create [character] <class> <firstname>\n" +
         "  class: 2-letter EnB class code\n" +
         "    Terran:   TE=Enforcer  TT=Trader   TS=Scout\n" +

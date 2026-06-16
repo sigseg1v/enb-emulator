@@ -13,12 +13,12 @@ namespace N7.CliClient.Repl;
 /// </summary>
 public static class CharacterClass
 {
-    public const int RaceTerran   = 0;
-    public const int RaceJenquai  = 1;
-    public const int RaceProgen   = 2;
+    public const int RaceTerran = 0;
+    public const int RaceJenquai = 1;
+    public const int RaceProgen = 2;
 
-    public const int ProfWarrior  = 0;
-    public const int ProfTrader   = 1;
+    public const int ProfWarrior = 0;
+    public const int ProfTrader = 1;
     public const int ProfExplorer = 2;
 
     private static readonly int[] StartSectorTable =

@@ -38,9 +38,9 @@ public sealed class StarbaseRequestCodecTests
         // VendorInvEco dg #4 body: open the vendor NPC's talk tree.
         //   2A 99 03 00  C4 01 00 00  04
         var msg = new StarbaseRequestMessage(
-            PlayerId:   CaptureMaskedPlayerId,
+            PlayerId: CaptureMaskedPlayerId,
             StarbaseId: 452,
-            Action:     StarbaseRequestMessage.ActionTalkToNpc);
+            Action: StarbaseRequestMessage.ActionTalkToNpc);
 
         byte[] wire = new StarbaseRequestCodec().EncodeOutbound(msg);
 

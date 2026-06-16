@@ -15,4 +15,17 @@
     <WarningsNotAsErrors></WarningsNotAsErrors>
     <DefaultItemExcludes>$(DefaultItemExcludes)</DefaultItemExcludes>
   </PropertyGroup>
+
+  <!--
+    Phase AT: StyleCop.Analyzers. SA* severities live in the repo-root
+    .editorconfig at `suggestion`, so they guide the IDE / dotnet format
+    without surfacing as warnings, which keeps TreatWarningsAsErrors green.
+  -->
+  <ItemGroup>
+    <PackageReference Include="StyleCop.Analyzers" Version="1.2.0-beta.556">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
+    </PackageReference>
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)../../stylecop.json" Link="stylecop.json" />
+  </ItemGroup>
 </Project>

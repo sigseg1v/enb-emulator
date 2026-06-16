@@ -66,8 +66,8 @@ public sealed class EquipUseCodec : IOpcodeCodec
         }
 
         return new EquipUseMessage(
-            GameId:  BinaryPrimitives.ReadInt32LittleEndian(payload[0..4]),
-            InvNum:  payload[4],
+            GameId: BinaryPrimitives.ReadInt32LittleEndian(payload[0..4]),
+            InvNum: payload[4],
             InvSlot: payload[5]);
     }
 

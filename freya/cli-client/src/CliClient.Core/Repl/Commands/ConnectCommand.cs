@@ -22,7 +22,7 @@ public sealed class ConnectCommand : ICommandHandler
         _ctx = ctx;
     }
 
-    public string Name    => "connect";
+    public string Name => "connect";
     public string Summary => "set host[:auth-port] and probe TCP";
 
     // Reflect the live default host so Tab / right-arrow fill the value that
@@ -34,7 +34,7 @@ public sealed class ConnectCommand : ICommandHandler
     // Once a probe has connected, the next step is login, so connect retires.
     public bool Available => !_ctx.Connected;
     public int Priority => 100;
-    public string Usage   =>
+    public string Usage =>
         "connect [host[:auth-port]]\n" +
         "  no host: probe the current default (" + _ctx.Host + ")\n" +
         "  default auth-port: " + _ctx.AuthPort + "\n" +

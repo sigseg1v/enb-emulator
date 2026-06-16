@@ -18,9 +18,9 @@ public sealed class SubpartsRecord : PacketRecord
     protected override void WriteFields(StringBuilder sb)
     {
         if (Payload.Length < 8) { Flag(sb, $"SUBPARTS truncated -- {Payload.Length} bytes, expected >= 8"); return; }
-        int gameId   = ReadI32BE(Payload, 0);
+        int gameId = ReadI32BE(Payload, 0);
         int numParts = ReadI32BE(Payload, 4);
-        FHex(sb, 0, "GameID",      gameId, "(BE -- ntohl at emit)");
+        FHex(sb, 0, "GameID", gameId, "(BE -- ntohl at emit)");
         FDec(sb, 4, "NumSubParts", numParts);
         int off = 8;
         for (int i = 0; i < numParts && off < Payload.Length; i++)
@@ -28,8 +28,8 @@ public sealed class SubpartsRecord : PacketRecord
             int nul = System.Array.IndexOf(Payload, (byte)0, off);
             if (nul < 0 || nul >= Payload.Length) break;
             string bone = System.Text.Encoding.ASCII.GetString(Payload, off, nul - off);
-            int strLen  = nul - off + 1; // include NUL
-            FStr(sb, off, strLen, $"  [{i}] Bone",    bone);
+            int strLen = nul - off + 1; // include NUL
+            FStr(sb, off, strLen, $"  [{i}] Bone", bone);
             off = nul + 1;
             if (off + 4 > Payload.Length) break;
             int assetId = ReadI32BE(Payload, off);

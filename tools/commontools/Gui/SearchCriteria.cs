@@ -38,8 +38,8 @@ namespace CommonTools.Gui
         public override String ToString()
         {
             String cleanedQuery = subQuery;
-            String parameter = DB.QueryParameterCharacter + sqlParameter;
-            if(cleanedQuery.Contains(parameter))
+            String parameter = "@" + sqlParameter;
+            if (cleanedQuery.Contains(parameter))
             {
                 int position = cleanedQuery.IndexOf(parameter);
                 cleanedQuery = cleanedQuery.Substring(0, position)
@@ -51,9 +51,13 @@ namespace CommonTools.Gui
 
         public String getQuery()
         {
-            return column + " "
+            // Quote the column for Postgres: `column` is the bare schema name
+            // (mixed-case columns like npc_Id would otherwise fold to lowercase
+            // and miss). The name comes straight from the schema-generated
+            // ColName, so the case matches and quoting is always correct.
+            return "\"" + column + "\" "
                  + getComparatorSymbol() + " "
-                 + DB.QueryParameterCharacter + sqlParameter;
+                 + "@" + sqlParameter;
         }
 
         public String getComparatorSymbol()

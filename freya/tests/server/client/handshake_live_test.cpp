@@ -51,12 +51,11 @@ uint16_t PickEphemeralPort() {
 // Plays the server side of the 4-step handshake on `listen_port`. Stores
 // the RC4 key it decoded from SYN2 so the test can compare. Returns true
 // on success.
-bool ServerHandshakeOnce(uint16_t listen_port,
-                         std::array<unsigned char, 8>* decoded_key,
-                         uint16_t advertised_cord_port,
-                         uint16_t expected_session_id) {
+bool ServerHandshakeOnce(uint16_t listen_port, std::array<unsigned char, 8>* decoded_key,
+                         uint16_t advertised_cord_port, uint16_t expected_session_id) {
     int srv = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (srv < 0) return false;
+    if (srv < 0)
+        return false;
     int one = 1;
     ::setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
 
@@ -75,7 +74,8 @@ bool ServerHandshakeOnce(uint16_t listen_port,
 
     int conn = ::accept(srv, nullptr, nullptr);
     ::close(srv);
-    if (conn < 0) return false;
+    if (conn < 0)
+        return false;
 
     westwood::Rsa rsa;
     unsigned char modulus[westwood::kRsaBlockSize];
@@ -86,7 +86,8 @@ bool ServerHandshakeOnce(uint16_t listen_port,
         int got = 0;
         while (got < n) {
             int r = ::recv(conn, buf + got, n - got, 0);
-            if (r <= 0) return false;
+            if (r <= 0)
+                return false;
             got += r;
         }
         return true;
@@ -113,12 +114,24 @@ bool ServerHandshakeOnce(uint16_t listen_port,
     ack1[1] = 0x14;
     ack1[2] = syn1[2];
     ack1[3] = syn1[3];
-    ack1[4] = 0xAA; ack1[5] = 0xBB; ack1[6] = 0xCC; ack1[7] = 0xDD;
-    ack1[8] = 0x11; ack1[9] = 0x22; ack1[10] = 0x33; ack1[11] = 0x44;
-    ack1[12] = 0; ack1[13] = 0; ack1[14] = 0; ack1[15] = 0x41;
+    ack1[4] = 0xAA;
+    ack1[5] = 0xBB;
+    ack1[6] = 0xCC;
+    ack1[7] = 0xDD;
+    ack1[8] = 0x11;
+    ack1[9] = 0x22;
+    ack1[10] = 0x33;
+    ack1[11] = 0x44;
+    ack1[12] = 0;
+    ack1[13] = 0;
+    ack1[14] = 0;
+    ack1[15] = 0x41;
     ack1[16] = 0;
     std::memcpy(ack1 + 17, modulus, westwood::kRsaBlockSize);
-    ack1[81] = 0; ack1[82] = 0; ack1[83] = 0; ack1[84] = 0x01;
+    ack1[81] = 0;
+    ack1[82] = 0;
+    ack1[83] = 0;
+    ack1[84] = 0x01;
     ack1[85] = exponent_byte;
     if (!send_all(ack1, sizeof(ack1))) {
         ::close(conn);
@@ -146,10 +159,14 @@ bool ServerHandshakeOnce(uint16_t listen_port,
     ack2[1] = 0x14;
     ack2[2] = syn1[2];
     ack2[3] = syn1[3];
-    ack2[4] = 0x18; ack2[5] = 0x99;
+    ack2[4] = 0x18;
+    ack2[5] = 0x99;
     ack2[6] = static_cast<unsigned char>((advertised_cord_port >> 8) & 0xff);
     ack2[7] = static_cast<unsigned char>(advertised_cord_port & 0xff);
-    ack2[8] = 0; ack2[9] = 0; ack2[10] = 0x40; ack2[11] = 0;
+    ack2[8] = 0;
+    ack2[9] = 0;
+    ack2[10] = 0x40;
+    ack2[11] = 0;
     if (!send_all(ack2, sizeof(ack2))) {
         ::close(conn);
         return false;
@@ -158,7 +175,7 @@ bool ServerHandshakeOnce(uint16_t listen_port,
     return true;
 }
 
-}  // namespace
+} // namespace
 
 // ---------------------------------------------------------------------------
 // Loopback: drive both sides of the handshake; assert the key the
@@ -169,28 +186,25 @@ bool ServerHandshakeOnce(uint16_t listen_port,
 TEST(HandshakeDriver, LoopbackEndToEnd) {
     const uint16_t port = PickEphemeralPort();
     const uint16_t session_id = 0x2546;
-    const uint16_t cord_port = 0x0D3B;  // 3387, from capture_1
+    const uint16_t cord_port = 0x0D3B; // 3387, from capture_1
     std::array<unsigned char, 8> server_decoded_key{};
     std::atomic<bool> server_ok{false};
 
     std::thread server([&]() {
-        server_ok = ServerHandshakeOnce(port, &server_decoded_key, cord_port,
-                                        session_id);
+        server_ok = ServerHandshakeOnce(port, &server_decoded_key, cord_port, session_id);
     });
 
     // Give the server time to bind/listen.
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
     enbtest::TcpClient client;
-    ASSERT_TRUE(client.Connect("127.0.0.1", port, 2000))
-        << client.last_error();
+    ASSERT_TRUE(client.Connect("127.0.0.1", port, 2000)) << client.last_error();
 
     westwood::Rsa rsa;
     enbtest::HandshakeResult result;
     std::string err;
     ASSERT_TRUE(enbtest::RunClientHandshake(client, rsa, session_id,
-                                            /*rng_seed=*/0xDEADBEEFCAFEBABEull,
-                                            result, &err))
+                                            /*rng_seed=*/0xDEADBEEFCAFEBABEull, result, &err))
         << err;
 
     server.join();
@@ -221,8 +235,7 @@ TEST(HandshakeDriver, LiveServerHandshake) {
     enbtest::HandshakeResult result;
     std::string err;
     ASSERT_TRUE(enbtest::RunNet7Handshake(client, rsa,
-                                          /*rng_seed=*/0xA5A5A5A5A5A5A5A5ull,
-                                          result, &err))
+                                          /*rng_seed=*/0xA5A5A5A5A5A5A5A5ull, result, &err))
         << err;
 
     // Net-7 protocol has no ACK packet — success just means the server

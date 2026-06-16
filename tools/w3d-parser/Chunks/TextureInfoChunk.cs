@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -33,7 +33,7 @@ namespace WestWood3D.Chunks
                 Console.Out.WriteLine("\t\t   Attributes: " + attributes);
                 Console.Out.WriteLine("\t\t   Frame Count: " + frame_count);
                 Console.Out.WriteLine("\t\t   Frame Rate: " + frame_rate);
-            } 
+            }
         }
 
         [CategoryAttribute("Chunk Values"), ReadOnlyAttribute(true), DescriptionAttribute("Any attributes / flags in this chunk.")]

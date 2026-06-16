@@ -1,8 +1,6 @@
 using System;
-using System.Collections.Generic;
-using System.Windows.Forms;
-using System.Text;
 using System.Data;
+using CommonTools.Database;
 
 namespace N7.Sql
 {
@@ -12,10 +10,8 @@ namespace N7.Sql
 
         public Sectors()
         {
-           // String sectorQuery = "SELECT * FROM sectors left join systems on sectors.system_id = systems.system_id "
-           // +"order by sectors.system_id;";
-            String sectorQuery = "SELECT * FROM sectors order by system_id, name";
-            sectors = Database.executeQuery(Database.DatabaseName.net7, sectorQuery);
+            sectors = Database.executeQuery(Database.DatabaseName.net7,
+                "SELECT * FROM sectors order by system_id, name");
         }
 
         public DataTable getSectorTable()
@@ -24,19 +20,9 @@ namespace N7.Sql
         }
 
         public DataRow[] findRowsByName(String name)
-        {
-            DataRow[] foundRows;
-            foundRows = sectors.Select("name Like '"+name+"'");
-
-            return foundRows;
-        }
+            => sectors.WhereTextEquals("name", name);
 
         public DataRow[] getRowsBySystemID(String systemID)
-        {
-            DataRow[] foundRows;
-            foundRows = sectors.Select("system_id = '" + systemID + "'");
-
-            return foundRows;
-        }
+            => sectors.WhereIntEquals("system_id", long.Parse(systemID));
     }
 }

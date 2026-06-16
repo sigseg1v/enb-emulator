@@ -1,38 +1,38 @@
+// SPDX-License-Identifier: CC-BY-NC-SA-3.0
+// Part of the Earth & Beyond emulator preservation project.
+// Ported from N7.Sprites.Sector under Net-7 Entertainment's CC BY-NC-SA
+// 3.0; preservation modifications inherit under ShareAlike.
+
 using System;
-using System.Collections.Generic;
-using System.Text;
 using System.Drawing;
-using System.IO;
-using System.Drawing.Drawing2D;
+using SectorEditor.PiccoloShim;
 
-using UMD.HCIL.Piccolo;
-using UMD.HCIL.Piccolo.Event;
-using UMD.HCIL.Piccolo.Nodes;
-using UMD.HCIL.Piccolo.Util;
-
-namespace N7.Sprites
+namespace SectorEditor.Sprites
 {
-    class Sector
+    // Sample/placeholder sector drawn at fixed (100, 500) — used by the
+    // original sector-editor's "New Sector" preview hook before SectorSprite
+    // takes over with real DB-bound data.
+    public class Sector
     {
-        public Sector(PLayer layer, String name)
+        public Sector(PLayer layer, string name)
         {
-            Random rnd = new Random((int)DateTime.Now.Ticks); // seeded with ticks
-            Color penColor = Color.FromArgb((rnd.Next(0, 255)), (rnd.Next(0, 255)), (rnd.Next(0, 255)));
+            var rnd = new Random((int)DateTime.Now.Ticks);
+            var penColor = Color.FromArgb(rnd.Next(0, 255), rnd.Next(0, 255), rnd.Next(0, 255));
 
-            Pen sigPen = new Pen(penColor, 2.0F);
-            sigPen.DashStyle = DashStyle.DashDotDot;
+            var sigPen = new Pen(penColor, 2.0F) { DashStyle = DashStyle.DashDotDot };
 
-            PPath sigCircle = PPath.CreateEllipse(100, 500, 100, 100);
+            var sigCircle = PPath.CreateEllipse(100, 500, 100, 100);
             sigCircle.Pen = sigPen;
             sigCircle.Brush = Brushes.Transparent;
 
-            PText pname = new PText(name);
-            pname.TextBrush = Brushes.White;
-            pname.TextAlignment = StringAlignment.Center;
-            pname.X = sigCircle.X;
-            pname.Y = sigCircle.Y;
+            var pname = new PText(name)
+            {
+                TextBrush = Brushes.White,
+                TextAlignment = StringAlignment.Center,
+                X = sigCircle.X,
+                Y = sigCircle.Y,
+            };
 
-            //Display Object by adding them to its layer
             layer.AddChild(pname);
             layer.AddChild(sigCircle);
         }

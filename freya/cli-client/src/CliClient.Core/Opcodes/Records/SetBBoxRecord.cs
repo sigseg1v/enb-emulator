@@ -17,9 +17,9 @@ public sealed class SetBBoxRecord : PacketRecord
     protected override void WriteFields(StringBuilder sb)
     {
         if (Payload.Length < 16) { Flag(sb, $"SET_BBOX truncated -- {Payload.Length} bytes, expected 16"); return; }
-        FFloat(sb,  0, "XMin", ReadF32LE(Payload,  0));
-        FFloat(sb,  4, "YMin", ReadF32LE(Payload,  4));
-        FFloat(sb,  8, "XMax", ReadF32LE(Payload,  8));
+        FFloat(sb, 0, "XMin", ReadF32LE(Payload, 0));
+        FFloat(sb, 4, "YMin", ReadF32LE(Payload, 4));
+        FFloat(sb, 8, "XMax", ReadF32LE(Payload, 8));
         FFloat(sb, 12, "YMax", ReadF32LE(Payload, 12));
     }
 }

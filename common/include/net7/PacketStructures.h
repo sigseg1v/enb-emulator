@@ -26,14 +26,12 @@
 // file stands alone and can be shared across all three subprojects.
 #include <net7/Packing.h>
 
-struct EnbTcpHeader
-{
-    short   size;
-    short   opcode;
+struct EnbTcpHeader {
+    short size;
+    short opcode;
 } ATTRIB_PACKED;
 
-struct VersionRequest
-{
+struct VersionRequest {
     // Phase K: int32_t guarantees 4 bytes on every platform. `long` is 8 bytes
     // on Linux x86_64 vs 4 bytes on Win32, and the wire format is 4 bytes.
     int32_t Major;
@@ -44,24 +42,22 @@ struct VersionRequest
 // 0x3009 status request. Proxy-internal telemetry; never sent to the real
 // client and never forwarded to the server. Fixed-size, all u8 so there is no
 // byte-order concern. See common/include/net7/Opcodes.h (0x3009/0x300A).
-struct ProxyStatusReply
-{
-    uint8_t dtls_required;     // 1 = proxy<->server DTLS enforced; 0 = plaintext opt-out
-    uint8_t dtls_live_assocs;  // live proxy<->server DTLS associations (0 when plaintext)
-    uint8_t connected;         // 1 = proxy has an active server-side UDP link
-    uint8_t reserved;          // pad to 4 bytes; keep zero
+struct ProxyStatusReply {
+    uint8_t dtls_required;    // 1 = proxy<->server DTLS enforced; 0 = plaintext opt-out
+    uint8_t dtls_live_assocs; // live proxy<->server DTLS associations (0 when plaintext)
+    uint8_t connected;        // 1 = proxy has an active server-side UDP link
+    uint8_t reserved;         // pad to 4 bytes; keep zero
 } ATTRIB_PACKED;
 
 //New header for use with UDP comms.
 //If we have the player_id it makes things a lot simpler
-struct EnbUdpHeader
-{
+struct EnbUdpHeader {
     // Phase K: int32_t guarantees 4 bytes on every platform. `long` is 8
     // bytes on Linux x86_64 vs 4 bytes on Win32, which made sizeof(header)
     // 20 on Linux and 12 on Win32 — wire format is 12. Both server and
     // proxy recompile from this header, so the size flip is symmetric.
-    short   size;
-    short   opcode;
+    short size;
+    short opcode;
     int32_t player_id;
     int32_t packet_sequence;
 } ATTRIB_PACKED;
@@ -74,8 +70,7 @@ struct EnbUdpHeader
 // (and the server's parse) always used. Server-side acceptance of the legacy
 // 16-byte form lives in Player::ReSendOpcodes; the CLI mirror is
 // CliClient.Core/Opcodes/Outbound/ResendPacketSequenceCodec.cs.
-struct ReSendRequest
-{
+struct ReSendRequest {
     int32_t packet_start;
     int32_t packet_count;
 } ATTRIB_PACKED;
@@ -100,13 +95,12 @@ struct ReSendRequest
 // datagrams carry player_id == 0 and are gated by ticket validation, not by the
 // per-packet token, so the zero-token window is never enforced.
 #define NET7_UDP_AUTH_WRAPPER_VERSION 0x01
-#define NET7_UDP_AUTH_TOKEN_LEN       16
+#define NET7_UDP_AUTH_TOKEN_LEN 16
 
-struct EnbUdpAuthWrapper
-{
-    uint8_t version;                          // NET7_UDP_AUTH_WRAPPER_VERSION
-    uint8_t token[NET7_UDP_AUTH_TOKEN_LEN];   // binary login-ticket suffix
-} ATTRIB_PACKED;                              // 17 bytes, no padding
+struct EnbUdpAuthWrapper {
+    uint8_t version;                        // NET7_UDP_AUTH_WRAPPER_VERSION
+    uint8_t token[NET7_UDP_AUTH_TOKEN_LEN]; // binary login-ticket suffix
+} ATTRIB_PACKED;                            // 17 bytes, no padding
 
 /*
 
@@ -146,8 +140,7 @@ struct EnbUdpAuthWrapper
 
 */
 
-struct AvatarData
-{
+struct AvatarData {
     // Phase K: int32_t (was `long`). On Win32 `long` is 4 bytes so the
     // original wire size is 241 bytes; on Linux x86_64 `long` is 8 bytes,
     // which bloats the struct to 277 bytes (+9 longs × 4 bytes). The Win32
@@ -155,82 +148,80 @@ struct AvatarData
     // must serialise 4-byte fields too. Mirrors the e74f07c migration for
     // ServerRedirect/VersionRequest/MasterJoin. ATTRIB_PACKED still guards
     // the no-padding invariant.
-    char    avatar_first_name[20];      // 14   d4  20
-    char    avatar_last_name[20];       // 28   e8  20
-    int32_t avatar_type;                // 04   08  4
-    char    filler1;                    //      0c  -
-    char    avatar_version;             // 09   0d  1
-                                        //      0e
-                                        //      0f
-    int32_t race;                       // 0c   10  4
-    int32_t profession;                 // 10   14  4
-    int32_t gender;                     // 14   18  4
-    int32_t mood_type;                  // 18   1c  4
+    char avatar_first_name[20]; // 14   d4  20
+    char avatar_last_name[20];  // 28   e8  20
+    int32_t avatar_type;        // 04   08  4
+    char filler1;               //      0c  -
+    char avatar_version;        // 09   0d  1
+                                //      0e
+                                //      0f
+    int32_t race;               // 0c   10  4
+    int32_t profession;         // 10   14  4
+    int32_t gender;             // 14   18  4
+    int32_t mood_type;          // 18   1c  4
 
-    char    personality;                // 1c   20  1
-    char    nlp;                        // 1d   21  1
-    char    body_type;                  // 1e   22  1 (shirt type?)
-    char    pants_type;                 // 1f   23  1
-    char    head_type;                  // 20   24  1
-    char    hair_num;                   // 21   27  1
-    char    ear_num;                    // 22   26  1
-    char    goggle_num;                 // 23   27  1
-    char    beard_num;                  // 24   28  1
-    char    weapon_hip_num;             // 25   29  1
-    char    weapon_unique_num;          // 26   2a  1
-    char    weapon_back_num;            // 27   2b  1
-    char    head_texture_num;           // 28   2c  1
-    char    tattoo_texture_num;         // 29   2d  1
-                                        //      2e  -
-                                        //      2f  -
+    char personality;        // 1c   20  1
+    char nlp;                // 1d   21  1
+    char body_type;          // 1e   22  1 (shirt type?)
+    char pants_type;         // 1f   23  1
+    char head_type;          // 20   24  1
+    char hair_num;           // 21   27  1
+    char ear_num;            // 22   26  1
+    char goggle_num;         // 23   27  1
+    char beard_num;          // 24   28  1
+    char weapon_hip_num;     // 25   29  1
+    char weapon_unique_num;  // 26   2a  1
+    char weapon_back_num;    // 27   2b  1
+    char head_texture_num;   // 28   2c  1
+    char tattoo_texture_num; // 29   2d  1
+                             //      2e  -
+                             //      2f  -
 
-    float   tattoo_offset[3];           // 2c   30  12 (x,y,zoom)
-    float   hair_color[3];              // 38   3c  12
-    float   beard_color[3];             // 44   48  12
-    float   eye_color[3];               // 50   54  12
-    float   skin_color[3];              // 5c   60  12
-    float   shirt_primary_color[3];     // 68   6c  12
-    float   shirt_secondary_color[3];   // 74   78  12
-    float   pants_primary_color[3];     // 80   84  12
-    float   pants_secondary_color[3];   // 8c   90  12
+    float tattoo_offset[3];         // 2c   30  12 (x,y,zoom)
+    float hair_color[3];            // 38   3c  12
+    float beard_color[3];           // 44   48  12
+    float eye_color[3];             // 50   54  12
+    float skin_color[3];            // 5c   60  12
+    float shirt_primary_color[3];   // 68   6c  12
+    float shirt_secondary_color[3]; // 74   78  12
+    float pants_primary_color[3];   // 80   84  12
+    float pants_secondary_color[3]; // 8c   90  12
 
-    int32_t shirt_primary_metal;        // 98   9c  4
-    int32_t shirt_secondary_metal;      // 9c   a0  4
-    int32_t pants_primary_metal;        // a0   a4  4
-    int32_t pants_secondary_metal;      // a4   a8  4
+    int32_t shirt_primary_metal;   // 98   9c  4
+    int32_t shirt_secondary_metal; // 9c   a0  4
+    int32_t pants_primary_metal;   // a0   a4  4
+    int32_t pants_secondary_metal; // a4   a8  4
 
-    char    filler2;                    //          1?
+    char filler2; //          1?
 
-    float   height_weight_1[5];         //      ac  20
-    float   height_weight_2[5];         //      c0  20
-} ATTRIB_PACKED;  // 241 bytes
+    float height_weight_1[5]; //      ac  20
+    float height_weight_2[5]; //      c0  20
+} ATTRIB_PACKED;              // 241 bytes
 
-struct AvatarInfo
-{
+struct AvatarInfo {
     // Phase K: int32_t (was `long`). Win32 packed = 13×4 + 81 = 133 bytes;
     // Linux x86_64 with 8-byte long = 13×8 + 81 = 185 bytes — wire-format
     // divergence. Migrated to int32_t for parity with the Win32 client and
     // ntohl-compatibility (ntohl returns uint32_t; into a `long` field this
     // was previously a silent widening conversion).
     // NOTE: All fields are in Big Endian format -- use ntohl to convert!
-    int32_t avatar_slot;        // 0 to 4 = 0
-    int32_t sector_id;          // 1071
-    int32_t galaxy_id;          // 1
-    int32_t count;              // 5
-    int32_t avatar_id_msb;      // 0
-    int32_t avatar_id_lsb;      // 1
-    int32_t account_id_msb;     // 0
-    int32_t account_id_lsb;     // 2
-    int32_t admin_level;        // 0
-    int32_t gm_flag;            // 1
-    int32_t combat_level;       // 0
-    int32_t explore_level;      // 0
-    int32_t trade_level;        // 0
-    char    location[81];       // "Saturn"
-} ATTRIB_PACKED;  // 133 bytes
+    int32_t avatar_slot;    // 0 to 4 = 0
+    int32_t sector_id;      // 1071
+    int32_t galaxy_id;      // 1
+    int32_t count;          // 5
+    int32_t avatar_id_msb;  // 0
+    int32_t avatar_id_lsb;  // 1
+    int32_t account_id_msb; // 0
+    int32_t account_id_lsb; // 2
+    int32_t admin_level;    // 0
+    int32_t gm_flag;        // 1
+    int32_t combat_level;   // 0
+    int32_t explore_level;  // 0
+    int32_t trade_level;    // 0
+    char location[81];      // "Saturn"
+} ATTRIB_PACKED;            // 133 bytes
 
-struct ColorInfo
-{
+struct ColorInfo {
     // Phase K: int32_t (was `long`). Win32 packed = 12 + 1 + 4 = 17 bytes;
     // Linux with 8-byte long = 21 bytes. Embedded 8× in ShipData which is
     // embedded in GlobalCreateCharacter — pre-migration GCC bloated
@@ -242,60 +233,56 @@ struct ColorInfo
     // AccountManager.cpp) all assign from a local `int metal`, so
     // narrowing long→int32_t is value-preserving for every existing
     // call site.
-    float   HSV[3];
-    char    flat;
+    float HSV[3];
+    char flat;
     int32_t metal;
-} ATTRIB_PACKED;  // 17 bytes
+} ATTRIB_PACKED; // 17 bytes
 
-struct ShipData
-{
+struct ShipData {
     // Phase K: int32_t (was `long`). Win32 packed = 5*4 + 26 + 12 + 8*17 = 194
     // bytes; Linux with 8-byte long = 5*8 + 26 + 12 + 136 = 214 bytes. Embedded
     // in GlobalCreateCharacter — without this migration the proxy stamped a
     // 20-byte-too-large payload into the UDP_GLOBAL_SERVER_PORT exchange, and
     // the server's wire offsets walked off into the ship_data/unknown region.
-    int32_t race;                           // 00
-    int32_t profession;                     // 04
-    int32_t hull;                           // 0c
-    int32_t wing;                           // 08
-    int32_t decal;                          // 10
+    int32_t race;       // 00
+    int32_t profession; // 04
+    int32_t hull;       // 0c
+    int32_t wing;       // 08
+    int32_t decal;      // 10
 
-    char    ship_name[26];                  // 14
-    float   ship_name_color[3];             // 2e
+    char ship_name[26];       // 14
+    float ship_name_color[3]; // 2e
 
-    ColorInfo   HullPrimaryColor;           // 3a, 46, 47
-    ColorInfo   HullSecondaryColor;         // 4b, 57, 58
-    ColorInfo   ProfessionPrimaryColor;     // 5c, 68, 69
-    ColorInfo   ProfessionSecondaryColor;   // 6d, 79, 7a
-    ColorInfo   WingPrimaryColor;           // 7e, 8a, 8b
-    ColorInfo   WingSecondaryColor;         // 8f, 9b, 9c
-    ColorInfo   EnginePrimaryColor;         // a0, ac, ad
-    ColorInfo   EngineSecondaryColor;       // b1, bd, be
-} ATTRIB_PACKED;  // 194 bytes
+    ColorInfo HullPrimaryColor;         // 3a, 46, 47
+    ColorInfo HullSecondaryColor;       // 4b, 57, 58
+    ColorInfo ProfessionPrimaryColor;   // 5c, 68, 69
+    ColorInfo ProfessionSecondaryColor; // 6d, 79, 7a
+    ColorInfo WingPrimaryColor;         // 7e, 8a, 8b
+    ColorInfo WingSecondaryColor;       // 8f, 9b, 9c
+    ColorInfo EnginePrimaryColor;       // a0, ac, ad
+    ColorInfo EngineSecondaryColor;     // b1, bd, be
+} ATTRIB_PACKED;                        // 194 bytes
 
-struct Galaxy
-{
+struct Galaxy {
     // Phase K: int32_t (was `long`). Win32 packed = 64 + 4×4 + 2 + 2 = 84
     // bytes; Linux with 8-byte long = 64 + 4×8 + 2 + 2 = 100 bytes. The
     // wire format is 84 — fix the local representation to match.
-    char    Name[64];
+    char Name[64];
     int32_t GalaxyID;
     int32_t IP_Address;
-    short   port;
+    short port;
     int32_t NumPlayers;
     int32_t MaxPlayers;
-    short   unknown2;
-} ATTRIB_PACKED;  // 84 bytes
+    short unknown2;
+} ATTRIB_PACKED; // 84 bytes
 
-struct WarpPacket
-{
+struct WarpPacket {
     int32_t GameID;
     short Navs;
     int32_t TargetID[20];
 } ATTRIB_PACKED;
 
-struct InvMove
-{
+struct InvMove {
     int32_t GameID;
     int32_t FromInv;
     int32_t FromSlot;
@@ -304,18 +291,16 @@ struct InvMove
     int32_t Num;
 } ATTRIB_PACKED;
 
-struct InvSort
-{
-	int32_t ID;
-	int32_t TargetInv;
-	int32_t Sort1;
-	int32_t Sort2;
-	int32_t Sort3;
-	char Reverse;
+struct InvSort {
+    int32_t ID;
+    int32_t TargetInv;
+    int32_t Sort1;
+    int32_t Sort2;
+    int32_t Sort3;
+    char Reverse;
 } ATTRIB_PACKED;
 
-struct ItemState
-{
+struct ItemState {
     int32_t GameID;
     int32_t BitMask;
     char Enable;
@@ -323,27 +308,24 @@ struct ItemState
     char ItemNum;
 } ATTRIB_PACKED;
 
-struct AvatarListItem
-{
-    AvatarInfo      info;               // 133 bytes (internal struct is 144 bytes)
-    AvatarData      data;               // 241 bytes (internal struct is 268 bytes)
-} ATTRIB_PACKED;  // 374 bytes
+struct AvatarListItem {
+    AvatarInfo info; // 133 bytes (internal struct is 144 bytes)
+    AvatarData data; // 241 bytes (internal struct is 268 bytes)
+} ATTRIB_PACKED;     // 374 bytes
 
-struct GlobalAvatarList
-{
+struct GlobalAvatarList {
     // Phase K: total wire size with int32_t-migrated members and 2 galaxies =
     // 5×374 + 4 + 2×84 = 2042 bytes. With unmigrated 8-byte longs on Linux,
     // the struct ballooned to 5×(185+277) + 8 + 2×100 = 2518 bytes — the
     // bytes a Win32 client would memcpy into a 2042-byte buffer would have
     // come from random fields. Migration restores Win32 parity.
-    AvatarListItem  avatar[5];      // 5 * 374 bytes
-    int32_t         num_galaxies;   // 4 bytes -- 1 to 6 currently hard-coded to 1!
-    Galaxy          galaxy[2];      // support only one galaxy!
+    AvatarListItem avatar[5]; // 5 * 374 bytes
+    int32_t num_galaxies;     // 4 bytes -- 1 to 6 currently hard-coded to 1!
+    Galaxy galaxy[2];         // support only one galaxy!
     // Galaxy           galaxy[4];  // 4 * 84 bytes -- variable length array of galaxies
 } ATTRIB_PACKED;
 
-struct GlobalCreateCharacter
-{
+struct GlobalCreateCharacter {
     // Phase K: int32_t (was `long`). Win32 packed = 3*4 + 65 + 241 + 194 + 27 =
     // 539 bytes; Linux with 8-byte long = 3*8 + 65 + 241 + 194 + 27 = 551
     // bytes (still divergent through the embedded ShipData, since both this
@@ -351,17 +333,16 @@ struct GlobalCreateCharacter
     // of the proxy->server UDP exchange (UDPClient_linux.cpp:746) via
     // sizeof(GlobalCreateCharacter), so a size mismatch silently corrupts the
     // CREATE_AVATAR request and AccountManager::CreateCharacter reads garbage.
-    int32_t galaxy_id;              // 4 bytes
-    int32_t character_slot;         // 4 bytes
-    int32_t tutorial_status;        // 4 bytes
-    char    account_username[65];   // 65 bytes
-    AvatarData avatar;              // 241 bytes
-    ShipData ship_data;             // 194 bytes
-    char    unknown[27];            // 27 bytes
-} ATTRIB_PACKED;  // 539 bytes
+    int32_t galaxy_id;         // 4 bytes
+    int32_t character_slot;    // 4 bytes
+    int32_t tutorial_status;   // 4 bytes
+    char account_username[65]; // 65 bytes
+    AvatarData avatar;         // 241 bytes
+    ShipData ship_data;        // 194 bytes
+    char unknown[27];          // 27 bytes
+} ATTRIB_PACKED;               // 539 bytes
 
-struct MasterJoin
-{
+struct MasterJoin {
     // Phase K: 11 * int32_t + 20-byte ticket = 64 bytes on every platform.
     // Was `long`, which is 8 bytes on Linux x86_64 (struct = 108B) vs 4 bytes
     // on Win32 (struct = 64B). The wire format is 64 bytes; the Linux
@@ -379,7 +360,7 @@ struct MasterJoin
     int32_t unknown8;
     int32_t unknown9;
     int32_t unknown10;
-    char    ticket[20];
+    char ticket[20];
 } ATTRIB_PACKED;
 
 // This packet is sent by the Global Server to the Client
@@ -390,669 +371,613 @@ struct MasterJoin
 // The MasterJoin packet is the first packet sent from the
 // client to the Global Server once.
 //
-struct GlobalTicket
-{
+struct GlobalTicket {
     // Phase K: int32_t (was `long`). Win32 = 4 + 64 = 68 bytes; Linux with
     // 8-byte long was 8 + 64 = 72. Sent by Connection::SendGlobalTicket via
     // sizeof(GlobalTicket) so the 4-byte gap would have shifted the embedded
     // MasterJoin avatar_id / sector_id / ticket fields on the Win32 client's
     // side, producing a wrong-galaxy ServerRedirect or rejected ticket.
-    int32_t     response_code;
-    MasterJoin  join_data;
+    int32_t response_code;
+    MasterJoin join_data;
 } ATTRIB_PACKED;
 
-struct ServerRedirect
-{
+struct ServerRedirect {
     // Phase K: int32_t — Win32 client expects 4-byte fields on the wire.
     int32_t sector_id;
     int32_t ip_address;
-    short   port;
+    short port;
 } ATTRIB_PACKED;
 
-struct ChangeBaseAsset
-{
-	int32_t	GameID;			// buff[12] 4 bytes
-	int32_t	BaseAsset;		// buff[16] 4 bytes
-	float	Scale;			// buff[20] 4 bytes
-	float	HSV[3];			// buff[24] 12 bytes
+struct ChangeBaseAsset {
+    int32_t GameID;    // buff[12] 4 bytes
+    int32_t BaseAsset; // buff[16] 4 bytes
+    float Scale;       // buff[20] 4 bytes
+    float HSV[3];      // buff[24] 12 bytes
 } ATTRIB_PACKED;
 
-struct Create
-{
-    int32_t    GameID;                 // this[12] 4 bytes
-    float   Scale;                  // this[16] 4 bytes
-    short   BaseAsset;              // this[20] 2 bytes
-    char    Type;                   // this[22] 1 byte
-    float   HSV[3];                 // this[24] 12 bytes
+struct Create {
+    int32_t GameID;  // this[12] 4 bytes
+    float Scale;     // this[16] 4 bytes
+    short BaseAsset; // this[20] 2 bytes
+    char Type;       // this[22] 1 byte
+    float HSV[3];    // this[24] 12 bytes
 } ATTRIB_PACKED;
 
-struct ServerParameters
-{
-    float   ZBandMin;               // this[12] 4 bytes
-    float   ZBandMax;               // this[16] 4 bytes
-    float   XMin;                   // this[20] 4 bytes
-    float   YMin;                   // this[24] 4 bytes
-    float   XMax;                   // this[28] 4 bytes
-    float   YMax;                   // this[32] 4 bytes
-    float   FogNear;                // this[36] 4 bytes
-    float   FogFar;                 // this[40] 4 bytes
-    int32_t    DebrisMode;             // this[44] 4 bytes
-    char    LightBackdrop;          // this[48] 1 byte (boolean 1=true 0=false)
-    char    FogBackdrop;            // this[49] 1 byte (boolean 1=true 0=false)
-    char    SwapBackdrop;           // this[50] 1 byte (boolean 1=true 0=false)
-    float   BackdropFogNear;        // this[52] 4 bytes
-    float   BackdropFogFar;         // this[56] 4 bytes
-    float   MaxTilt;                // this[60] 4 bytes
-    char    AutoLevel;              // this[64] 1 byte (boolean 1=true 0=false)
-    float   ImpulseRate;            // this[68] 4 bytes
-    float   DecayVelocity;          // this[72] 4 bytes
-    float   DecaySpin;              // this[76] 4 bytes
-    short   BackdropBaseAsset;      // this[80] 2 bytes
-    uint32_t SectorNum;        // this[84] 4 bytes
+struct ServerParameters {
+    float ZBandMin;          // this[12] 4 bytes
+    float ZBandMax;          // this[16] 4 bytes
+    float XMin;              // this[20] 4 bytes
+    float YMin;              // this[24] 4 bytes
+    float XMax;              // this[28] 4 bytes
+    float YMax;              // this[32] 4 bytes
+    float FogNear;           // this[36] 4 bytes
+    float FogFar;            // this[40] 4 bytes
+    int32_t DebrisMode;      // this[44] 4 bytes
+    char LightBackdrop;      // this[48] 1 byte (boolean 1=true 0=false)
+    char FogBackdrop;        // this[49] 1 byte (boolean 1=true 0=false)
+    char SwapBackdrop;       // this[50] 1 byte (boolean 1=true 0=false)
+    float BackdropFogNear;   // this[52] 4 bytes
+    float BackdropFogFar;    // this[56] 4 bytes
+    float MaxTilt;           // this[60] 4 bytes
+    char AutoLevel;          // this[64] 1 byte (boolean 1=true 0=false)
+    float ImpulseRate;       // this[68] 4 bytes
+    float DecayVelocity;     // this[72] 4 bytes
+    float DecaySpin;         // this[76] 4 bytes
+    short BackdropBaseAsset; // this[80] 2 bytes
+    uint32_t SectorNum;      // this[84] 4 bytes
 } ATTRIB_PACKED;
 
-struct LoginData
-{
-    char    unknown40[40];
-    char    timestamp[18];      // mm/dd/yy hh:mm:ss, example "10/01/06 16:43:25"
-    char    unknown7[7];
-} ATTRIB_PACKED;  // 65 bytes
+struct LoginData {
+    char unknown40[40];
+    char timestamp[18]; // mm/dd/yy hh:mm:ss, example "10/01/06 16:43:25"
+    char unknown7[7];
+} ATTRIB_PACKED; // 65 bytes
 
-struct Login
-{
-    MasterJoin  join_data;      // this[16] 64 bytes
-    int32_t        TimeSent;       // this[88] 4 bytes
-    LoginData   login_data;     // this[96] 65 bytes
-    int32_t        TimeReceived;   // this[164] 4 bytes
+struct Login {
+    MasterJoin join_data; // this[16] 64 bytes
+    int32_t TimeSent;     // this[88] 4 bytes
+    LoginData login_data; // this[96] 65 bytes
+    int32_t TimeReceived; // this[164] 4 bytes
 } ATTRIB_PACKED;
 
-struct SetBBox
-{
-    float   XMin;               // this[12] 4 bytes
-    float   YMin;               // this[16] 4 bytes
-    float   XMax;               // this[20] 4 bytes
-    float   YMax;               // this[24] 4 bytes
+struct SetBBox {
+    float XMin; // this[12] 4 bytes
+    float YMin; // this[16] 4 bytes
+    float XMax; // this[20] 4 bytes
+    float YMax; // this[24] 4 bytes
 } ATTRIB_PACKED;
 
-struct SetZBand
-{
-    float   Min;                // this[12] 4 bytes
-    float   Max;                // this[16] 4 bytes
+struct SetZBand {
+    float Min; // this[12] 4 bytes
+    float Max; // this[16] 4 bytes
 } ATTRIB_PACKED;
 
-struct Navigation
-{
-    int32_t    GameID;
-    float   Signature;
-    char    PlayerHasVisited;
-    int32_t    NavType;
-    char    IsHuge;
+struct Navigation {
+    int32_t GameID;
+    float Signature;
+    char PlayerHasVisited;
+    int32_t NavType;
+    char IsHuge;
 } ATTRIB_PACKED;
 
-struct CreateAttachment
-{
-    int32_t    Parent_ID;
-    int32_t    Child_ID;
-    int32_t    Slot;
+struct CreateAttachment {
+    int32_t Parent_ID;
+    int32_t Child_ID;
+    int32_t Slot;
 } ATTRIB_PACKED;
 
-struct DecalItem
-{
-    int32_t    Index;
-    int32_t    decal_id;
-    float   HSV[3];
-    float   opacity;
+struct DecalItem {
+    int32_t Index;
+    int32_t decal_id;
+    float HSV[3];
+    float opacity;
 } ATTRIB_PACKED;
 
-#define MAX_DECALS  6   // arbitrary limit
+#define MAX_DECALS 6 // arbitrary limit
 
-struct Decal
-{
-    int32_t    GameID;
-    short   DecalCount;
+struct Decal {
+    int32_t GameID;
+    short DecalCount;
     DecalItem Item[MAX_DECALS];
 } ATTRIB_PACKED;
 
-struct NameDecal
-{
-    int32_t    GameID;
-    char    Name[32];
-    float   RGB[3];
+struct NameDecal {
+    int32_t GameID;
+    char Name[32];
+    float RGB[3];
 } ATTRIB_PACKED;
 
-struct ColorizationItem
-{
-    int32_t    metal;
-    float   HSV[3];
+struct ColorizationItem {
+    int32_t metal;
+    float HSV[3];
 } ATTRIB_PACKED;
 
-#define MAX_COLORIZATION_ITEMS  10  // arbitrary number
+#define MAX_COLORIZATION_ITEMS 10 // arbitrary number
 
-struct Colorization
-{
-    int32_t    GameID;
-    short   ItemCount;
+struct Colorization {
+    int32_t GameID;
+    short ItemCount;
     ColorizationItem item[MAX_COLORIZATION_ITEMS];
 } ATTRIB_PACKED;
 
-struct CharacterCreatorAvatarDataFile
-{
-    AvatarData  avatar;         // 241 bytes
-    ShipData   ship;           // 194 bytes
-} ATTRIB_PACKED;  // 435 bytes, Avatar1.dat is 564 bytes
+struct CharacterCreatorAvatarDataFile {
+    AvatarData avatar; // 241 bytes
+    ShipData ship;     // 194 bytes
+} ATTRIB_PACKED;       // 435 bytes, Avatar1.dat is 564 bytes
 
 struct AvatarDescription // opcode 0x61
 {
     uint32_t AvatarID;
-    AvatarData  avatar_data;
-	int32_t		unknown1;
-    u8          unknown2[3];
-    float       unknown3;
-    float       unknown4;
+    AvatarData avatar_data;
+    int32_t unknown1;
+    u8 unknown2[3];
+    float unknown3;
+    float unknown4;
 } ATTRIB_PACKED;
 
 struct Subparts // opcode 0xb4
 {
-    int32_t    GameID;
-    int32_t    NumSubParts;
-    char    BoneProfession[4];
-    int32_t    BassetProfession;
-    char    BoneEngine1[11];
-    int32_t    BassetEngine1;
-    char    BoneEngine2[11];
-    int32_t    BassetEngine2;
-    char    BoneWing[4];
-    int32_t    BassetWing;
+    int32_t GameID;
+    int32_t NumSubParts;
+    char BoneProfession[4];
+    int32_t BassetProfession;
+    char BoneEngine1[11];
+    int32_t BassetEngine1;
+    char BoneEngine2[11];
+    int32_t BassetEngine2;
+    char BoneWing[4];
+    int32_t BassetWing;
 } ATTRIB_PACKED;
 
-struct ConstantPositionalUpdate
-{
-    int32_t    GameID;             // this[12] 4 bytes
-    float   Position[3];        // this[16] 12 bytes
-    float   Orientation[4];     // this[28] 16 bytes
+struct ConstantPositionalUpdate {
+    int32_t GameID;       // this[12] 4 bytes
+    float Position[3];    // this[16] 12 bytes
+    float Orientation[4]; // this[28] 16 bytes
 } ATTRIB_PACKED;
 
-struct FormationPositionalUpdate
-{
-    int32_t	TargetID;			// this[16] 4 bytes
-    int32_t    LeaderID;           // this[12] 4 bytes
-    float   Position[3];        // this[20] 12 bytes
+struct FormationPositionalUpdate {
+    int32_t TargetID;  // this[16] 4 bytes
+    int32_t LeaderID;  // this[12] 4 bytes
+    float Position[3]; // this[20] 12 bytes
 } ATTRIB_PACKED;
 
-struct RequestTarget
-{
-    int32_t    GameID;             // this[12] 4 bytes
-    int32_t    TargetID;           // this[16] 4 bytes
+struct RequestTarget {
+    int32_t GameID;   // this[12] 4 bytes
+    int32_t TargetID; // this[16] 4 bytes
 } ATTRIB_PACKED;
 
-struct SetInterface
-{
-	int32_t UIChange;
-	int32_t UIType;
+struct SetInterface {
+    int32_t UIChange;
+    int32_t UIType;
 } ATTRIB_PACKED;
 
-struct SetTarget
-{
-    int32_t    GameID;             // this[12] 4 bytes
-    int32_t    TargetID;           // this[16] 4 bytes
+struct SetTarget {
+    int32_t GameID;   // this[12] 4 bytes
+    int32_t TargetID; // this[16] 4 bytes
 } ATTRIB_PACKED;
 
-struct ActionPacket
-{
-    int32_t    GameID;             // this[12] 4 bytes
-    int32_t    Action;             // this[16] 4 bytes
-    int32_t    Target;             // this[20] 4 bytes
-    int32_t    OptionalVar;        // this[24] 4 bytes
+struct ActionPacket {
+    int32_t GameID;      // this[12] 4 bytes
+    int32_t Action;      // this[16] 4 bytes
+    int32_t Target;      // this[20] 4 bytes
+    int32_t OptionalVar; // this[24] 4 bytes
 } ATTRIB_PACKED;
 
-struct ActionPacket2
-{
-    int32_t    GameID;             // reversed bytes
-    int32_t    Action;             // reversed bytes
-    short   string_len;         // BSTR
-    char    string[1];			// ...
-	int32_t	_OptionalVar;		// reversed bytes
+struct ActionPacket2 {
+    int32_t GameID;       // reversed bytes
+    int32_t Action;       // reversed bytes
+    short string_len;     // BSTR
+    char string[1];       // ...
+    int32_t _OptionalVar; // reversed bytes
 } ATTRIB_PACKED;
 
-struct ClientSetTime
-{
-    int32_t    ClientSent;
-    int32_t    ServerReceived;
-    int32_t    ServerSent;
+struct ClientSetTime {
+    int32_t ClientSent;
+    int32_t ServerReceived;
+    int32_t ServerSent;
 } ATTRIB_PACKED;
 
-struct VerbRequest
-{
-    int32_t    SubjectID;
-    int32_t    ObjectID;
-    int32_t    Action;
+struct VerbRequest {
+    int32_t SubjectID;
+    int32_t ObjectID;
+    int32_t Action;
 } ATTRIB_PACKED;
 
-struct CameraControl
-{
-    int32_t    Message;
-    int32_t    GameID;
+struct CameraControl {
+    int32_t Message;
+    int32_t GameID;
 } ATTRIB_PACKED;
 
-struct LogoffRequest
-{
-    int32_t    PlayerID;           // this[12] 4 bytes
-	int32_t	LogOutType;
+struct LogoffRequest {
+    int32_t PlayerID; // this[12] 4 bytes
+    int32_t LogOutType;
 } ATTRIB_PACKED;
 
-struct TriggerEmote
-{
-    int32_t    GameID;
-    int32_t    Emote;
+struct TriggerEmote {
+    int32_t GameID;
+    int32_t Emote;
 } ATTRIB_PACKED;
 
-struct NotifyEmote
-{
-    int32_t    GameID;
-    int32_t    Emote;
+struct NotifyEmote {
+    int32_t GameID;
+    int32_t Emote;
 } ATTRIB_PACKED;
 
-struct OptionPacket
-{
-    int32_t    GameID;             // this[12] 4 bytes
-    int32_t    OptionType;         // this[16] 4 bytes
-    unsigned char OptionVar;    // this[20] 1 byte
+struct OptionPacket {
+    int32_t GameID;          // this[12] 4 bytes
+    int32_t OptionType;      // this[16] 4 bytes
+    unsigned char OptionVar; // this[20] 1 byte
 } ATTRIB_PACKED;
 
-struct SelectTalkTree
-{
-    int32_t    PlayerID;
+struct SelectTalkTree {
+    int32_t PlayerID;
     unsigned char Selection;
 } ATTRIB_PACKED;
 
-struct ChatStream
-{
-	int32_t	GameID;
-	char	Unknown1;			// I can't tell what this does (It's always 0x01.  Maybe for byte-alignment?)
-	short	ChatSize;			// The size of the rest of the packet + 2 additional bytes (Target as mentioned below?)
-	char	message[1];			// Variable length string
-	short	_data_size;			// do not access from here on, reference only
-	char	_unknown_data[1];	// optional block of data of data_size length
+struct ChatStream {
+    int32_t GameID;
+    char Unknown1; // I can't tell what this does (It's always 0x01.  Maybe for byte-alignment?)
+    short
+        ChatSize; // The size of the rest of the packet + 2 additional bytes (Target as mentioned below?)
+    char message[1];       // Variable length string
+    short _data_size;      // do not access from here on, reference only
+    char _unknown_data[1]; // optional block of data of data_size length
 } ATTRIB_PACKED;
 
-struct ClientChat
-{
-    int32_t    GameID;             // this[12] 4 bytes
-    char    Type;               // this[22] 1 byte
-    short   Size;               // this[20] 2 bytes = strlen(String) + 1
-    char    String[1];          // variable length string
-	short	_data_size;			// do not access from here on, reference only
-	char	_unknown_data[1];	// optional block of data of data_size length
+struct ClientChat {
+    int32_t GameID;        // this[12] 4 bytes
+    char Type;             // this[22] 1 byte
+    short Size;            // this[20] 2 bytes = strlen(String) + 1
+    char String[1];        // variable length string
+    short _data_size;      // do not access from here on, reference only
+    char _unknown_data[1]; // optional block of data of data_size length
 } ATTRIB_PACKED;
 
 //ClientChatError.type and ClientChatRequest.type
-#define CCE_SPEAK_ON			0
-#define CCE_SPEAK_LOCALLY		1
-#define CCE_BROADCAST_TO		2
-#define CCE_BROADCAST_ALL		3
-#define CCE_INSERT_CHANNEL		4
-#define CCE_REMOVE_CHANNEL		5
-#define CCE_ENTER_CHANNEL		6
-#define CCE_EXIT_CHANNEL		7
-#define CCE_ADD_FRIEND			8
-#define CCE_REMOVE_FRIEND		9
-#define CCE_IGNORE				10
-#define CCE_UNIGNORE			11
-#define CCE_INVITE1				12
-#define CCE_INVITE2				13
-#define CCE_BAN					14
-#define CCE_UNBAN				15
-#define CCE_GAG					16
-#define CCE_UNGAG				17
-#define CCE_ADD_OWNER			18
-#define CCE_REMOVE_OWNER		19
-#define CCE_KICK				20
-#define CCE_SET_ACCESS			21
-#define CCE_SET_PASSWORD		22
-#define CCR_LIST_IGNORES		23 // Request only
-#define CCR_LIST_FRIENDS		24 // Request only
-#define CCR_LIST_CHANNELS		25 // Request only
-#define CCR_LIST_ALL_CHANNELS	26 // Request only
-#define CCR_UNKNOWN				27
-#define CCR_FRIEND_STATUS_ONLY	28 // Request only
-#define CCR_ANYONE_STATUS		29 // Request only
-#define CCR_SECTOR_LOGIN		30 // Request only
-#define CCE_GMGAG				31
-#define CCE_GMUNGAG				32
+#define CCE_SPEAK_ON 0
+#define CCE_SPEAK_LOCALLY 1
+#define CCE_BROADCAST_TO 2
+#define CCE_BROADCAST_ALL 3
+#define CCE_INSERT_CHANNEL 4
+#define CCE_REMOVE_CHANNEL 5
+#define CCE_ENTER_CHANNEL 6
+#define CCE_EXIT_CHANNEL 7
+#define CCE_ADD_FRIEND 8
+#define CCE_REMOVE_FRIEND 9
+#define CCE_IGNORE 10
+#define CCE_UNIGNORE 11
+#define CCE_INVITE1 12
+#define CCE_INVITE2 13
+#define CCE_BAN 14
+#define CCE_UNBAN 15
+#define CCE_GAG 16
+#define CCE_UNGAG 17
+#define CCE_ADD_OWNER 18
+#define CCE_REMOVE_OWNER 19
+#define CCE_KICK 20
+#define CCE_SET_ACCESS 21
+#define CCE_SET_PASSWORD 22
+#define CCR_LIST_IGNORES 23      // Request only
+#define CCR_LIST_FRIENDS 24      // Request only
+#define CCR_LIST_CHANNELS 25     // Request only
+#define CCR_LIST_ALL_CHANNELS 26 // Request only
+#define CCR_UNKNOWN 27
+#define CCR_FRIEND_STATUS_ONLY 28 // Request only
+#define CCR_ANYONE_STATUS 29      // Request only
+#define CCR_SECTOR_LOGIN 30       // Request only
+#define CCE_GMGAG 31
+#define CCE_GMUNGAG 32
 
-struct ClientChatRequest
-{
-    int32_t    PlayerID;
-    int32_t    type;				// type of request
-    short   string_length1;
-	char	string1[1];			// string of length1 bytes
-	short	_string_length2;	// do not access from here on, reference only
-	char	_string2[1];		// string of length2 bytes
-	short	_string_length3;
-	char	_string3[1];		// string of length3 bytes
-	int32_t	_data_size;			// size of following block
-	char	_unknown_data[1];	// optional block of data of data_size length
+struct ClientChatRequest {
+    int32_t PlayerID;
+    int32_t type; // type of request
+    short string_length1;
+    char string1[1];       // string of length1 bytes
+    short _string_length2; // do not access from here on, reference only
+    char _string2[1];      // string of length2 bytes
+    short _string_length3;
+    char _string3[1];      // string of length3 bytes
+    int32_t _data_size;    // size of following block
+    char _unknown_data[1]; // optional block of data of data_size length
 } ATTRIB_PACKED;
 
-#define CHAT_LIST_FRIENDS			0
-#define CHAT_LIST_IGNORES			1
-#define CHAT_LIST_MEMBERS_CHANNEL	2
-#define CHAT_LIST_ACTIVE_CHANNELS	3
-#define CHAT_LIST_CURRENT_CHANNELS	4
-struct ClientChatList
-{
-	int32_t ListType;				// list id
-	char unknown_string[2];		// string, empty is 2 bytes (unicode?)
-	int32_t count1;				// size of following array
-	BSTR _players[1];			// array of players
-	int32_t _count2;				// size of following array
-	BSTR _list2[1];				// array of matching info
+#define CHAT_LIST_FRIENDS 0
+#define CHAT_LIST_IGNORES 1
+#define CHAT_LIST_MEMBERS_CHANNEL 2
+#define CHAT_LIST_ACTIVE_CHANNELS 3
+#define CHAT_LIST_CURRENT_CHANNELS 4
+struct ClientChatList {
+    int32_t ListType;       // list id
+    char unknown_string[2]; // string, empty is 2 bytes (unicode?)
+    int32_t count1;         // size of following array
+    BSTR _players[1];       // array of players
+    int32_t _count2;        // size of following array
+    BSTR _list2[1];         // array of matching info
 } ATTRIB_PACKED;
 
 //ClientChatError.reason
-#define CHAT_ERROR_OK					0	// "ok"
-#define CHAT_ERROR_UNKNOWN				1	// "unknown_error"
-#define CHAT_ERROR_INVALID_CHANNEL		2	// "invalid channel"
-#define CHAT_ERROR_INVALID_PARAM		3	// "invalid parameter"
-#define CHAT_ERROR_INVALID_PERSON		4	// "invalid person"
-#define CHAT_ERROR_DUPLICATE_NAME		5	// "duplicate name"
-#define CHAT_ERROR_NOT_A_MEMBER			6	// "not a member"
-#define CHAT_ERROR_ALREADY				7	// "already"
-#define CHAT_ERROR_IS_IGNORED			8	// "is ignored"
-#define CHAT_ERROR_IS_GAGGED			9	// "is gagged"
-#define CHAT_ERROR_IS_BANNED			10	// "is banned"
-#define CHAT_ERROR_IS_SYSTEM_CHANNEL	11	// "is system channel"
-#define CHAT_ERROR_NEED_PASSWORD		12	// "need password"
-#define CHAT_ERROR_WRONG_PASSWORD		13	// "wrong password"
-#define CHAT_ERROR_NO_PERMISSION		14	// "no permission"
-#define CHAT_ERROR_BAD_NAME				15	// "bad name"
-#define CHAT_ERROR_NO_MEMORY			16	// "no memory"
-#define CHAT_ERROR_YOURSELF				17	// "yourself"
-#define CHAT_ERROR_REACHED_LIMIT		18	// "reached max limit"
+#define CHAT_ERROR_OK 0                 // "ok"
+#define CHAT_ERROR_UNKNOWN 1            // "unknown_error"
+#define CHAT_ERROR_INVALID_CHANNEL 2    // "invalid channel"
+#define CHAT_ERROR_INVALID_PARAM 3      // "invalid parameter"
+#define CHAT_ERROR_INVALID_PERSON 4     // "invalid person"
+#define CHAT_ERROR_DUPLICATE_NAME 5     // "duplicate name"
+#define CHAT_ERROR_NOT_A_MEMBER 6       // "not a member"
+#define CHAT_ERROR_ALREADY 7            // "already"
+#define CHAT_ERROR_IS_IGNORED 8         // "is ignored"
+#define CHAT_ERROR_IS_GAGGED 9          // "is gagged"
+#define CHAT_ERROR_IS_BANNED 10         // "is banned"
+#define CHAT_ERROR_IS_SYSTEM_CHANNEL 11 // "is system channel"
+#define CHAT_ERROR_NEED_PASSWORD 12     // "need password"
+#define CHAT_ERROR_WRONG_PASSWORD 13    // "wrong password"
+#define CHAT_ERROR_NO_PERMISSION 14     // "no permission"
+#define CHAT_ERROR_BAD_NAME 15          // "bad name"
+#define CHAT_ERROR_NO_MEMORY 16         // "no memory"
+#define CHAT_ERROR_YOURSELF 17          // "yourself"
+#define CHAT_ERROR_REACHED_LIMIT 18     // "reached max limit"
 
-struct ClientChatError
-{
-	int32_t reason;
-	int32_t type;
-	short string_length1;
-	char player[1];
-	short _string_length2;
-	char _channel[1];
-	short _string_length3;
-	char _other[1];
+struct ClientChatError {
+    int32_t reason;
+    int32_t type;
+    short string_length1;
+    char player[1];
+    short _string_length2;
+    char _channel[1];
+    short _string_length3;
+    char _other[1];
 } ATTRIB_PACKED;
 
 // ClientChatEvent.type
-#define CHEV_LOGGED_IN				1
-#define CHEV_LOGGED_OUT				2
-#define CHEV_CHANNEL_MESSAGE		3
-#define CHEV_PRIVATE_MESSAGE		4
-#define CHEV_ORANGE_MESSAGE_7		5
-#define CHEV_SYSTEM_MESSAGE			6
-#define CHEV_UNKNOWN				7
-#define CHEV_UNKNOWN_GUILD			8
-#define CHEV_CHANNEL_CREATED		9
-#define CHEV_MISSING_TYPE			10
-#define CHEV_REMOVED_CHANNEL		11
-#define CHEV_INVITED				12
-#define CHEV_UNINVITED				13
-#define CHEV_GAGGED					14
-#define CHEV_UNGAGGED				15
-#define CHEV_BANNED					16
-#define CHEV_UNBANNED				17
-#define CHEV_KICKED					18
-#define CHEV_NOW_IGNORING			19	
-#define CHEV_NO_LONGER_IGNORING		20
-#define CHEV_NOW_FRIENDS			21
-#define CHEV_NO_LONGER_FRIENDS		22
-#define CHEV_ADDED_OWNER			23
-#define CHEV_REMOVED_OWNER			24
-#define CHEV_FRIEND_STATUS_ONLY		25
-#define CHEV_ALL_STATUS				26
-#define CHEV_GAGGED_BY_GM			27
-#define CHEV_UNGAGGED_BY_GM			28
+#define CHEV_LOGGED_IN 1
+#define CHEV_LOGGED_OUT 2
+#define CHEV_CHANNEL_MESSAGE 3
+#define CHEV_PRIVATE_MESSAGE 4
+#define CHEV_ORANGE_MESSAGE_7 5
+#define CHEV_SYSTEM_MESSAGE 6
+#define CHEV_UNKNOWN 7
+#define CHEV_UNKNOWN_GUILD 8
+#define CHEV_CHANNEL_CREATED 9
+#define CHEV_MISSING_TYPE 10
+#define CHEV_REMOVED_CHANNEL 11
+#define CHEV_INVITED 12
+#define CHEV_UNINVITED 13
+#define CHEV_GAGGED 14
+#define CHEV_UNGAGGED 15
+#define CHEV_BANNED 16
+#define CHEV_UNBANNED 17
+#define CHEV_KICKED 18
+#define CHEV_NOW_IGNORING 19
+#define CHEV_NO_LONGER_IGNORING 20
+#define CHEV_NOW_FRIENDS 21
+#define CHEV_NO_LONGER_FRIENDS 22
+#define CHEV_ADDED_OWNER 23
+#define CHEV_REMOVED_OWNER 24
+#define CHEV_FRIEND_STATUS_ONLY 25
+#define CHEV_ALL_STATUS 26
+#define CHEV_GAGGED_BY_GM 27
+#define CHEV_UNGAGGED_BY_GM 28
 
-struct ClientChatEvent
-{
-	int32_t type;				// type of event
-	int32_t unknown;			// dont know yet, only used for some types
-	short string_length1;
-	char firstname[1];		// rank?
-	short string_length2;
-	char lastname[1];		// player name
-	short string_length3;
-	char otherplayer[1];	// events affecting another player
-	short string_length4;
-	char channel[1];		// channel name
-	short string_length5;
-	char message[1];		// message
-	short string_length6;
-	char unknown_string[1];	// not referenced
-	int32_t customcount;		// used for private messages in some way
-	char custombytes[1];
+struct ClientChatEvent {
+    int32_t type;    // type of event
+    int32_t unknown; // dont know yet, only used for some types
+    short string_length1;
+    char firstname[1]; // rank?
+    short string_length2;
+    char lastname[1]; // player name
+    short string_length3;
+    char otherplayer[1]; // events affecting another player
+    short string_length4;
+    char channel[1]; // channel name
+    short string_length5;
+    char message[1]; // message
+    short string_length6;
+    char unknown_string[1]; // not referenced
+    int32_t customcount;    // used for private messages in some way
+    char custombytes[1];
 } ATTRIB_PACKED;
 
-struct ClientSkillsRequest
-{
-	int32_t PlayerID;
-	int32_t unknown1;
+struct ClientSkillsRequest {
+    int32_t PlayerID;
+    int32_t unknown1;
 } ATTRIB_PACKED;
 
-struct StarbaseAvatarChange
-{
-    int32_t    AvatarID;
-    int32_t    RoomType;
-    float   Orient;
-    float   Position[3];
-    int32_t    ActionFlag;
+struct StarbaseAvatarChange {
+    int32_t AvatarID;
+    int32_t RoomType;
+    float Orient;
+    float Position[3];
+    int32_t ActionFlag;
 } ATTRIB_PACKED;
 
-struct StarbaseAvatarChange_S2C
-{
-    int32_t    AvatarID;
-    float   Orient;
-    float   Position[3];
-    int32_t    ActionFlag;
-    int32_t    Room;
+struct StarbaseAvatarChange_S2C {
+    int32_t AvatarID;
+    float Orient;
+    float Position[3];
+    int32_t ActionFlag;
+    int32_t Room;
 } ATTRIB_PACKED;
 
-struct StarbaseRoomChange
-{
-    int32_t    AvatarID;
-    int32_t    NewRoom;
-    int32_t    OldRoom;
+struct StarbaseRoomChange {
+    int32_t AvatarID;
+    int32_t NewRoom;
+    int32_t OldRoom;
 } ATTRIB_PACKED;
 
-struct StarbaseRequest
-{
-    int32_t    PlayerID;
-    int32_t    StarbaseID;
-    char    Action;
+struct StarbaseRequest {
+    int32_t PlayerID;
+    int32_t StarbaseID;
+    char Action;
 } ATTRIB_PACKED;
 
-#define RELATIONSHIP_ATTACK     0
-#define RELATIONSHIP_SHUN       1
-#define RELATIONSHIP_FRIENDLY   2
-#define RELATIONSHIP_ADORATION  3
+#define RELATIONSHIP_ATTACK 0
+#define RELATIONSHIP_SHUN 1
+#define RELATIONSHIP_FRIENDLY 2
+#define RELATIONSHIP_ADORATION 3
 
-struct Relationship
-{
-    int32_t    ObjectID;
-    int32_t    Reaction;
-    char    IsAttacking;
+struct Relationship {
+    int32_t ObjectID;
+    int32_t Reaction;
+    char IsAttacking;
 } ATTRIB_PACKED;
 
-struct ObjectEffect             // opcode 0x09
+struct ObjectEffect // opcode 0x09
 {
-    char    Bitmask;            // bitfield of flags
-    int32_t    GameID;
-    short   EffectDescID;
-    int32_t    EffectID;           // bit 0
-    uint32_t TimeStamp;    // bit 1
-    short   Duration;           // bit 2
-    float   Scale;              // bit 3
-    float   HSVShift[3];        // bit 4,5,6
+    char Bitmask; // bitfield of flags
+    int32_t GameID;
+    short EffectDescID;
+    int32_t EffectID;   // bit 0
+    uint32_t TimeStamp; // bit 1
+    short Duration;     // bit 2
+    float Scale;        // bit 3
+    float HSVShift[3];  // bit 4,5,6
 } ATTRIB_PACKED;
 
-struct ObjectToObjectEffect             // opcode 0x0B
+struct ObjectToObjectEffect // opcode 0x0B
 {
-	// Field-addressed storage; the bit<->field WIRE mapping lives in the emitter,
-	// NOT in this declaration order (the struct is never memcpy'd to the wire on
-	// the 0x0B path -- the emitter AddData's each field into a separate buffer).
-	// The AUTHORITATIVE mapping in the per-field comments below is
-	// Object::SendObjectToObjectEffectRL (server/src/ObjectClass.cpp ~850-928),
-	// validated byte-exact vs the retail capture (CLI ObjectToObjectEffectRecord).
-	// The single-player twin Player::SendObjectToObjectEffect
-	// (PlayerConnection.cpp:1394) emits a DIFFERENT order above bit 0x04 and is
-	// wrong there -- but its only callers use bits 0x01/0x02/0x04, where the two
-	// agree, so the divergence is latent (see plans/26 Z-8 / plans/28 §5).
-	u16		Bitmask;
-	int32_t    GameID;
-	int32_t	TargetID;
-	u16		EffectDescID;
-	char	*Message;           // if set: length-prefixed string; else a single 0 byte
-	// the following fields are not always present; inclusion depends on Bitmask.
-	int32_t    EffectID;           // bit 0x0001
-	uint32_t TimeStamp;            // bit 0x0002
-	u16		Duration;           // bit 0x0004  (2 bytes; milliseconds)
-	float	TargetOffset[3];	// bit 0x0040  (12 bytes)  <- NOT 0x08
-	u16		OutsideTargetRadius;// bit 0x0008  (emitted as (long) -> 4 wire bytes)
-	u16		unused;				// no wire bit (0x0010 / 0x0020 emit nothing)
-	float	Scale;				// bit 0x0080  (4 bytes)  <- NOT 0x40
-	float	HSVShift[3];		// bits 0x0100 / 0x0200 / 0x0400  (one channel per bit)
-	float	Speedup;			// bit 0x0800  (4 bytes)  <- NOT 0x100
+    // Field-addressed storage; the bit<->field WIRE mapping lives in the emitter,
+    // NOT in this declaration order (the struct is never memcpy'd to the wire on
+    // the 0x0B path -- the emitter AddData's each field into a separate buffer).
+    // The AUTHORITATIVE mapping in the per-field comments below is
+    // Object::SendObjectToObjectEffectRL (server/src/ObjectClass.cpp ~850-928),
+    // validated byte-exact vs the retail capture (CLI ObjectToObjectEffectRecord).
+    // The single-player twin Player::SendObjectToObjectEffect
+    // (PlayerConnection.cpp:1394) emits a DIFFERENT order above bit 0x04 and is
+    // wrong there -- but its only callers use bits 0x01/0x02/0x04, where the two
+    // agree, so the divergence is latent (see plans/26 Z-8 / plans/28 §5).
+    u16 Bitmask;
+    int32_t GameID;
+    int32_t TargetID;
+    u16 EffectDescID;
+    char* Message; // if set: length-prefixed string; else a single 0 byte
+    // the following fields are not always present; inclusion depends on Bitmask.
+    int32_t EffectID;        // bit 0x0001
+    uint32_t TimeStamp;      // bit 0x0002
+    u16 Duration;            // bit 0x0004  (2 bytes; milliseconds)
+    float TargetOffset[3];   // bit 0x0040  (12 bytes)  <- NOT 0x08
+    u16 OutsideTargetRadius; // bit 0x0008  (emitted as (long) -> 4 wire bytes)
+    u16 unused;              // no wire bit (0x0010 / 0x0020 emit nothing)
+    float Scale;             // bit 0x0080  (4 bytes)  <- NOT 0x40
+    float HSVShift[3];       // bits 0x0100 / 0x0200 / 0x0400  (one channel per bit)
+    float Speedup;           // bit 0x0800  (4 bytes)  <- NOT 0x100
 } ATTRIB_PACKED;
 
-struct InitRenderState			// opcode 0x2f
+struct InitRenderState // opcode 0x2f
 {
-	int32_t	GameID;
-	uint32_t RenderStateID;
+    int32_t GameID;
+    uint32_t RenderStateID;
 } ATTRIB_PACKED;
 
-struct ActivateRenderState      // opcode 0x30
+struct ActivateRenderState // opcode 0x30
 {
-    int32_t    GameID;                 // this[12] 4 bytes
-    uint32_t RenderStateID;    // this[20] 4 bytes
+    int32_t GameID;         // this[12] 4 bytes
+    uint32_t RenderStateID; // this[20] 4 bytes
 } ATTRIB_PACKED;
 
-struct SimplePositionalUpdate
-{
-    int32_t    GameID;                 // this[12] 4 bytes
-    uint32_t TimeStamp;        // this[16] 4 bytes
-    float   Position[3];            // this[20] 12 bytes
-    float   Orientation[4];         // this[32] 16 bytes
-    float   Velocity[3];            // this[48] 12 bytes
+struct SimplePositionalUpdate {
+    int32_t GameID;       // this[12] 4 bytes
+    uint32_t TimeStamp;   // this[16] 4 bytes
+    float Position[3];    // this[20] 12 bytes
+    float Orientation[4]; // this[32] 16 bytes
+    float Velocity[3];    // this[48] 12 bytes
 } ATTRIB_PACKED;
 
-struct PlanetPositionalUpdate
-{
-    int32_t    GameID;                 // this[12] 4 bytes
-    uint32_t TimeStamp;        // this[16] 4 bytes
-    float   Position[3];            // this[20] 12 bytes
-    int32_t    OrbitID;                // this[32] 4 bytes
-    float   OrbitDist;              // this[36] 4 bytes
-    float   OrbitAngle;             // this[40] 4 bytes
-    float   OrbitRate;              // this[44] 4 bytes
-    float   RotateAngle;            // this[48] 4 bytes
-    float   RotateRate;             // this[52] 4 bytes
-    float   TiltAngle;              // this[56] 4 bytes
+struct PlanetPositionalUpdate {
+    int32_t GameID;     // this[12] 4 bytes
+    uint32_t TimeStamp; // this[16] 4 bytes
+    float Position[3];  // this[20] 12 bytes
+    int32_t OrbitID;    // this[32] 4 bytes
+    float OrbitDist;    // this[36] 4 bytes
+    float OrbitAngle;   // this[40] 4 bytes
+    float OrbitRate;    // this[44] 4 bytes
+    float RotateAngle;  // this[48] 4 bytes
+    float RotateRate;   // this[52] 4 bytes
+    float TiltAngle;    // this[56] 4 bytes
 } ATTRIB_PACKED;
 
-struct ComponentPositionalUpdate
-{
-    struct  SimplePositionalUpdate simple;  // this[12] 48 bytes
-    float   ImpartedDecay;                  // this[68] 4 bytes
-    float   TractorSpeed;                   // this[72] 4 bytes
-    int32_t    TractorID;                      // this[76] 4 bytes
-    int32_t    TractorEffectID;                // this[80] 4 bytes
+struct ComponentPositionalUpdate {
+    struct SimplePositionalUpdate simple; // this[12] 48 bytes
+    float ImpartedDecay;                  // this[68] 4 bytes
+    float TractorSpeed;                   // this[72] 4 bytes
+    int32_t TractorID;                    // this[76] 4 bytes
+    int32_t TractorEffectID;              // this[80] 4 bytes
 } ATTRIB_PACKED;
 
-struct AdvancedPositionalUpdate
-{
-    short   Bitmask;                // flags for condional fields
-    int32_t    GameID;                 // this[12] 4 bytes
-    uint32_t TimeStamp;        // this[16] 4 bytes
-    float   Position[3];            // this[20] 12 bytes
-    float   Orientation[4];         // this[32] 16 bytes
-    uint32_t MovementID;       // this[100] 4 bytes
+struct AdvancedPositionalUpdate {
+    short Bitmask;        // flags for condional fields
+    int32_t GameID;       // this[12] 4 bytes
+    uint32_t TimeStamp;   // this[16] 4 bytes
+    float Position[3];    // this[20] 12 bytes
+    float Orientation[4]; // this[32] 16 bytes
+    uint32_t MovementID;  // this[100] 4 bytes
     // the following fields are not always present, inclusion depends on bitmask
-    float   CurrentSpeed;           // this[48] 4 bytes     bit 0  0x0001
-    float   SetSpeed;               // this[52] 4 bytes     bit 1  0x0002
-    float   Acceleration;           // this[56] 4 bytes     bit 2  0x0004
-    float   RotY;                   // this[60] 4 bytes     bit 3  0x0008
-    float   DesiredY;               // this[64] 4 bytes     bit 4  0x0010
-    float   RotZ;                   // this[68] 4 bytes     bit 5  0x0020
-    float   DesiredZ;               // this[72] 4 bytes     bit 6  0x0040
-    float   ImpartedVelocity[3];    // this[76] 12 bytes    bit 7  0x0080
-    float   ImpartedSpin;           // this[88] 4 bytes     bit 7  0x0080
-    float   ImpartedRoll;           // this[92] 4 bytes     bit 7  0x0080
-    float   ImpartedPitch;          // this[96] 4 bytes     bit 7  0x0080
+    float CurrentSpeed;        // this[48] 4 bytes     bit 0  0x0001
+    float SetSpeed;            // this[52] 4 bytes     bit 1  0x0002
+    float Acceleration;        // this[56] 4 bytes     bit 2  0x0004
+    float RotY;                // this[60] 4 bytes     bit 3  0x0008
+    float DesiredY;            // this[64] 4 bytes     bit 4  0x0010
+    float RotZ;                // this[68] 4 bytes     bit 5  0x0020
+    float DesiredZ;            // this[72] 4 bytes     bit 6  0x0040
+    float ImpartedVelocity[3]; // this[76] 12 bytes    bit 7  0x0080
+    float ImpartedSpin;        // this[88] 4 bytes     bit 7  0x0080
+    float ImpartedRoll;        // this[92] 4 bytes     bit 7  0x0080
+    float ImpartedPitch;       // this[96] 4 bytes     bit 7  0x0080
     uint32_t UpdatePeriod;     // this[104] 4 bytes    bit 8  0x0100
 } ATTRIB_PACKED;
 
-struct EquipUse
-{
-    int32_t    GameID;      // 4 bytes
-    char	InvNum;      // 1 bytes
-	char	InvSlot;     // 1 bytes
+struct EquipUse {
+    int32_t GameID; // 4 bytes
+    char InvNum;    // 1 bytes
+    char InvSlot;   // 1 bytes
 } ATTRIB_PACKED;
 
-struct AbilityUse
-{
-    int32_t    GameID;      // 4 bytes
-    int32_t	UnKnown;     // 4 bytes
-	int32_t	Ability;     // 4 bytes
+struct AbilityUse {
+    int32_t GameID;  // 4 bytes
+    int32_t UnKnown; // 4 bytes
+    int32_t Ability; // 4 bytes
 } ATTRIB_PACKED;
 
-struct StarbaseSet
-{
-    int32_t    StarbaseID;
-    char    Action;
-    char    ExitMode;
+struct StarbaseSet {
+    int32_t StarbaseID;
+    char Action;
+    char ExitMode;
 } ATTRIB_PACKED;
 
-struct ServerHandoff
-{
-    MasterJoin  join;
-    char        variable_data[128];
+struct ServerHandoff {
+    MasterJoin join;
+    char variable_data[128];
 } ATTRIB_PACKED;
 
-struct ShipInfo
-{
-    int32_t    hull;
-    int32_t    profession;
-    int32_t    engine;
-    int32_t    wing;
-    float   Position[3];
-    float   Orientation[4];
+struct ShipInfo {
+    int32_t hull;
+    int32_t profession;
+    int32_t engine;
+    int32_t wing;
+    float Position[3];
+    float Orientation[4];
 } ATTRIB_PACKED;
 
-struct CharacterDatabase
-{
-    AvatarInfo      info;               // 133 bytes
-    AvatarData      avatar;             // 241 bytes
-    ShipData        ship_data;          // 194 bytes
-    ShipInfo        ship_info;
+struct CharacterDatabase {
+    AvatarInfo info;    // 133 bytes
+    AvatarData avatar;  // 241 bytes
+    ShipData ship_data; // 194 bytes
+    ShipInfo ship_info;
 } ATTRIB_PACKED;
 
-struct CTARequest
-{
-	int32_t SourceID;
-	int32_t TargetID;
-	int32_t Action;
+struct CTARequest {
+    int32_t SourceID;
+    int32_t TargetID;
+    int32_t Action;
 } ATTRIB_PACKED;
 
-struct MovePacket
-{
+struct MovePacket {
     int32_t GameID;
     char type;
 } ATTRIB_PACKED;
 
-struct SkillAction
-{
-	int32_t	GameID;
-	int		SkillPoints;
-	short	SkillID;
+struct SkillAction {
+    int32_t GameID;
+    int SkillPoints;
+    short SkillID;
 } ATTRIB_PACKED;
 
 struct SkillUse // Opcode 0x58
@@ -1062,120 +987,109 @@ struct SkillUse // Opcode 0x58
     int32_t AbilityIndex;
 } ATTRIB_PACKED;
 
-struct MissionDismissal
-{
-	int32_t PlayerID;
-	int32_t MissionID;					// Could be 2 or 4 bytes, the 1st 2 bytes are always 0 from my observations
+struct MissionDismissal {
+    int32_t PlayerID;
+    int32_t MissionID; // Could be 2 or 4 bytes, the 1st 2 bytes are always 0 from my observations
 } ATTRIB_PACKED;
 
-struct MVASHandoff
-{
-	int32_t	player_id;
-	int32_t	port;
+struct MVASHandoff {
+    int32_t player_id;
+    int32_t port;
 } ATTRIB_PACKED;
-
 
 // LoungeNPC Structure
 
 struct StationData {
-	int	StationType;
-	int	RoomNumber;
+    int StationType;
+    int RoomNumber;
 } ATTRIB_PACKED;
 
 struct StationRooms {
-	int RoomNumber;
-	int	RoomStyle;
-	float FogNear;
-	float FogFar;
+    int RoomNumber;
+    int RoomStyle;
+    float FogNear;
+    float FogFar;
 
-	float FogRed;
-	float FogGreen;
-	float FogBlue;
+    float FogRed;
+    float FogGreen;
+    float FogBlue;
 } ATTRIB_PACKED;
 
 // Term Number
 
 struct StationTerms {
-	int	RoomNumber;
-	int Location;
-	int TermType;
-	int Unknown;
+    int RoomNumber;
+    int Location;
+    int TermType;
+    int Unknown;
 } ATTRIB_PACKED;
 
 // NPC Number
 
 struct StationNPC {
-	int RoomNumber;
-	int	Location;
-	int NPCID;
-	int BoothType;
-	int Unknown1;
-	int Unknown2;
-	struct AvatarData Avatar;
+    int RoomNumber;
+    int Location;
+    int NPCID;
+    int BoothType;
+    int Unknown1;
+    int Unknown2;
+    struct AvatarData Avatar;
 } ATTRIB_PACKED;
 
 struct StationLounge {
-	struct StationData	Station;
-	struct StationRooms	Rooms[5];
-	int					NumTerms;
-	struct StationTerms	Terms[15];
-	int					NumNPCs;
-	StationNPC	NPC[30];
+    struct StationData Station;
+    struct StationRooms Rooms[5];
+    int NumTerms;
+    struct StationTerms Terms[15];
+    int NumNPCs;
+    StationNPC NPC[30];
 } ATTRIB_PACKED;
 
-struct ManufactureData
-{
-	int32_t GameID;
-	int32_t Data;
+struct ManufactureData {
+    int32_t GameID;
+    int32_t Data;
 } ATTRIB_PACKED;
 
-struct ManufactureTechLevelFilter
-{
+struct ManufactureTechLevelFilter {
     int32_t GameID;
     char Enable;
     int32_t BitField;
 } ATTRIB_PACKED;
 
-struct FindMember
-{
-	int32_t count;
-	struct fm_item
-	{
-		int32_t GameID;		// reverse bytes
-		int32_t Level;			// reverse bytes
-		int32_t Race;			// reverse bytes
-		int32_t Profession;	// reverse bytes
-	} list[1];			// array of count * 16 byte structures
+struct FindMember {
+    int32_t count;
+    struct fm_item {
+        int32_t GameID;     // reverse bytes
+        int32_t Level;      // reverse bytes
+        int32_t Race;       // reverse bytes
+        int32_t Profession; // reverse bytes
+    } list[1];              // array of count * 16 byte structures
 } ATTRIB_PACKED;
 
-struct RecustomizeAvatarStart
-{
-	int32_t costs[14];
-	int32_t playerid;
+struct RecustomizeAvatarStart {
+    int32_t costs[14];
+    int32_t playerid;
 } ATTRIB_PACKED;
 
-struct RecustomizeShipStart
-{
-	struct ShipData ship;
-	int32_t costs[12];
-	int32_t playerid;
-	int32_t unknown[4];
+struct RecustomizeShipStart {
+    struct ShipData ship;
+    int32_t costs[12];
+    int32_t playerid;
+    int32_t unknown[4];
 } ATTRIB_PACKED;
 
-struct RecustomizeShipDone
-{
-	struct ShipData ship;
-	int32_t playerid;
-	bool unknown;
-	char _unknown[11];
+struct RecustomizeShipDone {
+    struct ShipData ship;
+    int32_t playerid;
+    bool unknown;
+    char _unknown[11];
 } ATTRIB_PACKED;
 
-struct RecustomizeAvatarDone
-{
-	struct AvatarData avatar;
-	int32_t playerid;
-	bool unknown;
-	char _unknown[11];
+struct RecustomizeAvatarDone {
+    struct AvatarData avatar;
+    int32_t playerid;
+    bool unknown;
+    char _unknown[11];
 } ATTRIB_PACKED;
 
 // Close the push from net7/Packing.h so we don't leak pack(1) into any

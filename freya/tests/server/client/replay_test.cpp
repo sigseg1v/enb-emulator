@@ -20,11 +20,10 @@ std::filesystem::path CaptureFile(const char* name) {
     return std::filesystem::path(NET7_TEST_CAPTURES_DIR) / name;
 }
 
-}  // namespace
+} // namespace
 
 TEST(Replay, FilterByPortIsolatesSectorTraffic) {
-    auto all = enbtest::ParseCaptureFile(
-        CaptureFile("capture_1_handshake.txt").string());
+    auto all = enbtest::ParseCaptureFile(CaptureFile("capture_1_handshake.txt").string());
     // capture_1_handshake.txt is sliced to include the handshake (port 3801)
     // and the first few post-handshake sector packets (port 3387).
     auto sector = enbtest::FilterByPort(all, 3387);
@@ -32,17 +31,20 @@ TEST(Replay, FilterByPortIsolatesSectorTraffic) {
 
     EXPECT_FALSE(sector.empty());
     EXPECT_FALSE(master.empty());
-    for (const auto& p : sector) EXPECT_EQ(p.peer_port, 3387);
-    for (const auto& p : master) EXPECT_EQ(p.peer_port, 3801);
+    for (const auto& p : sector)
+        EXPECT_EQ(p.peer_port, 3387);
+    for (const auto& p : master)
+        EXPECT_EQ(p.peer_port, 3801);
 }
 
 TEST(Replay, PostHandshakeCaptureContainsMasterJoinOpcode) {
-    auto packets = enbtest::ParseCaptureFile(
-        CaptureFile("capture_1_post_handshake.txt").string());
+    auto packets = enbtest::ParseCaptureFile(CaptureFile("capture_1_post_handshake.txt").string());
     bool saw_master_join = false;
     for (const auto& p : packets) {
-        if (p.direction != enbtest::Direction::kClientToServer) continue;
-        if (p.bytes.size() < 4) continue;
+        if (p.direction != enbtest::Direction::kClientToServer)
+            continue;
+        if (p.bytes.size() < 4)
+            continue;
         // EnB TCP header: little-endian length, little-endian opcode.
         if (p.bytes[2] == 0x35 && p.bytes[3] == 0x00) {
             saw_master_join = true;
@@ -101,12 +103,10 @@ TEST(Replay, LivePostHandshakeReplay) {
     enbtest::HandshakeResult hs;
     std::string err;
     ASSERT_TRUE(enbtest::RunNet7Handshake(client, rsa,
-                                          /*rng_seed=*/0xA5A5A5A5A5A5A5A5ull,
-                                          hs, &err))
+                                          /*rng_seed=*/0xA5A5A5A5A5A5A5A5ull, hs, &err))
         << err;
 
-    auto packets = enbtest::ParseCaptureFile(
-        CaptureFile("capture_1_post_handshake.txt").string());
+    auto packets = enbtest::ParseCaptureFile(CaptureFile("capture_1_post_handshake.txt").string());
     auto master = enbtest::FilterByPort(packets, 3387);
 
     enbtest::ReplayOptions opts;
@@ -121,25 +121,21 @@ TEST(Replay, LivePostHandshakeReplay) {
     opts.verify_response_opcode = true;
     opts.response_timeout_ms = 2000;
 
-    auto stats = enbtest::RunReplay(client, master, opts, &hs.tx_cipher,
-                                    &hs.rx_cipher);
+    auto stats = enbtest::RunReplay(client, master, opts, &hs.tx_cipher, &hs.rx_cipher);
 
     // What we can deterministically prove: the handshake completed (asserted
     // above) and the encrypted post-handshake send path was accepted.
-    EXPECT_GT(stats.packets_sent, 0)
-        << "no packets sent -- handshake or send path broken";
-    EXPECT_EQ(stats.last_error, "")
-        << "replay aborted on the send path: " << stats.last_error;
+    EXPECT_GT(stats.packets_sent, 0) << "no packets sent -- handshake or send path broken";
+    EXPECT_EQ(stats.last_error, "") << "replay aborted on the send path: " << stats.last_error;
 
     // The redirect is expected to be absent (see comment block): a
     // stale-avatar replay gets no MVAS confirm, and the ~150s fallback
     // cannot land inside the timeout. Record it for visibility.
     if (stats.responses_missing > 0) {
-        GTEST_LOG_(INFO)
-            << stats.responses_missing << " captured response(s) not reproduced "
-            << "from byte-replay (expected: stale-avatar Master_Join cannot "
-            << "elicit a live ServerRedirect). The session-backed redirect "
-            << "round-trip is covered by the Phase-T xUnit suite.";
+        GTEST_LOG_(INFO) << stats.responses_missing << " captured response(s) not reproduced "
+                         << "from byte-replay (expected: stale-avatar Master_Join cannot "
+                         << "elicit a live ServerRedirect). The session-backed redirect "
+                         << "round-trip is covered by the Phase-T xUnit suite.";
     }
     // If a response DID arrive, its opcode must match -- but the replay is
     // not expected to elicit one, so this guards rather than asserts presence.

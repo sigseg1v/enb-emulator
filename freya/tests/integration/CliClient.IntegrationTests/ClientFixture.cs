@@ -52,7 +52,7 @@ public sealed class ClientFixture
             acceptUntrustedCertificates: true);
     }
 
-    public OpcodeRegistry  Registry  { get; }
+    public OpcodeRegistry Registry { get; }
     public AuthLoginClient AuthLogin { get; }
 
     /// <summary>

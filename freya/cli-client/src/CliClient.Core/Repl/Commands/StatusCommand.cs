@@ -22,9 +22,9 @@ public sealed class StatusCommand : ICommandHandler
         _ctx = ctx;
     }
 
-    public string Name    => "status";
+    public string Name => "status";
     public string Summary => "show proxy link state + DTLS encryption of the server leg";
-    public string Usage   => "status";
+    public string Usage => "status";
 
     // Needs the global channel to reach the proxy's status opcode.
     public bool Available => _ctx.Global is not null;

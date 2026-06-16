@@ -70,13 +70,13 @@ namespace LaunchFreya
                     }
                     result.Add(new ModInfo
                     {
-                        Id           = Get("id", folderName),
-                        Name         = Get("name", folderName),
-                        Author       = Get("author", "Unknown"),
-                        Description  = Get("description", ""),
-                        Entrypoint   = Get("entrypoint", "init.lua"),
+                        Id = Get("id", folderName),
+                        Name = Get("name", folderName),
+                        Author = Get("author", "Unknown"),
+                        Description = Get("description", ""),
+                        Entrypoint = Get("entrypoint", "init.lua"),
                         Dependencies = GetStrArray("dependencies"),
-                        Dir          = dir,
+                        Dir = dir,
                     });
                 }
                 catch
@@ -85,8 +85,11 @@ namespace LaunchFreya
                     // it rather than silently dropping it.
                     result.Add(new ModInfo
                     {
-                        Id = folderName, Name = folderName, Author = "Unknown",
-                        Description = "(mod.json could not be parsed)", Dir = dir,
+                        Id = folderName,
+                        Name = folderName,
+                        Author = "Unknown",
+                        Description = "(mod.json could not be parsed)",
+                        Dir = dir,
                     });
                 }
             }

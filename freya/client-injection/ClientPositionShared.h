@@ -46,7 +46,7 @@
 
 // Stamped in every datagram; the consumer drops any datagram whose magic does
 // not match, so unrelated loopback traffic can never feed garbage positions.
-#define FREYA_CLIENT_POS_MAGIC 0x4E37504Fu  // 'N7PO'
+#define FREYA_CLIENT_POS_MAGIC 0x4E37504Fu // 'N7PO'
 
 // One position sample, sent verbatim as the UDP payload. All fields are 4-byte
 // aligned and the total is a multiple of 4, so the struct is naturally packed
@@ -54,15 +54,14 @@
 // both LE) -- no #pragma pack needed. Datagrams are atomic at the socket layer,
 // so there is no torn-read concern and no seqlock: the consumer simply keeps the
 // most recent valid datagram it has drained.
-struct FreyaClientPosDatagram
-{
-    uint32_t magic;        // == FREYA_CLIENT_POS_MAGIC
-    uint32_t seq;          // producer-monotonic; consumer keeps the latest seq
-    float    position[3];  // engine ship position    x, y, z
-    float    heading[3];   // engine ship orientation x, y, z
-    uint32_t sector_id;    // current sector id (0 = unknown / not in space)
-    uint32_t valid;        // 1 = live, in-space sample (else the producer is
-                           //     loading/docked/at char-select; consumer skips)
+struct FreyaClientPosDatagram {
+    uint32_t magic;     // == FREYA_CLIENT_POS_MAGIC
+    uint32_t seq;       // producer-monotonic; consumer keeps the latest seq
+    float position[3];  // engine ship position    x, y, z
+    float heading[3];   // engine ship orientation x, y, z
+    uint32_t sector_id; // current sector id (0 = unknown / not in space)
+    uint32_t valid;     // 1 = live, in-space sample (else the producer is
+                        //     loading/docked/at char-select; consumer skips)
 };
 
 #ifdef __cplusplus

@@ -111,20 +111,20 @@ public sealed class AuxHulkIndexDecoder
         // QuadrantDamage / the three Damage decals: present-branch emits the
         // member (decals emit 0 bytes -- AuxDamage::Build*Packet are no-ops),
         // absent-branch emits a single 0x05 gated on the next flag byte's bit.
-        if      ((f0 & 0x40) != 0) QuadrantDamageExt(ref o, "QuadrantDamage");
+        if ((f0 & 0x40) != 0) QuadrantDamageExt(ref o, "QuadrantDamage");
         else if ((f1 & 0x40) != 0) Marker(ref o, "QuadrantDamage");
-        if      ((f0 & 0x80) != 0) Empty(o, "DamageSpot");
+        if ((f0 & 0x80) != 0) Empty(o, "DamageSpot");
         else if ((f1 & 0x80) != 0) Marker(ref o, "DamageSpot");
-        if      ((f1 & 0x01) != 0) Empty(o, "DamageLine");
+        if ((f1 & 0x01) != 0) Empty(o, "DamageLine");
         else if ((f2 & 0x01) != 0) Marker(ref o, "DamageLine");
-        if      ((f1 & 0x02) != 0) Empty(o, "DamageBlotch");
+        if ((f1 & 0x02) != 0) Empty(o, "DamageBlotch");
         else if ((f2 & 0x02) != 0) Marker(ref o, "DamageBlotch");
 
         // EquipInv (AuxInventory20): ExtendedFlags[6], 20 slots.
-        if      ((f1 & 0x04) != 0) InventoryExt(ref o, "EquipInv", 20, 6);
+        if ((f1 & 0x04) != 0) InventoryExt(ref o, "EquipInv", 20, 6);
         else if ((f2 & 0x04) != 0) Marker(ref o, "EquipInv");
         // CargoInv (AuxInventory40): ExtendedFlags[11], 40 slots.
-        if      ((f1 & 0x08) != 0) InventoryExt(ref o, "CargoInv", 40, 11);
+        if ((f1 & 0x08) != 0) InventoryExt(ref o, "CargoInv", 40, 11);
         else if ((f2 & 0x08) != 0) Marker(ref o, "CargoInv");
 
         return o;

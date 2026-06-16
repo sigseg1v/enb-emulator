@@ -146,14 +146,14 @@ static async Task<int> RunConnectAndLoginAsync(string[] argv)
         string? next() => i + 1 < argv.Length ? argv[++i] : null;
         switch (a)
         {
-            case "--user":        user = next(); break;
-            case "--pass":        pass = next(); break;
-            case "--login-host":  loginHost = next() ?? loginHost; break;
-            case "--login-port":  loginPort = int.Parse(next() ?? "443"); break;
+            case "--user": user = next(); break;
+            case "--pass": pass = next(); break;
+            case "--login-host": loginHost = next() ?? loginHost; break;
+            case "--login-port": loginPort = int.Parse(next() ?? "443"); break;
             case "--global-host": globalHost = next() ?? globalHost; break;
             case "--global-port": globalPort = int.Parse(next() ?? "3500"); break;
-            case "--idle":        idleSeconds = int.Parse(next() ?? "5"); break;
-            case "--strict-tls":  strictTls = true; break;
+            case "--idle": idleSeconds = int.Parse(next() ?? "5"); break;
+            case "--strict-tls": strictTls = true; break;
             default:
                 Console.Error.WriteLine($"unknown option: {a}");
                 return 2;
@@ -215,16 +215,16 @@ static async Task<int> RunSendChatAsync(string[] argv)
         string? next() => i + 1 < argv.Length ? argv[++i] : null;
         switch (a)
         {
-            case "--user":        user = next(); break;
-            case "--pass":        pass = next(); break;
-            case "--login-host":  loginHost = next() ?? loginHost; break;
-            case "--login-port":  loginPort = int.Parse(next() ?? "443"); break;
+            case "--user": user = next(); break;
+            case "--pass": pass = next(); break;
+            case "--login-host": loginHost = next() ?? loginHost; break;
+            case "--login-port": loginPort = int.Parse(next() ?? "443"); break;
             case "--global-host": globalHost = next() ?? globalHost; break;
             case "--global-port": globalPort = int.Parse(next() ?? "3500"); break;
-            case "--game-id":     gameId = int.Parse(next() ?? "0"); break;
-            case "--channel":     channel = ParseChannel(next()); break;
-            case "--message":     message = next(); break;
-            case "--strict-tls":  strictTls = true; break;
+            case "--game-id": gameId = int.Parse(next() ?? "0"); break;
+            case "--channel": channel = ParseChannel(next()); break;
+            case "--message": message = next(); break;
+            case "--strict-tls": strictTls = true; break;
             default:
                 Console.Error.WriteLine($"unknown option: {a}");
                 return 2;
@@ -299,10 +299,10 @@ static async Task<int> RunSendChatAsync(string[] argv)
 static ChatChannel ParseChannel(string? s) =>
     (s ?? "broadcast").ToLowerInvariant() switch
     {
-        "target"    => ChatChannel.Target,
-        "group"     => ChatChannel.Group,
-        "guild"     => ChatChannel.Guild,
-        "local"     => ChatChannel.Local,
+        "target" => ChatChannel.Target,
+        "group" => ChatChannel.Group,
+        "guild" => ChatChannel.Guild,
+        "local" => ChatChannel.Local,
         "broadcast" => ChatChannel.Broadcast,
         _ => throw new ArgumentException(
             $"unknown chat channel '{s}' (use: target|group|guild|local|broadcast)"),

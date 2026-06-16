@@ -937,16 +937,16 @@ public sealed class RetailRecordDecodeTests
         // these decodes flips to a garbage sector and this test breaks -- which is
         // precisely the failure that crashed the client.
         var redirect = Frames["serverredirect_to_glenn"].Payload;
-        var handoff  = Frames["serverhandoff_friendship7_to_glenn"].Payload;
+        var handoff = Frames["serverhandoff_friendship7_to_glenn"].Payload;
         int redirectSector = redirect[0] | redirect[1] << 8 | redirect[2] << 16 | redirect[3] << 24; // LE
-        int handoffSector  = handoff[23] | handoff[22] << 8 | handoff[21] << 16 | handoff[20] << 24;  // BE
+        int handoffSector = handoff[23] | handoff[22] << 8 | handoff[21] << 16 | handoff[20] << 24;  // BE
         Assert.Equal(4515, redirectSector);
         Assert.Equal(4515, handoffSector);
         Assert.Equal(handoffSector, redirectSector);
 
         // And the same pairing for the second transition (sector 1077).
         var redirect2 = Frames["serverredirect_to_asteroidbelt"].Payload;
-        var handoff2  = Frames["serverhandoff_glenn_to_asteroidbelt"].Payload;
+        var handoff2 = Frames["serverhandoff_glenn_to_asteroidbelt"].Payload;
         int r2 = redirect2[0] | redirect2[1] << 8 | redirect2[2] << 16 | redirect2[3] << 24;
         int h2 = handoff2[23] | handoff2[22] << 8 | handoff2[21] << 16 | handoff2[20] << 24;
         Assert.Equal(1077, r2);
@@ -1683,7 +1683,7 @@ public sealed class RetailRecordDecodeTests
     public void ClientAvatar_And_ClientShip_AgreeOnYourShipId()
     {
         var avatar = Dump("clientavatar_your_ship_06ee13de");
-        var ship   = Dump("clientship_your_ship_06ee13de");
+        var ship = Dump("clientship_your_ship_06ee13de");
         Assert.Contains("GameID            = 0x06EE13DE", avatar);
         Assert.Contains("GameID            = 0x06EE13DE", ship);
         Assert.DoesNotContain("(NB)", avatar);
@@ -2106,12 +2106,12 @@ public sealed class RetailRecordDecodeTests
         // 0x17 RequestTarget (ids LE) then a 0x5A VerbRequest (ids BE) against the
         // same object. Read each with its own convention -> identical ids.
         var verb = Frames["verbrequest_subject_object_action1"].Payload;
-        var req  = Frames["requesttarget_player_targets_2617"].Payload;
+        var req = Frames["requesttarget_player_targets_2617"].Payload;
 
         int verbSubjectBE = verb[0] << 24 | verb[1] << 16 | verb[2] << 8 | verb[3];      // BE
-        int verbObjectBE  = verb[4] << 24 | verb[5] << 16 | verb[6] << 8 | verb[7];      // BE
-        int reqGameLE     = req[0] | req[1] << 8 | req[2] << 16 | req[3] << 24;          // LE
-        int reqTargetLE   = req[4] | req[5] << 8 | req[6] << 16 | req[7] << 24;          // LE
+        int verbObjectBE = verb[4] << 24 | verb[5] << 16 | verb[6] << 8 | verb[7];      // BE
+        int reqGameLE = req[0] | req[1] << 8 | req[2] << 16 | req[3] << 24;          // LE
+        int reqTargetLE = req[4] | req[5] << 8 | req[6] << 16 | req[7] << 24;          // LE
 
         Assert.Equal(8708585, reqGameLE);
         Assert.Equal(2617, reqTargetLE);
@@ -2323,7 +2323,7 @@ public sealed class RetailRecordDecodeTests
     {
         // 0x21 and 0x22 share one record class; only the opcode the registry passes
         // distinguishes them. Pin both directions so a copy-paste swap is caught.
-        var push  = Frames["pushmessage_level_up_quickline"];
+        var push = Frames["pushmessage_level_up_quickline"];
         var queue = Frames["queuemessage_group_bonus"];
         Assert.Equal((ushort)0x22, PacketRecord.Resolve((ushort)push.Opcode, push.Payload).Opcode);
         Assert.Equal((ushort)0x21, PacketRecord.Resolve((ushort)queue.Opcode, queue.Payload).Opcode);
@@ -2531,7 +2531,7 @@ public sealed class RetailRecordDecodeTests
         var room = Frames["starbaseroomchange_player_06ed2ad7"].Payload;
         var sort = Frames["inventorysort_cargo_by_name"].Payload;
         int roomAvatarLE = room[0] | room[1] << 8 | room[2] << 16 | room[3] << 24;
-        int sortIdBE     = sort[0] << 24 | sort[1] << 16 | sort[2] << 8 | sort[3];
+        int sortIdBE = sort[0] << 24 | sort[1] << 16 | sort[2] << 8 | sort[3];
         Assert.Equal(0x06ED2AD7, roomAvatarLE);
         Assert.Equal(roomAvatarLE, sortIdBE);
     }
@@ -2697,7 +2697,7 @@ public sealed class RetailRecordDecodeTests
         // both little-endian -- the cross-packet byte-order lock the note relies on.
         var dbg = Frames["debug_gameid_00aaccee"];
         var room = Frames["starbaseroomchange_move_0_to_1"];
-        int dbgId  = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(dbg.Payload.AsSpan(0, 4));
+        int dbgId = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(dbg.Payload.AsSpan(0, 4));
         int roomId = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(room.Payload.AsSpan(0, 4));
         Assert.Equal(0x00AACCEE, dbgId);
         Assert.Equal(dbgId, roomId);
@@ -2727,9 +2727,9 @@ public sealed class RetailRecordDecodeTests
         // The 0x06 START_ACK StartID is byte-identical to the 0x05 START StartID
         // the server sent in the same session -- the round-trip that proves the
         // field (HandleStartAck itself discards the payload).
-        var ack   = Frames["startack_avatar_5150"];
+        var ack = Frames["startack_avatar_5150"];
         var start = Frames["start_avatar_5150_s2c"];
-        int ackId   = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(ack.Payload.AsSpan(0, 4));
+        int ackId = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(ack.Payload.AsSpan(0, 4));
         int startId = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(start.Payload.AsSpan(0, 4));
         Assert.Equal(5150, ackId);
         Assert.Equal(startId, ackId);
@@ -2899,7 +2899,7 @@ public sealed class RetailRecordDecodeTests
         var sb = Frames["starbaserequest_talk_npc"];
         var start = Frames["start_avatar_5150_s2c"];
         int sbPlayer = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(sb.Payload.AsSpan(0, 4));
-        int startId  = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(start.Payload.AsSpan(0, 4));
+        int startId = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(start.Payload.AsSpan(0, 4));
         Assert.Equal(5150, sbPlayer);
         Assert.Equal(startId, sbPlayer);
         // Both 0x4E frames are the same player.

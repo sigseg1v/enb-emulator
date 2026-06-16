@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -35,21 +35,23 @@ namespace WestWood3D.Chunks
             texture_tile_factor = br.ReadSingle();
             u_per_sec = br.ReadSingle();
             v_per_sec = br.ReadSingle();
-        	
-    	    int[] reserved = new int[9];
-		    for (int i = 0; i < 9; i++) {
-			    reserved[i] = br.ReadInt32();
-		    }    	
-    		
-		    if(dbg){
-			    Console.Out.WriteLine("\t  Flags: "+flags);
-			    Console.Out.WriteLine("\t  Sub Division Level: "+sub_division_level);
-			    Console.Out.WriteLine("\t  Noise Amplitude: "+noise_amplitude);
-			    Console.Out.WriteLine("\t  Merge Abort Factor: "+merge_abort_factor);
-			    Console.Out.WriteLine("\t  Texture Tile Factor: "+texture_tile_factor);
-			    Console.Out.WriteLine("\t  U Per Second: "+u_per_sec);
-			    Console.Out.WriteLine("\t  V Per Second: "+v_per_sec);
-		    }
+
+            int[] reserved = new int[9];
+            for (int i = 0; i < 9; i++)
+            {
+                reserved[i] = br.ReadInt32();
+            }
+
+            if (dbg)
+            {
+                Console.Out.WriteLine("\t  Flags: " + flags);
+                Console.Out.WriteLine("\t  Sub Division Level: " + sub_division_level);
+                Console.Out.WriteLine("\t  Noise Amplitude: " + noise_amplitude);
+                Console.Out.WriteLine("\t  Merge Abort Factor: " + merge_abort_factor);
+                Console.Out.WriteLine("\t  Texture Tile Factor: " + texture_tile_factor);
+                Console.Out.WriteLine("\t  U Per Second: " + u_per_sec);
+                Console.Out.WriteLine("\t  V Per Second: " + v_per_sec);
+            }
         }
 
         [CategoryAttribute("Chunk Values"), ReadOnlyAttribute(true), DescriptionAttribute("Any attributes this chunk may have.")]

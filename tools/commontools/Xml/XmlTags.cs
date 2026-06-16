@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text;
 
@@ -7,55 +7,55 @@ namespace CommonTools
     public class XmlTag
     {
         // Sector Content tags
-        public const String SECTOR_CONTENT              = "SectorContent";
-        public const String GALAXY                      = "Galaxy";
-        public const String UNIVERSE                    = "Universe";
-        public const String SYSTEM                      = "System";
-        public const String SECTOR                      = "Sector";
-        public const String SERVER_PARAMETERS           = "ServerParameters";
-        public const String GAME_OBJECT                 = "GameObject";
-        public const String ACTIVATE_RENDER_STATE       = "ActivateRenderState";
-        public const String OBJECT_EFFECT               = "ObjectEffect";
-        public const String RELATIONSHIP                = "Relationship";
-        public const String SIMPLE_POSITIONAL_UPDATE    = "SimplePositionalUpdate";
-        public const String ADVANCED_POSITIONAL_UPDATE  = "AdvancedPositionalUpdate";
-        public const String PLANET_POSITIONAL_UPDATE    = "PlanetPositionalUpdate";
-        public const String CONSTANT_POSITIONAL_UPDATE  = "ConstantPositionalUpdate";
+        public const String SECTOR_CONTENT = "SectorContent";
+        public const String GALAXY = "Galaxy";
+        public const String UNIVERSE = "Universe";
+        public const String SYSTEM = "System";
+        public const String SECTOR = "Sector";
+        public const String SERVER_PARAMETERS = "ServerParameters";
+        public const String GAME_OBJECT = "GameObject";
+        public const String ACTIVATE_RENDER_STATE = "ActivateRenderState";
+        public const String OBJECT_EFFECT = "ObjectEffect";
+        public const String RELATIONSHIP = "Relationship";
+        public const String SIMPLE_POSITIONAL_UPDATE = "SimplePositionalUpdate";
+        public const String ADVANCED_POSITIONAL_UPDATE = "AdvancedPositionalUpdate";
+        public const String PLANET_POSITIONAL_UPDATE = "PlanetPositionalUpdate";
+        public const String CONSTANT_POSITIONAL_UPDATE = "ConstantPositionalUpdate";
         public const String COMPONENT_POSITIONAL_UPDATE = "ComponentPositionalUpdate";
-        public const String NAVIGATION                  = "Navigation";
-        public const String DESTINATION                 = "Destination";
-        public const String GREETINGS                   = "Greetings";
-        public const String MOB_ID                      = "MOBID";
-        public const String RESOURCE_ID                 = "Resource";
-        public const String SPAWN_DATA                  = "SpawnData";
-        public const String FIELD_POINT                 = "FieldPoint";
-        public const String SPAWN_POINT                 = "SpawnPoint";
+        public const String NAVIGATION = "Navigation";
+        public const String DESTINATION = "Destination";
+        public const String GREETINGS = "Greetings";
+        public const String MOB_ID = "MOBID";
+        public const String RESOURCE_ID = "Resource";
+        public const String SPAWN_DATA = "SpawnData";
+        public const String FIELD_POINT = "FieldPoint";
+        public const String SPAWN_POINT = "SpawnPoint";
 
         // TODO: These are not implemented yet
-        public const String DOCKING_MSG                 = "DockingMsg";
-        public const String LAUNCH_MSG                  = "LaunchMsg";
-        public const String REPAIR_MSG                  = "RepairMsg";
-        public const String REGISTER_MSG                = "RegisterMsg";
+        public const String DOCKING_MSG = "DockingMsg";
+        public const String LAUNCH_MSG = "LaunchMsg";
+        public const String REPAIR_MSG = "RepairMsg";
+        public const String REGISTER_MSG = "RegisterMsg";
 
         // Item Base tags
-        public const String ITEM_TEMPLATES              = "ItemTemplates";
-        public const String ITEM_BASE                   = "ItemBase";
-        public const String MANUFACTURER                = "Manufacturer";
-        public const String ITEM_FIELDS                 = "ItemFields";
-        public const String ITEM                        = "Item";
-        public const String ACTIVATABLE_EFFECTS         = "ActivatableEffects";
-        public const String EQUIPABLE_EFFECTS           = "EquipableEffects";
-        public const String EFFECT                      = "Effect";
-        public const String COMPONENTS					= "Components";
-        public const String ITEMEFFECTS                 = "ItemEffects";
+        public const String ITEM_TEMPLATES = "ItemTemplates";
+        public const String ITEM_BASE = "ItemBase";
+        public const String MANUFACTURER = "Manufacturer";
+        public const String ITEM_FIELDS = "ItemFields";
+        public const String ITEM = "Item";
+        public const String ACTIVATABLE_EFFECTS = "ActivatableEffects";
+        public const String EQUIPABLE_EFFECTS = "EquipableEffects";
+        public const String EFFECT = "Effect";
+        public const String COMPONENTS = "Components";
+        public const String ITEMEFFECTS = "ItemEffects";
 
         // Multi-purpose tags
-        public const String NAME                        = "Name";
-        public const String DESCRIPTION                 = "Description";
-        public const String TOOLTIP                     = "Tooltip";
-        public const String DESCRIPTION_VARS            = "DescriptionVars";
-        public const String FLOAT                       = "Float";
-        public const String NOTES                       = "Notes";
+        public const String NAME = "Name";
+        public const String DESCRIPTION = "Description";
+        public const String TOOLTIP = "Tooltip";
+        public const String DESCRIPTION_VARS = "DescriptionVars";
+        public const String FLOAT = "Float";
+        public const String NOTES = "Notes";
 
         // Station Tags
         public const String STATION = "station";

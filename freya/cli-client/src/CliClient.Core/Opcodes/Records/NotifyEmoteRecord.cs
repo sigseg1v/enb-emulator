@@ -18,6 +18,6 @@ public sealed class NotifyEmoteRecord : PacketRecord
     {
         if (Payload.Length < 8) { Flag(sb, $"NOTIFY_EMOTE truncated -- {Payload.Length} bytes, expected 8"); return; }
         FHex(sb, 0, "GameID", ReadI32LE(Payload, 0));
-        FDec(sb, 4, "Emote",  ReadI32LE(Payload, 4));
+        FDec(sb, 4, "Emote", ReadI32LE(Payload, 4));
     }
 }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -45,10 +45,10 @@ namespace WestWood3D.Chunks
                     Console.Out.WriteLine("\t Pivot #" + i);
 
                     for (int i3 = 0; i3 < 4; i3++)
-			        {
-                        object[] vOutput =  (object[]) maxMatrix[i3];
-                        Console.Out.WriteLine("\t\t " + vOutput[0] + ", " + vOutput[1] + ", " + vOutput[2]); 
-			        }
+                    {
+                        object[] vOutput = (object[])maxMatrix[i3];
+                        Console.Out.WriteLine("\t\t " + vOutput[0] + ", " + vOutput[1] + ", " + vOutput[2]);
+                    }
                 }
 
                 pivot_max_matrix[i] = maxMatrix;

@@ -31,9 +31,9 @@ public sealed class WarpCommand : ICommandHandler
     private readonly SessionContext _ctx;
     public WarpCommand(SessionContext ctx) { ArgumentNullException.ThrowIfNull(ctx); _ctx = ctx; }
 
-    public string Name    => "warp";
+    public string Name => "warp";
     public string Summary => "warp to a nav/gate/station name or gid (direct; no client-side cancel exists)";
-    public string Usage   =>
+    public string Usage =>
         "warp <name-or-gid>\n" +
         "  Target = a tracked nav, gate, or station name (with spaces, e.g.\n" +
         "  `warp Mars Gate`) or any object's gid (0x.. / decimal). Tab-completes\n" +

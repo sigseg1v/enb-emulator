@@ -32,7 +32,7 @@ public sealed class ClientSoundRecord : PacketRecord
 
         int off = 4 + len;
         if (off + 5 > Payload.Length) { Flag(sb, $"CLIENT_SOUND missing trailing Channel/Queue -- {Payload.Length - off} bytes left"); return; }
-        FDec(sb, off,     "Channel", ReadI32LE(Payload, off));
-        FDec(sb, off + 4, "Queue",   Payload[off + 4]);
+        FDec(sb, off, "Channel", ReadI32LE(Payload, off));
+        FDec(sb, off + 4, "Queue", Payload[off + 4]);
     }
 }

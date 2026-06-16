@@ -26,18 +26,17 @@ uint16_t ReadBE16(const unsigned char* in) {
 }
 
 uint32_t ReadBE32(const unsigned char* in) {
-    return (static_cast<uint32_t>(in[0]) << 24) |
-           (static_cast<uint32_t>(in[1]) << 16) |
+    return (static_cast<uint32_t>(in[0]) << 24) | (static_cast<uint32_t>(in[1]) << 16) |
            (static_cast<uint32_t>(in[2]) << 8) | static_cast<uint32_t>(in[3]);
 }
 
-}  // namespace
+} // namespace
 
-bool RunClientHandshake(TcpClient& client, const westwood::Rsa& rsa,
-                        uint16_t session_id, uint64_t rng_seed,
-                        HandshakeResult& out, std::string* err) {
+bool RunClientHandshake(TcpClient& client, const westwood::Rsa& rsa, uint16_t session_id,
+                        uint64_t rng_seed, HandshakeResult& out, std::string* err) {
     auto set_err = [&](const std::string& msg) {
-        if (err) *err = msg;
+        if (err)
+            *err = msg;
     };
 
     // --- 1. SYN1 -----------------------------------------------------------
@@ -88,11 +87,10 @@ bool RunClientHandshake(TcpClient& client, const westwood::Rsa& rsa,
 
     // --- 3. SYN2 -----------------------------------------------------------
     // Choose a deterministic 8-byte RC4 session key.
-    std::mt19937_64 rng(rng_seed == 0
-                            ? static_cast<uint64_t>(std::chrono::steady_clock::now()
-                                                        .time_since_epoch()
-                                                        .count())
-                            : rng_seed);
+    std::mt19937_64 rng(
+        rng_seed == 0
+            ? static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count())
+            : rng_seed);
     std::array<unsigned char, 8> rc4_key{};
     for (auto& b : rc4_key) {
         b = static_cast<unsigned char>(rng() & 0xff);
@@ -157,11 +155,11 @@ bool RunClientHandshake(TcpClient& client, const westwood::Rsa& rsa,
     return true;
 }
 
-bool RunNet7Handshake(TcpClient& client, const westwood::Rsa& rsa,
-                      uint64_t rng_seed, HandshakeResult& out,
-                      std::string* err) {
+bool RunNet7Handshake(TcpClient& client, const westwood::Rsa& rsa, uint64_t rng_seed,
+                      HandshakeResult& out, std::string* err) {
     auto set_err = [&](const std::string& msg) {
-        if (err) *err = msg;
+        if (err)
+            *err = msg;
     };
 
     // --- 1. Server sends 74-byte pubkey packet immediately on connect. -----
@@ -186,18 +184,16 @@ bool RunNet7Handshake(TcpClient& client, const westwood::Rsa& rsa,
         set_err("net7 pubkey: modulus mismatch");
         return false;
     }
-    if (ReadBE32(pubkey + 69) != 0x01 ||
-        pubkey[73] != rsa.GetPublicExponentByte()) {
+    if (ReadBE32(pubkey + 69) != 0x01 || pubkey[73] != rsa.GetPublicExponentByte()) {
         set_err("net7 pubkey: bad exponent block");
         return false;
     }
 
     // --- 2. Choose RC4 key, build reversed-key plaintext, encrypt, send. ---
-    std::mt19937_64 rng(rng_seed == 0
-                            ? static_cast<uint64_t>(std::chrono::steady_clock::now()
-                                                        .time_since_epoch()
-                                                        .count())
-                            : rng_seed);
+    std::mt19937_64 rng(
+        rng_seed == 0
+            ? static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count())
+            : rng_seed);
     std::array<unsigned char, 8> rc4_key{};
     for (auto& b : rc4_key) {
         b = static_cast<unsigned char>(rng() & 0xff);
@@ -235,4 +231,4 @@ bool RunNet7Handshake(TcpClient& client, const westwood::Rsa& rsa,
     return true;
 }
 
-}  // namespace enbtest
+} // namespace enbtest

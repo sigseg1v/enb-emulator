@@ -1,6 +1,7 @@
 #pragma once
 struct lua_State;
-namespace enb { namespace lua {
+namespace enb {
+namespace lua {
 // Register the global `enb` table + all bindings into L.
 void open(lua_State* L);
 // Drop all registered callbacks (on_tick/on_skill/on_chat). Call before re-running init.lua on a
@@ -10,5 +11,6 @@ void reset_callbacks(lua_State* L);
 void tick(lua_State* L);
 // Dispatch event-hook callbacks (called from the game-function hooks, marshalled onto the tick).
 void on_skill(unsigned thisptr, unsigned arg);
-void on_chat (unsigned thisptr, unsigned arg);
-}}
+void on_chat(unsigned thisptr, unsigned arg);
+} // namespace lua
+} // namespace enb

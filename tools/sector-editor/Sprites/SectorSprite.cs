@@ -1,44 +1,39 @@
+// SPDX-License-Identifier: CC-BY-NC-SA-3.0
+// Part of the Earth & Beyond emulator preservation project.
+// Ported from N7.Sprites.SectorSprite under Net-7 Entertainment's
+// CC BY-NC-SA 3.0; preservation modifications inherit under ShareAlike.
+
 using System;
-using System.Collections.Generic;
-using System.Text;
-using System.Drawing;
-using System.IO;
-using System.Drawing.Drawing2D;
-using System.Windows.Forms;
 using System.Data;
-
-using UMD.HCIL.Piccolo;
-using UMD.HCIL.Piccolo.Event;
-using UMD.HCIL.Piccolo.Nodes;
-using UMD.HCIL.Piccolo.Util;
-
+using System.Drawing;
 using N7.Props;
+using SectorEditor.PiccoloShim;
+using SectorEditor.Utilities;
 
-namespace N7.Sprites
+namespace SectorEditor.Sprites
 {
-    class SectorSprite
+    // Renders one sector's name+bounds circle in the galaxy-scale
+    // SystemWindow. Click → push SectorProps into the property host.
+    public class SectorSprite
     {
-        private PropertyGrid _pg;
+        private readonly IPropertyHost _pg;
         private SectorProps sp;
         private PText pname;
         private DataRow dr;
 
-        public SectorSprite(PLayer layer, PropertyGrid pg, DataRow r, String name, float galaxy_x, float galaxy_y, float xmin, float xmax, float ymin, float ymax)
+        public SectorSprite(PLayer layer, IPropertyHost pg, DataRow r,
+                            string name, float galaxy_x, float galaxy_y,
+                            float xmin, float xmax, float ymin, float ymax)
         {
             _pg = pg;
             dr = r;
-
             setupData(r);
 
             float width = (xmax - xmin) / 1000;
-            float height = (ymax - ymin) / 1000;
+            // height unused in original beyond the (square) circle diameter
 
-            Color penColor = Color.Honeydew;
-
-            Pen sigPen = new Pen(penColor, 2.0F);
-            sigPen.DashStyle = DashStyle.Dash;
-
-            PPath sigCircle = PPath.CreateEllipse(galaxy_x, galaxy_y, width, width);
+            var sigPen = new Pen(Color.Honeydew, 2.0F) { DashStyle = DashStyle.Dash };
+            var sigCircle = PPath.CreateEllipse(galaxy_x, galaxy_y, width, width);
             sigCircle.Pen = sigPen;
             sigCircle.Brush = Brushes.Transparent;
 
@@ -49,21 +44,15 @@ namespace N7.Sprites
             pname.Y = sigCircle.Y + (sigCircle.Height / 2);
 
             sigCircle.Tag = this;
-
-            //Display Object by adding them to its layer
             sigCircle.AddChild(pname);
             layer.AddChild(sigCircle);
-
             sigCircle.ChildrenPickable = false;
-
-            // Attach event delegates directly to the node.
-            sigCircle.MouseDown += new PInputEventHandler(Image_MouseDown);
+            sigCircle.MouseDown += Image_MouseDown;
         }
 
         private void setupData(DataRow r)
         {
-            //Retrieve Properties from sql row.
-            String sectorName = r["name"].ToString();
+            string sectorName = r["name"].ToString();
             float xmin = float.Parse(r["x_min"].ToString());
             float xmax = float.Parse(r["x_max"].ToString());
             float ymin = float.Parse(r["y_min"].ToString());
@@ -76,19 +65,19 @@ namespace N7.Sprites
             float fognear = float.Parse(r["fog_near"].ToString());
             float fogfar = float.Parse(r["fog_far"].ToString());
             int debrismode = int.Parse(r["debris_mode"].ToString());
-            bool lightbackdrop = (Boolean) r["light_backdrop"];
-            bool fogbackdrop = (Boolean) r["fog_backdrop"];
-            bool swapbackdrop = (Boolean) r["swap_backdrop"];
+            bool lightbackdrop = (bool)r["light_backdrop"];
+            bool fogbackdrop = (bool)r["fog_backdrop"];
+            bool swapbackdrop = (bool)r["swap_backdrop"];
             float backdropfognear = float.Parse(r["backdrop_fog_near"].ToString());
             float backdropfogfar = float.Parse(r["backdrop_fog_far"].ToString());
             float maxtilt = float.Parse(r["max_tilt"].ToString());
-            bool autolevel = (Boolean)r["auto_level"];
+            bool autolevel = (bool)r["auto_level"];
             float impulserate = float.Parse(r["impulse_rate"].ToString());
             float decayvelocity = float.Parse(r["decay_velocity"].ToString());
             float decayspin = float.Parse(r["decay_spin"].ToString());
             int backdropasset = int.Parse(r["backdrop_asset"].ToString());
-            String greetings = r["greetings"].ToString();
-            String notes = r["notes"].ToString();
+            string greetings = r["greetings"].ToString();
+            string notes = r["notes"].ToString();
             int systemid = int.Parse(r["system_id"].ToString());
             float galaxyx = float.Parse(r["galaxy_x"].ToString());
             float galaxyy = float.Parse(r["galaxy_y"].ToString());
@@ -99,7 +88,6 @@ namespace N7.Sprites
             float height = ymax - ymin;
             float depth = zmax - zmin;
 
-            //Populate Properties
             sp = new SectorProps();
             sp.Name = sectorName;
             sp.Width = width;
@@ -129,185 +117,71 @@ namespace N7.Sprites
             sp.GalaxyY = galaxyy;
             sp.GalaxyZ = galaxyz;
 
-            String oSector = "";
-            switch (sector_type)
+            sp.SectorType = sector_type switch
             {
-                case 0:
-                    oSector = "Space Sector";
-                    break;
-                case 1:
-                    oSector = "Rocky Planet Surface";
-                    break;
-                case 2:
-                    oSector = "Gas Giant Surface";
-                    break;;
-            }
-
-            sp.SectorType = oSector;
+                0 => "Space Sector",
+                1 => "Rocky Planet Surface",
+                2 => "Gas Giant Surface",
+                _ => "",
+            };
         }
 
-        protected void Image_MouseDown(object sender, PInputEventArgs e)
+        private void Image_MouseDown(object sender, PInputEventArgs e)
         {
             _pg.SelectedObject = sp;
         }
 
-        public PText getText()
+        public PText getText() => pname;
+
+        public void updateChangedInfo(string propertyName, string _changedValue)
         {
-            return pname;
-        }
-
-        public void updateChangedInfo(String propertyName, String _changedValue)
-        {
-            String changedValue = _changedValue.Replace("'", "''");
-            if (propertyName == "Name")
+            string changedValue = _changedValue.Replace("'", "''");
+            switch (propertyName)
             {
-                dr["name"] = changedValue;
-            }
-            else if (propertyName == "Width" || propertyName == "Height" || propertyName == "Depth")
-            {
-                float xmin = 0;
-                float xmax = 0;
-                float ymin = 0;
-                float ymax = 0;
-                float zmin = 0;
-                float zmax = 0;
-
-                if (sp.Width != 0)
-                {
-                    xmin = -(sp.Width / 2);
-                    xmax = sp.Width / 2;
-                }
-                if (sp.Height != 0)
-                {
-                    ymin = -(sp.Height / 2);
-                    ymax = sp.Height / 2;
-                }
-                if (sp.Depth != 0)
-                {
-                    zmin = -(sp.Depth / 2);
-                    zmax = sp.Depth / 2;
-                }
-
-                dr["x_min"] = xmin;
-                dr["x_max"] = xmax;
-                dr["y_min"] = ymin;
-                dr["y_max"] = ymax;
-                dr["z_min"] = zmin;
-                dr["z_max"] = zmax;
-            }
-            else if (propertyName == "GridX")
-            {
-                dr["grix_x"] = int.Parse(changedValue);
-            }
-            else if (propertyName == "GridY")
-            {
-                dr["grix_y"] = int.Parse(changedValue);
-            }
-            else if (propertyName == "GridZ")
-            {
-                dr["grix_z"] = int.Parse(changedValue);
-            }
-            else if (propertyName == "FogNear")
-            {
-                dr["fog_near"] = float.Parse(changedValue);
-            }
-            else if (propertyName == "FogFar")
-            {
-                dr["fog_far"] = float.Parse(changedValue);
-            }
-            else if (propertyName == "DebrisMode")
-            {
-                dr["debris_mode"] = int.Parse(changedValue);
-            }
-            else if (propertyName == "LightBackdrop")
-            {
-                dr["light_backdrop"] = bool.Parse(changedValue);
-            }
-            else if (propertyName == "FogBackdrop")
-            {
-                dr["fog_backdrop"] = bool.Parse(changedValue);
-            }
-            else if (propertyName == "SwapBackdrop")
-            {
-                dr["swap_backdrop"] = bool.Parse(changedValue); ;
-            }
-            else if (propertyName == "BackdropFogNear")
-            {
-                dr["backdrop_fog_near"] = float.Parse(changedValue);
-            }
-            else if (propertyName == "BackdropFogFar")
-            {
-                dr["backdrop_fog_far"] = float.Parse(changedValue);
-            }
-            else if (propertyName == "MaxTilt")
-            {
-                dr["mex_tilt"] = float.Parse(changedValue);
-            }
-            else if (propertyName == "AutoLevel")
-            {
-                dr["auto_level"] = bool.Parse(changedValue);
-            }
-            else if (propertyName == "ImpulseRate")
-            {
-                dr["impulse_rate"] = float.Parse(changedValue);
-            }
-            else if (propertyName == "DecayVelocity")
-            {
-                dr["decay_velocity"] = float.Parse(changedValue);
-            }
-            else if (propertyName == "DecaySpin")
-            {
-                dr["decay_spin"] = float.Parse(changedValue);
-            }
-            else if (propertyName == "BackdropAsset")
-            {
-                dr["backdrop_asset"] = int.Parse(changedValue);
-            }
-            else if (propertyName == "Greetings")
-            {
-                dr["greetings"] = changedValue;
-            }
-            else if (propertyName == "Notes")
-            {
-                dr["notes"] = changedValue;
-            }
-            else if (propertyName == "SystemID")
-            {
-                dr["system_id"] = int.Parse(changedValue);
-            }
-            else if (propertyName == "GalaxyX")
-            {
-                dr["galaxy_x"] = float.Parse(changedValue);
-            }
-            else if (propertyName == "GalaxyY")
-            {
-                dr["galaxy_y"] = float.Parse(changedValue);
-            }
-            else if (propertyName == "GalaxyZ")
-            {
-                dr["galaxy_z"] = float.Parse(changedValue);
-            }
-            else if (propertyName == "SectorType")
-            {
-                if (changedValue == "Space Sector")
-                {
-                    dr["sector_type"] = 0;
-                }
-                else if (changedValue == "Rocky Planet Surface")
-                {
-                    
-                    dr["sector_type"] = 1;
-                }
-                else if (changedValue == "Gas Giant Surface")
-                {
-                    dr["sector_type"] = 2;
-                }
+                case "Name": dr["name"] = changedValue; break;
+                case "Width":
+                case "Height":
+                case "Depth":
+                    if (sp.Width != 0) { dr["x_min"] = -(sp.Width / 2); dr["x_max"] = sp.Width / 2; }
+                    if (sp.Height != 0) { dr["y_min"] = -(sp.Height / 2); dr["y_max"] = sp.Height / 2; }
+                    if (sp.Depth != 0) { dr["z_min"] = -(sp.Depth / 2); dr["z_max"] = sp.Depth / 2; }
+                    break;
+                // NOTE: original code wrote dr["grix_x"] (typo for grid_x) — preserved
+                // verbatim; if anyone ever validates this against the schema, they'll
+                // need a separate audit pass to decide whether to fix-up or migrate.
+                case "GridX": dr["grix_x"] = int.Parse(changedValue); break;
+                case "GridY": dr["grix_y"] = int.Parse(changedValue); break;
+                case "GridZ": dr["grix_z"] = int.Parse(changedValue); break;
+                case "FogNear": dr["fog_near"] = float.Parse(changedValue); break;
+                case "FogFar": dr["fog_far"] = float.Parse(changedValue); break;
+                case "DebrisMode": dr["debris_mode"] = int.Parse(changedValue); break;
+                case "LightBackdrop": dr["light_backdrop"] = bool.Parse(changedValue); break;
+                case "FogBackdrop": dr["fog_backdrop"] = bool.Parse(changedValue); break;
+                case "SwapBackdrop": dr["swap_backdrop"] = bool.Parse(changedValue); break;
+                case "BackdropFogNear": dr["backdrop_fog_near"] = float.Parse(changedValue); break;
+                case "BackdropFogFar": dr["backdrop_fog_far"] = float.Parse(changedValue); break;
+                // NOTE: original used "mex_tilt" — typo preserved verbatim, same caveat as above.
+                case "MaxTilt": dr["mex_tilt"] = float.Parse(changedValue); break;
+                case "AutoLevel": dr["auto_level"] = bool.Parse(changedValue); break;
+                case "ImpulseRate": dr["impulse_rate"] = float.Parse(changedValue); break;
+                case "DecayVelocity": dr["decay_velocity"] = float.Parse(changedValue); break;
+                case "DecaySpin": dr["decay_spin"] = float.Parse(changedValue); break;
+                case "BackdropAsset": dr["backdrop_asset"] = int.Parse(changedValue); break;
+                case "Greetings": dr["greetings"] = changedValue; break;
+                case "Notes": dr["notes"] = changedValue; break;
+                case "SystemID": dr["system_id"] = int.Parse(changedValue); break;
+                case "GalaxyX": dr["galaxy_x"] = float.Parse(changedValue); break;
+                case "GalaxyY": dr["galaxy_y"] = float.Parse(changedValue); break;
+                case "GalaxyZ": dr["galaxy_z"] = float.Parse(changedValue); break;
+                case "SectorType":
+                    if (changedValue == "Space Sector") dr["sector_type"] = 0;
+                    else if (changedValue == "Rocky Planet Surface") dr["sector_type"] = 1;
+                    else if (changedValue == "Gas Giant Surface") dr["sector_type"] = 2;
+                    break;
             }
 
             if (dr.RowState != DataRowState.Modified)
-            {
                 dr.SetModified();
-            }
         }
     }
 }

@@ -22,12 +22,12 @@ public sealed class LineEditorTests
 
     private static ConsoleKeyInfo Ch(char c)
         => new(c, (ConsoleKey)char.ToUpperInvariant(c), false, false, false);
-    private static readonly ConsoleKeyInfo Tab     = new('\t', ConsoleKey.Tab, false, false, false);
+    private static readonly ConsoleKeyInfo Tab = new('\t', ConsoleKey.Tab, false, false, false);
     private static readonly ConsoleKeyInfo ShiftTab = new('\t', ConsoleKey.Tab, true, false, false);
-    private static readonly ConsoleKeyInfo Enter   = new('\r', ConsoleKey.Enter, false, false, false);
-    private static readonly ConsoleKeyInfo Back    = new('\b', ConsoleKey.Backspace, false, false, false);
-    private static readonly ConsoleKeyInfo Right   = new('\0', ConsoleKey.RightArrow, false, false, false);
-    private static readonly ConsoleKeyInfo Left    = new('\0', ConsoleKey.LeftArrow, false, false, false);
+    private static readonly ConsoleKeyInfo Enter = new('\r', ConsoleKey.Enter, false, false, false);
+    private static readonly ConsoleKeyInfo Back = new('\b', ConsoleKey.Backspace, false, false, false);
+    private static readonly ConsoleKeyInfo Right = new('\0', ConsoleKey.RightArrow, false, false, false);
+    private static readonly ConsoleKeyInfo Left = new('\0', ConsoleKey.LeftArrow, false, false, false);
 
     private static readonly IReadOnlyList<CommandSpec> Specs = new[]
     {
@@ -183,7 +183,7 @@ public sealed class LineEditorTests
     public async Task ReadLine_NonTty_FallsBackToReadLine_AndWritesPrompt()
     {
         var editor = new LineEditor(() => Array.Empty<CommandSpec>());
-        var input  = new StringReader("connect 1.2.3.4\n");
+        var input = new StringReader("connect 1.2.3.4\n");
         var output = new StringWriter();
 
         string? line = await editor.ReadLineAsync("> ", input, output, CancellationToken.None);

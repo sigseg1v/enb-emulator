@@ -16,7 +16,7 @@ namespace LaunchFreya.Patching
     public class AuthLoginPatcher
     {
         const byte Https = 0xc0;
-        const byte Http  = 0x40;
+        const byte Http = 0x40;
 
         sealed class Layout
         {
@@ -64,9 +64,9 @@ namespace LaunchFreya.Patching
             var layout = Detect(dll, fileName);
             return new AuthPatcherInfo
             {
-                Build    = layout.Name,
+                Build = layout.Name,
                 UseHttps = dll[layout.SchemeOffset] == Https,
-                Port     = BitConverter.ToUInt16(dll, layout.PortOffset),
+                Port = BitConverter.ToUInt16(dll, layout.PortOffset),
             };
         }
 

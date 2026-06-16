@@ -16,7 +16,7 @@ public sealed class InitRenderStateRecord : PacketRecord
     protected override void WriteFields(StringBuilder sb)
     {
         if (Payload.Length < 8) { Flag(sb, $"INIT_RENDER_STATE truncated -- {Payload.Length} bytes, expected 8"); return; }
-        FHex(sb, 0, "GameID",        ReadI32LE(Payload, 0));
+        FHex(sb, 0, "GameID", ReadI32LE(Payload, 0));
         FHex(sb, 4, "RenderStateID", ReadU32LE(Payload, 4));
     }
 }

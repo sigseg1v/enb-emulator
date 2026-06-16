@@ -28,9 +28,9 @@ public enum AuxKind
 /// <summary>One conditional field in an Aux structure, gated by a flag bit.</summary>
 public sealed class AuxField
 {
-    public int      FlagNum { get; }
-    public string   Name    { get; }
-    public AuxKind  Kind    { get; }
+    public int FlagNum { get; }
+    public string Name { get; }
+    public AuxKind Kind { get; }
     public AuxSchema? Schema { get; }  // for Kind == Nested
 
     /// <summary>
@@ -66,17 +66,17 @@ public sealed class AuxField
 /// </summary>
 public sealed class AuxSchema
 {
-    public string         Name            { get; }
-    public bool           HasHeader       { get; init; }
-    public IReadOnlyList<AuxField> Fields  { get; }
+    public string Name { get; }
+    public bool HasHeader { get; init; }
+    public IReadOnlyList<AuxField> Fields { get; }
 
-    public bool           IsContainer     { get; }
-    public int            ContainerCount  { get; }
-    public AuxSchema?     ContainerElement{ get; }
+    public bool IsContainer { get; }
+    public int ContainerCount { get; }
+    public AuxSchema? ContainerElement { get; }
 
-    public int FlagCount     => IsContainer ? ContainerCount : Fields.Count;
+    public int FlagCount => IsContainer ? ContainerCount : Fields.Count;
     public int PlainFlagBytes => (FlagCount + 4 + 7) / 8;
-    public int ExtFlagBytes   => (2 * FlagCount + 4 + 7) / 8;
+    public int ExtFlagBytes => (2 * FlagCount + 4 + 7) / 8;
 
     // record
     public AuxSchema(string name, IReadOnlyList<AuxField> fields, bool hasHeader = false)

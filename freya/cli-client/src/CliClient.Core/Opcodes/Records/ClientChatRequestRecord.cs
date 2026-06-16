@@ -57,16 +57,16 @@ public sealed class ClientChatRequestRecord : PacketRecord
 
     private static string TypeNote(int type) => type switch
     {
-        0  => "(CCE_SPEAK_ON -- channel message)",
-        1  => "(CCE_SPEAK_LOCALLY)",
-        2  => "(CCE_BROADCAST_TO)",
-        3  => "(CCE_BROADCAST_ALL)",
-        4  => "(CCE_INSERT_CHANNEL)",
-        5  => "(CCE_REMOVE_CHANNEL)",
-        6  => "(CCE_ENTER_CHANNEL)",
-        7  => "(CCE_EXIT_CHANNEL)",
-        8  => "(CCE_ADD_FRIEND)",
-        9  => "(CCE_REMOVE_FRIEND)",
+        0 => "(CCE_SPEAK_ON -- channel message)",
+        1 => "(CCE_SPEAK_LOCALLY)",
+        2 => "(CCE_BROADCAST_TO)",
+        3 => "(CCE_BROADCAST_ALL)",
+        4 => "(CCE_INSERT_CHANNEL)",
+        5 => "(CCE_REMOVE_CHANNEL)",
+        6 => "(CCE_ENTER_CHANNEL)",
+        7 => "(CCE_EXIT_CHANNEL)",
+        8 => "(CCE_ADD_FRIEND)",
+        9 => "(CCE_REMOVE_FRIEND)",
         10 => "(CCE_IGNORE)",
         11 => "(CCE_UNIGNORE)",
         12 => "(CCE_INVITE1)",
@@ -89,6 +89,6 @@ public sealed class ClientChatRequestRecord : PacketRecord
         30 => "(CCR_SECTOR_LOGIN)",
         31 => "(CCE_GMGAG)",
         32 => "(CCE_GMUNGAG)",
-        _  => "(unknown request type)",
+        _ => "(unknown request type)",
     };
 }

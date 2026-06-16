@@ -100,7 +100,7 @@ public sealed class PacketLog : IDisposable, IAsyncDisposable
         AppendKv(sb, "ts", ts.ToString("O"), first: true);
         AppendKv(sb, "direction", direction switch
         {
-            PacketDirection.Inbound  => "inbound",
+            PacketDirection.Inbound => "inbound",
             PacketDirection.Outbound => "outbound",
             _ => "unknown",
         });

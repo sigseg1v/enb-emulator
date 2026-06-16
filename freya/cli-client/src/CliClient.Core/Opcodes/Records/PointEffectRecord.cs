@@ -27,7 +27,7 @@ public sealed class PointEffectRecord : PacketRecord
     protected override void WriteFields(StringBuilder sb)
     {
         if (Payload.Length < 40) { Flag(sb, $"POINT_EFFECT truncated -- {Payload.Length} bytes, expected 40"); return; }
-        FHex(sb, 0, "ObjectID",  ReadI32LE(Payload, 0));
+        FHex(sb, 0, "ObjectID", ReadI32LE(Payload, 0));
         FHex(sb, 4, "TimeStamp", ReadU32LE(Payload, 4));
         FBytes(sb, 8, 12, "Position",
                $"({ReadF32LE(Payload, 8):0.0##}, {ReadF32LE(Payload, 12):0.0##}, {ReadF32LE(Payload, 16):0.0##})");

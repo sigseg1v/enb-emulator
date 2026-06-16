@@ -51,10 +51,10 @@ public sealed class LiveReferenceFabricationTests
 
         // Independent field pin (matches fixture comment + server emit order).
         Assert.Equal(unchecked((int)0x4000C95F), BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(0)));
-        Assert.Equal(0x00018802,                 BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(4)));   // AsteroidGID (static node)
-        Assert.Equal(0x0025409D,                 BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(8)));   // EffectUID (dynamic counter)
-        Assert.Equal(0x512E794Bu,                BinaryPrimitives.ReadUInt32LittleEndian(b.AsSpan(12))); // ProspectTick
-        Assert.Equal(1000u,                      BinaryPrimitives.ReadUInt32LittleEndian(b.AsSpan(16))); // DrainMs
+        Assert.Equal(0x00018802, BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(4)));   // AsteroidGID (static node)
+        Assert.Equal(0x0025409D, BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(8)));   // EffectUID (dynamic counter)
+        Assert.Equal(0x512E794Bu, BinaryPrimitives.ReadUInt32LittleEndian(b.AsSpan(12))); // ProspectTick
+        Assert.Equal(1000u, BinaryPrimitives.ReadUInt32LittleEndian(b.AsSpan(16))); // DrainMs
 
         var rec = PacketRecord.Resolve(0x2012, b);
         Assert.IsType<StartProspectRecord>(rec);
@@ -64,7 +64,7 @@ public sealed class LiveReferenceFabricationTests
     }
 
     [Theory]
-    [InlineData("live_tractor_ore_2013_helium.hex",      46, "Helium",          6418, 0x00C0)]
+    [InlineData("live_tractor_ore_2013_helium.hex", 46, "Helium", 6418, 0x00C0)]
     [InlineData("live_tractor_ore_2013_californium.hex", 55, "Californium Ore", 5348, 0x0076)]
     public void TractorOre_0x2013_LiveCapture_FullyDecoded(
         string fixture, int len, string name, uint tractorTime, int baseAsset)
@@ -73,14 +73,14 @@ public sealed class LiveReferenceFabricationTests
         Assert.Equal(len, b.Length);
 
         Assert.Equal(unchecked((int)0x4000C95F), BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(0)));
-        Assert.Equal((short)baseAsset,           BinaryPrimitives.ReadInt16LittleEndian(b.AsSpan(12)));
+        Assert.Equal((short)baseAsset, BinaryPrimitives.ReadInt16LittleEndian(b.AsSpan(12)));
         short nameLen = BinaryPrimitives.ReadInt16LittleEndian(b.AsSpan(18));
         Assert.Equal(name.Length, nameLen);
         Assert.Equal(name, System.Text.Encoding.Latin1.GetString(b, 20, nameLen));
 
         int off = 20 + nameLen;
         Assert.Equal(tractorTime, BinaryPrimitives.ReadUInt32LittleEndian(b.AsSpan(off)));
-        Assert.Equal(350.0f,      BinaryPrimitives.ReadSingleLittleEndian(b.AsSpan(off + 4)));
+        Assert.Equal(350.0f, BinaryPrimitives.ReadSingleLittleEndian(b.AsSpan(off + 4)));
 
         var rec = PacketRecord.Resolve(0x2013, b);
         Assert.IsType<TractorOreRecord>(rec);
@@ -92,8 +92,8 @@ public sealed class LiveReferenceFabricationTests
     }
 
     [Theory]
-    [InlineData("live_loot_item_2014_craxelhide.hex", 51, "Craxel Hide",          4500, 0x052E)]
-    [InlineData("live_loot_item_2014_juuona.hex",     60, "Juuona Adrenal Gland", 4500, 0x0531)]
+    [InlineData("live_loot_item_2014_craxelhide.hex", 51, "Craxel Hide", 4500, 0x052E)]
+    [InlineData("live_loot_item_2014_juuona.hex", 60, "Juuona Adrenal Gland", 4500, 0x0531)]
     public void LootItem_0x2014_LiveCapture_FullyDecoded(
         string fixture, int len, string name, uint tractorTime, int baseAsset)
     {
@@ -101,14 +101,14 @@ public sealed class LiveReferenceFabricationTests
         Assert.Equal(len, b.Length);
 
         Assert.Equal(unchecked((int)0x4003992A), BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(0)));
-        Assert.Equal((short)baseAsset,           BinaryPrimitives.ReadInt16LittleEndian(b.AsSpan(12)));
+        Assert.Equal((short)baseAsset, BinaryPrimitives.ReadInt16LittleEndian(b.AsSpan(12)));
         short nameLen = BinaryPrimitives.ReadInt16LittleEndian(b.AsSpan(18));
         Assert.Equal(name.Length, nameLen);
         Assert.Equal(name, System.Text.Encoding.Latin1.GetString(b, 20, nameLen));
 
         int off = 20 + nameLen;
         Assert.Equal(tractorTime, BinaryPrimitives.ReadUInt32LittleEndian(b.AsSpan(off)));
-        Assert.Equal(350.0f,      BinaryPrimitives.ReadSingleLittleEndian(b.AsSpan(off + 4)));
+        Assert.Equal(350.0f, BinaryPrimitives.ReadSingleLittleEndian(b.AsSpan(off + 4)));
 
         var rec = PacketRecord.Resolve(0x2014, b);
         Assert.IsType<LootItemRecord>(rec);
@@ -128,20 +128,20 @@ public sealed class LiveReferenceFabricationTests
     private const int PlayerGid = 0x4003992A;
 
     [Theory]
-    [InlineData("live_client_damage_0064_dealt.hex",    415.0f, -16.496f,  2, 3, PlayerGid,  0x000186F5)]
-    [InlineData("live_client_damage_0064_received.hex",   4.9f,   -2.1f,   3, 1, 0x000187EC, PlayerGid)]
+    [InlineData("live_client_damage_0064_dealt.hex", 415.0f, -16.496f, 2, 3, PlayerGid, 0x000186F5)]
+    [InlineData("live_client_damage_0064_received.hex", 4.9f, -2.1f, 3, 1, 0x000187EC, PlayerGid)]
     public void ClientDamage_0x0064_LiveCapture_SourceTargetAreEntities(
         string fixture, float damage, float modifier, int type, int inflicted, int sourceId, int targetId)
     {
         byte[] b = HexFixture.Load(fixture);
         Assert.Equal(24, b.Length);
 
-        Assert.Equal(damage,    BinaryPrimitives.ReadSingleLittleEndian(b.AsSpan(0)),  3);
-        Assert.Equal(modifier,  BinaryPrimitives.ReadSingleLittleEndian(b.AsSpan(4)),  3);
-        Assert.Equal(type,      BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(8)));
+        Assert.Equal(damage, BinaryPrimitives.ReadSingleLittleEndian(b.AsSpan(0)), 3);
+        Assert.Equal(modifier, BinaryPrimitives.ReadSingleLittleEndian(b.AsSpan(4)), 3);
+        Assert.Equal(type, BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(8)));
         Assert.Equal(inflicted, BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(12)));
-        Assert.Equal(sourceId,  BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(16)));
-        Assert.Equal(targetId,  BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(20)));
+        Assert.Equal(sourceId, BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(16)));
+        Assert.Equal(targetId, BinaryPrimitives.ReadInt32LittleEndian(b.AsSpan(20)));
 
         // Exactly one of source/target is the player (the other combatant is
         // the non-player entity) -- the invariant that proves both are entities.

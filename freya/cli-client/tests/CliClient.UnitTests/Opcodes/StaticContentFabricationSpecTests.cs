@@ -50,9 +50,9 @@ public sealed class StaticContentFabricationSpecTests
 
     // SigFlags bit layout (server/src/NavTypeClass.cpp; mirrored in
     // StaticObjectCreateRecord). Low nibble = NavType.
-    private const byte HAS_NAV     = 0x10;
-    private const byte IS_NAV      = 0x20;
-    private const byte IS_HUGE     = 0x40;
+    private const byte HAS_NAV = 0x10;
+    private const byte IS_NAV = 0x20;
+    private const byte IS_HUGE = 0x40;
     private const byte HAS_VISITED = 0x80;
 
     private const byte PosTypeConstant = 3; // CONSTANT (static objects)
@@ -256,14 +256,14 @@ public sealed class StaticContentFabricationSpecTests
     [Fact]
     public void Static2018_Nav_Expands_To_Create_Relationship_Pos_Aux_Nav()
     {
-        const int   gid       = 0x00012345;
-        const byte  createType = 37;
+        const int gid = 0x00012345;
+        const byte createType = 37;
         const short baseAsset = 1463;
-        const float scale     = 1.0f;
-        const byte  reaction  = 5;            // FRIENDLY (compact @23, passed through)
+        const float scale = 1.0f;
+        const byte reaction = 5;            // FRIENDLY (compact @23, passed through)
         const float signature = 2000.0f;
-        const byte  sigFlags  = HAS_NAV | IS_NAV | HAS_VISITED | 0x01; // NavType=1, visited
-        const string name     = "Luna Nav 1";
+        const byte sigFlags = HAS_NAV | IS_NAV | HAS_VISITED | 0x01; // NavType=1, visited
+        const string name = "Luna Nav 1";
 
         var compact = FabricateCompact2018(
             gid, createType, baseAsset, scale,
@@ -349,11 +349,11 @@ public sealed class StaticContentFabricationSpecTests
     [Fact]
     public void Static2018_Deco_NoNavBit_UsesPlaceholderName_AndEmitsNoNavigation()
     {
-        const int   gid       = 0x00067890;
-        const byte  createType = 37;
-        const byte  sigFlags  = 0x00;    // no HAS_NAV, no IS_NAV
+        const int gid = 0x00067890;
+        const byte createType = 37;
+        const byte sigFlags = 0x00;    // no HAS_NAV, no IS_NAV
         const float signature = 100.0f;  // below the 3000 clamp floor
-        const string name     = "Some Deco";
+        const string name = "Some Deco";
 
         // No HAS_NAV -> the proxy emits no 0x99 frame.
         Assert.True((sigFlags & HAS_NAV) == 0);
@@ -375,9 +375,9 @@ public sealed class StaticContentFabricationSpecTests
     [Fact]
     public void Static2018_Station_UsesSimpleAuxName_Format()
     {
-        const int    gid        = 0x00099999;
-        const byte   createType = 12;     // station
-        const string name       = "Luna Station";
+        const int gid = 0x00099999;
+        const byte createType = 12;     // station
+        const string name = "Luna Station";
 
         var aux = ExpandAux2018(gid, createType, 0x00, name, 0f)!;
         // [gid][innerLen=N+4][0x1201][strLen=N][name]
@@ -403,12 +403,12 @@ public sealed class StaticContentFabricationSpecTests
     [Fact]
     public void Resource2019_Expands_To_Create_Pos_ResourceName()
     {
-        const int    gid       = 0x000A1B2C;
-        const short  baseAsset = 7777;
-        const float  scale     = 2.5f;
-        const float  hsv0      = 0.3f;
-        const float  hsv1      = 0.0f;   // resources carry only two HSV channels; HSV1 is 0
-        const string name      = "Ore Field";
+        const int gid = 0x000A1B2C;
+        const short baseAsset = 7777;
+        const float scale = 2.5f;
+        const float hsv0 = 0.3f;
+        const float hsv1 = 0.0f;   // resources carry only two HSV channels; HSV1 is 0
+        const string name = "Ore Field";
 
         var compact = FabricateCompact2019(
             gid, baseAsset, scale, hsv0, hsv1,

@@ -62,7 +62,7 @@ public sealed class RequestTargetCodec : IOpcodeCodec
         }
 
         return new RequestTargetMessage(
-            GameId:   BinaryPrimitives.ReadInt32LittleEndian(payload[0..4]),
+            GameId: BinaryPrimitives.ReadInt32LittleEndian(payload[0..4]),
             TargetId: BinaryPrimitives.ReadInt32LittleEndian(payload[4..8]));
     }
 

@@ -25,9 +25,9 @@ public sealed class NavsCommand : ICommandHandler
         _ctx = ctx;
     }
 
-    public string Name    => "navs";
+    public string Name => "navs";
     public string Summary => "list navs, gates, and stations in this sector (warp/gate/dock targets)";
-    public string Usage   =>
+    public string Usage =>
         "navs\n" +
         "  Lists every navigable destination the server has shown this sector --\n" +
         "  discovered/visible navs, stargates, and stations -- nearest first, with\n" +

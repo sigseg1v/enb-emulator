@@ -63,9 +63,9 @@ public sealed class DockCommand : ICommandHandler
     private readonly SessionContext _ctx;
     public DockCommand(SessionContext ctx) { ArgumentNullException.ThrowIfNull(ctx); _ctx = ctx; }
 
-    public string Name    => "dock";
+    public string Name => "dock";
     public string Summary => "dock at a nearby station by name or gid (0x002C ACTION 28 -> 7)";
-    public string Usage   =>
+    public string Usage =>
         "dock <name-or-gid>\n" +
         "  Target = a tracked station name (with spaces, e.g. `dock Mars Station`)\n" +
         "  or its gid (0x.. / decimal). Tab-completes from `navs`. Sends the\n" +

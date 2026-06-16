@@ -28,7 +28,7 @@
 namespace enbtest {
 
 struct ReplayOptions {
-    bool apply_rc4 = false;            // most post-handshake traffic is RC4-encrypted
+    bool apply_rc4 = false;             // most post-handshake traffic is RC4-encrypted
     bool verify_response_opcode = true; // check first 4 bytes of response header
     int response_timeout_ms = 2000;
     // When false, a Server->Client packet that does not arrive within
@@ -44,7 +44,7 @@ struct ReplayOptions {
 struct ReplayStats {
     int packets_sent = 0;
     int packets_received = 0;
-    int responses_missing = 0;  // S2C packets that did not arrive (require_responses=false)
+    int responses_missing = 0; // S2C packets that did not arrive (require_responses=false)
     int opcode_mismatches = 0;
     std::string last_error;
 };
@@ -56,14 +56,12 @@ struct ReplayStats {
 // `on_response` (optional) is called for every server->client packet with
 // the decoded plaintext, so the caller can perform domain-specific
 // assertions.
-ReplayStats RunReplay(TcpClient& client, const std::vector<Packet>& packets,
-                      const ReplayOptions& opts, westwood::Rc4* tx, westwood::Rc4* rx,
-                      const std::function<void(const Packet&,
-                                               const std::vector<unsigned char>&)>&
-                          on_response = {});
+ReplayStats RunReplay(
+    TcpClient& client, const std::vector<Packet>& packets, const ReplayOptions& opts,
+    westwood::Rc4* tx, westwood::Rc4* rx,
+    const std::function<void(const Packet&, const std::vector<unsigned char>&)>& on_response = {});
 
 // Convenience: filter packets to those matching `peer_port`.
-std::vector<Packet> FilterByPort(const std::vector<Packet>& packets,
-                                 uint16_t peer_port);
+std::vector<Packet> FilterByPort(const std::vector<Packet>& packets, uint16_t peer_port);
 
-}  // namespace enbtest
+} // namespace enbtest

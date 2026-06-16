@@ -29,7 +29,7 @@ cd "$ROOT"
 
 # Roots we care about. Skip vendored / archived / generated trees.
 ROOTS=(server login-server proxy launcher client tools)
-EXCLUDE_RE='(server/third_party/|server/src/openssl/|server/src/mysql/|server/src/LUA/|login-server/Net7Mysql/mysql/|archive/|tools/.*/bin/|tools/.*/obj/)'
+EXCLUDE_RE='(server/third_party/|server/src/openssl/|server/src/LUA/|archive/|tools/.*/bin/|tools/.*/obj/)'
 
 found=0
 while IFS= read -r path; do

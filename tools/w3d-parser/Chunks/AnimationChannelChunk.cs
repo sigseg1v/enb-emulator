@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -35,7 +35,7 @@ namespace WestWood3D.Chunks
             channel_type = br.ReadInt16();
             pivot = br.ReadInt16();
             padding = br.ReadInt16();
-            
+
             if (dbg)
             {
                 Console.Out.WriteLine("\t First Frame: " + first_frame);
@@ -47,7 +47,7 @@ namespace WestWood3D.Chunks
 
             long RemainingChunkLength = chunkLength - 12;
             long NumData = RemainingChunkLength / (VectorLength * 4);
-            
+
             for (int i = 0; i < NumData; i++)
             {
                 float[] veclen = new float[VectorLength];
@@ -64,13 +64,13 @@ namespace WestWood3D.Chunks
                 IDictionaryEnumerator en = key_frame_data.GetEnumerator();
                 while (en.MoveNext())
                 {
-                    float[] tmp = (float[]) en.Value;
+                    float[] tmp = (float[])en.Value;
                     for (int i3 = 0; i3 < tmp.Length; i3++)
-	                {
-	                    Console.Out.WriteLine("\t Frame["+ en.Key + "] Vector[" + i3 + "]:" + tmp[i3]);  
-	                }
+                    {
+                        Console.Out.WriteLine("\t Frame[" + en.Key + "] Vector[" + i3 + "]:" + tmp[i3]);
+                    }
                 }
-             }
+            }
         }
 
         [CategoryAttribute("Chunk Values"), ReadOnlyAttribute(true), DescriptionAttribute("First Frame of the Animation Data.")]

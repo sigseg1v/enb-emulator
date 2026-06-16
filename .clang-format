@@ -1,0 +1,28 @@
+# Phase AT -- C++ formatting for in-scope trees (proxy/, common/, login-server/,
+# launcher/, client/, freya/ C++, tools/ C++). NOT applied to server/src (frozen
+# for the rewrite) or any vendored third_party/ tree.
+#
+# Critical safety choices for this repo:
+#   * ReflowComments: false  -- never rewrap comment blocks, so the Latin-1 ©
+#     license header lines are left byte-for-byte intact (no mojibake).
+#   * LineEnding: DeriveLF    -- per-file: keep the file's existing line ending
+#     (inherited sources are CRLF, freya/ is LF); do not flip them.
+#   * 4-space indent, no tabs.
+---
+Language: Cpp
+BasedOnStyle: LLVM
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 100
+ReflowComments: false
+LineEnding: DeriveLF
+SortIncludes: false
+PointerAlignment: Left
+NamespaceIndentation: None
+AccessModifierOffset: -4
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+BreakBeforeBraces: Attach
+FixNamespaceComments: true
+...

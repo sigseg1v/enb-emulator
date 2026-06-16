@@ -19,6 +19,6 @@ public sealed class GuildRecruitConfirmRecord : PacketRecord
     {
         int off = 0;
         if (!TryReadAddDataLS(sb, ref off, "RecruiterName")) return;
-        if (!TryReadAddDataLS(sb, ref off, "GuildName"))     return;
+        if (!TryReadAddDataLS(sb, ref off, "GuildName")) return;
     }
 }

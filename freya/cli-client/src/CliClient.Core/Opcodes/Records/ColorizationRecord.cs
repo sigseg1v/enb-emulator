@@ -27,15 +27,15 @@ public sealed class ColorizationRecord : PacketRecord
     protected override void WriteFields(StringBuilder sb)
     {
         if (Payload.Length < 6) { Flag(sb, $"COLORIZATION truncated -- {Payload.Length} bytes, expected >= 6"); return; }
-        int   gameId = ReadI32LE(Payload, 0);
-        short count  = ReadI16LE(Payload, 4);
+        int gameId = ReadI32LE(Payload, 0);
+        short count = ReadI16LE(Payload, 4);
         FHex(sb, 0, "GameID", gameId);
 
         const int BlockSize = 16;       // one {metal, H, S, V}
         int bodyLen = Payload.Length - 6;
-        int blocks  = bodyLen / BlockSize;
+        int blocks = bodyLen / BlockSize;
         string note = count == blocks / 2 ? "slots, 2 blocks each (retail convention)"
-                    : count == blocks     ? "flat blocks (tada-o server convention)"
+                    : count == blocks ? "flat blocks (tada-o server convention)"
                     : $"does not match {blocks} blocks present";
         FDec(sb, 4, "ItemCount", count, note);
 
@@ -49,11 +49,11 @@ public sealed class ColorizationRecord : PacketRecord
 
     private void EmitBlock(StringBuilder sb, int off, string label)
     {
-        int   metal = ReadI32LE(Payload, off);
-        float h     = ReadF32LE(Payload, off + 4);
-        float s     = ReadF32LE(Payload, off + 8);
-        float v     = ReadF32LE(Payload, off + 12);
-        FHex(sb, off,       $"{label} Metal", metal);
+        int metal = ReadI32LE(Payload, off);
+        float h = ReadF32LE(Payload, off + 4);
+        float s = ReadF32LE(Payload, off + 8);
+        float v = ReadF32LE(Payload, off + 12);
+        FHex(sb, off, $"{label} Metal", metal);
         FBytes(sb, off + 4, 12, $"{label} H/S/V", $"{h:0.###}, {s:0.###}, {v:0.###}");
     }
 }

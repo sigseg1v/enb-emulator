@@ -105,7 +105,7 @@ public sealed class MalformedReplyTests
         // started rejecting all unknown opcodes would silently pass
         // the malformed-frame test for the wrong reason.
         byte[] payload = new byte[64];
-        for (int i = 0; i < payload.Length; i++) payload[i] = (byte) (i ^ 0x5A);
+        for (int i = 0; i < payload.Length; i++) payload[i] = (byte)(i ^ 0x5A);
 
         await using var bad = new ScriptedServer(async (stream, ct) =>
         {

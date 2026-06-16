@@ -74,7 +74,7 @@ public sealed class AuxMobIndexDecoder
     // ── shared header + 15-byte flag block ───────────────────────────────────
     private int Header()
     {
-        uint gameId  = BinaryPrimitives.ReadUInt32LittleEndian(_p.AsSpan(0, 4));
+        uint gameId = BinaryPrimitives.ReadUInt32LittleEndian(_p.AsSpan(0, 4));
         Annos.Add(new(0, 4, 0, "MobIndex.GameID", $"0x{gameId:X8}"));
         ushort bodyLen = BinaryPrimitives.ReadUInt16LittleEndian(_p.AsSpan(4, 2));
         string blNote = bodyLen == _p.Length - 6 ? "(payload-6)" : bodyLen == _p.Length ? "(payload)" : $"(payload={_p.Length})";
@@ -117,15 +117,15 @@ public sealed class AuxMobIndexDecoder
 
         // QuadrantDamage / the three Damage decals / Lego: present-branch emits
         // the member, absent-branch emits a single 0x05 iff its buffer[19] bit.
-        if      ((B(12) & 0x02) != 0) QuadrantDamage(ref o, "QuadrantDamage");
+        if ((B(12) & 0x02) != 0) QuadrantDamage(ref o, "QuadrantDamage");
         else if ((B(19) & 0x08) != 0) Marker(ref o, "QuadrantDamage");
-        if      ((B(12) & 0x04) != 0) Empty(o, "DamageSpot");
+        if ((B(12) & 0x04) != 0) Empty(o, "DamageSpot");
         else if ((B(19) & 0x10) != 0) Marker(ref o, "DamageSpot");
-        if      ((B(12) & 0x08) != 0) Empty(o, "DamageLine");
+        if ((B(12) & 0x08) != 0) Empty(o, "DamageLine");
         else if ((B(19) & 0x20) != 0) Marker(ref o, "DamageLine");
-        if      ((B(12) & 0x10) != 0) Empty(o, "DamageBlotch");
+        if ((B(12) & 0x10) != 0) Empty(o, "DamageBlotch");
         else if ((B(19) & 0x40) != 0) Marker(ref o, "DamageBlotch");
-        if      ((B(12) & 0x20) != 0) Lego(ref o, "Lego");
+        if ((B(12) & 0x20) != 0) Lego(ref o, "Lego");
         else if ((B(19) & 0x80) != 0) Marker(ref o, "Lego");
 
         if ((B(13) & 0x04) != 0) U32(ref o, "EngineThrustState");
@@ -145,7 +145,7 @@ public sealed class AuxMobIndexDecoder
         int o = Header();
         int B(int i) => _p[i];
 
-        if      ((B(8) & 0x04) != 0) Shield(ref o, "Shield");
+        if ((B(8) & 0x04) != 0) Shield(ref o, "Shield");
         else if ((B(15) & 0x10) != 0) Marker(ref o, "Shield");
         if ((B(8) & 0x08) != 0) F32(ref o, "MaxShield");
         if ((B(8) & 0x10) != 0) F32(ref o, "HullPoints");

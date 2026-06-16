@@ -25,13 +25,13 @@ public sealed class ClientSetTimeRecord : PacketRecord
     protected override void WriteFields(StringBuilder sb)
     {
         if (Payload.Length < 12) { Flag(sb, $"CLIENT_SET_TIME truncated -- {Payload.Length} bytes, expected 12"); return; }
-        int clientSent     = ReadI32LE(Payload, 0);
+        int clientSent = ReadI32LE(Payload, 0);
         int serverReceived = ReadI32LE(Payload, 4);
-        int serverSent     = ReadI32LE(Payload, 8);
-        int processTicks   = serverSent - serverReceived;
-        FHex(sb, 0, "ClientSent",     clientSent);
+        int serverSent = ReadI32LE(Payload, 8);
+        int processTicks = serverSent - serverReceived;
+        FHex(sb, 0, "ClientSent", clientSent);
         FHex(sb, 4, "ServerReceived", serverReceived);
-        FHex(sb, 8, "ServerSent",     serverSent,
+        FHex(sb, 8, "ServerSent", serverSent,
              processTicks >= 0 ? $"(+{processTicks} tick server latency)" : null);
         if (processTicks < 0)
             Flag(sb, $"ServerSent < ServerReceived ({serverSent} < {serverReceived}) -- server clock ran backwards");

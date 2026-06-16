@@ -13,7 +13,7 @@ public sealed class ReplTests
     {
         public string Name { get; }
         public string Summary => "test handler";
-        public string Usage   => Name + " [args]";
+        public string Usage => Name + " [args]";
         public List<IReadOnlyList<string>> Calls { get; } = new();
         public int ExitCode { get; set; }
 
@@ -66,7 +66,7 @@ public sealed class ReplTests
         var handler = new CapturingHandler("connect");
         repl.Register(handler);
 
-        var input  = new StringReader("connect 127.0.0.1 3500\nquit\n");
+        var input = new StringReader("connect 127.0.0.1 3500\nquit\n");
         var output = new StringWriter();
         int rc = await repl.RunAsync(input, output);
 
@@ -79,7 +79,7 @@ public sealed class ReplTests
     public async Task Run_PrintsErrorForUnknownCommand_KeepsLooping()
     {
         var repl = new N7.CliClient.Repl.Repl();
-        var input  = new StringReader("nosuch foo\nquit\n");
+        var input = new StringReader("nosuch foo\nquit\n");
         var output = new StringWriter();
         await repl.RunAsync(input, output);
 
@@ -92,7 +92,7 @@ public sealed class ReplTests
     {
         var repl = new N7.CliClient.Repl.Repl();
         repl.Register(new CapturingHandler("connect"));
-        var input  = new StringReader("help\nquit\n");
+        var input = new StringReader("help\nquit\n");
         var output = new StringWriter();
         await repl.RunAsync(input, output);
 
@@ -107,7 +107,7 @@ public sealed class ReplTests
     {
         var repl = new N7.CliClient.Repl.Repl();
         repl.Register(new CapturingHandler("connect"));
-        var input  = new StringReader("help connect\nquit\n");
+        var input = new StringReader("help connect\nquit\n");
         var output = new StringWriter();
         await repl.RunAsync(input, output);
 
@@ -119,7 +119,7 @@ public sealed class ReplTests
     public async Task Run_QuitExits_WithExitCodeZero()
     {
         var repl = new N7.CliClient.Repl.Repl();
-        var input  = new StringReader("quit\n");
+        var input = new StringReader("quit\n");
         var output = new StringWriter();
         Assert.Equal(0, await repl.RunAsync(input, output));
     }
@@ -130,7 +130,7 @@ public sealed class ReplTests
         var repl = new N7.CliClient.Repl.Repl();
         var bad = new CapturingHandler("bad", exitCode: 42);
         repl.Register(bad);
-        var input  = new StringReader("bad\n");
+        var input = new StringReader("bad\n");
         var output = new StringWriter();
         int rc = await repl.RunAsync(input, output);
         Assert.Equal(42, rc);
@@ -142,7 +142,7 @@ public sealed class ReplTests
         var repl = new N7.CliClient.Repl.Repl();
         var h = new CapturingHandler("ping");
         repl.Register(h);
-        var input  = new StringReader("\n\n   \nping\nquit\n");
+        var input = new StringReader("\n\n   \nping\nquit\n");
         var output = new StringWriter();
         await repl.RunAsync(input, output);
         Assert.Single(h.Calls);
@@ -156,7 +156,7 @@ public sealed class ReplTests
         var ping = new CapturingHandler("ping");
         repl.Register(ping);
 
-        var input  = new StringReader("boom\nping\nquit\n");
+        var input = new StringReader("boom\nping\nquit\n");
         var output = new StringWriter();
         await repl.RunAsync(input, output);
 
@@ -179,7 +179,7 @@ public sealed class ReplTests
     public async Task Run_Help_ListsQuitOnce()
     {
         var repl = new N7.CliClient.Repl.Repl();
-        var input  = new StringReader("help\nquit\n");
+        var input = new StringReader("help\nquit\n");
         var output = new StringWriter();
         await repl.RunAsync(input, output);
 
@@ -222,7 +222,7 @@ public sealed class ReplTests
         var repl = new N7.CliClient.Repl.Repl();
         var custom = new CapturingHandler("quit");
         repl.Register(custom);
-        var input  = new StringReader("quit\n");
+        var input = new StringReader("quit\n");
         var output = new StringWriter();
         await repl.RunAsync(input, output);
         // Capturing handler returns 0 (not -1), so the loop does NOT exit
@@ -232,9 +232,9 @@ public sealed class ReplTests
 
     private sealed class ThrowingHandler : ICommandHandler
     {
-        public string Name    => "boom";
+        public string Name => "boom";
         public string Summary => "throws";
-        public string Usage   => "boom";
+        public string Usage => "boom";
         public Task<int> ExecuteAsync(
             IReadOnlyList<string> args, TextWriter output, CancellationToken ct)
             => throw new InvalidOperationException("kaboom");

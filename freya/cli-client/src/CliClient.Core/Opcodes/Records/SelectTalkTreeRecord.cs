@@ -32,9 +32,9 @@ public sealed class SelectTalkTreeRecord : PacketRecord
         byte sel = Payload[4];
         string note = sel switch
         {
-            0   => "(0 = more/back)",
+            0 => "(0 = more/back)",
             255 => "(255 = resume tree after debrief)",
-            _   => "(menu branch index)",
+            _ => "(menu branch index)",
         };
         FDec(sb, 4, "Selection", sel, note);
     }

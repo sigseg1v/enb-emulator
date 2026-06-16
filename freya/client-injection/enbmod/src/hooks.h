@@ -9,7 +9,8 @@
 
 #include <functional>
 
-namespace enb { namespace hooks {
+namespace enb {
+namespace hooks {
 
 // Initialize the MinHook library only (idempotent). Call this BEFORE running any
 // Lua that may install a game hook at load time, so MH_CreateHook does not fail
@@ -41,16 +42,16 @@ void set_on_input(std::function<bool(unsigned /*msg*/, unsigned /*wparam*/, long
 // flags below; set by the Lua layer when a handler registers.
 void set_input_mask(unsigned mask);
 enum {
-    WANT_KEY   = 1u << 0,   // WM_KEYDOWN / WM_KEYUP / WM_SYSKEYDOWN / WM_SYSKEYUP
-    WANT_CHAR  = 1u << 1,   // WM_CHAR
-    WANT_MOUSE = 1u << 2,   // WM_*BUTTON* / WM_MOUSEMOVE / WM_MOUSEWHEEL
+    WANT_KEY = 1u << 0,   // WM_KEYDOWN / WM_KEYUP / WM_SYSKEYDOWN / WM_SYSKEYUP
+    WANT_CHAR = 1u << 1,  // WM_CHAR
+    WANT_MOUSE = 1u << 2, // WM_*BUTTON* / WM_MOUSEMOVE / WM_MOUSEWHEEL
 };
 
 // --- game-function event hooks (opt-in; off by default until offsets are trusted) ---
 // These wrap the game's __thiscall functions. We only read `this` (ECX) and log/dispatch;
 // we never alter behaviour. Enabling them is gated behind enb.enable_event_hooks() from Lua
 // so a bad assumption can't crash the client on load.
-bool enable_event_hooks();   // hooks SkillLifecycle (ability use) + ChatChannel (chat lines)
+bool enable_event_hooks(); // hooks SkillLifecycle (ability use) + ChatChannel (chat lines)
 void disable_event_hooks();
 
 // In-space heartbeat (opt-in, same safety gate as the event hooks). Hooks
@@ -74,7 +75,7 @@ unsigned rpg_mgr();
 
 // Event sinks set by the Lua layer. Args are best-effort raw pointers/values.
 void set_on_skill(std::function<void(unsigned /*this*/, unsigned /*arg*/)> cb);
-void set_on_chat (std::function<void(unsigned /*this*/, unsigned /*arg*/)> cb);
+void set_on_chat(std::function<void(unsigned /*this*/, unsigned /*arg*/)> cb);
 
 // Chat send-line sink. Fires on the game thread with the raw typed line BEFORE
 // it becomes a chat packet. Return true to SWALLOW the line (the real send is
@@ -82,4 +83,5 @@ void set_on_chat (std::function<void(unsigned /*this*/, unsigned /*arg*/)> cb);
 // Must NOT touch Lua directly (Lua lives on the tick thread) -- inspect + enqueue.
 void set_on_chat_send(std::function<bool(const char* /*line*/)> cb);
 
-}} // namespace enb::hooks
+} // namespace hooks
+} // namespace enb

@@ -12,43 +12,40 @@ class Connection;
 // MessageQueue
 //================================================================================
 
-class MessageQueue
-{
+class MessageQueue {
 public:
-	MessageQueue();
-	virtual ~MessageQueue();
+    MessageQueue();
+    virtual ~MessageQueue();
 
-// Public methods
+    // Public methods
 public:
-	void Add( char *buffer );
-	void Add( unsigned char *buffer, int length);
-	void AddHead( char *buffer );
-	void AddHead( unsigned char *buffer, int length );
-	bool CheckQueue( char **pMessage );
-	bool CheckQueue( unsigned char **pMessage, int * length);
+    void Add(char* buffer);
+    void Add(unsigned char* buffer, int length);
+    void AddHead(char* buffer);
+    void AddHead(unsigned char* buffer, int length);
+    bool CheckQueue(char** pMessage);
+    bool CheckQueue(unsigned char** pMessage, int* length);
 
-// Private member attributes
+    // Private member attributes
 private:
-    Mutex  m_GroupMutex;
-    Mutex  m_Mutex;
-	Connection *connection;
+    Mutex m_GroupMutex;
+    Mutex m_Mutex;
+    Connection* connection;
 
-	struct MessageEntry;
-	struct MessageEntry
-	{
-		unsigned char *message;
+    struct MessageEntry;
+    struct MessageEntry {
+        unsigned char* message;
         int length;
-		struct MessageEntry *next;
-	};
+        struct MessageEntry* next;
+    };
 
-	MessageEntry *m_Queue;
+    MessageEntry* m_Queue;
 
-	uint32_t m_TotalAdded;
-	uint32_t m_TotalAddedToHead;
-	uint32_t m_TotalAddedToTail;
-	uint32_t m_TotalRemoved;
-	uint32_t m_EntriesInQueue;
+    uint32_t m_TotalAdded;
+    uint32_t m_TotalAddedToHead;
+    uint32_t m_TotalAddedToTail;
+    uint32_t m_TotalRemoved;
+    uint32_t m_EntriesInQueue;
 };
 
 #endif // _MESSAGE_QUEUE_H_INCLUDED_
-

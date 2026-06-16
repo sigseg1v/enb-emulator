@@ -1,14 +1,13 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.Text;
 using System.IO;
 using System.Xml;
 using CommonTools;
-using System.Windows.Forms;
 using MissionEditor.Database;
 
 namespace MissionEditor.Nodes
 {
+    // Ported verbatim from tools/missioneditor/Nodes/Stage.cs.
     public class Stage
     {
         public enum ValidationType { FromDialog, Complete };
@@ -19,82 +18,43 @@ namespace MissionEditor.Nodes
         private List<Reward> m_rewards;
         private List<TalkTree> m_talkTrees;
 
-        public Stage()
-        {
-            clear();
-        }
+        public Stage() { clear(); }
 
         public void clear()
         {
             m_id = "";
             m_description = "";
-            if (m_completions != null
-                && m_completions.Count != 0)
-            {
-                m_completions.Clear();
-            }
+            if (m_completions != null && m_completions.Count != 0) m_completions.Clear();
             m_completions = null;
-            if (m_rewards != null
-                && m_rewards.Count != 0)
-            {
-                m_rewards.Clear();
-            }
+            if (m_rewards != null && m_rewards.Count != 0) m_rewards.Clear();
             m_rewards = null;
-            if (m_talkTrees != null
-                && m_talkTrees.Count != 0)
-            {
-                m_talkTrees.Clear();
-            }
+            if (m_talkTrees != null && m_talkTrees.Count != 0) m_talkTrees.Clear();
             m_talkTrees = null;
         }
 
-        public override string ToString()
-        {
-            return getId() + "." + getDescription();
-        }
+        public override string ToString() { return getId() + "." + getDescription(); }
 
-        public void setId(String id)
-        {
-            m_id = id;
-        }
-
-        public String getId()
-        {
-            return m_id;
-        }
-
-        public void setDescription(String description)
-        {
-            m_description = description;
-        }
-
-        public String getDescription()
-        {
-            return m_description;
-        }
+        public void setId(String id) { m_id = id; }
+        public String getId() { return m_id; }
+        public void setDescription(String description) { m_description = description; }
+        public String getDescription() { return m_description; }
 
         public void addCompletion(Completion completion)
         {
-            if (m_completions == null)
-            {
-                m_completions = new List<Completion>();
-            }
+            if (m_completions == null) m_completions = new List<Completion>();
             if (CheckBadCompletionDuplicates(completion))
             {
                 m_completions.Add(completion);
             }
         }
 
-        //TB to Rackle - is this the best way to do this?
         public Boolean CheckBadCompletionDuplicates(Completion completion)
         {
             switch (completion.getCompletionType())
             {
                 case CompletionType.Nearest_Nav:
-                    //there can be only one ... Nearest Nav
                     if (completion.contains(m_completions, CompletionType.Nearest_Nav))
                     {
-                        //already contains a Nearest_Nav, don't allow another
                         DataConfiguration.addValidation("You can only have one Nearest_Nav per stage completion.");
                         return false;
                     }
@@ -105,93 +65,31 @@ namespace MissionEditor.Nodes
             return true;
         }
 
-        public Boolean hasCompletions()
-        {
-            return m_completions != null && m_completions.Count != 0;
-        }
-
-        public List<Completion> getCompletions()
-        {
-            return m_completions;
-        }
-
-        public void removeCompletion(Completion completion)
-        {
-            if (m_completions != null)
-            {
-                m_completions.Remove(completion);
-            }
-        }
-
-        public void clearCompletions()
-        {
-            if (m_completions != null)
-            {
-                m_completions.Clear();
-            }
-        }
+        public Boolean hasCompletions() { return m_completions != null && m_completions.Count != 0; }
+        public List<Completion> getCompletions() { return m_completions; }
+        public void removeCompletion(Completion completion) { if (m_completions != null) m_completions.Remove(completion); }
+        public void clearCompletions() { if (m_completions != null) m_completions.Clear(); }
 
         public void addReward(Reward reward)
         {
-            if (m_rewards == null)
-            {
-                m_rewards = new List<Reward>();
-            }
+            if (m_rewards == null) m_rewards = new List<Reward>();
             m_rewards.Add(reward);
         }
 
-        public Boolean hasRewards()
-        {
-            return m_rewards != null && m_rewards.Count != 0;
-        }
-
-        public List<Reward> getRewards()
-        {
-            return m_rewards;
-        }
-
-        public void removeReward(Reward reward)
-        {
-            if (m_rewards != null)
-            {
-                m_rewards.Remove(reward);
-            }
-        }
-
-        public void clearRewards()
-        {
-            if (m_rewards != null)
-            {
-                m_rewards.Clear();
-            }
-        }
+        public Boolean hasRewards() { return m_rewards != null && m_rewards.Count != 0; }
+        public List<Reward> getRewards() { return m_rewards; }
+        public void removeReward(Reward reward) { if (m_rewards != null) m_rewards.Remove(reward); }
+        public void clearRewards() { if (m_rewards != null) m_rewards.Clear(); }
 
         public void addTalkTree(TalkTree talkTree)
         {
-            if(m_talkTrees == null)
-            {
-                m_talkTrees = new List<TalkTree>();
-            }
+            if (m_talkTrees == null) m_talkTrees = new List<TalkTree>();
             m_talkTrees.Add(talkTree);
         }
 
-        public void clearTalkTrees()
-        {
-            if (m_talkTrees != null)
-            {
-                m_talkTrees.Clear();
-            }
-        }
-
-        public Boolean hasTalkTrees()
-        {
-            return m_talkTrees != null && m_talkTrees.Count != 0;
-        }
-
-        public List<TalkTree> getTalkTrees()
-        {
-            return m_talkTrees;
-        }
+        public void clearTalkTrees() { if (m_talkTrees != null) m_talkTrees.Clear(); }
+        public Boolean hasTalkTrees() { return m_talkTrees != null && m_talkTrees.Count != 0; }
+        public List<TalkTree> getTalkTrees() { return m_talkTrees; }
 
         public void getTalkTreesXML(StringWriter stringWriter)
         {
@@ -204,10 +102,6 @@ namespace MissionEditor.Nodes
             }
         }
 
-        /// <summary>
-        /// Parse the XML nodes
-        /// </summary>
-        /// <param name="xmlNode">The <Stage></Stage> nodes</param>
         public void fromXml(XmlNode xmlNode)
         {
             String value;
@@ -218,7 +112,7 @@ namespace MissionEditor.Nodes
             {
                 if (stageChildNode.Name.Equals(XmlTag.DESCRIPTION))
                 {
-                    Xml.getValue(stageChildNode, !getId().Equals("0"), out value); // Optional for stage 0, required for others
+                    Xml.getValue(stageChildNode, !getId().Equals("0"), out value);
                     setDescription(value);
                 }
                 else if (stageChildNode.Name.Equals(XmlTag.COMPLETION))
@@ -241,15 +135,11 @@ namespace MissionEditor.Nodes
                 }
                 else
                 {
-                    MessageBox.Show("Unexpected node: " + stageChildNode.Name + " in the" + XmlTag.STAGE + " tag");
+                    Console.Error.WriteLine("Unexpected node: " + stageChildNode.Name + " in the" + XmlTag.STAGE + " tag");
                 }
             }
 
             addValidations(ValidationType.Complete);
-            /*if (!valid(ValidationType.Complete, out value))
-            {
-                throw (new Exception(value + "\n\n" + xmlNode.InnerXml));
-            }*/
         }
 
         public void getXML(StringWriter stringWriter)
@@ -261,24 +151,15 @@ namespace MissionEditor.Nodes
             }
             if (hasCompletions())
             {
-                foreach (Completion completion in getCompletions())
-                {
-                    completion.getXML(stringWriter);
-                }
+                foreach (Completion completion in getCompletions()) completion.getXML(stringWriter);
             }
             if (hasTalkTrees())
             {
-                foreach (TalkTree talkTree in getTalkTrees())
-                {
-                    talkTree.getXML(stringWriter);
-                }
+                foreach (TalkTree talkTree in getTalkTrees()) talkTree.getXML(stringWriter);
             }
             if (hasRewards())
             {
-                foreach (Reward reward in getRewards())
-                {
-                    reward.getXML(stringWriter);
-                }
+                foreach (Reward reward in getRewards()) reward.getXML(stringWriter);
             }
             stringWriter.WriteLine("</Stage>");
         }
@@ -288,34 +169,20 @@ namespace MissionEditor.Nodes
             if (hasCompletions())
             {
                 stringWriter.WriteLine("<tr><td colspan=\"2\"><BR><B>Completions<B></td></tr>");
-                foreach (Completion completion in getCompletions())
-                {
-                    completion.getReport(stringWriter);
-                }
+                foreach (Completion completion in getCompletions()) completion.getReport(stringWriter);
             }
             if (hasRewards())
             {
                 stringWriter.WriteLine("<tr><td colspan=\"2\"><BR><B>Rewards<B></td></tr>");
-                foreach (Reward reward in getRewards())
-                {
-                    reward.getReport(stringWriter);
-                }
+                foreach (Reward reward in getRewards()) reward.getReport(stringWriter);
             }
             if (hasTalkTrees())
             {
                 stringWriter.WriteLine("<tr><td colspan=\"2\"><BR><B>Talk Tree<B></td></tr>");
-                foreach (TalkTree talkTree in getTalkTrees())
-                {
-                    talkTree.getReport(stringWriter);
-                }
+                foreach (TalkTree talkTree in getTalkTrees()) talkTree.getReport(stringWriter);
             }
         }
 
-        /// <summary>
-        /// Add the Stage validations
-        /// </summary>
-        /// <param name="validationType">The type of validation to perform. 
-        ///     Only the dialog should use the FromDialog type.</param>
         public void addValidations(ValidationType validationType)
         {
             Int32 stageId;
@@ -347,11 +214,7 @@ namespace MissionEditor.Nodes
                             case CompletionType.Use_Skill_On_Mob_Type:
                             case CompletionType.Use_Skill_On_Object:
                                 actionCount = completion.getCount();
-                                if (actionCount == -1)
-                                {
-                                    // If there is no count then it "counts" as one
-                                    actionCount = 1;
-                                }
+                                if (actionCount == -1) actionCount = 1;
                                 totalActionCount += actionCount;
                                 break;
                         }
@@ -360,20 +223,8 @@ namespace MissionEditor.Nodes
                     {
                         DataConfiguration.addValidation("There cannot be more than 32 actions in a stage (Stage: " + getId() + ")");
                     }
-
-                    // Verify CompletionType interdependencies
-                    /*if (Completion.contains(getCompletions(), CompletionType.Take_Item_To_Location)
-                        && !Completion.contains(getCompletions(), CompletionType.Nearest_Nav))
-                    {
-                        DataConfiguration.addValidation("The type '"
-                                                            + CompletionType.Take_Item_To_Location.ToString()
-                                                            + "' requires the '"
-                                                            + CompletionType.Nearest_Nav.ToString()
-                                                            + "' type (Stage: " + getId() + ").");
-                    }*/
                 }
-            } // ValidationType.Complete
+            }
         }
-
     }
 }

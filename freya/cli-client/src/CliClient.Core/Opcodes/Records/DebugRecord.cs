@@ -31,7 +31,7 @@ public sealed class DebugRecord : PacketRecord
     {
         if (Payload.Length < 12) { Flag(sb, $"DEBUG truncated -- {Payload.Length} bytes, expected 12"); return; }
 
-        FHex(sb, 0, "GameID",   ReadI32LE(Payload, 0), "(LE; object id -- cross-proven LE via this session's StarbaseRoomChange)");
+        FHex(sb, 0, "GameID", ReadI32LE(Payload, 0), "(LE; object id -- cross-proven LE via this session's StarbaseRoomChange)");
         FDec(sb, 4, "Unknown4", ReadI32LE(Payload, 4), "(LE by convention; HandleDebug discards the body -- unverified, constant 0x21 in capture)");
         FDec(sb, 8, "Unknown8", ReadI32LE(Payload, 8), "(LE by convention; unverified -- 0 in every captured frame)");
     }

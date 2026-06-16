@@ -36,36 +36,35 @@
 
 #ifdef _WIN32
 // Win32 (MinGW) sockets. winsock2.h must precede windows.h.
-#  ifndef WIN32_LEAN_AND_MEAN
-#    define WIN32_LEAN_AND_MEAN
-#  endif
-#  include <winsock2.h>
-#  include <ws2tcpip.h>
-#  include <windows.h>
-#  include <io.h>
-#  include <process.h>
-#  include <unistd.h>   // MinGW-posix: usleep, sleep, close
-#  include <pthread.h>  // MinGW-posix: winpthreads
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+#include <io.h>
+#include <process.h>
+#include <unistd.h>  // MinGW-posix: usleep, sleep, close
+#include <pthread.h> // MinGW-posix: winpthreads
 // winsock2.h provides SOCKET / INVALID_SOCKET / SOCKET_ERROR /
 // closesocket / WSAGetLastError natively. MinGW also ships _vsnprintf.
 // strcasecmp / strncasecmp aren't in <string.h> on Win32 — alias them
 // to MSVC's _stricmp / _strnicmp so legacy call sites compile.
-#  ifndef strcasecmp
-#    define strcasecmp  _stricmp
-#  endif
-#  ifndef strncasecmp
-#    define strncasecmp _strnicmp
-#  endif
+#ifndef strcasecmp
+#define strcasecmp _stricmp
+#endif
+#ifndef strncasecmp
+#define strncasecmp _strnicmp
+#endif
 // MSG_NOSIGNAL doesn't exist on Win32 (no SIGPIPE on send-to-closed).
-#  ifndef MSG_NOSIGNAL
-#    define MSG_NOSIGNAL 0
-#  endif
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
 // POSIX setenv → Win32 _putenv_s. Ignore `overwrite` like setenv does
 // (current callers all pass overwrite=0, and we only setenv after gating
 // on getenv being empty, so the semantics line up).
-#  include <stdlib.h>
-static inline int setenv(const char *name, const char *value, int /*overwrite*/)
-{
+#include <stdlib.h>
+static inline int setenv(const char* name, const char* value, int /*overwrite*/) {
     return _putenv_s(name, value);
 }
 // POSIX `in_addr_t` is the inet_addr() return type / IPv4 in network byte
@@ -73,66 +72,66 @@ static inline int setenv(const char *name, const char *value, int /*overwrite*/)
 typedef ULONG in_addr_t;
 // Socket shutdown(2) "how" values. POSIX: SHUT_RD/SHUT_WR/SHUT_RDWR.
 // Winsock: SD_RECEIVE/SD_SEND/SD_BOTH. Map the POSIX names.
-#  ifndef SHUT_RD
-#    define SHUT_RD   SD_RECEIVE
-#  endif
-#  ifndef SHUT_WR
-#    define SHUT_WR   SD_SEND
-#  endif
-#  ifndef SHUT_RDWR
-#    define SHUT_RDWR SD_BOTH
-#  endif
+#ifndef SHUT_RD
+#define SHUT_RD SD_RECEIVE
+#endif
+#ifndef SHUT_WR
+#define SHUT_WR SD_SEND
+#endif
+#ifndef SHUT_RDWR
+#define SHUT_RDWR SD_BOTH
+#endif
 #else
 // POSIX (Linux) sockets + threading.
-#  include <sys/types.h>
-#  include <sys/socket.h>
-#  include <netinet/in.h>
-#  include <netinet/tcp.h>
-#  include <arpa/inet.h>
-#  include <netdb.h>
-#  include <unistd.h>
-#  include <fcntl.h>
-#  include <errno.h>
-#  include <pthread.h>
-#  include <strings.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <pthread.h>
+#include <strings.h>
 
 // MSVC names that legacy code uses; map to their POSIX equivalents.
-#  define _vsnprintf  vsnprintf
-#  define closesocket(s) ::close(s)
-#  define WSAGetLastError() errno
+#define _vsnprintf vsnprintf
+#define closesocket(s) ::close(s)
+#define WSAGetLastError() errno
 
 // MSVC-only directives gcc doesn't understand.
-#  define __cdecl
-#  ifndef WINAPI
-#    define WINAPI
-#  endif
+#define __cdecl
+#ifndef WINAPI
+#define WINAPI
+#endif
 
-#  ifndef MAX_PATH
-#    define MAX_PATH 260
-#  endif
+#ifndef MAX_PATH
+#define MAX_PATH 260
+#endif
 
 // Phase M Wave 3: the proxy's ~25-symbol Win32 typedef shim was retired.
 // Only SOCKET / INVALID_SOCKET / SOCKET_ERROR are kept — 60+ Linux-active
 // call sites across the listener/connection layer use them as canonical
 // socket idioms, and rewriting them is cosmetic.
 typedef int SOCKET;
-#  ifndef INVALID_SOCKET
-#    define INVALID_SOCKET (-1)
-#  endif
-#  ifndef SOCKET_ERROR
-#    define SOCKET_ERROR   (-1)
-#  endif
+#ifndef INVALID_SOCKET
+#define INVALID_SOCKET (-1)
+#endif
+#ifndef SOCKET_ERROR
+#define SOCKET_ERROR (-1)
+#endif
 #endif // !_WIN32
 
 // The Net7Proxy logs/database paths are unused on the server-side Linux
 // build (Net7Proxy was originally a client-side launcher). Keep the names
 // defined so any legacy reference compiles.
-#define SERVER_LOGS_PATH        "./logs/"
-#define SERVER_HTML_PATH        "./html/"
-#define SERVER_DATABASE_PATH	"./database/"
-#define SERVER_USER_PATH        "./database/Users/"
+#define SERVER_LOGS_PATH "./logs/"
+#define SERVER_HTML_PATH "./html/"
+#define SERVER_DATABASE_PATH "./database/"
+#define SERVER_USER_PATH "./database/Users/"
 
-#define CONFIG_FILE             "Net7Config.cfg"
+#define CONFIG_FILE "Net7Config.cfg"
 
 // ATTRIB_PACKED + sized integer typedefs are defined in net7/Packing.h
 // (included by net7/PacketStructures.h). Don't redefine here — the
@@ -141,22 +140,20 @@ typedef int SOCKET;
 
 #define PERIODIC_CACHE_SEND_SIZE 512
 
-
-
 // This should be incremented as needed to prevent obsolete Sector Servers
 // from connecting to the Master Server.
-#define SECTOR_SERVER_MAJOR_VERSION			0
-#define SECTOR_SERVER_MINOR_VERSION			2
+#define SECTOR_SERVER_MAJOR_VERSION 0
+#define SECTOR_SERVER_MINOR_VERSION 2
 
 // Three server types are supported by the TcpListener and Connection classes
-#define CONNECTION_TYPE_CLIENT_TO_GLOBAL_SERVER			1
-#define CONNECTION_TYPE_CLIENT_TO_MASTER_SERVER			2
-#define	CONNECTION_TYPE_CLIENT_TO_SECTOR_SERVER			3
-#define CONNECTION_TYPE_MASTER_SERVER_TO_SECTOR_SERVER	4
-#define CONNECTION_TYPE_SECTOR_SERVER_TO_SECTOR_SERVER	5
-#define CONNECTION_TYPE_PROXY_TO_SECTOR_SERVER          6
-#define CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY          9
-#define CONNECTION_TYPE_GLOBAL_PROXY_TO_SERVER		    10
+#define CONNECTION_TYPE_CLIENT_TO_GLOBAL_SERVER 1
+#define CONNECTION_TYPE_CLIENT_TO_MASTER_SERVER 2
+#define CONNECTION_TYPE_CLIENT_TO_SECTOR_SERVER 3
+#define CONNECTION_TYPE_MASTER_SERVER_TO_SECTOR_SERVER 4
+#define CONNECTION_TYPE_SECTOR_SERVER_TO_SECTOR_SERVER 5
+#define CONNECTION_TYPE_PROXY_TO_SECTOR_SERVER 6
+#define CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY 9
+#define CONNECTION_TYPE_GLOBAL_PROXY_TO_SERVER 10
 
 // Port macros + CLIENT_TYPE_* tags live in common/include/net7/Ports.h
 // (Phase R Wave 2 — wire-load-bearing, kept in exactly one place).
@@ -167,16 +164,16 @@ typedef int SOCKET;
 // Phase M vocabulary sweep: monotonic ms tick counter replaces GetTickCount().
 #include <net7/Ticks.h>
 
-#define	MAX_BUFFER					25000
+#define MAX_BUFFER 25000
 extern unsigned short ssl_port;
 
-#define	RACE_TERRAN					0
-#define RACE_JENQUAI				1
-#define RACE_PROGEN					2
+#define RACE_TERRAN 0
+#define RACE_JENQUAI 1
+#define RACE_PROGEN 2
 
-#define PROFESSION_WARRIOR			0
-#define PROFESSION_TRADER		    1
-#define PROFESSION_EXPLORER			2
+#define PROFESSION_WARRIOR 0
+#define PROFESSION_TRADER 1
+#define PROFESSION_EXPLORER 2
 
 extern char g_LogFilename[MAX_PATH];
 extern char g_InternalIP[MAX_PATH];
@@ -186,22 +183,21 @@ extern int g_DASE;
 
 // Phase AH: proxy<->server DTLS policy, resolved at startup (Net7.cpp
 // InitProxyDtlsPolicy) and consumed per-socket by UDPClient::InitDtls.
-extern bool g_DtlsPlaintext;             // true ONLY when explicitly opted out
+extern bool g_DtlsPlaintext;              // true ONLY when explicitly opted out
 extern char g_DtlsVerifyDomain[MAX_PATH]; // server cert hostname to verify
 extern char g_DtlsCaFile[MAX_PATH];       // CA file ("" = system trust store)
 
 extern char g_Galaxy_Name[MAX_PATH];
 extern long g_AddrStore;
 
-
 void LockMessageQueue();
 void UnlockMessageQueue();
-void LogMessage(char *format, ...);
-void LogVMessage(char *format, ...);
-void LogDebug(char *format, ...);
-void LogChatMsg(char *format, ...);
-void DumpBuffer(unsigned char *buffer, int length);
-void DumpBufferToFile(unsigned char *buffer, int length, char *filename, bool rawData);
+void LogMessage(char* format, ...);
+void LogVMessage(char* format, ...);
+void LogDebug(char* format, ...);
+void LogChatMsg(char* format, ...);
+void DumpBuffer(unsigned char* buffer, int length);
+void DumpBufferToFile(unsigned char* buffer, int length, char* filename, bool rawData);
 // ShutdownClient is a no-op server-side stub (no game client in this
 // process); kept for the master-server teardown path.
 bool ShutdownClient();
@@ -215,11 +211,11 @@ class StringManager;
 class ItemBaseManager;
 class AccountManager;
 
-extern ServerManager * g_ServerMgr;
-extern GMemoryHandler * g_GlobMemMgr;
-extern PlayerManager * g_PlayerMgr;
-extern ItemBaseManager * g_ItemBaseMgr;
-extern AccountManager * g_AccountMgr;
+extern ServerManager* g_ServerMgr;
+extern GMemoryHandler* g_GlobMemMgr;
+extern PlayerManager* g_PlayerMgr;
+extern ItemBaseManager* g_ItemBaseMgr;
+extern AccountManager* g_AccountMgr;
 extern bool g_LoggedIn;
 extern bool g_LogoffConfirmed;
 
@@ -232,8 +228,6 @@ extern bool g_Debug_Launch;
 
 // _CrtCheckMemory was MSVC-only; on Linux this is a no-op so legacy
 // call sites in the proxy compile cleanly.
-static inline void check_memory ()
-{
-}
+static inline void check_memory() {}
 
 #endif // _NET_7_H_INCLUDED_

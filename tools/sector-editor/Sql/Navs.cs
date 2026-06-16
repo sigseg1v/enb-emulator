@@ -1,7 +1,5 @@
 using System;
-using System.Collections.Generic;
 using System.Data;
-using System.Text;
 
 namespace N7.Sql
 {
@@ -11,8 +9,8 @@ namespace N7.Sql
 
         public Navs()
         {
-            String navQuery = "SELECT * FROM sectors order by system_id, name";
-            navs = Database.executeQuery(Database.DatabaseName.net7, navQuery);
+            navs = Database.executeQuery(Database.DatabaseName.net7,
+                "SELECT * FROM sectors order by system_id, name");
         }
 
         public DataTable getSectorTable()

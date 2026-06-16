@@ -118,16 +118,17 @@ endif()
 target_compile_options(net7proxy PRIVATE
     -Wall
     -Wextra
-    -Wno-unused-parameter
-    -Wno-unused-variable
-    -Wno-unused-function
-    -Wno-unused-but-set-variable
-    -Wno-sign-compare
-    -Wno-reorder
-    -Wno-deprecated-declarations
-    -Wno-address-of-packed-member
+    # Phase AT-4: the only two warning categories left suppressed are pervasive
+    # idioms in the inherited Net-7 proxy C++ that cannot be fixed without
+    # large, behaviour-risky churn across CC-licensed code:
+    #   -Wno-write-strings  : ~174 `char* = "literal"` sites; const-correcting
+    #                         them cascades through char*-taking signatures.
+    #   -Wno-unused-function: ~26 dead static helpers kept from upstream.
+    # Every other former suppression was removed in AT-4: six suppressed zero
+    # warnings (dead config), and -Wreorder / -Wunused-variable were fixed in
+    # the source instead (ServerManager, SSL_Listener, SectorServerManager).
     -Wno-write-strings
-    -Wno-pointer-arith
+    -Wno-unused-function
     -fpermissive
 )
 

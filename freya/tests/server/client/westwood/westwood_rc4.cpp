@@ -45,4 +45,4 @@ void Rc4::SwapByte(unsigned char* a, unsigned char* b) {
     *b = tmp;
 }
 
-}  // namespace westwood
+} // namespace westwood

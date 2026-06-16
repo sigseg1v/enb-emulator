@@ -25,12 +25,12 @@ public sealed class InventorySortRecord : PacketRecord
     {
         if (Payload.Length < 21) { Flag(sb, $"INVENTORY_SORT truncated -- {Payload.Length} bytes, expected 21"); return; }
 
-        FHex(sb,  0, "ID",        ReadI32BE(Payload,  0), "(BE -- ntohl at parse)");
-        FDec(sb,  4, "TargetInv", ReadI32BE(Payload,  4), TargetInvNote(ReadI32BE(Payload, 4)));
-        FDec(sb,  8, "Sort1",     ReadI32BE(Payload,  8), SortKeyNote(ReadI32BE(Payload,  8)));
-        FDec(sb, 12, "Sort2",     ReadI32BE(Payload, 12), SortKeyNote(ReadI32BE(Payload, 12)));
-        FDec(sb, 16, "Sort3",     ReadI32BE(Payload, 16), SortKeyNote(ReadI32BE(Payload, 16)));
-        FDec(sb, 20, "Reverse",   Payload[20], Payload[20] != 0 ? "(reverse order)" : "(ascending)");
+        FHex(sb, 0, "ID", ReadI32BE(Payload, 0), "(BE -- ntohl at parse)");
+        FDec(sb, 4, "TargetInv", ReadI32BE(Payload, 4), TargetInvNote(ReadI32BE(Payload, 4)));
+        FDec(sb, 8, "Sort1", ReadI32BE(Payload, 8), SortKeyNote(ReadI32BE(Payload, 8)));
+        FDec(sb, 12, "Sort2", ReadI32BE(Payload, 12), SortKeyNote(ReadI32BE(Payload, 12)));
+        FDec(sb, 16, "Sort3", ReadI32BE(Payload, 16), SortKeyNote(ReadI32BE(Payload, 16)));
+        FDec(sb, 20, "Reverse", Payload[20], Payload[20] != 0 ? "(reverse order)" : "(ascending)");
     }
 
     private static string TargetInvNote(int inv) => inv switch
@@ -42,11 +42,11 @@ public sealed class InventorySortRecord : PacketRecord
 
     private static string SortKeyNote(int key) => key switch
     {
-        1  => "(BE; sort by name)",
-        5  => "(BE; sort by category)",
+        1 => "(BE; sort by name)",
+        5 => "(BE; sort by category)",
         10 => "(BE; sort by value)",
-        4  => "(BE; secondary key -- no-op)",
-        8  => "(BE; tertiary key -- no-op)",
-        _  => "(BE; sort key)",
+        4 => "(BE; secondary key -- no-op)",
+        8 => "(BE; tertiary key -- no-op)",
+        _ => "(BE; sort key)",
     };
 }

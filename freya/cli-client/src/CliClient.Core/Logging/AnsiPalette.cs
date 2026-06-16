@@ -20,25 +20,25 @@ public static class AnsiPalette
     public static bool Enabled { get; set; } = InitialEnabled();
 
     // 8-colour-safe foreground codes.
-    public const string Reset        = "\x1b[0m";
-    public const string Bold         = "\x1b[1m";
-    public const string Dim          = "\x1b[2m";
+    public const string Reset = "\x1b[0m";
+    public const string Bold = "\x1b[1m";
+    public const string Dim = "\x1b[2m";
 
-    public const string Cyan         = "\x1b[36m";   // opcode header
-    public const string BrightCyan   = "\x1b[96m";
-    public const string Magenta      = "\x1b[35m";   // compare-mismatch
-    public const string Yellow       = "\x1b[33m";   // suspicious value (zero, sentinel)
+    public const string Cyan = "\x1b[36m";   // opcode header
+    public const string BrightCyan = "\x1b[96m";
+    public const string Magenta = "\x1b[35m";   // compare-mismatch
+    public const string Yellow = "\x1b[33m";   // suspicious value (zero, sentinel)
     public const string BrightYellow = "\x1b[93m";   // outbound packet header in dump-on live tail
-    public const string Red          = "\x1b[31m";   // hard error flag
-    public const string BrightRed    = "\x1b[91m";
-    public const string Green        = "\x1b[32m";   // values, ok-compare
-    public const string Blue         = "\x1b[34m";   // ASCII gutter
-    public const string Gray         = "\x1b[90m";   // hex offsets
+    public const string Red = "\x1b[31m";   // hard error flag
+    public const string BrightRed = "\x1b[91m";
+    public const string Green = "\x1b[32m";   // values, ok-compare
+    public const string Blue = "\x1b[34m";   // ASCII gutter
+    public const string Gray = "\x1b[90m";   // hex offsets
 
     // Per-byte background colours for the annotated hex view.
     //   KnownBg   = black fg + bright-green bg  (bytes covered by a decoded field)
     //   UnknownBg = black fg + 256-colour orange bg (bytes not yet decoded)
-    public const string KnownBg   = "\x1b[30;102m";
+    public const string KnownBg = "\x1b[30;102m";
     public const string UnknownBg = "\x1b[30;48;5;214m";
 
     private static bool InitialEnabled()
@@ -65,12 +65,12 @@ public static class AnsiPalette
     // these give the rest of the REPL (prompt, command output, suggestions)
     // a single consistent vocabulary. Each is a no-op when colour is off, so
     // piped / non-interactive output stays plain.
-    public static string Head(string s)   => Colorize(BrightCyan + Bold, s);  // section titles
-    public static string Ok(string s)     => Colorize(Green, s);              // success / done
-    public static string Err(string s)    => Colorize(BrightRed, s);          // failures
-    public static string Warn(string s)   => Colorize(Yellow, s);            // hints / usage
-    public static string Info(string s)   => Colorize(Cyan, s);              // neutral status
-    public static string Muted(string s)  => Colorize(Gray, s);              // secondary detail
+    public static string Head(string s) => Colorize(BrightCyan + Bold, s);  // section titles
+    public static string Ok(string s) => Colorize(Green, s);              // success / done
+    public static string Err(string s) => Colorize(BrightRed, s);          // failures
+    public static string Warn(string s) => Colorize(Yellow, s);            // hints / usage
+    public static string Info(string s) => Colorize(Cyan, s);              // neutral status
+    public static string Muted(string s) => Colorize(Gray, s);              // secondary detail
     public static string Accent(string s) => Colorize(BrightCyan, s);        // names / emphasis
-    public static string Value(string s)  => Colorize(BrightYellow, s);      // ids, coords, counts
+    public static string Value(string s) => Colorize(BrightYellow, s);      // ids, coords, counts
 }

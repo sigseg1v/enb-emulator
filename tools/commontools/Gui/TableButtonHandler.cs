@@ -1,21 +1,23 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Windows.Forms;
+using System;
+using Avalonia.Controls;
+using Avalonia.Interactivity;
 
 namespace CommonTools.Gui
 {
+    // Avalonia port of the WinForms TableButtonHandler. The WinForms
+    // version coupled ListView + 5 Buttons; here we use ListBox (its
+    // SelectedItems is List-based, matching the move-up/move-down logic
+    // more naturally than a DataGrid).
     public class TableButtonHandler
     {
-        private ListView table;
-        private Button add;
-        private Button delete;
-        private Button edit;
-        private Button up;
-        private Button down;
+        readonly ListBox table;
+        readonly Button add;
+        readonly Button delete;
+        readonly Button edit;
+        readonly Button up;
+        readonly Button down;
 
-        public TableButtonHandler(ListView table, Button add, Button delete, Button edit, Button up, Button down)
+        public TableButtonHandler(ListBox table, Button add, Button delete, Button edit, Button up, Button down)
         {
             this.table = table;
             this.add = add;
@@ -24,79 +26,38 @@ namespace CommonTools.Gui
             this.up = up;
             this.down = down;
 
-            table.SelectedIndexChanged += new EventHandler(onTableRowSelected);
-            up.Click += new EventHandler(onMoveUp);
-            down.Click += new EventHandler(onMoveDown);
+            table.SelectionChanged += OnSelectionChanged;
+            up.Click += OnMoveUp;
+            down.Click += OnMoveDown;
         }
 
-        private void onTableRowSelected(object sender, EventArgs e)
+        void OnSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            delete.Enabled = table.SelectedItems.Count != 0;
-            if (edit != null)
-            {
-                edit.Enabled = false; // table.SelectedItems.Count == 1;
-            }
-            up.Enabled = table.SelectedItems.Count == 1
-                            && table.SelectedIndices[0] != 0;
-            down.Enabled = table.SelectedItems.Count == 1
-                            && table.SelectedIndices[0] != table.Items.Count - 1;
+            int count = table.SelectedItems != null ? table.SelectedItems.Count : 0;
+            if (delete != null) delete.IsEnabled = count != 0;
+            if (edit != null) edit.IsEnabled = false;
+            if (up != null) up.IsEnabled = count == 1 && table.SelectedIndex > 0;
+            if (down != null) down.IsEnabled = count == 1 && table.SelectedIndex < (table.ItemCount - 1);
         }
 
-        private void onMoveUp(object sender, EventArgs e)
+        void OnMoveUp(object sender, RoutedEventArgs e)
         {
-            table.BeginUpdate();
-            int index = table.SelectedItems[0].Index;
-            ListViewItem lvItem = table.Items[index];
-            table.Items.Remove(lvItem);
-            table.Items.Insert(index - 1, lvItem);
-            /*int ilevel = 0;
-            if (table.SelectedItems.Count > 0)
-            {
-                for (int itmp = 0; itmp <= table.Items.Count - 1; itmp++)
-                {
-                    if (table.Items[itmp].Selected == true)
-                    {
-                        ilevel = itmp;
-                        if (ilevel - 1 >= 0)
-                        {
-                            ListViewItem lvitem = table.Items[itmp];
-                            table.Items.Remove(lvitem);
-                            table.Items.Insert(ilevel - 1, lvitem);
-                        }
-
-                    }
-                }
-            }*/
-            table.EndUpdate();
+            int index = table.SelectedIndex;
+            if (index <= 0) return;
+            var item = table.Items[index];
+            table.Items.RemoveAt(index);
+            table.Items.Insert(index - 1, item);
+            table.SelectedIndex = index - 1;
         }
 
-        private void onMoveDown(object sender, EventArgs e)
+        void OnMoveDown(object sender, RoutedEventArgs e)
         {
-            table.BeginUpdate();
-            int index = table.SelectedItems[0].Index;
-            ListViewItem lvItem = table.Items[index];
-            table.Items.Remove(lvItem);
-            table.Items.Insert(index + 1, lvItem);
-            /*int iLevel = 0;
-            if (table.SelectedItems.Count > 0)
-            {
-                for (int iTmp = 0; iTmp <= table.Items.Count - 1; iTmp++)
-                {
-                    if (table.Items[iTmp].Selected == true)
-                    {
-                        iLevel = iTmp;
-                        if (iLevel + 1 <= table.Items.Count - 1)
-                        {
-                            ListViewItem lvItem = table.Items[iTmp];
-                            table.Items.Remove(lvItem);
-                            table.Items.Insert(iLevel + 1, lvItem);
-                        }
-                    }
-                }
-            }*/
-            table.EndUpdate();
+            int index = table.SelectedIndex;
+            if (index < 0 || index >= table.ItemCount - 1) return;
+            var item = table.Items[index];
+            table.Items.RemoveAt(index);
+            table.Items.Insert(index + 1, item);
+            table.SelectedIndex = index + 1;
         }
-
     }
-
 }

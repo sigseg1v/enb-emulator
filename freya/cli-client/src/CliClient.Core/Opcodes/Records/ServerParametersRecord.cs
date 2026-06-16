@@ -23,26 +23,26 @@ public sealed class ServerParametersRecord : PacketRecord
     {
         if (Payload.Length < 70) { Flag(sb, $"SERVER_PARAMETERS truncated -- {Payload.Length} bytes, expected 70"); return; }
 
-        FFloat(sb,  0, "ZBandMin",        ReadF32LE(Payload,  0));
-        FFloat(sb,  4, "ZBandMax",        ReadF32LE(Payload,  4));
-        FFloat(sb,  8, "XMin",            ReadF32LE(Payload,  8));
-        FFloat(sb, 12, "YMin",            ReadF32LE(Payload, 12));
-        FFloat(sb, 16, "XMax",            ReadF32LE(Payload, 16));
-        FFloat(sb, 20, "YMax",            ReadF32LE(Payload, 20));
-        FFloat(sb, 24, "FogNear",         ReadF32LE(Payload, 24));
-        FFloat(sb, 28, "FogFar",          ReadF32LE(Payload, 28));
-        FDec(sb,   32, "DebrisMode",      ReadI32LE(Payload, 32));
-        FDec(sb,   36, "LightBackdrop",   Payload[36]);
-        FDec(sb,   37, "FogBackdrop",     Payload[37]);
-        FDec(sb,   38, "SwapBackdrop",    Payload[38]);
+        FFloat(sb, 0, "ZBandMin", ReadF32LE(Payload, 0));
+        FFloat(sb, 4, "ZBandMax", ReadF32LE(Payload, 4));
+        FFloat(sb, 8, "XMin", ReadF32LE(Payload, 8));
+        FFloat(sb, 12, "YMin", ReadF32LE(Payload, 12));
+        FFloat(sb, 16, "XMax", ReadF32LE(Payload, 16));
+        FFloat(sb, 20, "YMax", ReadF32LE(Payload, 20));
+        FFloat(sb, 24, "FogNear", ReadF32LE(Payload, 24));
+        FFloat(sb, 28, "FogFar", ReadF32LE(Payload, 28));
+        FDec(sb, 32, "DebrisMode", ReadI32LE(Payload, 32));
+        FDec(sb, 36, "LightBackdrop", Payload[36]);
+        FDec(sb, 37, "FogBackdrop", Payload[37]);
+        FDec(sb, 38, "SwapBackdrop", Payload[38]);
         FFloat(sb, 39, "BackdropFogNear", ReadF32LE(Payload, 39));
-        FFloat(sb, 43, "BackdropFogFar",  ReadF32LE(Payload, 43));
-        FFloat(sb, 47, "MaxTilt",         ReadF32LE(Payload, 47));
-        FDec(sb,   51, "AutoLevel",       Payload[51]);
-        FFloat(sb, 52, "ImpulseRate",     ReadF32LE(Payload, 52));
-        FFloat(sb, 56, "DecayVelocity",   ReadF32LE(Payload, 56));
-        FFloat(sb, 60, "DecaySpin",       ReadF32LE(Payload, 60));
-        FDec(sb,   64, "BackdropBaseAsset", ReadI16LE(Payload, 64));
-        FHex(sb,   66, "SectorNum",       ReadU32LE(Payload, 66));
+        FFloat(sb, 43, "BackdropFogFar", ReadF32LE(Payload, 43));
+        FFloat(sb, 47, "MaxTilt", ReadF32LE(Payload, 47));
+        FDec(sb, 51, "AutoLevel", Payload[51]);
+        FFloat(sb, 52, "ImpulseRate", ReadF32LE(Payload, 52));
+        FFloat(sb, 56, "DecayVelocity", ReadF32LE(Payload, 56));
+        FFloat(sb, 60, "DecaySpin", ReadF32LE(Payload, 60));
+        FDec(sb, 64, "BackdropBaseAsset", ReadI16LE(Payload, 64));
+        FHex(sb, 66, "SectorNum", ReadU32LE(Payload, 66));
     }
 }

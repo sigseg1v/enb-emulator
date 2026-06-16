@@ -29,4 +29,4 @@ private:
     unsigned char y_;
 };
 
-}  // namespace westwood
+} // namespace westwood

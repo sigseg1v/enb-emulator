@@ -1,23 +1,14 @@
 # 07 - Tools toolchain
 
 The `tools/` directory holds the C# editor suite for the content database
-plus a few legacy C++ utilities. There are **two parallel sets** of C#
-projects:
-
-- **`<tool>-avalonia/`** -- ports targeting `net10.0` + **Avalonia 11**.
-  Run **natively on Linux** (no WINE). These are the recommended
-  binaries. The central solution that pulls them in is
-  `tools/FreyaTools.slnx` (SDK-style XML solution); each port also has its
-  own `.csproj` and most can be launched directly.
-- **`<tool>/`** -- the original 2008-era WinForms code, modernized to
-  SDK-style projects targeting `net10.0-windows` with
-  `<UseWindowsForms>true</UseWindowsForms>`. These cross-compile
-  (`dotnet build tools/FreyaTools.slnx`) but their runtime is Windows /
-  WINE only. Kept for reference and diffing.
+plus a few legacy C++ utilities. All user-facing C# editors are
+**Avalonia 11 / .NET 10** ports (`tools/<name>/`) that run
+**natively on Linux** (no WINE). The original WinForms projects have been
+removed. The central solution is `tools/FreyaTools.slnx` (SDK-style XML
+solution); each port also has its own `.csproj` and can be launched directly.
 
 Every user-facing editor has an Avalonia port, including the Item Editor
-(`tools/item-editor-avalonia/`). The original `tools/itemeditor/`
-(WinForms) is kept for reference. See `tools/README.md` for the
+(`tools/item-editor/`). See `tools/README.md` for the
 user-facing quickstart and the launch recipes.
 
 ## Quickstart
@@ -31,7 +22,7 @@ just init                    # boots Postgres 16 + applies the schema
 Then either launch the central GUI launcher:
 
 ```sh
-just launch                  # toolslauncher-avalonia
+just launch                  # toolslauncher
 ```
 
 Or jump straight to a specific editor:
@@ -52,7 +43,7 @@ just launch-toolspatcher     # patcher for the editor binaries
 ```
 
 `just --list` prints every recipe. Each recipe runs
-`dotnet run --project tools/<name>-avalonia/`.
+`dotnet run --project tools/<name>/`.
 
 Editors that hit the DB pop a Login dialog on startup; default dev creds
 match the docker-compose stack: host `localhost`, port `5434`, user `net7`,
@@ -66,13 +57,13 @@ password `net7`, database `net7` (or `net7_user` for the accounts schema).
 
 ## Per-tool reference
 
-### `commontools/` + `commontools-avalonia/` -- CommonTools (shared library)
+### `commontools/` -- CommonTools (shared library)
 
 Type: library.
 Purpose: shared DB connection, login dialog, enumerations, common widgets,
 XML helpers. Every editor depends on this.
-Avalonia notes: `commontools-avalonia/` is the Avalonia 11 port; the login
-dialog is Avalonia XAML. The DB layer talks to Postgres via Npgsql.
+Notes: the login dialog is Avalonia XAML. The DB layer talks to Postgres
+via Npgsql.
 
 ### `chunktypes/` -- ChunkTypes (legacy C++)
 
@@ -81,16 +72,16 @@ Purpose: dumps the chunk-type tree of a Westwood 3D (`.w3d`) file to text,
 for offline asset inspection.
 Status: legacy C++ utility; not in `FreyaTools.slnx`. Windows-only.
 
-### `dataimport/` + `dataimport-avalonia/` -- DataImport
+### `dataimport/` -- DataImport
 
-Type: Avalonia (recommended) / WinForms (legacy).
+Type: Avalonia.
 Purpose: bulk content imports into the database -- assets, skills, item
 references. Reuses CommonTools' login dialog.
 Launch: `just launch-dataimport`.
 
-### `effect-editor/` + `effect-editor-avalonia/` -- Effect Editor
+### `effect-editor/` -- Effect Editor
 
-Type: Avalonia (recommended) / WinForms (legacy).
+Type: Avalonia.
 Purpose: edit the `effects`, `item_effect_base`, `item_effect_container`,
 and `buffs` tables.
 Launch: `just launch-effect-editor`.
@@ -104,29 +95,28 @@ SkillParser. The current `Main` runs `new SkillParser()` and exits;
 other parsers are commented out.
 Status: console tool, no Avalonia port needed; runs as-is on `dotnet`.
 
-### `enbpatcher/` + `enbpatcher-avalonia/` -- EnBPatcher
+### `enbpatcher/` -- EnBPatcher
 
-Type: Avalonia (recommended) / WinForms (legacy).
+Type: Avalonia.
 Purpose: client-side patcher utility -- generates and applies CRC32 patches
 to the client binary.
 Launch: `just launch-enbpatcher`.
 
-### `faction-editor/` + `faction-editor-avalonia/` -- Faction Editor
+### `faction-editor/` -- Faction Editor
 
-Type: Avalonia (recommended) / WinForms (legacy).
+Type: Avalonia.
 Purpose: edit `factions`, `faction_matrix`, `manufacturers`.
 Launch: `just launch-faction-editor`.
 
-### `itemeditor/` + `item-editor-avalonia/` -- Item Editor
+### `item-editor/` -- Item Editor
 
-Type: Avalonia (recommended) / WinForms (legacy).
+Type: Avalonia.
 Purpose: edit `item_base` and all `item_*` subtype tables (ammo, beam,
 device, engine, missile, projectile, reactor, shield), plus
 `item_manufacture`, `item_other_req`, `item_refine`, `item_effects`.
 Launch: `just launch-item-editor`.
-Notes: `tools/item-editor-avalonia/` is the Avalonia port and runs
-natively on Linux; `tools/itemeditor/` is the original WinForms project,
-kept for reference and Windows / WINE use.
+Notes: the upstream WinForms project (`tools/itemeditor/`) had no
+`.csproj` and has been removed. The Avalonia port is the only version.
 
 ### `LaunchFreya/` -- Freya (game client launcher)
 
@@ -137,10 +127,8 @@ WINE). On the Windows build it self-updates: it hashes its own
 `/updateCheck` endpoint whether they are current, and swaps the EXEs in
 place when a newer release is published.
 Launch: `just launch-net7`.
-Notes: the superseded WinForms launcher (`launchnet7/`, with its
-upstream `ExeUpdater`/`FileListCreator` helpers) has been removed; the
-Avalonia launcher is the only one. An even older C++ launcher survives
-under `launchnet7-old/` as historical reference only -- it is not built.
+Notes: the WinForms launcher projects (`launchnet7/` and `launchnet7-old/`)
+have been removed. The Avalonia launcher is the only one.
 
 Windows distribution: `just package-client-windows` produces
 `dist/enb-client-windows/` (and a `.zip`) holding the self-contained
@@ -155,58 +143,57 @@ the Freya updater delivers only the launcher + proxy, never game data.
 The Linux path (`client/linux-installer/`) is unrelated and still uses the
 upstream WINE installer, which remains the EnB client-data delivery there.
 
-### `missioneditor/` + `missioneditor-avalonia/` -- Mission Editor
+### `missioneditor/` -- Mission Editor
 
-Type: Avalonia (recommended) / WinForms (legacy).
+Type: Avalonia.
 Purpose: edit `missions.mission_XML`. Renders the mission tree
 (`Nodes`, `TalkNode.cs`, `Replies.cs`) and serialises back to XML.
 Launch: `just launch-mission-editor`.
 
-### `mob-editor/` + `mob-editor-avalonia/` -- Mob Editor
+### `mob-editor/` -- Mob Editor
 
-Type: Avalonia (recommended) / WinForms (legacy).
+Type: Avalonia.
 Purpose: edit `mob_base`, `mob_items`, `mob_spawn_group`. Per-mob
 property sheets, GUI, SQL split into folders.
 Launch: `just launch-mob-editor`.
 
-### `sector-editor/` + `sector-editor-avalonia/` -- Sector Editor
+### `sector-editor/` -- Sector Editor
 
-Type: Avalonia (recommended) / WinForms (legacy).
+Type: Avalonia.
 Purpose: edit `systems`, `sectors`, `sector_objects` and subtype tables.
 Three top-level windows (`SystemWindow`, `SectorWindow`, `UniverseWindow`)
 plus a sidebar tree (`TreeWindow`). The original Piccolo.NET dependency
-was replaced in the Avalonia port by `tools/sector-editor-avalonia/PiccoloShim/`
--- a shim that maps the small Piccolo subset the editor used onto
-Avalonia primitives, so we don't carry a Windows-only third-party
-graphics library.
+was replaced by `tools/sector-editor/PiccoloShim/` -- a shim
+that maps the small Piccolo subset the editor used onto Avalonia primitives,
+so we don't carry a Windows-only third-party graphics library.
 Launch: `just launch-sector-editor`.
 
-### `station-tools/` + `station-tools-avalonia/` -- Station Tools
+### `station-tools/` -- Station Tools
 
-Type: Avalonia (recommended) / WinForms (legacy).
+Type: Avalonia.
 Purpose: edit `starbases`, `starbase_rooms`, `starbase_npcs`,
 `starbase_npc_avatar_templates`, `starbase_terminals`,
 `starbase_vendors`, `starbase_vender_*`. Bundles a TalkTree editor and
 an item browse dialog.
 Launch: `just launch-station-tools`.
 
-### `talktreeeditor/` + `talktreeeditor-avalonia/` -- TalkTree Editor
+### `talktreeeditor/` -- TalkTree Editor
 
-Type: Avalonia (recommended) / WinForms (legacy).
+Type: Avalonia.
 Purpose: edit and preview NPC dialogue trees in the XML format stored in
 `starbase_npcs.talk_tree_handle`.
 Launch: `just launch-talktree-editor`.
 
-### `toolslauncher/` + `toolslauncher-avalonia/` -- Tools Launcher
+### `toolslauncher/` -- Tools Launcher
 
-Type: Avalonia (recommended) / WinForms (legacy).
-Purpose: a launcher menu for the other editors. The Avalonia version is
-the central entry point exposed by `just launch`.
+Type: Avalonia.
+Purpose: a launcher menu for the other editors. The central entry point
+exposed by `just launch`.
 Launch: `just launch`.
 
-### `toolspatcher/` + `toolspatcher-avalonia/` -- Tools Patcher
+### `toolspatcher/` -- Tools Patcher
 
-Type: Avalonia (recommended) / WinForms (legacy).
+Type: Avalonia.
 Purpose: in-place patcher for the editor binaries. CRC32-checks each
 binary, downloads the replacement, swaps. Counterpart to `enbpatcher/`
 but for the toolchain itself.
@@ -256,7 +243,7 @@ it":
    table `table_changes` records what changed, by whom, when, with full
    before/after payloads.
 3. **Validation**: some editors run client-side validation (e.g.
-   `itemeditor/Database/DataValidation.cs`) before writing.
+   `item-editor/Database/DataValidation.cs`) before writing.
 4. **Database**: data lives in Postgres. The runtime schema is
    `db/postgres/schema.sql`; the `db/mysql/` dumps are the historical
    source the schema was converted from. World content (the `net7`
@@ -278,55 +265,43 @@ beyond `versions` and `table_changes`.
 
 ## Build status
 
-Every user-facing editor has an Avalonia port that runs natively on
-Linux. Every C# project that had a `.csproj` is SDK-style and builds on a
-modern dotnet SDK; per-tool diff status lives in `tools/BUILD_STATUS.md`.
+Every user-facing editor is an Avalonia port that runs natively on
+Linux. Every C# project that has a `.csproj` is SDK-style and builds on a
+modern dotnet SDK; historical Phase D status lives in `tools/BUILD_STATUS.md`.
 
-The matrix below is the runtime story (not the build story -- every C#
-project below builds via `dotnet build tools/FreyaTools.slnx`):
-
-| Tool | Avalonia? | Linux runtime |
-|---|:-:|:-:|
-| commontools | Yes shared lib | n/a |
-| dataimport | Yes | Yes |
-| effect-editor | Yes | Yes |
-| enb-ini-parser | n/a (console) | Yes |
-| enbpatcher | Yes | Yes |
-| faction-editor | Yes | Yes |
-| item-editor | Yes | Yes |
-| launchnet7 | Yes | Yes |
-| missioneditor | Yes | Yes |
-| mob-editor | Yes | Yes |
-| sector-editor | Yes | Yes |
-| station-tools | Yes | Yes |
-| talktreeeditor | Yes | Yes |
-| toolslauncher | Yes | Yes |
-| toolspatcher | Yes | Yes |
-| chunktypes | No (legacy C++) | No |
-| udpdump | No (legacy C++) | No |
-| unmix | No (legacy C++) | No |
-| w3d-parser | n/a (not user-facing) | n/a |
-| xml-exporter | No (legacy C++) | No |
+| Tool | Linux runtime |
+|---|:-:|
+| commontools (shared lib) | n/a |
+| dataimport | Yes |
+| effect-editor | Yes |
+| enb-ini-parser (console) | Yes |
+| enbpatcher | Yes |
+| faction-editor | Yes |
+| item-editor | Yes |
+| LaunchFreya | Yes |
+| missioneditor | Yes |
+| mob-editor | Yes |
+| sector-editor | Yes |
+| station-tools | Yes |
+| talktreeeditor | Yes |
+| toolslauncher | Yes |
+| toolspatcher | Yes |
+| chunktypes (legacy C++) | No |
+| udpdump (legacy C++) | No |
+| unmix (legacy C++) | No |
+| w3d-parser (not user-facing) | n/a |
+| xml-exporter (legacy C++) | No |
 
 ## Runtime requirements
 
-For the Avalonia editors (the recommended path):
+For the Avalonia editors:
 
 - Any modern Linux distro with the .NET 10 SDK or runtime installed.
   Also runs on macOS and Windows -- Avalonia is cross-platform.
 - A Postgres server reachable on the network. The default dev stack runs
   `postgres:16` on `localhost:5434` via `docker-compose.yml`.
 
-For the legacy WinForms editors (`tools/<name>/` without `-avalonia`):
-
-- Windows 10 or 11, or WINE 9+ with the .NET 10 Desktop Runtime inside
-  the WINE prefix.
-- The .NET 10 Desktop Runtime (Microsoft-supplied; not the cross-platform
-  ASP.NET runtime).
-- Same Postgres connectivity as above.
-
-For console tools (`enb-ini-parser`): .NET 10 runtime. Some reference
-`System.Windows.Forms` and remain Windows-only as written.
+For console tools (`enb-ini-parser`): .NET 10 runtime.
 
 For the legacy C++ utilities: a Win32 toolchain (MSYS2 + MinGW or
 Visual Studio Build Tools). Trivially portable in principle, not

@@ -16,7 +16,7 @@ public sealed class SetTargetRecord : PacketRecord
     protected override void WriteFields(StringBuilder sb)
     {
         if (Payload.Length < 8) { Flag(sb, $"SET_TARGET truncated -- {Payload.Length} bytes, expected 8"); return; }
-        FHex(sb, 0, "GameID",   ReadI32LE(Payload, 0));
+        FHex(sb, 0, "GameID", ReadI32LE(Payload, 0));
         int target = ReadI32LE(Payload, 4);
         FHex(sb, 4, "TargetID", target, target == -1 ? "(no target)" : null);
     }

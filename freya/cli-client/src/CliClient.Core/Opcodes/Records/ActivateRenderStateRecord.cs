@@ -24,9 +24,9 @@ public sealed class ActivateRenderStateRecord : PacketRecord
     {
         string label = _opcode == 0x0031 ? "ACTIVATE_NEXT_RENDER_STATE" : "ACTIVATE_RENDER_STATE";
         if (Payload.Length < 8) { Flag(sb, $"{label} truncated -- {Payload.Length} bytes, expected 8"); return; }
-        int    gameId        = ReadI32LE(Payload, 0);
-        uint   renderStateId = ReadU32LE(Payload, 4);
-        FHex(sb, 0, "GameID",        gameId);
+        int gameId = ReadI32LE(Payload, 0);
+        uint renderStateId = ReadU32LE(Payload, 4);
+        FHex(sb, 0, "GameID", gameId);
         FHex(sb, 4, "RenderStateID", (int)renderStateId);
     }
 }

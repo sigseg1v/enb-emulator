@@ -25,11 +25,11 @@ public sealed class InventoryMoveRecord : PacketRecord
     protected override void WriteFields(StringBuilder sb)
     {
         if (Payload.Length < 24) { Flag(sb, $"INVENTORY_MOVE truncated -- {Payload.Length} bytes, expected 24"); return; }
-        FHex(sb,  0, "GameID",   ReadI32BE(Payload,  0), "(BE -- ntohl at parse)");
-        FDec(sb,  4, "FromInv",  ReadI32BE(Payload,  4), "(BE; 1=cargo 2=equip ...)");
-        FDec(sb,  8, "FromSlot", ReadI32BE(Payload,  8), "(BE)");
-        FDec(sb, 12, "ToInv",    ReadI32BE(Payload, 12), "(BE)");
-        FDec(sb, 16, "ToSlot",   ReadI32BE(Payload, 16), "(BE)");
-        FDec(sb, 20, "Num",      ReadI32BE(Payload, 20), "(BE)");
+        FHex(sb, 0, "GameID", ReadI32BE(Payload, 0), "(BE -- ntohl at parse)");
+        FDec(sb, 4, "FromInv", ReadI32BE(Payload, 4), "(BE; 1=cargo 2=equip ...)");
+        FDec(sb, 8, "FromSlot", ReadI32BE(Payload, 8), "(BE)");
+        FDec(sb, 12, "ToInv", ReadI32BE(Payload, 12), "(BE)");
+        FDec(sb, 16, "ToSlot", ReadI32BE(Payload, 16), "(BE)");
+        FDec(sb, 20, "Num", ReadI32BE(Payload, 20), "(BE)");
     }
 }

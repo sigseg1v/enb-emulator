@@ -23,11 +23,11 @@ public sealed class ActionRecord : PacketRecord
     protected override void WriteFields(StringBuilder sb)
     {
         if (Payload.Length < 16) { Flag(sb, $"ACTION truncated -- {Payload.Length} bytes, expected 16"); return; }
-        FHex(sb, 0,  "GameID",      ReadI32LE(Payload, 0));
+        FHex(sb, 0, "GameID", ReadI32LE(Payload, 0));
         int action = ReadI32LE(Payload, 4);
-        FDec(sb, 4,  "Action",      action, $"({DescribeAction(action)})");
+        FDec(sb, 4, "Action", action, $"({DescribeAction(action)})");
         int target = ReadI32LE(Payload, 8);
-        FHex(sb, 8,  "Target",      target, target == -1 ? "(no target)" : null);
+        FHex(sb, 8, "Target", target, target == -1 ? "(no target)" : null);
         FDec(sb, 12, "OptionalVar", ReadI32LE(Payload, 12));
     }
 
@@ -37,9 +37,9 @@ public sealed class ActionRecord : PacketRecord
     /// </summary>
     internal static string DescribeAction(int action) => action switch
     {
-        1  => "tractor",
-        7  => "docking-complete",
-        8  => "land",
+        1 => "tractor",
+        7 => "docking-complete",
+        8 => "land",
         10 => "invite",
         11 => "accept",
         12 => "decline",
@@ -53,6 +53,6 @@ public sealed class ActionRecord : PacketRecord
         28 => "dock",
         29 => "planet-land",
         30 => "scan",
-        _  => "action",
+        _ => "action",
     };
 }

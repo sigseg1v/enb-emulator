@@ -60,7 +60,7 @@
     <PackageReference Include="Avalonia.Diagnostics" Version="11.2.3" Condition="'$(Configuration)' == 'Debug'" />
     <PackageReference Include="MessageBox.Avalonia" Version="3.2.0" />
     <PackageReference Include="Avalonia.Headless" Version="11.2.3" />
-    <!-- See note in toolspatcher-avalonia/csproj. -->
+    <!-- See note in toolspatcher/csproj. -->
     <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3" />
   </ItemGroup>
 </Project>

@@ -1,131 +1,97 @@
+// SPDX-License-Identifier: CC-BY-NC-SA-3.0
+// Part of the Earth & Beyond emulator preservation project.
+// Ported from N7.Sprites.StargateSprite under Net-7 Entertainment's
+// CC BY-NC-SA 3.0; preservation modifications inherit under ShareAlike.
+
 using System;
-using System.Collections.Generic;
-using System.Text;
-using System.Drawing;
-using System.IO;
-using System.Drawing.Drawing2D;
 using System.Data;
-using System.Windows.Forms;
-
+using System.Drawing;
+using Avalonia.Media.Imaging;
 using N7.Props;
-using N7.Utilities;
+using SectorEditor.PiccoloShim;
+using SectorEditor.Utilities;
 
-using UMD.HCIL.Piccolo;
-using UMD.HCIL.Piccolo.Event;
-using UMD.HCIL.Piccolo.Nodes;
-using UMD.HCIL.Piccolo.Util;
-
-namespace N7.Sprites
+namespace SectorEditor.Sprites
 {
-    class StargateSprite
+    // Renders one stargate (`sector_objects` row of `type=11`) at sector-
+    // local scale: image + signature/radar/exploration circles + floating
+    // name. Image swaps among:
+    //   standardGate.gif      - in radar, no class/faction restriction
+    //   hiddenGate.gif        - not in radar, no class/faction restriction
+    //   classSpecificGate.gif - class-restricted (regardless of radar)
+    //   FactionSpecificGate.gif - faction-restricted (wins over class)
+    public class StargateSprite
     {
+        private readonly IPropertyHost _pg;
+        private readonly IGridSyncSink _grid;
         private StargateProps dp;
-        private PropertyGrid _pg;
         private bool appearsInRadar;
         private PText pname;
         private DataRow dr;
-        private PLayer _layer;
+        private readonly PLayer _layer;
         private PImage stargateImage;
         private bool dragging;
-        private DataGridView _dgv;
 
-        public StargateSprite(PLayer layer, DataRow r, PropertyGrid pg, DataGridView dgv)
+        public StargateSprite(PLayer layer, DataRow r, IPropertyHost pg, IGridSyncSink grid)
         {
             _pg = pg;
+            _grid = grid ?? new NullGridSyncSink();
             setupData(r);
             dr = r;
             _layer = layer;
-            _dgv = dgv;
 
-            String name = r["name"].ToString();
+            string name = r["name"].ToString();
             float x = float.Parse(r["position_x"].ToString());
             float y = -(float.Parse(r["position_y"].ToString()));
             float sigRadius = float.Parse(r["signature"].ToString());
             float rrRadius = float.Parse(r["radar_range"].ToString());
-            float ExplorationRange = float.Parse(r["exploration_range"].ToString());
-            appearsInRadar = (Boolean) r["appears_in_radar"];
+            float explorationRange = float.Parse(r["exploration_range"].ToString());
+            appearsInRadar = (bool)r["appears_in_radar"];
             int navType = int.Parse(r["nav_type"].ToString());
-            bool isClassSpecific = (Boolean) r["classSpecific"];
+            bool isClassSpecific = (bool)r["classSpecific"];
             int factionID = int.Parse(r["faction_id"].ToString());
 
             float sigDia = (sigRadius * 2) / 100;
             float rrDia = (rrRadius * 2) / 100;
-            float expDia = (ExplorationRange * 2) / 100;
+            float expDia = (explorationRange * 2) / 100;
 
-            if (sigDia == 0)
-            {
-                sigDia = 5;
-            }
-            if (rrDia == 0)
-            {
-                rrDia = 5;
-            }
-            if (expDia == 0)
-            {
-                expDia = 5;
-            }
+            if (sigDia == 0) sigDia = 5;
+            if (rrDia == 0) rrDia = 5;
+            if (expDia == 0) expDia = 5;
 
-            string dataDirectory = "Images";
-            string filePath = Path.Combine("..", "..");
-            string imageName = null;
+            // Image-name priority matches original: radar → classSpecific
+            // overrides → factionID overrides everything.
+            string imageName = appearsInRadar ? "standardGate.gif" : "hiddenGate.gif";
+            if (isClassSpecific) imageName = "classSpecificGate.gif";
+            if (factionID != -1) imageName = "FactionSpecificGate.gif";
 
-            if (appearsInRadar == true)
-            {
-                imageName = "standardGate.gif";
-            }
-            else
-            {
-                imageName = "hiddenGate.gif";
-            }
+            string imagePath = Mob.ResolveImage(imageName);
+            stargateImage = new PImage(imagePath);
+            stargateImage.X = (x - (stargateImage.Width / 2)) / 100;
+            stargateImage.Y = (y - (stargateImage.Height / 2)) / 100;
 
-            if (isClassSpecific == true)
-            {
-                imageName = "classSpecificGate.gif";
-            }
+            float sigX = (x / 100) - ((sigDia / 2) - (stargateImage.Width / 2));
+            float sigY = (y / 100) - ((sigDia / 2) - (stargateImage.Height / 2));
+            float rrX = (x / 100) - ((rrDia / 2) - (stargateImage.Width / 2));
+            float rrY = (y / 100) - ((rrDia / 2) - (stargateImage.Height / 2));
+            float expX = (x / 100) - ((expDia / 2) - (stargateImage.Width / 2));
+            float expY = (y / 100) - ((expDia / 2) - (stargateImage.Height / 2));
 
-            if (factionID != -1)
-            {
-                imageName = "FactionSpecificGate.gif";
-            }
+            var sigPen = new Pen(Color.ForestGreen, 3.0F);
+            var rrPen = new Pen(Color.GreenYellow, 2.0F) { DashStyle = DashStyle.Dash };
+            var expPen = new Pen(Color.LightGreen, 1.0F) { DashStyle = DashStyle.DashDotDot };
 
-            if (File.Exists(Path.Combine(dataDirectory, imageName)))
-            {
-                filePath = "";
-            }
-
-            Image image = Image.FromFile(Path.Combine(filePath, Path.Combine(dataDirectory, imageName)));
-            stargateImage = new PImage(image);
-            stargateImage.X = (x - (image.Width/2)) / 100;
-            stargateImage.Y = (y - (image.Height/2)) / 100;
-
-            float sigX = (x / 100) - ((sigDia / 2) - (image.Width / 2));
-            float sigY = (y / 100) - ((sigDia / 2) - (image.Height / 2));
-            float rrX = (x / 100) - ((rrDia / 2) - (image.Width / 2));
-            float rrY = (y / 100) - ((rrDia / 2) - (image.Height / 2));
-            float expX = (x / 100) - ((expDia / 2) - (image.Width / 2));
-            float expY = (y / 100) - ((expDia / 2) - (image.Height / 2));
-
-            Pen sigPen = new Pen(Color.ForestGreen, 3.0F);
-            Pen rrPen = new Pen(Color.GreenYellow, 2.0F);
-            rrPen.DashStyle = DashStyle.Dash;
-            Pen expPen = new Pen(Color.LightGreen, 1.0F);
-            expPen.DashStyle = DashStyle.DashDotDot;
-
-            PPath sigCircle = PPath.CreateEllipse(sigX, sigY, sigDia, sigDia);
+            var sigCircle = PPath.CreateEllipse(sigX, sigY, sigDia, sigDia);
             sigCircle.Pen = sigPen;
-            PPath rrCircle = PPath.CreateEllipse(rrX, rrY, rrDia, rrDia);
+            sigCircle.Brush = Brushes.Transparent;
+
+            var rrCircle = PPath.CreateEllipse(rrX, rrY, rrDia, rrDia);
             rrCircle.Pen = rrPen;
-            PPath expCircle = PPath.CreateEllipse(expX, expY, expDia, expDia);
+            rrCircle.Brush = Brushes.Transparent;
+
+            var expCircle = PPath.CreateEllipse(expX, expY, expDia, expDia);
             expCircle.Pen = expPen;
-
-            PNode sigNode = sigCircle;
-            sigNode.Brush = Brushes.Transparent;
-
-            PNode rrNode = rrCircle;
-            rrNode.Brush = Brushes.Transparent;
-
-            PNode expNode = expCircle;
-            expNode.Brush = Brushes.Transparent;
+            expCircle.Brush = Brushes.Transparent;
 
             pname = new PText(name);
             pname.TextBrush = Brushes.White;
@@ -133,119 +99,89 @@ namespace N7.Sprites
             pname.X = (x / 100) - (pname.Width / 2);
             pname.Y = (y / 100) - 20;
 
-            stargateImage.AddChild(sigNode);
-            stargateImage.AddChild(rrNode);
-            stargateImage.AddChild(expNode);
+            // Child indexes: 0=sig, 1=rr, 2=exp, 3=pname, then navType
+            // placeholder PNodes.
+            stargateImage.AddChild(sigCircle);
+            stargateImage.AddChild(rrCircle);
+            stargateImage.AddChild(expCircle);
             stargateImage.AddChild(pname);
-
-            //Add placeholder nodes for nav_type visualization lookup.
             for (int i = 0; i < navType; i++)
-            {
                 stargateImage.AddChild(new PNode());
-            }
 
             stargateImage.ChildrenPickable = false;
-
-            //Set the tag to this class for information retrieval later.
             stargateImage.Tag = this;
 
-            // Attach event delegates directly to the node.
-            stargateImage.MouseDown += new PInputEventHandler(Image_MouseDown);
-            stargateImage.MouseUp += new PInputEventHandler(Image_MouseUp);
-            stargateImage.MouseDrag += new PInputEventHandler(Image_MouseDrag);
+            stargateImage.MouseDown += Image_MouseDown;
+            stargateImage.MouseUp += Image_MouseUp;
+            stargateImage.MouseDrag += Image_MouseDrag;
 
-            //Display Object by adding them to its layer
             layer.AddChild(stargateImage);
         }
 
         private void setupData(DataRow r)
         {
             int objectType = int.Parse(r["type"].ToString());
-            String oType = "";
-            switch (objectType)
+            string oType = objectType switch
             {
-                case 0:
-                    oType = "Mobs";
-                    break;
-                case 3:
-                    oType = "Planets";
-                    break;
-                case 11:
-                    oType = "Stargates";
-                    break;
-                case 12:
-                    oType = "Starbases";
-                    break;
-                case 37:
-                    oType = "Decorations";
-                    break;
-                case 38:
-                    oType = "Harvestables";
-                    break;
-            }
+                0 => "Mobs",
+                3 => "Planets",
+                11 => "Stargates",
+                12 => "Starbases",
+                37 => "Decorations",
+                38 => "Harvestables",
+                _ => "",
+            };
 
             dp = new StargateProps();
-
-            //Base Props + Nav Point Props
             dp.SectorID = int.Parse(r["sector_id"].ToString());
             dp.NavType = r["nav_type"].ToString();
             dp.Signature = float.Parse(r["signature"].ToString());
-            dp.IsHuge = (Boolean) r["is_huge"];
+            dp.IsHuge = (bool)r["is_huge"];
             dp.BaseXP = int.Parse(r["base_xp"].ToString());
             dp.ExplorationRange = float.Parse(r["exploration_range"].ToString());
-
             dp.BaseAssetID = int.Parse(r["base_asset_id"].ToString());
 
-            AdobeColors.HSL hslColor = new AdobeColors.HSL();
-            hslColor.H = float.Parse(r["h"].ToString());
-            hslColor.S = float.Parse(r["s"].ToString());
-            hslColor.L = float.Parse(r["v"].ToString());
-            Color newColor = AdobeColors.HSL_to_RGB(hslColor);
-            dp.Color = newColor;
+            var hslColor = new HslConvert.HSL
+            {
+                H = float.Parse(r["h"].ToString()),
+                S = float.Parse(r["s"].ToString()),
+                L = float.Parse(r["v"].ToString()),
+            };
+            dp.Color = HslConvert.HslToRgb(hslColor);
 
             dp.Type = oType;
-            dp.Scale = float.Parse(r["scale"].ToString()); ;
+            dp.Scale = float.Parse(r["scale"].ToString());
             dp.PositionX = float.Parse(r["position_x"].ToString());
             dp.PositionY = float.Parse(r["position_y"].ToString());
-            dp.PositionZ = float.Parse(r["position_z"].ToString()); ;
+            dp.PositionZ = float.Parse(r["position_z"].ToString());
 
-            double[] quat1 = new double[4];
+            var quat1 = new double[4];
             quat1[0] = double.Parse(r["orientation_z"].ToString());
             quat1[1] = double.Parse(r["orientation_u"].ToString());
             quat1[2] = double.Parse(r["orientation_v"].ToString());
             quat1[3] = double.Parse(r["orientation_w"].ToString());
 
-            QuaternionCalc qc1 = new QuaternionCalc();
+            var qc1 = new N7.Utilities.QuaternionCalc();
             double[] ang1 = qc1.QuatToAngle(quat1);
-            if (ang1[0] == double.NaN)
-            {
-                ang1[0] = 0;
-            }
-            if (ang1[1] == double.NaN)
-            {
-                ang1[1] = 0;
-            }
-            if (ang1[2] == double.NaN)
-            {
-                ang1[2] = 0;
-            }
+            // == double.NaN dead-code guard fix; see MobSprite.cs.
+            if (double.IsNaN(ang1[0])) ang1[0] = 0;
+            if (double.IsNaN(ang1[1])) ang1[1] = 0;
+            if (double.IsNaN(ang1[2])) ang1[2] = 0;
             dp.Orientation_Yaw = Math.Round(ang1[0], 0);
             dp.Orientation_Pitch = Math.Round(ang1[1], 0);
             dp.Orientation_Roll = Math.Round(ang1[2], 0);
 
             dp.Name = r["name"].ToString();
-            dp.AppearsInRadar = (Boolean) r["appears_in_radar"];
+            dp.AppearsInRadar = (bool)r["appears_in_radar"];
             dp.RadarRange = float.Parse(r["radar_range"].ToString());
             dp.Destination = int.Parse(r["gate_to"].ToString());
             dp.SoundEffect = int.Parse(r["sound_effect_id"].ToString());
             dp.SoundEffectRange = float.Parse(r["sound_effect_range"].ToString());
 
-            //Stargate Specific Props
-            dp.IsClassSpecific = (Boolean)r["classSpecific"];
-
-            //TODO: Get Faction Name from ID;
-            String factionName = mainFrm.factions.findNameByID(int.Parse(r["faction_id"].ToString()));
-            dp.FactionID = factionName;
+            dp.IsClassSpecific = (bool)r["classSpecific"];
+            // mainFrm.factions → EditorGlobals.Factions abstraction.
+            int factionId = int.Parse(r["faction_id"].ToString());
+            dp.FactionID = EditorGlobals.Factions.FindNameById(factionId);
         }
 
         protected void Image_MouseDown(object sender, PInputEventArgs e)
@@ -260,7 +196,7 @@ namespace N7.Sprites
 
         protected void Image_MouseUp(object sender, PInputEventArgs e)
         {
-            if (dragging == true)
+            if (dragging)
             {
                 dp.PositionX = e.Position.X * 100;
                 dp.PositionY = -(e.Position.Y * 100);
@@ -269,317 +205,187 @@ namespace N7.Sprites
                 dragging = false;
             }
             _pg.SelectedObject = dp;
-            mainFrm.selectedObjectID = int.Parse(dr["sector_object_id"].ToString());
+            EditorGlobals.SelectedObjectId = int.Parse(dr["sector_object_id"].ToString());
         }
 
-        public Boolean getAppearsInRader()
+        public bool getAppearsInRader() => appearsInRadar;
+        public PText getText() => pname;
+        public DataRow getRow() => dr;
+        public void setPropGrid() { _pg.SelectedObject = dp; }
+
+        public void updateChangedInfo(string propertyName, object _changedValue)
         {
-            return appearsInRadar;
-        }
+            string changedValue = _changedValue?.ToString() ?? "";
 
-        public PText getText()
-        {
-            return pname;
-        }
-
-        public void updateChangedInfo(String propertyName, Object _changedValue)
-        {
-            String changedValue = _changedValue.ToString();
-
-            //Update DataRow and Graphics (only certain props require graphical updating).
-            if (propertyName == "SectorID")
+            switch (propertyName)
             {
-                dr["sector_id"] = int.Parse(changedValue);
-            }
-            else if (propertyName == "NavType")
-            {
-                dr["nav_type"] = changedValue;
-            }
-            else if (propertyName == "Signature")
-            {
-                dr["signature"] = float.Parse(changedValue);
-
-                float imageWidth = stargateImage.Width;
-                float imageHeight = stargateImage.Height;
-                float x = stargateImage.X;
-                float y = stargateImage.Y;
-                stargateImage.GetChild(0).X = (x + (imageWidth / 2)) - (float.Parse(changedValue) / 100);
-                stargateImage.GetChild(0).Y = (y + (imageHeight / 2)) - (float.Parse(changedValue) / 100);
-                stargateImage.GetChild(0).Width = (float.Parse(changedValue) * 2) / 100;
-                stargateImage.GetChild(0).Height = (float.Parse(changedValue) * 2) / 100;
-            }
-            else if (propertyName == "IsHuge")
-            {
-                dr["is_huge"] = bool.Parse(changedValue);
-            }
-            else if (propertyName == "BaseXP")
-            {
-                dr["base_xp"] = int.Parse(changedValue);
-            }
-            else if (propertyName == "ExplorationRange")
-            {
-                dr["exploration_range"] = float.Parse(changedValue);
-
-                float imageWidth = stargateImage.Width;
-                float imageHeight = stargateImage.Height;
-                float x = stargateImage.X;
-                float y = stargateImage.Y;
-                stargateImage.GetChild(2).X = (x + (imageWidth / 2)) - (float.Parse(changedValue) / 100);
-                stargateImage.GetChild(2).Y = (y + (imageHeight / 2)) - (float.Parse(changedValue) / 100);
-                stargateImage.GetChild(2).Width = (float.Parse(changedValue) * 2) / 100;
-                stargateImage.GetChild(2).Height = (float.Parse(changedValue) * 2) / 100;
-            }
-            else if (propertyName == "BaseAssetID")
-            {
-                dr["base_asset_id"] = int.Parse(changedValue);
-                foreach (DataGridViewRow row in _dgv.SelectedRows)
-                {
-                    _dgv.Rows[row.Index].Cells["base_asset_id"].Value = int.Parse(changedValue);
-                    _dgv.Update();
-                    _dgv.Refresh();
-                }
-            }
-            else if (propertyName == "Color")
-            {
-                Color color = (Color)_changedValue;
-                AdobeColors.HSL hsv = AdobeColors.RGB_to_HSL(color);
-
-                dr["h"] = hsv.H;
-                dr["s"] = hsv.S;
-                dr["v"] = hsv.L;
-            }
-            else if (propertyName == "Type")
-            {
-                _layer.RemoveChild(stargateImage);
-
-                /*
-                if (changedValue == "Mobs")
-                {
-                    dr["type"] = 0;
-                    new MobSprite(_layer, dr, _pg);
-                }
-                else if (changedValue == "Planets")
-                {
-                    dr["type"] = 3;
-                    new PlanetSprite(_layer, dr, _pg);
-                }
-                else if (changedValue == "Starbases")
-                {
-                    dr["type"] = 12;
-                    new StarbaseSprite(_layer, dr, _pg);
-                }
-                else if (changedValue == "Decorations")
-                {
-                    dr["type"] = 37;
-                    new DecorationSprite(_layer, dr, _pg);
-                }
-                else if (changedValue == "Harvestables")
-                {
-                    dr["type"] = 38;
-                    new HarvestableSprite(_layer, dr, _pg);
-                }*/
-
-                _pg.SelectedObject = null;
-            }
-            else if (propertyName == "Scale")
-            {
-                dr["scale"] = float.Parse(changedValue);
-            }
-            else if (propertyName == "PositionX")
-            {
-                dr["position_x"] = float.Parse(changedValue);
-
-                float dx = (float.Parse(changedValue) / 100) - stargateImage.X;
-                stargateImage.TranslateBy(dx, 0);
-            }
-            else if (propertyName == "PositionY")
-            {
-                dr["position_y"] = float.Parse(changedValue);
-
-                float dy = (float.Parse(changedValue) / 100) - stargateImage.Y;
-                stargateImage.TranslateBy(0, dy);
-            }
-            else if (propertyName == "PositionZ")
-            {
-                dr["position_z"] = float.Parse(changedValue);
-            }
-            else if (propertyName == "Orientation_Yaw" || propertyName == "Orientation_Pitch" || propertyName == "Orientation_Roll")
-            {
-                QuaternionCalc qtmp = new QuaternionCalc();
-                double[] q1 = qtmp.AngleToQuat(dp.Orientation_Yaw, dp.Orientation_Pitch, dp.Orientation_Roll);
-
-                dr["orientation_z"] = q1[0];
-                dr["orientation_u"] = q1[1];
-                dr["orientation_v"] = q1[2];
-                dr["orientation_w"] = q1[3];
-            }
-            else if (propertyName == "Name")
-            {
-                dr["name"] = changedValue;
-
-                float x = stargateImage.X;
-                float y = stargateImage.Y;
-                PText name = (PText)stargateImage.GetChild(3);
-                name.Text = changedValue;
-                name.TextAlignment = StringAlignment.Center;
-                name.X = x - (name.Width / 2);
-                name.Y = y - 20;
-
-                foreach (DataGridViewRow row in _dgv.SelectedRows)
-                {
-                    _dgv.Rows[row.Index].Cells["name"].Value = changedValue;
-                    _dgv.Update();
-                    _dgv.Refresh();
-                }
-            }
-            else if (propertyName == "AppearsInRadar")
-            {
-                dr["appears_in_radar"] = bool.Parse(changedValue);
-
-                if (bool.Parse(changedValue) == true)
-                {
-                    changeImage(1);
-                }
-                else
-                {
-                    changeImage(0);
-                }
-            }
-            else if (propertyName == "RadarRange")
-            {
-                dr["radar_range"] = float.Parse(changedValue);
-
-                float imageWidth = stargateImage.Width;
-                float imageHeight = stargateImage.Height;
-                float x = stargateImage.X;
-                float y = stargateImage.Y;
-                stargateImage.GetChild(1).X = (x + (imageWidth / 2)) - (float.Parse(changedValue) / 100);
-                stargateImage.GetChild(1).Y = (y + (imageHeight / 2)) - (float.Parse(changedValue) / 100);
-                stargateImage.GetChild(1).Width = (float.Parse(changedValue) * 2) / 100;
-                stargateImage.GetChild(1).Height = (float.Parse(changedValue) * 2) / 100;
-            }
-            else if (propertyName == "Destination")
-            {
-                dr["gate_to"] = int.Parse(changedValue);
-            }
-            else if (propertyName == "IsClassSpecific")
-            {
-                dr["classSpecific"] = bool.Parse(changedValue);
-
-                if (bool.Parse(changedValue) == true)
-                {
-                    changeImage(2);
-                }
-                else
-                {
-                    if (bool.Parse(dr["appears_in_radar"].ToString()) == true)
+                case "SectorID":
+                    dr["sector_id"] = int.Parse(changedValue); break;
+                case "NavType":
+                    dr["nav_type"] = changedValue; break;
+                case "Signature":
+                    dr["signature"] = float.Parse(changedValue);
+                    ResizeCircleChild(0, float.Parse(changedValue));
+                    break;
+                case "IsHuge":
+                    dr["is_huge"] = bool.Parse(changedValue); break;
+                case "BaseXP":
+                    dr["base_xp"] = int.Parse(changedValue); break;
+                case "ExplorationRange":
+                    dr["exploration_range"] = float.Parse(changedValue);
+                    ResizeCircleChild(2, float.Parse(changedValue));
+                    break;
+                case "BaseAssetID":
+                    dr["base_asset_id"] = int.Parse(changedValue);
+                    _grid.OnCellChanged("base_asset_id", int.Parse(changedValue));
+                    break;
+                case "Color":
+                    if (_changedValue is Color color)
                     {
-                        changeImage(1);
+                        var hsv = HslConvert.RgbToHsl(color);
+                        dr["h"] = hsv.H;
+                        dr["s"] = hsv.S;
+                        dr["v"] = hsv.L;
                     }
-                    else
+                    break;
+                case "Type":
+                    _layer.RemoveChild(stargateImage);
+                    _pg.SelectedObject = null;
+                    break;
+                case "Scale":
+                    dr["scale"] = float.Parse(changedValue); break;
+                case "PositionX":
                     {
-                        changeImage(0);
+                        dr["position_x"] = float.Parse(changedValue);
+                        float dx = (float.Parse(changedValue) / 100) - stargateImage.X;
+                        stargateImage.TranslateBy(dx, 0);
+                        break;
                     }
-
-                    if (int.Parse(dr["faction_id"].ToString()) > 0)
+                case "PositionY":
                     {
-                        changeImage(3);
+                        dr["position_y"] = float.Parse(changedValue);
+                        float dy = (float.Parse(changedValue) / 100) - stargateImage.Y;
+                        stargateImage.TranslateBy(0, dy);
+                        break;
                     }
-                }
-
-            }
-            else if (propertyName == "FactionID")
-            {
-                //get id from name;
-                int id = mainFrm.factions.findIDbyName(changedValue);
-
-                dr["faction_id"] = id;
-                
-                if (id > 0)
-                {
-                    Console.Out.WriteLine("test2");
-                    changeImage(3);
-                }
-                else
-                {
-                    if (bool.Parse(dr["appears_in_radar"].ToString()) == true)
+                case "PositionZ":
+                    dr["position_z"] = float.Parse(changedValue); break;
+                case "Orientation_Yaw":
+                case "Orientation_Pitch":
+                case "Orientation_Roll":
                     {
-                        changeImage(1);
+                        var qtmp = new N7.Utilities.QuaternionCalc();
+                        double[] q1 = qtmp.AngleToQuat(dp.Orientation_Yaw, dp.Orientation_Pitch, dp.Orientation_Roll);
+                        dr["orientation_z"] = q1[0];
+                        dr["orientation_u"] = q1[1];
+                        dr["orientation_v"] = q1[2];
+                        dr["orientation_w"] = q1[3];
+                        break;
                     }
-                    else
+                case "Name":
                     {
-                        changeImage(0);
+                        dr["name"] = changedValue;
+                        float x = stargateImage.X;
+                        float y = stargateImage.Y;
+                        var nameNode = (PText)stargateImage.GetChild(3);
+                        nameNode.Text = changedValue;
+                        nameNode.TextAlignment = StringAlignment.Center;
+                        nameNode.X = x - (nameNode.Width / 2);
+                        nameNode.Y = y - 20;
+                        _grid.OnCellChanged("name", changedValue);
+                        break;
                     }
-
-                    if (bool.Parse(dr["classSpecific"].ToString()) == true)
+                case "AppearsInRadar":
+                    dr["appears_in_radar"] = bool.Parse(changedValue);
+                    changeImage(bool.Parse(changedValue) ? 1 : 0);
+                    break;
+                case "RadarRange":
+                    dr["radar_range"] = float.Parse(changedValue);
+                    ResizeCircleChild(1, float.Parse(changedValue));
+                    break;
+                case "Destination":
+                    dr["gate_to"] = int.Parse(changedValue); break;
+                case "IsClassSpecific":
                     {
-                        changeImage(2);
+                        dr["classSpecific"] = bool.Parse(changedValue);
+                        if (bool.Parse(changedValue))
+                        {
+                            changeImage(2);
+                        }
+                        else
+                        {
+                            bool inRadar = bool.Parse(dr["appears_in_radar"].ToString());
+                            changeImage(inRadar ? 1 : 0);
+                            if (int.Parse(dr["faction_id"].ToString()) > 0)
+                                changeImage(3);
+                        }
+                        break;
                     }
-                }
-            }
-            else if (propertyName == "SoundEffect")
-            {
-                dr["sound_effect_id"] = int.Parse(changedValue);
-            }
-            else if (propertyName == "SoundEffectRange")
-            {
-                dr["sound_effect_range"] = float.Parse(changedValue);
+                case "FactionID":
+                    {
+                        int id = EditorGlobals.Factions.FindIdByName(changedValue);
+                        dr["faction_id"] = id;
+                        // Dropped a `Console.Out.WriteLine("test2")` debug
+                        // leftover from the original.
+                        if (id > 0)
+                        {
+                            changeImage(3);
+                        }
+                        else
+                        {
+                            bool inRadar = bool.Parse(dr["appears_in_radar"].ToString());
+                            changeImage(inRadar ? 1 : 0);
+                            if (bool.Parse(dr["classSpecific"].ToString()))
+                                changeImage(2);
+                        }
+                        break;
+                    }
+                case "SoundEffect":
+                    dr["sound_effect_id"] = int.Parse(changedValue); break;
+                case "SoundEffectRange":
+                    dr["sound_effect_range"] = float.Parse(changedValue); break;
             }
 
             if (dr.RowState != DataRowState.Modified)
-            {
                 dr.SetModified();
-            }
+        }
+
+        private void ResizeCircleChild(int childIndex, float radius)
+        {
+            float imageWidth = stargateImage.Width;
+            float imageHeight = stargateImage.Height;
+            float x = stargateImage.X;
+            float y = stargateImage.Y;
+            var c = stargateImage.GetChild(childIndex);
+            c.X = (x + (imageWidth / 2)) - (radius / 100);
+            c.Y = (y + (imageHeight / 2)) - (radius / 100);
+            c.Width = (radius * 2) / 100;
+            c.Height = (radius * 2) / 100;
         }
 
         private void changeImage(int type)
         {
-            //Setup our Image Path's based on our properties
-            string dataDirectory = "Images";
-            string filePath = Path.Combine("..", "..");
-            string imageName = null;
-
-            switch (type)
+            string imageName = type switch
             {
-                case 0:
-                    imageName = "hiddenGate.gif";
-                    appearsInRadar = false;
-                    break;
-                case 1:
-                    imageName = "standardGate.gif";
-                    appearsInRadar = true;
-                    break;
-                case 2:
-                    imageName = "classSpecificGate.gif";
-                    break;
-                case 3:
-                    imageName = "FactionSpecificGate.gif";
-                    break;
-            }
+                0 => "hiddenGate.gif",
+                1 => "standardGate.gif",
+                2 => "classSpecificGate.gif",
+                3 => "FactionSpecificGate.gif",
+                _ => null,
+            };
+            if (imageName == null) return;
+            if (type == 0) appearsInRadar = false;
+            else if (type == 1) appearsInRadar = true;
 
-            if (File.Exists(Path.Combine(dataDirectory, imageName)))
-            {
-                filePath = "";
-            }
-
+            string p = Mob.ResolveImage(imageName);
             float x = stargateImage.X;
             float y = stargateImage.Y;
-
-            //Load our icon.
-            Image image = Image.FromFile(Path.Combine(filePath, Path.Combine(dataDirectory, imageName)));
-            stargateImage.Image = image;
-            stargateImage.X = x;
-            stargateImage.Y = y;
-        }
-
-        public DataRow getRow()
-        {
-            return dr;
-        }
-
-        public void setPropGrid()
-        {
-            _pg.SelectedObject = dp;
+            if (System.IO.File.Exists(p))
+            {
+                stargateImage.Bitmap = new Bitmap(p);
+                stargateImage.X = x;
+                stargateImage.Y = y;
+            }
         }
     }
 }

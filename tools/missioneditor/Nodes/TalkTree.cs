@@ -1,12 +1,12 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.Text;
 using System.IO;
-using CommonTools;
 using System.Xml;
+using CommonTools;
 
 namespace MissionEditor.Nodes
 {
+    // Ported verbatim from tools/missioneditor/Nodes/TalkTree.cs.
     public class TalkTree
     {
         public class Branch
@@ -36,10 +36,7 @@ namespace MissionEditor.Nodes
             public String data;
             public TalkTreeFlag value;
 
-            public Flag()
-            {
-                data = "";
-            }
+            public Flag() { data = ""; }
 
             public void getXML(StringWriter stringWriter)
             {
@@ -67,59 +64,22 @@ namespace MissionEditor.Nodes
             m_flag = null;
         }
 
-        public void setNodeId(String nodeId)
-        {
-            m_nodeId = nodeId;
-        }
-
-        public String getNodeId()
-        {
-            return m_nodeId;
-        }
-
-        public void setNpcText(String npcText)
-        {
-            m_npcText = npcText;
-        }
-
-        public String getNpcText()
-        {
-            return m_npcText;
-        }
+        public void setNodeId(String nodeId) { m_nodeId = nodeId; }
+        public String getNodeId() { return m_nodeId; }
+        public void setNpcText(String npcText) { m_npcText = npcText; }
+        public String getNpcText() { return m_npcText; }
 
         public void addPcReply(Branch branch)
         {
-            if (m_pcReplies == null)
-            {
-                m_pcReplies = new List<Branch>();
-            }
+            if (m_pcReplies == null) m_pcReplies = new List<Branch>();
             m_pcReplies.Add(branch);
         }
 
-        public Boolean hasReplies()
-        {
-            return m_pcReplies != null && m_pcReplies.Count != 0;
-        }
-
-        public List<Branch> getPcReplies()
-        {
-            return m_pcReplies;
-        }
-
-        public void setFlag(Flag flag)
-        {
-            m_flag = flag;
-        }
-
-        public Boolean hasFlag()
-        {
-            return m_flag != null;
-        }
-
-        public Flag getFlag()
-        {
-            return m_flag;
-        }
+        public Boolean hasReplies() { return m_pcReplies != null && m_pcReplies.Count != 0; }
+        public List<Branch> getPcReplies() { return m_pcReplies; }
+        public void setFlag(Flag flag) { m_flag = flag; }
+        public Boolean hasFlag() { return m_flag != null; }
+        public Flag getFlag() { return m_flag; }
 
         public void getXML(StringWriter stringWriter)
         {
@@ -135,23 +95,13 @@ namespace MissionEditor.Nodes
                 }
                 if (hasReplies())
                 {
-                    foreach (Branch branch in m_pcReplies)
-                    {
-                        branch.getXML(stringWriter);
-                    }
+                    foreach (Branch branch in m_pcReplies) branch.getXML(stringWriter);
                 }
-                if (hasFlag())
-                {
-                    m_flag.getXML(stringWriter);
-                }
+                if (hasFlag()) m_flag.getXML(stringWriter);
                 stringWriter.WriteLine(Xml.tagEnd(XmlTag.TALKTREE));
             }
         }
 
-        /// <summary>
-        /// Parse the XML nodes
-        /// </summary>
-        /// <param name="xmlNode">The <Tree></Tree> nodes</param>
         public void fromXML(XmlNode xmlNode)
         {
             setNodeId(xmlNode.Attributes[XmlAttributes.TREENODEID].Value);
@@ -184,17 +134,13 @@ namespace MissionEditor.Nodes
             }
         }
 
-        public void addValidations()
-        {
-            
-        }
+        public void addValidations() { }
 
         public Boolean valid(out String error)
         {
             error = "";
             return error.Length == 0;
         }
-
 
         internal void getReport(StringWriter stringWriter)
         {
@@ -209,7 +155,7 @@ namespace MissionEditor.Nodes
                         stringWriter.Write("<TR><td>&nbsp;</td>");
                         stringWriter.Write("<td>" + branch.gotoNode + "</td>");
                         stringWriter.WriteLine("<td>" + branch.text + "</td></tr>");
-                   }
+                    }
                 }
                 if (hasFlag())
                 {
@@ -220,9 +166,7 @@ namespace MissionEditor.Nodes
                                          + "</td></tr>");
                 }
                 stringWriter.WriteLine("</TABLE></td></tr>");
-
             }
         }
-
     }
 }

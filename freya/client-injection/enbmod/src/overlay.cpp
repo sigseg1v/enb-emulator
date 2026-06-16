@@ -12,9 +12,10 @@
 #include <atomic>
 
 #define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"   // keep stdio loaders (stbi_load by path)
+#include "stb_image.h" // keep stdio loaders (stbi_load by path)
 
-namespace enb { namespace overlay {
+namespace enb {
+namespace overlay {
 
 // ---- display list -----------------------------------------------------------
 enum Kind { K_TEXT, K_RECT, K_LINE, K_IMAGE, K_RECT_GRAD, K_RRECT, K_RRECT_GRAD };
@@ -24,13 +25,13 @@ struct Cmd {
     uint32_t rgb;
     bool filled;
     int alpha;
-    std::string s;   // text, or image path
-    uint32_t rgb2;   // gradient bottom color (K_RECT_GRAD / K_RRECT_GRAD)
-    int radius;      // corner radius (K_RRECT / K_RRECT_GRAD)
-    float scale = 1.0f;  // glyph scale (K_TEXT; 1.0 = native atlas size)
+    std::string s;      // text, or image path
+    uint32_t rgb2;      // gradient bottom color (K_RECT_GRAD / K_RRECT_GRAD)
+    int radius;         // corner radius (K_RRECT / K_RRECT_GRAD)
+    float scale = 1.0f; // glyph scale (K_TEXT; 1.0 = native atlas size)
 };
-static std::vector<Cmd> g_staging;     // built by Lua during tick
-static std::vector<Cmd> g_render;      // consumed by the Present hook
+static std::vector<Cmd> g_staging; // built by Lua during tick
+static std::vector<Cmd> g_render;  // consumed by the Present hook
 static std::mutex g_list_mx;
 
 // ---- D3D8 present hook -------------------------------------------------------
@@ -44,17 +45,21 @@ static std::mutex g_list_mx;
 // (D3DFVF_XYZRHW) for rects/lines/images and a GDI-baked font-atlas texture
 // for text. All textures are D3DPOOL_MANAGED so a device Reset cannot strand
 // them (managed resources survive Reset; only DEFAULT-pool blocks it).
-typedef HRESULT (WINAPI *Present_t)(IDirect3DDevice8*, const RECT*, const RECT*,
-                                    HWND, const RGNDATA*);
+typedef HRESULT(WINAPI* Present_t)(IDirect3DDevice8*, const RECT*, const RECT*, HWND,
+                                   const RGNDATA*);
 static Present_t real_Present = nullptr;
 
-struct Vtx { float x, y, z, rhw; D3DCOLOR color; float u, v; };
+struct Vtx {
+    float x, y, z, rhw;
+    D3DCOLOR color;
+    float u, v;
+};
 #define FVF_VTX (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1)
 
 // All cached GPU objects are keyed to the device they were created on; if the
 // game ever tears the device down and creates a new one, the caches rebuild.
 static IDirect3DDevice8* g_cacheDev = nullptr;
-static IDirect3DTexture8* g_white = nullptr;     // 1x1 white: untextured prims
+static IDirect3DTexture8* g_white = nullptr; // 1x1 white: untextured prims
 
 // Backbuffer size, sampled in the Present hook each frame (Reset can change it
 // without the device pointer changing). Read from the tick thread via screen_size.
@@ -66,7 +71,10 @@ static std::atomic<bool> g_cursor_on{false};
 static std::atomic<void*> g_cursor_hwnd{nullptr};
 
 // ---- font atlas (chars 32..126, GDI-rendered once into a managed texture) ----
-struct Glyph { float u0, v0, u1, v1; int w, h; };
+struct Glyph {
+    float u0, v0, u1, v1;
+    int w, h;
+};
 static IDirect3DTexture8* g_fontTex = nullptr;
 static Glyph g_glyphs[95];
 static int g_lineHeight = 0;
@@ -76,28 +84,44 @@ static const int FONT_TEX = 256;
 static std::atomic<bool> g_fontReady{false};
 
 // ---- cached images (path -> managed texture) ---------------------------------
-struct Image { IDirect3DTexture8* tex; int w, h; float u1, v1; };
+struct Image {
+    IDirect3DTexture8* tex;
+    int w, h;
+    float u1, v1;
+};
 static std::unordered_map<std::string, Image> g_images;
 static std::mutex g_img_mx;
 
 static void release_caches() {
     g_fontReady.store(false, std::memory_order_release);
-    if (g_fontTex) { g_fontTex->Release(); g_fontTex = nullptr; }
-    if (g_white)   { g_white->Release();   g_white = nullptr; }
+    if (g_fontTex) {
+        g_fontTex->Release();
+        g_fontTex = nullptr;
+    }
+    if (g_white) {
+        g_white->Release();
+        g_white = nullptr;
+    }
     std::lock_guard<std::mutex> lk(g_img_mx);
     for (auto& kv : g_images)
-        if (kv.second.tex) kv.second.tex->Release();
+        if (kv.second.tex)
+            kv.second.tex->Release();
     g_images.clear();
 }
 
-static int pow2_up(int v) { int p = 1; while (p < v) p <<= 1; return p; }
+static int pow2_up(int v) {
+    int p = 1;
+    while (p < v)
+        p <<= 1;
+    return p;
+}
 
 static bool build_white(IDirect3DDevice8* dev) {
-    if (FAILED(dev->CreateTexture(1, 1, 1, 0, D3DFMT_A8R8G8B8,
-                                  D3DPOOL_MANAGED, &g_white)))
+    if (FAILED(dev->CreateTexture(1, 1, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &g_white)))
         return false;
     D3DLOCKED_RECT lr;
-    if (FAILED(g_white->LockRect(0, &lr, nullptr, 0))) return false;
+    if (FAILED(g_white->LockRect(0, &lr, nullptr, 0)))
+        return false;
     *(uint32_t*)lr.pBits = 0xFFFFFFFFu;
     g_white->UnlockRect(0);
     return true;
@@ -113,7 +137,7 @@ static bool build_font(IDirect3DDevice8* dev) {
     BITMAPINFO bi = {};
     bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
     bi.bmiHeader.biWidth = FONT_TEX;
-    bi.bmiHeader.biHeight = -FONT_TEX;   // top-down
+    bi.bmiHeader.biHeight = -FONT_TEX; // top-down
     bi.bmiHeader.biPlanes = 1;
     bi.bmiHeader.biBitCount = 32;
     bi.bmiHeader.biCompression = BI_RGB;
@@ -121,16 +145,16 @@ static bool build_font(IDirect3DDevice8* dev) {
     HBITMAP bmp = CreateDIBSection(screen, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
     ReleaseDC(nullptr, screen);
     if (!bmp || !bits) {
-        if (bmp) DeleteObject(bmp);
+        if (bmp)
+            DeleteObject(bmp);
         DeleteDC(mdc);
         logf("overlay: font DIB failed");
         return false;
     }
     HBITMAP oldbmp = (HBITMAP)SelectObject(mdc, bmp);
 
-    HFONT font = CreateFontA(-14, 0, 0, 0, FW_NORMAL, 0, 0, 0, ANSI_CHARSET,
-                             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                             ANTIALIASED_QUALITY, FF_DONTCARE | DEFAULT_PITCH,
+    HFONT font = CreateFontA(-14, 0, 0, 0, FW_NORMAL, 0, 0, 0, ANSI_CHARSET, OUT_DEFAULT_PRECIS,
+                             CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, FF_DONTCARE | DEFAULT_PITCH,
                              "Tahoma");
     HFONT oldfont = (HFONT)SelectObject(mdc, font);
     SetTextColor(mdc, RGB(255, 255, 255));
@@ -148,11 +172,18 @@ static bool build_font(IDirect3DDevice8* dev) {
         char ch = (char)c;
         SIZE sz = {};
         GetTextExtentPoint32A(mdc, &ch, 1, &sz);
-        if (x + sz.cx + 1 > FONT_TEX) { x = 0; y += g_lineHeight + 1; }
-        if (y + g_lineHeight > FONT_TEX) { fit = false; break; }
+        if (x + sz.cx + 1 > FONT_TEX) {
+            x = 0;
+            y += g_lineHeight + 1;
+        }
+        if (y + g_lineHeight > FONT_TEX) {
+            fit = false;
+            break;
+        }
         TextOutA(mdc, x, y, &ch, 1);
         Glyph& g = g_glyphs[c - 32];
-        g.w = sz.cx; g.h = g_lineHeight;
+        g.w = sz.cx;
+        g.h = g_lineHeight;
         g.u0 = (float)x / FONT_TEX;
         g.v0 = (float)y / FONT_TEX;
         g.u1 = (float)(x + sz.cx) / FONT_TEX;
@@ -162,9 +193,8 @@ static bool build_font(IDirect3DDevice8* dev) {
     GdiFlush();
 
     bool ok = false;
-    if (fit && SUCCEEDED(dev->CreateTexture(FONT_TEX, FONT_TEX, 1, 0,
-                                            D3DFMT_A8R8G8B8, D3DPOOL_MANAGED,
-                                            &g_fontTex))) {
+    if (fit && SUCCEEDED(dev->CreateTexture(FONT_TEX, FONT_TEX, 1, 0, D3DFMT_A8R8G8B8,
+                                            D3DPOOL_MANAGED, &g_fontTex))) {
         D3DLOCKED_RECT lr;
         if (SUCCEEDED(g_fontTex->LockRect(0, &lr, nullptr, 0))) {
             const uint8_t* src = (const uint8_t*)bits;
@@ -178,11 +208,14 @@ static bool build_font(IDirect3DDevice8* dev) {
             g_fontTex->UnlockRect(0);
             ok = true;
         } else {
-            g_fontTex->Release(); g_fontTex = nullptr;
+            g_fontTex->Release();
+            g_fontTex = nullptr;
         }
     }
-    if (!ok) logf("overlay: font atlas build failed%s", fit ? "" : " (charset overflow)");
-    else g_fontReady.store(true, std::memory_order_release);
+    if (!ok)
+        logf("overlay: font atlas build failed%s", fit ? "" : " (charset overflow)");
+    else
+        g_fontReady.store(true, std::memory_order_release);
 
     SelectObject(mdc, oldfont);
     DeleteObject(font);
@@ -193,25 +226,30 @@ static bool build_font(IDirect3DDevice8* dev) {
 }
 
 static bool ensure_caches(IDirect3DDevice8* dev) {
-    if (dev == g_cacheDev && g_white && g_fontTex) return true;
+    if (dev == g_cacheDev && g_white && g_fontTex)
+        return true;
     if (g_cacheDev && dev != g_cacheDev)
         logf("overlay: device changed -- rebuilding GPU caches");
     release_caches();
     g_cacheDev = dev;
-    if (!build_white(dev) || !build_font(dev)) { release_caches(); return false; }
+    if (!build_white(dev) || !build_font(dev)) {
+        release_caches();
+        return false;
+    }
     return true;
 }
 
 static Image* load_image(IDirect3DDevice8* dev, const std::string& path) {
     std::lock_guard<std::mutex> lk(g_img_mx);
     auto it = g_images.find(path);
-    if (it != g_images.end()) return it->second.tex ? &it->second : nullptr;
+    if (it != g_images.end())
+        return it->second.tex ? &it->second : nullptr;
 
     int w, h, ch;
     unsigned char* px = stbi_load(path.c_str(), &w, &h, &ch, 4); // force RGBA
     if (!px) {
         logf("overlay: image load failed: %s", path.c_str());
-        g_images[path] = Image{nullptr, 0, 0, 0, 0};   // cache the failure
+        g_images[path] = Image{nullptr, 0, 0, 0, 0}; // cache the failure
         return nullptr;
     }
 
@@ -219,8 +257,8 @@ static Image* load_image(IDirect3DDevice8* dev, const std::string& path) {
     // the quad samples only the [0..u1, 0..v1] sub-rect that holds the pixels.
     int tw = pow2_up(w), th = pow2_up(h);
     IDirect3DTexture8* tex = nullptr;
-    if (FAILED(dev->CreateTexture((UINT)tw, (UINT)th, 1, 0, D3DFMT_A8R8G8B8,
-                                  D3DPOOL_MANAGED, &tex))) {
+    if (FAILED(
+            dev->CreateTexture((UINT)tw, (UINT)th, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &tex))) {
         stbi_image_free(px);
         logf("overlay: image texture failed: %s", path.c_str());
         g_images[path] = Image{nullptr, 0, 0, 0, 0};
@@ -236,17 +274,17 @@ static Image* load_image(IDirect3DDevice8* dev, const std::string& path) {
     for (int row = 0; row < h; ++row) {
         uint32_t* dst = (uint32_t*)((uint8_t*)lr.pBits + row * lr.Pitch);
         const uint8_t* s = px + row * w * 4;
-        for (int col = 0; col < w; ++col)   // RGBA -> BGRA (straight alpha)
-            dst[col] = ((uint32_t)s[col*4+3] << 24) | ((uint32_t)s[col*4+0] << 16)
-                     | ((uint32_t)s[col*4+1] << 8)  |  (uint32_t)s[col*4+2];
-        memset(dst + w, 0, (size_t)(tw - w) * 4);   // clear the pow2 padding
+        for (int col = 0; col < w; ++col) // RGBA -> BGRA (straight alpha)
+            dst[col] = ((uint32_t)s[col * 4 + 3] << 24) | ((uint32_t)s[col * 4 + 0] << 16) |
+                       ((uint32_t)s[col * 4 + 1] << 8) | (uint32_t)s[col * 4 + 2];
+        memset(dst + w, 0, (size_t)(tw - w) * 4); // clear the pow2 padding
     }
     for (int row = h; row < th; ++row)
         memset((uint8_t*)lr.pBits + row * lr.Pitch, 0, (size_t)tw * 4);
     tex->UnlockRect(0);
     stbi_image_free(px);
 
-    Image img{ tex, w, h, (float)w / tw, (float)h / th };
+    Image img{tex, w, h, (float)w / tw, (float)h / th};
     auto res = g_images.emplace(path, img);
     logf("overlay: loaded image %s (%dx%d)", path.c_str(), w, h);
     return &res.first->second;
@@ -257,14 +295,13 @@ static inline D3DCOLOR argb(uint32_t rgb, int a) {
     return ((D3DCOLOR)(a & 0xFF) << 24) | (rgb & 0x00FFFFFFu);
 }
 
-static void draw_quad(IDirect3DDevice8* dev, IDirect3DTexture8* tex,
-                      float x, float y, float w, float h,
-                      float u0, float v0, float u1, float v1, D3DCOLOR c) {
+static void draw_quad(IDirect3DDevice8* dev, IDirect3DTexture8* tex, float x, float y, float w,
+                      float h, float u0, float v0, float u1, float v1, D3DCOLOR c) {
     Vtx v[4] = {
-        { x - 0.5f,     y - 0.5f,     0, 1, c, u0, v0 },
-        { x + w - 0.5f, y - 0.5f,     0, 1, c, u1, v0 },
-        { x - 0.5f,     y + h - 0.5f, 0, 1, c, u0, v1 },
-        { x + w - 0.5f, y + h - 0.5f, 0, 1, c, u1, v1 },
+        {x - 0.5f, y - 0.5f, 0, 1, c, u0, v0},
+        {x + w - 0.5f, y - 0.5f, 0, 1, c, u1, v0},
+        {x - 0.5f, y + h - 0.5f, 0, 1, c, u0, v1},
+        {x + w - 0.5f, y + h - 0.5f, 0, 1, c, u1, v1},
     };
     dev->SetTexture(0, tex);
     dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(Vtx));
@@ -277,39 +314,45 @@ static void draw_lines(IDirect3DDevice8* dev, const Vtx* v, UINT count) {
 
 // Per-channel lerp between two 0xRRGGBB colors at t in [0,1], with alpha a.
 static D3DCOLOR argb_lerp(uint32_t top, uint32_t bot, float t, int a) {
-    if (t < 0) t = 0; else if (t > 1) t = 1;
-    uint32_t r = (uint32_t)(((top >> 16) & 0xFF) + (((float)((bot >> 16) & 0xFF) - (float)((top >> 16) & 0xFF)) * t));
-    uint32_t g = (uint32_t)(((top >>  8) & 0xFF) + (((float)((bot >>  8) & 0xFF) - (float)((top >>  8) & 0xFF)) * t));
-    uint32_t b = (uint32_t)(( top        & 0xFF) + (((float)( bot        & 0xFF) - (float)( top        & 0xFF)) * t));
+    if (t < 0)
+        t = 0;
+    else if (t > 1)
+        t = 1;
+    uint32_t r = (uint32_t)(((top >> 16) & 0xFF) +
+                            (((float)((bot >> 16) & 0xFF) - (float)((top >> 16) & 0xFF)) * t));
+    uint32_t g = (uint32_t)(((top >> 8) & 0xFF) +
+                            (((float)((bot >> 8) & 0xFF) - (float)((top >> 8) & 0xFF)) * t));
+    uint32_t b = (uint32_t)((top & 0xFF) + (((float)(bot & 0xFF) - (float)(top & 0xFF)) * t));
     return ((D3DCOLOR)(a & 0xFF) << 24) | (r << 16) | (g << 8) | b;
 }
 
-static void draw_quad_grad(IDirect3DDevice8* dev, float x, float y, float w, float h,
-                           uint32_t top, uint32_t bot, int a) {
+static void draw_quad_grad(IDirect3DDevice8* dev, float x, float y, float w, float h, uint32_t top,
+                           uint32_t bot, int a) {
     D3DCOLOR ct = argb(top, a), cb = argb(bot, a);
     Vtx v[4] = {
-        { x - 0.5f,     y - 0.5f,     0, 1, ct, 0, 0 },
-        { x + w - 0.5f, y - 0.5f,     0, 1, ct, 1, 0 },
-        { x - 0.5f,     y + h - 0.5f, 0, 1, cb, 0, 1 },
-        { x + w - 0.5f, y + h - 0.5f, 0, 1, cb, 1, 1 },
+        {x - 0.5f, y - 0.5f, 0, 1, ct, 0, 0},
+        {x + w - 0.5f, y - 0.5f, 0, 1, ct, 1, 0},
+        {x - 0.5f, y + h - 0.5f, 0, 1, cb, 0, 1},
+        {x + w - 0.5f, y + h - 0.5f, 0, 1, cb, 1, 1},
     };
     dev->SetTexture(0, g_white);
     dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(Vtx));
 }
 
 // ---- rounded rectangle (triangle-fan corners; no textures, repo binary-asset rule) ----
-static const int kCornerSegs = 4;                      // arc steps per corner
-static const int kRRectPts   = 4 * (kCornerSegs + 1);  // perimeter points (20)
+static const int kCornerSegs = 4;                   // arc steps per corner
+static const int kRRectPts = 4 * (kCornerSegs + 1); // perimeter points (20)
 
 // Clockwise perimeter of a rounded rect, starting at the top-left corner's
 // leftmost point. Screen coords (y down), so sin<0 walks upward.
-static void rrect_perimeter(float x, float y, float w, float h, float r,
-                            float* xs, float* ys) {
-    const struct { float cx, cy, a0; } corner[4] = {
-        { x + r,     y + r,     180.f },   // top-left:     180 -> 270
-        { x + w - r, y + r,     270.f },   // top-right:    270 -> 360
-        { x + w - r, y + h - r,   0.f },   // bottom-right:   0 ->  90
-        { x + r,     y + h - r,  90.f },   // bottom-left:   90 -> 180
+static void rrect_perimeter(float x, float y, float w, float h, float r, float* xs, float* ys) {
+    const struct {
+        float cx, cy, a0;
+    } corner[4] = {
+        {x + r, y + r, 180.f},       // top-left:     180 -> 270
+        {x + w - r, y + r, 270.f},   // top-right:    270 -> 360
+        {x + w - r, y + h - r, 0.f}, // bottom-right:   0 ->  90
+        {x + r, y + h - r, 90.f},    // bottom-left:   90 -> 180
     };
     int n = 0;
     for (int c = 0; c < 4; ++c)
@@ -322,11 +365,14 @@ static void rrect_perimeter(float x, float y, float w, float h, float r,
 
 static void draw_rrect_cmd(IDirect3DDevice8* dev, const Cmd& c) {
     float w = (float)c.w, h = (float)c.h;
-    if (w <= 0 || h <= 0) return;
+    if (w <= 0 || h <= 0)
+        return;
     float r = (float)c.radius;
     float rmax = (w < h ? w : h) * 0.5f;
-    if (r > rmax) r = rmax;
-    if (r < 0) r = 0;
+    if (r > rmax)
+        r = rmax;
+    if (r < 0)
+        r = 0;
     float xs[kRRectPts], ys[kRRectPts];
     rrect_perimeter((float)c.x, (float)c.y, w, h, r, xs, ys);
 
@@ -337,18 +383,18 @@ static void draw_rrect_cmd(IDirect3DDevice8* dev, const Cmd& c) {
     };
 
     if (c.filled) {
-        Vtx v[kRRectPts + 2];   // center + perimeter + closing repeat
+        Vtx v[kRRectPts + 2]; // center + perimeter + closing repeat
         float cx = (float)c.x + w * 0.5f, cy = (float)c.y + h * 0.5f;
-        v[0] = { cx - 0.5f, cy - 0.5f, 0, 1, color_at(cy), 0, 0 };
+        v[0] = {cx - 0.5f, cy - 0.5f, 0, 1, color_at(cy), 0, 0};
         for (int i = 0; i < kRRectPts; ++i)
-            v[i + 1] = { xs[i] - 0.5f, ys[i] - 0.5f, 0, 1, color_at(ys[i]), 0, 0 };
+            v[i + 1] = {xs[i] - 0.5f, ys[i] - 0.5f, 0, 1, color_at(ys[i]), 0, 0};
         v[kRRectPts + 1] = v[1];
         dev->SetTexture(0, g_white);
         dev->DrawPrimitiveUP(D3DPT_TRIANGLEFAN, kRRectPts, v, sizeof(Vtx));
     } else {
         Vtx v[kRRectPts + 1];
         for (int i = 0; i < kRRectPts; ++i)
-            v[i] = { xs[i] - 0.5f, ys[i] - 0.5f, 0, 1, color_at(ys[i]), 0, 0 };
+            v[i] = {xs[i] - 0.5f, ys[i] - 0.5f, 0, 1, color_at(ys[i]), 0, 0};
         v[kRRectPts] = v[0];
         draw_lines(dev, v, kRRectPts + 1);
     }
@@ -360,12 +406,14 @@ static void draw_rrect_cmd(IDirect3DDevice8* dev, const Cmd& c) {
 static void draw_cursor(IDirect3DDevice8* dev) {
     void* hw = g_cursor_hwnd.load(std::memory_order_relaxed);
     POINT p;
-    if (!GetCursorPos(&p)) return;
-    if (hw) ScreenToClient((HWND)hw, &p);
+    if (!GetCursorPos(&p))
+        return;
+    if (hw)
+        ScreenToClient((HWND)hw, &p);
 
     // arrow outline (tip first), in pixels relative to the hotspot
-    static const float ax[] = { 0, 0, 3.5f, 6, 8.5f, 6, 11 };
-    static const float ay[] = { 0, 16, 12.5f, 18, 17, 11.5f, 11 };
+    static const float ax[] = {0, 0, 3.5f, 6, 8.5f, 6, 11};
+    static const float ay[] = {0, 16, 12.5f, 18, 17, 11.5f, 11};
     const int N = 7;
     float fx = (float)p.x, fy = (float)p.y;
 
@@ -374,32 +422,34 @@ static void draw_cursor(IDirect3DDevice8* dev) {
 
     Vtx fan[N + 1];
     for (int i = 0; i < N; ++i)
-        fan[i] = { fx + ax[i] - 0.5f, fy + ay[i] - 0.5f, 0, 1, fill, 0, 0 };
-    fan[N] = fan[1];   // close the fan back to the first rim vertex
+        fan[i] = {fx + ax[i] - 0.5f, fy + ay[i] - 0.5f, 0, 1, fill, 0, 0};
+    fan[N] = fan[1]; // close the fan back to the first rim vertex
     dev->DrawPrimitiveUP(D3DPT_TRIANGLEFAN, N - 1, fan, sizeof(Vtx));
 
     Vtx out[N + 1];
     for (int i = 0; i < N; ++i)
-        out[i] = { fx + ax[i] - 0.5f, fy + ay[i] - 0.5f, 0, 1, edge, 0, 0 };
+        out[i] = {fx + ax[i] - 0.5f, fy + ay[i] - 0.5f, 0, 1, edge, 0, 0};
     out[N] = out[0];
     dev->DrawPrimitiveUP(D3DPT_LINESTRIP, N, out, sizeof(Vtx));
 }
 
-static void draw_text(IDirect3DDevice8* dev, int x, int y,
-                      const std::string& s, D3DCOLOR c, float scale) {
-    if (scale <= 0.0f) scale = 1.0f;
+static void draw_text(IDirect3DDevice8* dev, int x, int y, const std::string& s, D3DCOLOR c,
+                      float scale) {
+    if (scale <= 0.0f)
+        scale = 1.0f;
     float cx = (float)x;
     dev->SetTexture(0, g_fontTex);
     for (char chs : s) {
         unsigned char ch = (unsigned char)chs;
-        if (ch < 32 || ch > 126) ch = '?';
+        if (ch < 32 || ch > 126)
+            ch = '?';
         const Glyph& g = g_glyphs[ch - 32];
         float gw = g.w * scale, gh = g.h * scale;
         Vtx v[4] = {
-            { cx - 0.5f,      (float)y - 0.5f,      0, 1, c, g.u0, g.v0 },
-            { cx + gw - 0.5f, (float)y - 0.5f,      0, 1, c, g.u1, g.v0 },
-            { cx - 0.5f,      (float)y + gh - 0.5f, 0, 1, c, g.u0, g.v1 },
-            { cx + gw - 0.5f, (float)y + gh - 0.5f, 0, 1, c, g.u1, g.v1 },
+            {cx - 0.5f, (float)y - 0.5f, 0, 1, c, g.u0, g.v0},
+            {cx + gw - 0.5f, (float)y - 0.5f, 0, 1, c, g.u1, g.v0},
+            {cx - 0.5f, (float)y + gh - 0.5f, 0, 1, c, g.u0, g.v1},
+            {cx + gw - 0.5f, (float)y + gh - 0.5f, 0, 1, c, g.u1, g.v1},
         };
         dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(Vtx));
         cx += gw;
@@ -408,15 +458,21 @@ static void draw_text(IDirect3DDevice8* dev, int x, int y,
 
 static void draw_frame(IDirect3DDevice8* dev) {
     std::vector<Cmd> frame;
-    { std::lock_guard<std::mutex> lk(g_list_mx); frame = g_render; }
+    {
+        std::lock_guard<std::mutex> lk(g_list_mx);
+        frame = g_render;
+    }
     const bool want_cursor = g_cursor_on.load(std::memory_order_relaxed);
-    if (frame.empty() && !want_cursor) return;
-    if (!ensure_caches(dev)) return;
+    if (frame.empty() && !want_cursor)
+        return;
+    if (!ensure_caches(dev))
+        return;
 
     // Snapshot the device state, draw, then restore -- the game's renderer
     // must never see our 2D state leak into its next frame.
     DWORD sb = 0;
-    if (FAILED(dev->CreateStateBlock(D3DSBT_ALL, &sb))) sb = 0;
+    if (FAILED(dev->CreateStateBlock(D3DSBT_ALL, &sb)))
+        sb = 0;
 
     dev->SetVertexShader(FVF_VTX);
     dev->SetPixelShader(0);
@@ -432,10 +488,10 @@ static void draw_frame(IDirect3DDevice8* dev) {
     dev->SetRenderState(D3DRS_STENCILENABLE, FALSE);
     dev->SetRenderState(D3DRS_FILLMODE, D3DFILL_SOLID);
     dev->SetRenderState(D3DRS_CLIPPING, TRUE);
-    dev->SetTextureStageState(0, D3DTSS_COLOROP,   D3DTOP_MODULATE);
+    dev->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
     dev->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
     dev->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
-    dev->SetTextureStageState(0, D3DTSS_ALPHAOP,   D3DTOP_MODULATE);
+    dev->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
     dev->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
     dev->SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_DIFFUSE);
     dev->SetTextureStageState(0, D3DTSS_MINFILTER, D3DTEXF_POINT);
@@ -455,23 +511,22 @@ static void draw_frame(IDirect3DDevice8* dev) {
         case K_RECT: {
             D3DCOLOR col = argb(c.rgb, c.alpha);
             if (c.filled) {
-                draw_quad(dev, g_white, (float)c.x, (float)c.y,
-                          (float)c.w, (float)c.h, 0, 0, 1, 1, col);
+                draw_quad(dev, g_white, (float)c.x, (float)c.y, (float)c.w, (float)c.h, 0, 0, 1, 1,
+                          col);
             } else {
                 float x0 = (float)c.x - 0.5f, y0 = (float)c.y - 0.5f;
                 float x1 = x0 + (float)c.w - 1.0f, y1 = y0 + (float)c.h - 1.0f;
                 Vtx v[5] = {
-                    { x0, y0, 0, 1, col, 0, 0 }, { x1, y0, 0, 1, col, 0, 0 },
-                    { x1, y1, 0, 1, col, 0, 0 }, { x0, y1, 0, 1, col, 0, 0 },
-                    { x0, y0, 0, 1, col, 0, 0 },
+                    {x0, y0, 0, 1, col, 0, 0}, {x1, y0, 0, 1, col, 0, 0}, {x1, y1, 0, 1, col, 0, 0},
+                    {x0, y1, 0, 1, col, 0, 0}, {x0, y0, 0, 1, col, 0, 0},
                 };
                 draw_lines(dev, v, 5);
             }
             break;
         }
         case K_RECT_GRAD:
-            draw_quad_grad(dev, (float)c.x, (float)c.y, (float)c.w, (float)c.h,
-                           c.rgb, c.rgb2, c.alpha);
+            draw_quad_grad(dev, (float)c.x, (float)c.y, (float)c.w, (float)c.h, c.rgb, c.rgb2,
+                           c.alpha);
             break;
         case K_RRECT:
         case K_RRECT_GRAD:
@@ -480,28 +535,34 @@ static void draw_frame(IDirect3DDevice8* dev) {
         case K_LINE: {
             D3DCOLOR col = argb(c.rgb, c.alpha);
             Vtx v[2] = {
-                { (float)c.x - 0.5f, (float)c.y - 0.5f, 0, 1, col, 0, 0 },
-                { (float)c.w - 0.5f, (float)c.h - 0.5f, 0, 1, col, 0, 0 }, // w/h = x1/y1
+                {(float)c.x - 0.5f, (float)c.y - 0.5f, 0, 1, col, 0, 0},
+                {(float)c.w - 0.5f, (float)c.h - 0.5f, 0, 1, col, 0, 0}, // w/h = x1/y1
             };
             draw_lines(dev, v, 2);
             break;
         }
         case K_IMAGE: {
             Image* img = load_image(dev, c.s);
-            if (!img) break;
+            if (!img)
+                break;
             float dw = c.w > 0 ? (float)c.w : (float)img->w;
             float dh = c.h > 0 ? (float)c.h : (float)img->h;
-            draw_quad(dev, img->tex, (float)c.x, (float)c.y, dw, dh,
-                      0, 0, img->u1, img->v1, argb(0xFFFFFF, c.alpha));
+            draw_quad(dev, img->tex, (float)c.x, (float)c.y, dw, dh, 0, 0, img->u1, img->v1,
+                      argb(0xFFFFFF, c.alpha));
             break;
         }
         }
     }
 
-    if (want_cursor) draw_cursor(dev);   // last -> on top of the whole HUD
+    if (want_cursor)
+        draw_cursor(dev); // last -> on top of the whole HUD
 
-    if (scene) dev->EndScene();
-    if (sb) { dev->ApplyStateBlock(sb); dev->DeleteStateBlock(sb); }
+    if (scene)
+        dev->EndScene();
+    if (sb) {
+        dev->ApplyStateBlock(sb);
+        dev->DeleteStateBlock(sb);
+    }
 }
 
 // Sample the real render size from the device's backbuffer. Cheap (one COM call,
@@ -519,10 +580,13 @@ static void sample_screen(IDirect3DDevice8* dev) {
     }
 }
 
-static HRESULT WINAPI hk_Present(IDirect3DDevice8* dev, const RECT* src,
-                                 const RECT* dst, HWND wnd, const RGNDATA* dirty) {
+static HRESULT WINAPI hk_Present(IDirect3DDevice8* dev, const RECT* src, const RECT* dst, HWND wnd,
+                                 const RGNDATA* dirty) {
     static bool logged = false;
-    if (!logged) { logged = true; logf("overlay: Present hook FIRED -- D3D8 present path live"); }
+    if (!logged) {
+        logged = true;
+        logf("overlay: Present hook FIRED -- D3D8 present path live");
+    }
     sample_screen(dev);
     draw_frame(dev);
     return real_Present(dev, src, dst, wnd, dirty);
@@ -533,40 +597,50 @@ bool init() {
     // already loaded by the game (client.exe imports it); LoadLibrary is only a
     // fallback for a pre-render injection race.
     HMODULE d3dmod = GetModuleHandleA("d3d8.dll");
-    if (!d3dmod) d3dmod = LoadLibraryA("d3d8.dll");
-    if (!d3dmod) { logf("overlay: d3d8.dll not found"); return false; }
+    if (!d3dmod)
+        d3dmod = LoadLibraryA("d3d8.dll");
+    if (!d3dmod) {
+        logf("overlay: d3d8.dll not found");
+        return false;
+    }
 
-    typedef IDirect3D8* (WINAPI *Create8_t)(UINT);
+    typedef IDirect3D8*(WINAPI * Create8_t)(UINT);
     // via void*: FARPROC -> target-type direct cast trips -Wcast-function-type
     Create8_t create = (Create8_t)(void*)GetProcAddress(d3dmod, "Direct3DCreate8");
-    if (!create) { logf("overlay: Direct3DCreate8 not exported"); return false; }
+    if (!create) {
+        logf("overlay: Direct3DCreate8 not exported");
+        return false;
+    }
     IDirect3D8* d3d = create(D3D_SDK_VERSION);
-    if (!d3d) { logf("overlay: Direct3DCreate8 failed"); return false; }
+    if (!d3d) {
+        logf("overlay: Direct3DCreate8 failed");
+        return false;
+    }
 
     WNDCLASSA wc = {};
     wc.lpfnWndProc = DefWindowProcA;
     wc.hInstance = GetModuleHandleA(nullptr);
     wc.lpszClassName = "enbmod_d3d8probe";
     RegisterClassA(&wc);
-    HWND wnd = CreateWindowA(wc.lpszClassName, "", WS_OVERLAPPEDWINDOW,
-                             0, 0, 16, 16, nullptr, nullptr, wc.hInstance, nullptr);
+    HWND wnd = CreateWindowA(wc.lpszClassName, "", WS_OVERLAPPEDWINDOW, 0, 0, 16, 16, nullptr,
+                             nullptr, wc.hInstance, nullptr);
 
     D3DPRESENT_PARAMETERS pp = {};
     pp.Windowed = TRUE;
     pp.SwapEffect = D3DSWAPEFFECT_DISCARD;
-    pp.BackBufferFormat = D3DFMT_UNKNOWN;   // windowed: current display format
+    pp.BackBufferFormat = D3DFMT_UNKNOWN; // windowed: current display format
     pp.BackBufferWidth = 16;
     pp.BackBufferHeight = 16;
     pp.hDeviceWindow = wnd;
 
     IDirect3DDevice8* dev = nullptr;
-    HRESULT hr = d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, wnd,
-                                   D3DCREATE_SOFTWARE_VERTEXPROCESSING |
-                                   D3DCREATE_FPU_PRESERVE, &pp, &dev);
+    HRESULT hr =
+        d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, wnd,
+                          D3DCREATE_SOFTWARE_VERTEXPROCESSING | D3DCREATE_FPU_PRESERVE, &pp, &dev);
     if (FAILED(hr))
         hr = d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_REF, wnd,
-                               D3DCREATE_SOFTWARE_VERTEXPROCESSING |
-                               D3DCREATE_FPU_PRESERVE, &pp, &dev);
+                               D3DCREATE_SOFTWARE_VERTEXPROCESSING | D3DCREATE_FPU_PRESERVE, &pp,
+                               &dev);
     if (FAILED(hr) || !dev) {
         logf("overlay: probe CreateDevice failed (0x%08lx)", (unsigned long)hr);
         d3d->Release();
@@ -575,18 +649,20 @@ bool init() {
         return false;
     }
 
-    void** vtable = *(void***)dev;          // IDirect3DDevice8 vtable
-    void* present_addr = vtable[15];        // index 15 = Present
+    void** vtable = *(void***)dev;   // IDirect3DDevice8 vtable
+    void* present_addr = vtable[15]; // index 15 = Present
     dev->Release();
     d3d->Release();
     DestroyWindow(wnd);
     UnregisterClassA(wc.lpszClassName, wc.hInstance);
 
     if (MH_CreateHook(present_addr, (void*)&hk_Present, (void**)&real_Present) != MH_OK) {
-        logf("overlay: hook Present failed"); return false;
+        logf("overlay: hook Present failed");
+        return false;
     }
     if (MH_EnableHook(present_addr) != MH_OK) {
-        logf("overlay: enable Present hook failed"); return false;
+        logf("overlay: enable Present hook failed");
+        return false;
     }
     logf("overlay: hook installed -- IDirect3DDevice8::Present @ %p", present_addr);
     return true;
@@ -598,26 +674,36 @@ void shutdown() {
 }
 
 void screen_size(int* w, int* h) {
-    if (w) *w = g_screen_w.load(std::memory_order_relaxed);
-    if (h) *h = g_screen_h.load(std::memory_order_relaxed);
+    if (w)
+        *w = g_screen_w.load(std::memory_order_relaxed);
+    if (h)
+        *h = g_screen_h.load(std::memory_order_relaxed);
 }
 
 bool measure_text(const std::string& s, int* w, int* h) {
-    if (w) *w = 0;
-    if (h) *h = 0;
-    if (!g_fontReady.load(std::memory_order_acquire)) return false;
+    if (w)
+        *w = 0;
+    if (h)
+        *h = 0;
+    if (!g_fontReady.load(std::memory_order_acquire))
+        return false;
     int width = 0;
     for (char chs : s) {
         unsigned char ch = (unsigned char)chs;
-        if (ch < 32 || ch > 126) ch = '?';
+        if (ch < 32 || ch > 126)
+            ch = '?';
         width += g_glyphs[ch - 32].w;
     }
-    if (w) *w = width;
-    if (h) *h = g_lineHeight;
+    if (w)
+        *w = width;
+    if (h)
+        *h = g_lineHeight;
     return true;
 }
 
-void begin_frame() { g_staging.clear(); }
+void begin_frame() {
+    g_staging.clear();
+}
 void commit_frame() {
     std::lock_guard<std::mutex> lk(g_list_mx);
     g_render.swap(g_staging);
@@ -638,8 +724,8 @@ void rect_grad(int x, int y, int w, int h, uint32_t rgb_top, uint32_t rgb_bottom
 void rrect(int x, int y, int w, int h, int radius, uint32_t rgb, int alpha, bool filled) {
     g_staging.push_back({K_RRECT, x, y, w, h, rgb, filled, alpha, {}, 0, radius});
 }
-void rrect_grad(int x, int y, int w, int h, int radius,
-                uint32_t rgb_top, uint32_t rgb_bottom, int alpha) {
+void rrect_grad(int x, int y, int w, int h, int radius, uint32_t rgb_top, uint32_t rgb_bottom,
+                int alpha) {
     g_staging.push_back({K_RRECT_GRAD, x, y, w, h, rgb_top, true, alpha, {}, rgb_bottom, radius});
 }
 void image(const std::string& path, int x, int y, int w, int h, int alpha) {
@@ -651,4 +737,5 @@ void set_cursor(bool on, void* hwnd) {
     g_cursor_on.store(on, std::memory_order_relaxed);
 }
 
-}} // namespace enb::overlay
+} // namespace overlay
+} // namespace enb
