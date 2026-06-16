@@ -34,9 +34,9 @@ The server runs natively on Linux. Concretely:
   natively on Linux without WINE. There are 13 Avalonia executables (the
   content editors -- sector, mob, mission, faction, item, effect, talktree,
   station tools -- plus the launcher, patchers, data import, and
-  LaunchNet7) on top of the shared `commontools-avalonia` library. The
-  Item Editor is ported (`tools/item-editor-avalonia/`); its WinForms
-  original at `tools/itemeditor/` is kept for reference only.
+  LaunchFreya) on top of the shared `commontools-avalonia` library. The
+  original WinForms projects have been removed; the Avalonia ports are the
+  only versions.
 - A headless C# CLI client (`freya/cli-client/`) and an xUnit integration
   suite drive the live server end to end and byte-pin its packets.
 - The Linux client installer (`client/linux-installer/`, GPLv3, verbatim

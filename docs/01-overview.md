@@ -134,11 +134,9 @@ just launch-sector-editor
 just --list                 # shows every launch-* recipe
 ```
 
-The legacy WinForms projects under `tools/<name>/` (without `-avalonia`)
-still build cross-platform via `dotnet build tools/FreyaTools.slnx`, but
-their runtime is Windows / WINE only. They are kept for diff reference;
-the Item Editor's WinForms original lives at `tools/itemeditor/` and has
-been superseded by `tools/item-editor-avalonia/`.
+The original WinForms projects have been removed; the Avalonia ports are
+the only versions. `tools/item-editor-avalonia/` is the Item Editor port
+(the upstream WinForms project had no csproj and was never built).
 
 Per-tool documentation is in `07-tools-toolchain.md`; the
 `tools/README.md` has the quickstart-with-credentials cheat sheet.

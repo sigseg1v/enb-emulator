@@ -4,8 +4,7 @@ This document covers building the four components of the project:
 
 1. The C++ server / proxy / login-server (Linux primary, Windows secondary).
 2. The C# tool suite (`tools/FreyaTools.slnx`) -- Avalonia ports run native
-   on Linux; legacy WinForms ports build cross-platform but only run on
-   Windows / WINE.
+   on Linux. The original WinForms projects have been removed.
 3. The Linux client installer (`client/linux-installer/install-enb-linux.sh`).
 4. The dev environment (`just dev` / `docker compose`).
 
@@ -95,17 +94,14 @@ build first as a sanity check that nothing in the merge broke -- the
 upstream code did build there in 2010 and the merge preserved file
 contents.
 
-There is also `tools/launchnet7-old/LaunchNet7.dsp`, `tools/chunktypes/`,
-`tools/udpdump/`, `tools/unmix/`, `tools/xml-exporter/` as standalone VC6
-`.dsp` projects. These are not part of `Net7.sln`. See
-`07-tools-toolchain.md` for their status.
+There are also standalone VC6 `.dsp` projects: `tools/chunktypes/`,
+`tools/udpdump/`, `tools/unmix/`, `tools/xml-exporter/`. These are not
+part of `Net7.sln`. See `07-tools-toolchain.md` for their status.
 
 ## C# tools
 
-Every C# project that had an upstream `.csproj` is SDK-style and targets
-`net10.0-windows`. Every user-facing editor also has an Avalonia 11 port
-targeting `net10.0` (no `-windows`) so it runs natively on Linux. Build
-everything:
+Every C# project is SDK-style and targets `net10.0` (Avalonia ports) or
+`net10.0-windows` (console/library tools). Build everything:
 
 ```sh
 dotnet build tools/FreyaTools.slnx
@@ -121,15 +117,13 @@ Or jump directly to an editor -- every Avalonia port has a `just launch-*`
 recipe (`just launch-sector-editor`, `just launch-mob-editor`,
 `just launch-mission-editor`, etc.). `just --list` prints them all.
 
-Per-tool Avalonia status table is in `tools/README.md`; build-diff status
-for the legacy WinForms projects is in `tools/BUILD_STATUS.md`.
+Per-tool status table is in `tools/README.md`; historical Phase D build
+status is in `tools/BUILD_STATUS.md`.
 
 ### .NET 10 SDK requirement
 
 You need the .NET 10 SDK on whatever box runs `dotnet build`. For the
-Avalonia ports this is also the only runtime requirement on Linux. The
-legacy WinForms tools (`tools/<name>/` without `-avalonia`) build with
-the same SDK but only **run** on Windows / WINE.
+Avalonia ports this is also the only runtime requirement on Linux.
 
 ```sh
 dotnet --list-sdks    # must include 10.x
@@ -147,15 +141,10 @@ download from `https://dotnet.microsoft.com/download/dotnet/10.0`.
 
 ### Runtime
 
-The Avalonia ports (`tools/<name>-avalonia/`) run on Linux, macOS, and
-Windows with only the .NET 10 runtime installed. This is the recommended
-path -- every user-facing editor, including the Item Editor
-(`tools/item-editor-avalonia/`), has an Avalonia build.
-
-The legacy WinForms ports (`tools/<name>/`) are **Windows-only**:
-WinForms has not been ported to Linux/macOS. To run them on Linux,
-install the Windows .NET 10 Desktop Runtime inside a WINE prefix and
-launch under `wine`. A Windows VM is the unglamorous alternative.
+The Avalonia editors (`tools/<name>-avalonia/`) run on Linux, macOS, and
+Windows with only the .NET 10 runtime installed. Every user-facing editor,
+including the Item Editor (`tools/item-editor-avalonia/`), is an Avalonia
+build. The original WinForms projects have been removed.
 
 ## Linux client (game client, not server)
 
@@ -291,7 +280,6 @@ from the Microsoft RPM repo or the dnf module.
 |---|---|---|---|---|
 | C++ server / proxy / login | Yes (CMake + Ninja, OpenSSL 3, libpqxx) | Yes (passes integration tests) | Yes (VS 2022) | Yes |
 | C# tools (Avalonia ports) | .NET 10 SDK | Yes (native, no WINE) | .NET 10 SDK | Yes |
-| C# tools (legacy WinForms) | .NET 10 SDK | No (WinForms / WINE only) | .NET 10 SDK or VS 2022 | Yes |
 | Linux installer | Yes (bash) | Yes | n/a | n/a (it is *for* Linux) |
 | Game client | n/a (Windows binary) | Yes via WINE | n/a | Yes (native) |
 | Legacy C++ tools | No (Win32-only as written) | No | Yes (VS 2022, may need older compatibility) | Yes |

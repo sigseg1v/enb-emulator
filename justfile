@@ -278,8 +278,8 @@ stop-docker-proxy:
 # exported ENB_DB_* vars (localhost:5434 / net7 / net7 -- the dev stack;
 # `just init` first), so you just click Login: no typing. Phase N moved
 # the content DB to Postgres `net7` (was MySQL on 3307). Tools that don't
-# talk to the DB (toolslauncher, launchnet7, enbpatcher, toolspatcher,
-# w3d-parser, talktreeeditor) skip the login dialog.
+# talk to the DB (toolslauncher-avalonia, LaunchFreya, enbpatcher-avalonia,
+# toolspatcher-avalonia, w3d-parser, talktreeeditor-avalonia) skip the login dialog.
 
 # Central launcher GUI — button per editor; spawns Avalonia projects.
 launch:

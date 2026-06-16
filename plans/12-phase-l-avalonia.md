@@ -1291,6 +1291,23 @@ The WinForms binary continues to build and runs under WINE on Linux
 (`tools/README.md`). The Avalonia port is the end state; WINE is the
 interim story until Tier 12e lands.
 
+### WinForms originals removed (code-lint-cleanup, 2026-06-16)
+
+All 13 paired WinForms editor dirs + their loose siblings have been
+deleted now that every Avalonia replacement reached parity and builds
+clean: `tools/{commontools,dataimport,effect-editor,faction-editor,
+missioneditor,mob-editor,sector-editor,station-tools,talktreeeditor,
+toolslauncher,toolspatcher,itemeditor,enbpatcher,launchnet7,
+launchnet7-old}` (683 tracked files). Removed their 11 entries from
+`tools/FreyaTools.slnx`; `dotnet build tools/FreyaTools.slnx` stays at
+0 warnings / 0 errors. Docs (`tools/README.md`, root `README.md`,
+`tools/BUILD_STATUS.md`, `tools/THIRD_PARTY_BINARIES.md`, `docs/01,06,
+07,08,10,12,14`) repointed at the `-avalonia` paths; the justfile
+login-dialog comment updated. No Avalonia/KEEP project referenced any
+deleted dir (verified: no ProjectReference/HintPath crossed the
+boundary). The "keep both UIs in parallel" decision below is now
+satisfied -- Avalonia is the sole UI.
+
 ## Decisions
 
 - **Keep both UIs in parallel** during migration. The WinForms targets stay in the build until Avalonia ports reach parity. Don't break working code chasing a not-yet-working port.
