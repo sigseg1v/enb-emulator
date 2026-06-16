@@ -3,39 +3,71 @@ using System.IO;
 
 namespace LaunchFreya.Patching
 {
-    // Verbatim port of LaunchNet7/Patching/AuthLoginPatcher.cs. The byte
-    // offsets are fixed in the EnB client's authlogin.dll; the binary
-    // patch is platform-independent.
+    // The EnB client's authlogin.dll dials the auth server through WinINet, and
+    // two historical builds ship different code layouts, so the bytes we patch
+    // live at different offsets:
+    //   - the retail / Net-7 build (scheme byte @0x8328, port @0x82AD)
+    //   - the original demo build  (scheme byte @0x22BA, port @0x20A3)
+    // Both encode the HttpOpenRequestA flags as `push 0x84c03000` (68 00 30 C0
+    // 84): the third immediate byte is INTERNET_FLAG_SECURE -- 0xC0 = HTTPS,
+    // 0x40 = HTTP. The port is the nServerPort u16 immediate of the preceding
+    // InternetConnectA `push`. We detect the build by that flags-push signature
+    // and patch the matching offsets; the byte patch is platform-independent.
     public class AuthLoginPatcher
     {
-        static readonly byte Https = 0xc0;
-        static readonly byte Http  = 0x40;
+        const byte Https = 0xc0;
+        const byte Http  = 0x40;
+
+        sealed class Layout
+        {
+            public string Name;
+            public int SchemeOffset; // INTERNET_FLAG_SECURE byte (0xc0 https / 0x40 http)
+            public int PortOffset;   // InternetConnectA nServerPort, u16 little-endian
+        }
+
+        // Known builds. Detection is by signature, not by order, so listing is
+        // just for the "unrecognized build" message.
+        static readonly Layout[] Layouts =
+        {
+            new Layout { Name = "retail/Net-7", SchemeOffset = 0x8328, PortOffset = 0x82AD },
+            new Layout { Name = "demo",         SchemeOffset = 0x22BA, PortOffset = 0x20A3 },
+        };
+
+        // The flags push is the 5-byte `68 00 30 <scheme> 84`; the scheme byte
+        // sits 3 bytes in. Verifying the whole signature (not just a 0xc0/0x40
+        // byte) makes a false match require that exact instruction at that exact
+        // offset, so the two builds never alias each other.
+        static bool SignatureMatches(byte[] dll, int schemeOffset)
+        {
+            int p = schemeOffset - 3;
+            if (p < 0 || schemeOffset + 1 >= dll.Length) return false;
+            byte s = dll[schemeOffset];
+            return dll[p] == 0x68 && dll[p + 1] == 0x00 && dll[p + 2] == 0x30
+                && dll[schemeOffset + 1] == 0x84 && (s == Http || s == Https);
+        }
+
+        static Layout Detect(byte[] dll, string fileName)
+        {
+            foreach (var l in Layouts)
+                if (SignatureMatches(dll, l.SchemeOffset)) return l;
+            throw new InvalidDataException(
+                $"{Path.GetFileName(fileName)} is not a recognized Earth & Beyond authlogin.dll " +
+                "build (retail/Net-7 or demo): the WinINet flags-push signature was not found at " +
+                "any known offset. The client install may ship an unsupported authlogin.dll.");
+        }
 
         public static AuthPatcherInfo ReadInformation(string fileName)
         {
             if (!File.Exists(fileName)) throw new FileNotFoundException(fileName);
 
-            var info = new AuthPatcherInfo();
-            using (var fs = File.OpenRead(fileName))
+            byte[] dll = File.ReadAllBytes(fileName);
+            var layout = Detect(dll, fileName);
+            return new AuthPatcherInfo
             {
-                fs.Seek(0x8328, SeekOrigin.Begin);
-                byte current = (byte)fs.ReadByte();
-                if      (current == Https) info.UseHttps = true;
-                else if (current == Http)  info.UseHttps = false;
-                else throw new InvalidDataException(
-                    $"authlogin.dll byte at 0x8328 is 0x{current:X2}; expected 0x{Http:X2} or 0x{Https:X2}");
-
-                fs.Seek(0x82AD, SeekOrigin.Begin);
-                var port = new byte[2];
-                fs.ReadExactly(port, 0, 2);
-                info.Port = BitConverter.ToUInt16(port, 0);
-
-                fs.Seek(0x8292, SeekOrigin.Begin);
-                var timeout = new byte[2];
-                fs.ReadExactly(timeout, 0, 2);
-                info.TimeOut = BitConverter.ToUInt16(timeout, 0);
-            }
-            return info;
+                Build    = layout.Name,
+                UseHttps = dll[layout.SchemeOffset] == Https,
+                Port     = BitConverter.ToUInt16(dll, layout.PortOffset),
+            };
         }
 
         public static void WriteInformation(string fileName, AuthPatcherInfo infos)
@@ -43,27 +75,19 @@ namespace LaunchFreya.Patching
             if (infos == null) throw new ArgumentNullException(nameof(infos));
             if (!File.Exists(fileName)) throw new FileNotFoundException(fileName);
 
-            byte[] buffer;
-            using (var fs = File.OpenWrite(fileName))
-            {
-                fs.Seek(0x8328, SeekOrigin.Begin);
-                fs.WriteByte(infos.UseHttps ? Https : Http);
-
-                fs.Seek(0x82AD, SeekOrigin.Begin);
-                buffer = BitConverter.GetBytes(infos.Port);
-                fs.Write(buffer, 0, 2);
-
-                fs.Seek(0x8292, SeekOrigin.Begin);
-                buffer = BitConverter.GetBytes(infos.TimeOut);
-                fs.Write(buffer, 0, 2);
-            }
+            byte[] dll = File.ReadAllBytes(fileName);
+            var layout = Detect(dll, fileName);
+            dll[layout.SchemeOffset] = infos.UseHttps ? Https : Http;
+            BitConverter.GetBytes(infos.Port).CopyTo(dll, layout.PortOffset);
+            File.WriteAllBytes(fileName, dll);
         }
     }
 
     public sealed class AuthPatcherInfo
     {
         public ushort Port { get; set; }
-        public ushort TimeOut { get; set; } = 30;
         public bool UseHttps { get; set; }
+        // Which authlogin.dll build the patcher matched ("retail/Net-7" or "demo").
+        public string Build { get; set; }
     }
 }

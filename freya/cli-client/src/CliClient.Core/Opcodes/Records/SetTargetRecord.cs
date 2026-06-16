@@ -9,8 +9,6 @@ namespace N7.CliClient.Opcodes.Records;
 /// <summary>
 /// 0x0019 SET_TARGET. Wire (struct SetTarget, 8 bytes, LE, no byte-swap):
 ///   int32 GameID; int32 TargetID (0xFFFFFFFF = no target).
-/// Source: struct SetTarget (PacketStructures.h), emitter PlayerConnection.cpp
-/// (direct assignment, host-order LE).
 /// </summary>
 public sealed class SetTargetRecord : PacketRecord
 {

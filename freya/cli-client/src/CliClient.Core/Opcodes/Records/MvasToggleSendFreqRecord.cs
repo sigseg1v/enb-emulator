@@ -13,9 +13,6 @@ namespace N7.CliClient.Opcodes.Records;
 /// here is the body AFTER the 12-byte EnbUdpHeader { u16 size; u16 opcode;
 /// u32 player_id; u32 sequence }, i.e. a single u32:
 ///   u32 Frequency @0   (e.g. 02 00 00 00 == 2)
-///
-/// Source: retail proxy&lt;-&gt;server captures (planet land/fly/dock leg --
-/// the server emits this in response to the client's position feed).
 /// </summary>
 public sealed class MvasToggleSendFreqRecord : PacketRecord
 {

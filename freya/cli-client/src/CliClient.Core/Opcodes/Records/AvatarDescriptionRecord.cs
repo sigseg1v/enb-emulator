@@ -17,8 +17,6 @@ namespace N7.CliClient.Opcodes.Records;
 ///   14 appearance bytes@62, then nine f32[3] colour/offset triples@76..172,
 ///   four i32 metal fields@184, filler@200, height_weight_1 f32[5]@201,
 ///   height_weight_2 f32[5]@221.
-/// Source: struct AvatarDescription / AvatarData (PacketStructures.h), emitter
-/// Player avatar send (PlayerClass.cpp); offsets confirmed via gcc offsetof.
 /// </summary>
 public sealed class AvatarDescriptionRecord : PacketRecord
 {

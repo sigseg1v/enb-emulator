@@ -1193,17 +1193,26 @@ bool UDPClient::HandleCustomOpcode(short opcode, char *ptr, u8 *tcp_packet,
         return true;
 
     case ENB_OPCODE_2011_GALAXY_MAP_CACHE:
-        // Proxy-side galaxy-map cache request. The reference loads its
-        // cached GalaxyMap.dat and marks the cache primed; we do not
-        // implement the proxy-side cache (galaxy data goes live to the
-        // server), so consuming here is the correct no-op for our model.
-        // Must return TRUE: returning false would fall through to the
-        // forward gate, fail the 1..0xFE range, log "bad opcode", and
-        // STALL the whole packet sequence (caller marks PACKET_BLANK,
-        // never advances m_CurrentPacketNum). That stall was the failure
-        // mode behind the Wave 70 first attempt on 0x0098.
-        LogVMessage("UDPClient(Linux): galaxy-map cache request 0x%04x -- consumed\n",
-                    (unsigned short) opcode);
+        // Galaxy-map cache trigger. This is THE serve trigger, not a no-op.
+        // The server emits no renderable node list of its own: at login it
+        // sends a single direct 0x0097 Type-4 "you are here" record, and on
+        // the client's 0x0098 map-open request it replies with an EMPTY
+        // 0x2011 GALAXY_MAP_CACHE. The reference proxy keys the cache serve
+        // on exactly this 0x2011 (load GalaxyMap.dat, emit its 0x0097 node
+        // frames to the client), so the full galaxy map renders. We mirror
+        // that here. (The 0x2010 DATA_FILE{0x0097} path is the reference's
+        // OTHER serve trigger and is also wired, in SendClientDataFile -- but
+        // no server in our stack sends it, so without serving on 0x2011 the
+        // cache was never served and the in-game map rendered empty.)
+        //
+        // SendCachedGalaxyMap re-emits the cached 0x0097 frames and consumes
+        // this 0x2011 (the reference does not forward it to the client). Must
+        // still return TRUE: returning false would fall through to the forward
+        // gate, fail the 1..0xFE range, log "bad opcode", and STALL the whole
+        // packet sequence (caller marks PACKET_BLANK, never advances
+        // m_CurrentPacketNum). That stall was the failure mode behind the
+        // Wave 70 first attempt on 0x0098.
+        SendCachedGalaxyMap();
         return true;
 
     case ENB_OPCODE_2012_START_PROSPECT:

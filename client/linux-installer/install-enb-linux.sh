@@ -111,6 +111,15 @@ esac
 # Defaults and command line options
 : "${VERBOSE:=}"
 : "${DEBUG:=}"
+# *** LOCAL MOD (enb-emulator fork, 2026-06-15) ***
+# CLEAN_DEMO_INSTALL_ONLY: when set, install ONLY the Earth & Beyond demo
+# client (eandb_demo.exe) plus the wine/linux fixes needed to run it -- do
+# NOT install the Net-7 launcher, enb_up.exe, the Character and Starship
+# Creator, or any Net-7 / EnB shortcuts. CLEAN_UNINSTALL: when set, remove
+# everything this script installed (wine prefix + bin links + desktop
+# shortcuts) and exit. See LOCAL_MODIFICATIONS.md.
+: "${CLEAN_DEMO_INSTALL_ONLY:=}"
+: "${CLEAN_UNINSTALL:=}"
 
 # Get command info
 CMD="${0}"
@@ -272,6 +281,10 @@ while [ "${#}" -ne 0 ] ; do
             VERBOSE="$(( VERBOSE + 1 ))" && echo "#-INFO: VERBOSE=${VERBOSE}" && shift ;;
         -p|--prefix)    # Set the absolute path to the WINEPREFIX (DEFAULT: WINEPREFIX=${WINEPREFIX})
             WINEPREFIX="${2}" && vrb "#-INFO: WINEPREFIX=${WINEPREFIX}" && shift 2;;
+        -D|--demo-only) # Install ONLY the Earth & Beyond demo client (no Net-7 launcher, no enb_up.exe, no shortcuts)
+            CLEAN_DEMO_INSTALL_ONLY=1 && echo "#-INFO: CLEAN_DEMO_INSTALL_ONLY=1" && shift ;;
+        -U|--uninstall) # Remove everything this script installed (wine prefix + bin links + desktop shortcuts) and exit
+            CLEAN_UNINSTALL=1 && echo "#-INFO: CLEAN_UNINSTALL=1" && shift ;;
         --)              # end argument parsing
             shift && break ;;
         -*)
@@ -417,6 +430,10 @@ ENB_WINE_CLIENT_PATH_EXE=${ENB_WINE_INSTALL_PATH}'\\release\\'${ENB_CLIENT_EXE}
 ENB_CLIENT_INSTALL_EXE='eandb_demo.exe'
 ENB_CLIENT_DL="${ENB_LINUX_INSTALL_SOURCE}/${ENB_CLIENT_INSTALL_EXE}"
 ENB_APP_DIR="${APP_DIR}/EA GAMES/Earth & Beyond"
+# *** LOCAL MOD (enb-emulator fork, 2026-06-15) ***
+# Demo-only launcher: runs the demo client.exe directly (no Net-7 proxy/launcher).
+DEMO_CLIENT_SCRIPT="${ENB_LINUX_INSTALL_PATH}/${ENB_CLIENT_EXE}_demo_wine_launcher.sh"
+DEMO_LINK="${BIN_DIR}/enb-demo"
 
 DEMO_LINUX_INSTALL_SOURCE="${ENB_LINUX_INSTALL_SOURCE}/demo"
 DEMO_WINE_INSTALL_SOURCE=${ENB_WINE_INSTALL_SOURCE}'\\demo'
@@ -453,6 +470,89 @@ CSC_REDIRECT_EXE='CnSC.exe'
 CSC_SCRIPT="${ENB_LINUX_INSTALL_PATH}/${CSC_REDIRECT_EXE}_wine_launcher.sh"
 CSC_INSTALL_EXE='CharacterStarshipCreator.exe'
 CSC_DL="${CSC_LINUX_INSTALL_SOURCE}/${CSC_INSTALL_EXE}"
+
+# *** LOCAL MOD (enb-emulator fork, 2026-06-15) ***
+# Uninstall mode: remove everything this script installs (the wine prefix,
+# the ~/.local/bin launcher links, and the freedesktop .desktop / .menu /
+# .directory shortcuts) and exit. Runs before any wine/dependency checks so
+# it works even on a half-installed or wine-less system. Removes BOTH the
+# full-install artifacts and the demo-only artifacts so it cleans up either
+# kind of install. Destructive WINEPREFIX removal is confirmed first.
+if [ -n "${CLEAN_UNINSTALL}" ] ; then
+    banner 'UNINSTALL: removing Earth & Beyond / Net-7 install'
+
+    out "Remove ~/.local/bin launcher links"
+    for link in "${ENB_LINK}" "${N7_LAUNCHER_LINK}" "${CFG_LINK}" "${CSC_LINK}" "${DEMO_LINK}" ; do
+        if [ -L "${link}" ] || [ -e "${link}" ] ; then
+            echo "  removing ${link}"
+            rm --force "${link}"
+        fi
+    done
+    echo
+
+    out "Remove application (.desktop) shortcuts"
+    for dir in "${ENB_APP_DIR}" "${N7_APP_DIR}" ; do
+        if [ -d "${dir}" ] ; then
+            echo "  removing ${dir}"
+            rm --force --recursive "${dir}"
+        fi
+    done
+    # prune now-empty parent menu folders if nothing else lives in them
+    rmdir "${APP_DIR}/EA GAMES" 2>/dev/null || true
+    rmdir "${APP_DIR}/Net-7 Entertainment" 2>/dev/null || true
+    echo
+
+    out "Remove freedesktop menu and directory entries"
+    if [ -d "${MENU_DIR}" ] ; then
+        find "${MENU_DIR}" -maxdepth 1 -type f \
+            \( -name 'wine-Programs-EA GAMES-Earth & Beyond*.menu' \
+            -o -name 'wine-Programs-Net-7 Entertainment*.menu' \) \
+            -exec rm --force {} + 2>/dev/null || true
+    fi
+    DESKTOP_DIRECTORIES="${HOME}/.local/share/desktop-directories"
+    if [ -d "${DESKTOP_DIRECTORIES}" ] ; then
+        find "${DESKTOP_DIRECTORIES}" -maxdepth 1 -type f \
+            \( -name 'wine-Programs-EA GAMES*.directory' \
+            -o -name 'wine-Programs-Net-7 Entertainment*.directory' \) \
+            -exec rm --force {} + 2>/dev/null || true
+    fi
+    echo
+
+    if command -v gsettings >/dev/null 2>&1 ; then
+        dot_ogdaf='org.gnome.desktop.app-folders'
+        if gsettings get "${dot_ogdaf}" folder-children 2>/dev/null | grep -q "'enb'" ; then
+            out "Remove GNOME app-folder 'enb'"
+            gsettings reset-recursively \
+                "${dot_ogdaf}.folder:/org/gnome/desktop/app-folders/folders/enb/" 2>/dev/null || true
+            REMAINING_GNOME_APP_FOLDERS="$(gsettings get "${dot_ogdaf}" folder-children \
+                | sed "s/'enb'//g; s/, *,/,/g; s/\[ *, */[/; s/, *\]/]/")"
+            gsettings set "${dot_ogdaf}" folder-children "${REMAINING_GNOME_APP_FOLDERS}" 2>/dev/null || true
+            echo
+        fi
+    fi
+
+    if command -v update-desktop-database >/dev/null 2>&1 ; then
+        update-desktop-database "${APP_DIR}" 2>/dev/null || true
+    fi
+
+    if [ -e "${WINEPREFIX}" ] ; then
+        if prompt_for_yes "Permanently remove the WINEPREFIX '${WINEPREFIX}' (deletes the entire wine install, including any characters/saves)" ; then
+            if ! rm --interactive=never --recursive --force "${WINEPREFIX}" ; then
+                error_exit "There was an error while trying to remove WINEPREFIX '${WINEPREFIX}'"
+            fi
+            out "Removed '${WINEPREFIX}'"
+        else
+            out "Leaving WINEPREFIX '${WINEPREFIX}' in place"
+        fi
+    else
+        out "WINEPREFIX '${WINEPREFIX}' does not exist; nothing to remove"
+    fi
+    echo
+
+    banner 'UNINSTALL COMPLETE'
+    exit 0
+fi
+# *** END LOCAL MOD ***
 
 banner 'UNOFFICIAL LINUX INSTALL SCRIPT FOR THE NET-7 EARTH & BEYOND EMULATOR'
 
@@ -696,6 +796,10 @@ if [ ! -e "${CFG_LINUX_EXECUTABLE}" ] ; then
     echo
 fi
 
+# *** LOCAL MOD (enb-emulator fork, 2026-06-15) ***
+# Skip the entire Net-7 Entertainment install (Net-7_Install.exe, LaunchNet7,
+# enb_up.exe) in demo-only mode -- the demo client runs standalone.
+if [ -z "${CLEAN_DEMO_INSTALL_ONLY}" ] ; then
 banner 'Net-7 Entertainment Install'
 
 out "Check for Net-7 Unified Installer"
@@ -773,6 +877,8 @@ EOF
     #rm --force "${ENB_LINUX_INSTALL_PATH}/Data/client/output/login.ini"
 fi
 echo
+fi
+# *** END LOCAL MOD (skip Net-7 Entertainment install in demo-only mode) ***
 
 # *** LOCAL MOD (enb-emulator fork, 2026-05-26) ***
 # Net-7 Unified Installer drops LaunchNet7.cfg with `http://patch.net-7.org`
@@ -809,6 +915,10 @@ output=$(WINEPREFIX="${WINEPREFIX}" ${WINE_EXEC} winecfg -v win7 2>&1) || {
 }
 echo
 
+# *** LOCAL MOD (enb-emulator fork, 2026-06-15) ***
+# Skip the Character and Starship Creator install in demo-only mode -- it is
+# additional emulator tooling, not part of the demo client.
+if [ -z "${CLEAN_DEMO_INSTALL_ONLY}" ] ; then
 banner 'Character and Starship Creator Install'
 
 out "Check for Character and Starship Creator"
@@ -881,6 +991,8 @@ if [ ! -e "${CSC_LINUX_PATH_EXE}" ] ; then
     # *** END LOCAL MOD ***
     echo
 fi
+fi
+# *** END LOCAL MOD (skip Character and Starship Creator in demo-only mode) ***
 
 banner 'REGISTRY CONFIGURATION'
 
@@ -944,7 +1056,14 @@ Windows Registry Editor Version 5.00
 "dialog enabled"=dword:00000001
 "music enabled"=dword:00000001
 "sound enabled"=dword:00000001
+EOF
 
+# *** LOCAL MOD (enb-emulator fork, 2026-06-15) ***
+# The .NET TLS registry keys below exist only so LaunchNet7.exe can reach the
+# patch server over HTTPS. The demo client does not use them, so skip them
+# entirely in demo-only mode.
+if [ -z "${CLEAN_DEMO_INSTALL_ONLY}" ] ; then
+cat <<EOF >> "${REGISTRY_CONFIG}"
 ; *** LOCAL MOD (enb-emulator fork, 2026-05-26) ***
 ; Force .NET 2.0/3.5 and .NET 4.x to negotiate modern TLS so LaunchNet7.exe's
 ; HTTPS request to https://patch.net-7.org/ succeeds. .NET 2.0/3.5 defaults
@@ -971,6 +1090,8 @@ Windows Registry Editor Version 5.00
 "SchUseStrongCrypto"=dword:00000001
 "SystemDefaultTlsVersions"=dword:00000001
 EOF
+fi
+# *** END LOCAL MOD (skip .NET TLS keys in demo-only mode) ***
 
 # add the .reg into the windows registry within the WINEPREFIX
 output=$(WINEPREFIX="${WINEPREFIX}" ${WINE_EXEC} start /wait regedit.exe "${REGISTRY_CONFIG}" 2>&1) || {
@@ -979,6 +1100,48 @@ output=$(WINEPREFIX="${WINEPREFIX}" ${WINE_EXEC} start /wait regedit.exe "${REGI
 echo
 
 banner 'CREATE CONVENIENCE SCRIPTS'
+
+# *** LOCAL MOD (enb-emulator fork, 2026-06-15) ***
+# In demo-only mode, generate a single launcher that runs the demo client.exe
+# directly under wine -- no Net-7 launcher / proxy / config / C&S Creator
+# convenience scripts, and no Net-7 user.config migration.
+if [ -n "${CLEAN_DEMO_INSTALL_ONLY}" ] ; then
+    cat <<-EOF > "${DEMO_CLIENT_SCRIPT}"
+	#!/bin/bash
+
+	# Starts the Earth & Beyond demo client directly (no Net-7 emulator)
+
+	set -o errexit  # -e exit on command errors (so you MUST handle exit codes properly!)
+	set -o nounset  # -u treat unset variables as an error and exit immediately
+
+	WAIT=\${WAIT:+/wait}
+
+	launch()
+	{
+	    # disable startup movies
+	    if [ -e "${ENB_LINUX_INSTALL_PATH}/Data/client/mixfiles/EB_Sizzle.bik" ] ; then
+	        mv --force "${ENB_LINUX_INSTALL_PATH}/Data/client/mixfiles/EB_Sizzle.bik" \\
+	            "${ENB_LINUX_INSTALL_PATH}/Data/client/mixfiles/EB_Sizzle.bik.bak" 2>/dev/null
+	        mv --force "${ENB_LINUX_INSTALL_PATH}/Data/client/mixfiles/eb_ws_logo.bik" \\
+	            "${ENB_LINUX_INSTALL_PATH}/Data/client/mixfiles/eb_ws_logo.bik.bak" 2>/dev/null
+	    fi
+
+	    # shellcheck disable=SC2086
+	    output=\$(WINEPREFIX="${WINEPREFIX}" ${WINE_EXEC} start /d "${ENB_WINE_INSTALL_PATH}\\\\release" \${WAIT:-} \\
+	        "${ENB_CLIENT_EXE}" 2>&1) || {
+	        rc="\${?}"; echo ">> ERROR: rc: \${rc}, output: \${output}" 1>&2; exit "\${rc}"
+	    }
+	}
+
+	if [ -n "\${WAIT:-}" ] ; then
+	    launch
+	else
+	    launch &
+	fi
+	EOF
+    chmod a+x "${DEMO_CLIENT_SCRIPT}"
+else
+# *** END LOCAL MOD (demo-only launcher) ***
 
 sb='<setting name="'
 se='</setting>'
@@ -1296,10 +1459,28 @@ fi
 EOF
 
 chmod a+x "${N7_PROXY_SCRIPT}"
+fi
+# *** END LOCAL MOD (skip Net-7 convenience scripts in demo-only mode) ***
 
 banner 'CREATE AND UPDATE LINKS AND SHORTCUTS'
 
-if [ -n "${XDG_DATA_DIRS:-}" ] ; then
+# *** LOCAL MOD (enb-emulator fork, 2026-06-15) ***
+# In demo-only mode create just the single demo-client launcher link; do not
+# create or rewrite any Net-7 / EnB desktop shortcuts.
+if [ -n "${CLEAN_DEMO_INSTALL_ONLY}" ] ; then
+    mkdir -p "${BIN_DIR}"
+    if [ -L "${DEMO_LINK}" ] ; then
+        rm --force "${DEMO_LINK}"
+    fi
+    ln --symbolic "${DEMO_CLIENT_SCRIPT}" "${DEMO_LINK}"
+
+    out "To start the Earth & Beyond demo client:"
+    basename "${DEMO_LINK}"
+    echo
+    echo "which is a symlink to:"
+    echo "\"${DEMO_CLIENT_SCRIPT}\""
+    echo
+elif [ -n "${XDG_DATA_DIRS:-}" ] ; then
     mkdir -p "${BIN_DIR}"
 
     out "Create links"
@@ -1498,6 +1679,10 @@ banner 'INSTALL COMPLETE!'
 
 banner 'POST-INSTALL STEPS'
 
+# *** LOCAL MOD (enb-emulator fork, 2026-06-15) ***
+# Skip the Net-7 launcher patch-update run and the Net-7 Configuration run in
+# demo-only mode -- neither is installed.
+if [ -z "${CLEAN_DEMO_INSTALL_ONLY}" ] ; then
 out "Launching Net-7 Launcher to perform updates"
 N7_LAUNCHER_WINETRICKS_VERB="$(mktemp /tmp/n7launcher_XXXXXXXXXX.verb)"
 add_exit_cmd "rm -f ${N7_LAUNCHER_WINETRICKS_VERB}"
@@ -1591,6 +1776,8 @@ out "5. Press 'Apply' in the Net-7 Configuration window"
 out "6. Press 'OK' in the Net-7 Configuration window"
 WAIT=1 "${CFG_SCRIPT}"
 echo
+fi
+# *** END LOCAL MOD (skip Net-7 launcher update + config in demo-only mode) ***
 
 if [ -e "${ENB_LINUX_INSTALL_SOURCE}" ] ; then
     if prompt_for_yes "Cleanup downloaded and installer files from '${ENB_LINUX_INSTALL_SOURCE}'" ; then
@@ -1601,6 +1788,10 @@ if [ -e "${ENB_LINUX_INSTALL_SOURCE}" ] ; then
 fi
 echo
 
+# *** LOCAL MOD (enb-emulator fork, 2026-06-15) ***
+# Skip the Character and Starship Creator + emulator-account registration
+# prompts in demo-only mode; offer to start the demo client directly.
+if [ -z "${CLEAN_DEMO_INSTALL_ONLY}" ] ; then
 if prompt_for_yes "Run the Character and Starship Creator to create a character" ; then
     WAIT=1 "${CSC_LINK}"
     if [ -d "${CSC_LINUX_AVATAR_PATH}" ] ; then
@@ -1627,8 +1818,16 @@ if prompt_for_yes "Register for an Earth & Beyond Emulator game account" ; then
     xdg-open "https://www.net-7.org/?#login"
 fi
 echo
+fi
+# *** END LOCAL MOD (skip C&S + registration prompts in demo-only mode) ***
 
-if prompt_for_yes "Start Earth & Beyond Emulator" ; then
-    "${N7_PROXY_SCRIPT}"
+if [ -n "${CLEAN_DEMO_INSTALL_ONLY}" ] ; then
+    if prompt_for_yes "Start the Earth & Beyond demo client" ; then
+        "${DEMO_CLIENT_SCRIPT}"
+    fi
+else
+    if prompt_for_yes "Start Earth & Beyond Emulator" ; then
+        "${N7_PROXY_SCRIPT}"
+    fi
 fi
 echo

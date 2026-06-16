@@ -139,15 +139,16 @@ namespace LaunchFreya.Update
         }
 
         public static string BuildRequestJson(string launcherHash, string proxyHash,
-            string posFeedHash, string injectHash, string enbmodHash)
+            string posFeedHash, string injectHash, string enbmodHash, string galaxyMapHash)
         {
             var req = new UpdateCheckRequest
             {
-                LauncherHash = launcherHash,
-                ProxyHash    = proxyHash,
-                PosFeedHash  = posFeedHash,
-                InjectHash   = injectHash,
-                EnbmodHash   = enbmodHash,
+                LauncherHash  = launcherHash,
+                ProxyHash     = proxyHash,
+                PosFeedHash   = posFeedHash,
+                InjectHash    = injectHash,
+                EnbmodHash    = enbmodHash,
+                GalaxyMapHash = galaxyMapHash,
             };
             return JsonSerializer.Serialize(req);
         }

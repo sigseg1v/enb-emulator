@@ -19,9 +19,6 @@ namespace N7.CliClient.Opcodes.Records;
 /// with two reserved values the handler special-cases: 0 = "more"/back (resolved
 /// against m_MoreDestination, and used to end an action response), and 255 =
 /// resume the normal conversation tree after a mission debrief.
-/// Source: struct SelectTalkTree (PacketStructures.h:608),
-/// Player::HandleSelectTalkTree (PlayerConnection.cpp:10444). Pinned to
-/// capture_3.rar.
 /// </summary>
 public sealed class SelectTalkTreeRecord : PacketRecord
 {

@@ -17,9 +17,6 @@ namespace N7.CliClient.Opcodes.Records;
 /// three strings carry different things per request type (channel name, target
 /// nick, message text); the handler picks which by `type`, so they are reported
 /// positionally here. `type` is one of the CCE_*/CCR_* request codes.
-/// Source: struct ClientChatRequest (PacketStructures.h:669) +
-/// Player::HandleClientChatRequest (PlayerConnection.cpp:1645). Pinned to
-/// capture_3.rar (Client->Server).
 /// </summary>
 public sealed class ClientChatRequestRecord : PacketRecord
 {

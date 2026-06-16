@@ -21,7 +21,6 @@ namespace N7.CliClient.Opcodes.Records;
 /// (sizeof(StationNPC)) per NPC. Decoding the 6 ints + both names per NPC self-validates
 /// the stride: a wrong size garbles every subsequent NPC's name. The remaining 201 bytes
 /// of each AvatarData (colours/body fields) are byte-pinned but not field-decoded.
-/// Source: PlayerConnection.cpp SendLoungeNPC(); structs in common/include/net7/PacketStructures.h.
 /// </summary>
 public sealed class LoungeNpcRecord : PacketRecord
 {

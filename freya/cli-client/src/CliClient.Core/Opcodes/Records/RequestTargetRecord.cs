@@ -12,8 +12,6 @@ namespace N7.CliClient.Opcodes.Records;
 /// Client->server "select this object as my target"; identical layout to 0x0019
 /// SET_TARGET. The server reads TargetID raw host-order (GetObjectFromID(request->
 /// TargetID) in Player::HandleRequestTarget, no ntohl), so the wire is LE.
-/// Source: struct RequestTarget (PacketStructures.h), Player::HandleRequestTarget
-/// (PlayerConnection.cpp). Pinned to capture_3.rar Packet 1475 (Client->Server).
 /// </summary>
 public sealed class RequestTargetRecord : PacketRecord
 {

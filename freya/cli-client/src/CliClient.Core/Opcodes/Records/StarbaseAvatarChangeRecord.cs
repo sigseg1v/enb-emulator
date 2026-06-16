@@ -14,9 +14,6 @@ namespace N7.CliClient.Opcodes.Records;
 /// raw host-order in Player::HandleStarbaseAvatarChange (change->AvatarID,
 /// change->Position, change->Orient, change->ActionFlag -- no ntohl), so the wire
 /// is LE, and branches on ActionFlag == 0x41 ("send avatar to everyone").
-/// Source: struct StarbaseAvatarChange (PacketStructures.h),
-/// Player::HandleStarbaseAvatarChange (PlayerClass.cpp). Pinned to capture_3.rar
-/// Packet 553 (Client->Server) -- ActionFlag 0x41, the entering-room broadcast.
 /// </summary>
 public sealed class StarbaseAvatarChangeRecord : PacketRecord
 {

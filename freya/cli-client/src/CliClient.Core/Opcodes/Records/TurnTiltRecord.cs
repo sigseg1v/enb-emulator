@@ -14,9 +14,6 @@ namespace N7.CliClient.Opcodes.Records;
 /// carry exactly -1.0 / +1.0 at full deflection). The server reads Turning->
 /// Intensity raw host-order in Player::HandleTurn / Player::HandleTilt (PacketTurn
 /// {int32 GameID; float Intensity}, no ntohl), so the wire is LE.
-/// Source: Player::HandleTurn / Player::HandleTilt (PlayerConnection.cpp -- the
-/// Phase K Wave 11 local PacketTurn struct). Pinned to capture_3.rar Packet 5597
-/// (Turn) and Packet 5599 (Tilt), both Client->Server.
 /// </summary>
 public sealed class TurnTiltRecord : PacketRecord
 {

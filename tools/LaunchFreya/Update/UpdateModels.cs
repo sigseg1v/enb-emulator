@@ -27,6 +27,12 @@ namespace LaunchFreya.Update
         // user-editable mod content (init.lua hot-reloads) and the self-updater
         // would clobber local edits; they ship as a one-time seed in the zip.
         [JsonPropertyName("enbmodHash")]   public string EnbmodHash   { get; set; }
+        // GalaxyMap.dat -- the proxy's cached galaxy-map node data. Hashed and
+        // shipped INDEPENDENTLY, exactly like the MVAS pair and enbmod runtime:
+        // the WINE proxy serves it to the client for the in-game galaxy map and
+        // has no docker mount to source it from, so it must ride to existing
+        // installs on its own mismatch.
+        [JsonPropertyName("galaxyMapHash")] public string GalaxyMapHash { get; set; }
     }
 
     public sealed class UpdateFile

@@ -313,6 +313,14 @@ namespace LaunchFreya
             // because its hostname already resolves to 127.0.0.1.)
             ConfigureProxyDtlsEnv(_setting.Hostname, _setting.AuthenticationPort, dir);
 
+            // Tell the proxy where its cached galaxy-map data lives. The proxy
+            // serves GalaxyMap.dat to the client when the in-game galaxy map is
+            // opened (UDPClient::SendCachedGalaxyMap); without it the map renders
+            // empty. Unlike docker (which mounts server/data at the proxy's CWD),
+            // the WINE proxy has no data dir, so we ship GalaxyMap.dat next to
+            // FreyaProxy.exe and point the proxy at it.
+            ConfigureProxyGalaxyMap(dir);
+
             // A proxy from a previous Play is still bound to the loopback listen
             // ports; relaunching over it collides. Kill it first.
             StopProxy();
@@ -423,6 +431,28 @@ namespace LaunchFreya
                 Environment.SetEnvironmentVariable("NET7_DTLS_CA", null);
                 _warn($"WARNING: could not fetch server cert from {hostname}:{authPort} " +
                       $"({e.Message}). DTLS verification will have no trust anchor.");
+            }
+        }
+
+        // Point the spawned proxy at the cached galaxy-map data file. The proxy
+        // reads FREYA_GALAXY_MAP_PATH (see proxy SendCachedGalaxyMap); we ship
+        // GalaxyMap.dat alongside FreyaProxy.exe in proxyDir. Pass the BARE file
+        // name -- the proxy runs with WorkingDirectory = proxyDir, so a bare name
+        // resolves via CWD and we avoid Unix->Windows path translation inside the
+        // WINE prefix (same convention as the DTLS CA above). If the file is
+        // missing we clear the var and let the proxy fall back / log its own
+        // warning rather than pointing it at a path that isn't there.
+        void ConfigureProxyGalaxyMap(string proxyDir)
+        {
+            string dat = Path.Combine(proxyDir, "GalaxyMap.dat");
+            if (File.Exists(dat))
+            {
+                Environment.SetEnvironmentVariable("FREYA_GALAXY_MAP_PATH", "GalaxyMap.dat");
+            }
+            else
+            {
+                Environment.SetEnvironmentVariable("FREYA_GALAXY_MAP_PATH", null);
+                _warn($"WARNING: {dat} missing -- in-game galaxy map will render empty.");
             }
         }
 
@@ -572,6 +602,7 @@ namespace LaunchFreya
             try
             {
                 var info = AuthLoginPatcher.ReadInformation(_setting.AuthLoginFileName);
+                _warn($"authlogin.dll: detected {info.Build} build.");
                 if (info.Port != LocalAuthRelay.ListenPort || info.UseHttps)
                 {
                     info.Port     = (ushort)LocalAuthRelay.ListenPort;
@@ -585,6 +616,12 @@ namespace LaunchFreya
                     $"authlogin.dll not found at {_setting.AuthLoginFileName}. The standalone " +
                     "package does not ship the client mods -- you need a Net-7-patched Earth & " +
                     "Beyond install (authlogin.dll present in the client's release folder).", e);
+            }
+            catch (InvalidDataException e)
+            {
+                // Unrecognized authlogin.dll build -- surface the patcher's
+                // specific message rather than the generic wrapper below.
+                throw new ApplicationException(e.Message, e);
             }
             catch (UnauthorizedAccessException e)
             {

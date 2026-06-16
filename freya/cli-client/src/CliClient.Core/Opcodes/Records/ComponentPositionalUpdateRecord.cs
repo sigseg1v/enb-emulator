@@ -21,9 +21,6 @@ namespace N7.CliClient.Opcodes.Records;
 /// comments ("this[68]" ...) are stale/off-by-8 -- the ATTRIB_PACKED struct is
 /// contiguous, so the tail starts at payload offset 48 (proven by the retail
 /// frame's "Length = 68 bytes" == payload 64 + 4).
-/// Source: struct ComponentPositionalUpdate (PacketStructures.h),
-/// Player::SendComponentPositionalUpdate (PlayerConnection.cpp). Pinned to
-/// capture_3.rar Packet 1676 (Server->Client).
 /// </summary>
 public sealed class ComponentPositionalUpdateRecord : PacketRecord
 {

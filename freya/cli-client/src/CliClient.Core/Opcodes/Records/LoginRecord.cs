@@ -25,8 +25,6 @@ namespace N7.CliClient.Opcodes.Records;
 /// string ("07/02/04 22:54:30"). The unknown40/unknown7 blocks and TimeReceived
 /// are part of LoginData/Login but HandleLogin never reads them, so they are shown
 /// as raw bytes / labelled little-endian-by-convention rather than guessed.
-/// Source: struct Login + LoginData (PacketStructures.h:407), Player::HandleLogin
-/// (PlayerConnection.cpp:674). Pinned to capture_3.rar.
 /// </summary>
 public sealed class LoginRecord : PacketRecord
 {

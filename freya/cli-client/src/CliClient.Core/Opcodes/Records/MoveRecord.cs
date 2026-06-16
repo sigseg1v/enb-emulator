@@ -12,8 +12,6 @@ namespace N7.CliClient.Opcodes.Records;
 /// Client->server throttle command. The server reads Movement->type raw in
 /// Player::HandleMove and branches type == 4 (engine off / break formation) vs
 /// else (engine on); Move(type) drives the actual speed change.
-/// Source: struct MovePacket (PacketStructures.h), Player::HandleMove
-/// (PlayerConnection.cpp). Pinned to capture_3.rar Packet 5557 (Client->Server).
 /// </summary>
 public sealed class MoveRecord : PacketRecord
 {

@@ -17,8 +17,6 @@ namespace N7.CliClient.Opcodes.Records;
 ///   2 = trade complete (both confirmed -- close + reset)
 ///   3 = you confirmed          4 = trade money updated
 ///   5 = partner confirmed      6 = cancel confirmations
-/// Source: Player::TradeAction (PlayerConnection.cpp:3677) + its call sites.
-/// Pinned to capture_3.rar (Server->Client).
 /// </summary>
 public sealed class TradeActionRecord : PacketRecord
 {

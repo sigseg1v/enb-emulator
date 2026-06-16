@@ -182,6 +182,57 @@ the enb-emulator local copy. Phase U.4 (per
 upstream-PR-vs-local-fork decision; the user chose **local fork
 first** on 2026-05-26.
 
+### 2026-06-15 -- Demo-only install mode and uninstall mode
+
+**What:** Two new opt-in modes, selected by env var or CLI flag:
+
+- `CLEAN_DEMO_INSTALL_ONLY=1` / `-D` / `--demo-only`: install ONLY the
+  Earth & Beyond demo client (`eandb_demo.exe` -> `e&bsetup.exe`) plus
+  the wine prefix + winetricks deps + registry render/sound keys +
+  `winecfg -v win7` needed to run it. Skips, in this mode:
+  - the entire Net-7 Entertainment install (`Net-7_Install.exe`,
+    `LaunchNet7.exe`, `enb_up.exe`),
+  - the Character and Starship Creator install,
+  - the .NET TLS registry keys (launcher-only),
+  - all Net-7 convenience scripts (launcher / proxy / config / C&S) and
+    the Net-7 `user.config` migration,
+  - all Net-7 / EnB `.desktop` shortcut creation and rewrites,
+  - the post-install Net-7 launcher patch-update run and Net-7 Config run,
+  - the C&S Creator + emulator-account registration prompts.
+
+  Instead it generates a single `enb-demo` launcher (a
+  `${ENB_CLIENT_EXE}_demo_wine_launcher.sh` that runs the demo
+  `release/client.exe` directly under wine) and a `~/.local/bin/enb-demo`
+  symlink, then offers to start the demo client.
+
+- `CLEAN_UNINSTALL=1` / `-U` / `--uninstall`: remove everything the
+  script installs and exit, before any wine/dependency checks (so it works
+  on a half-installed or wine-less box). Removes the `~/.local/bin/enb*`
+  launcher links (full + demo), the `EA GAMES/Earth & Beyond` and
+  `Net-7 Entertainment/EnB Emulator` `.desktop` folders, the matching
+  freedesktop `.menu` and `.directory` entries, the GNOME `enb` app-folder,
+  refreshes the desktop database, and -- after a confirm prompt -- removes
+  the entire WINEPREFIX.
+
+**Why:** Lets a contributor stand up just the playable demo client on
+Linux (with all the wine/linux fixes) without pulling in any Net-7
+emulator components, and gives a clean teardown for either kind of install.
+
+**Implementation:** All changes are fenced `*** LOCAL MOD ... 2026-06-15 ***`
+blocks in `install-enb-linux.sh` (option parsing, the early uninstall
+block, and `if [ -z "${CLEAN_DEMO_INSTALL_ONLY}" ]` guards around each
+Net-7 / C&S / shortcut region). Indentation of guarded bodies is left
+unchanged (POSIX sh ignores it) to keep the diff reviewable. The script
+passes `sh -n`, `bash -n`, and `shellcheck` cleanly.
+
+**Note (internal tension):** the demo mode still creates one `enb-demo`
+launcher + bin symlink even though the brief said "no enb shortcuts" --
+without a launcher the freshly-installed client isn't runnable, so the
+prohibition was read as "no Net-7 / emulator shortcuts" and a single
+clearly-demo-scoped launcher was kept.
+
+**Not yet upstreamed:** local fork only.
+
 ## How to re-sync from upstream
 
 1. `cd client/linux-installer && git log` — find the last sync sha.

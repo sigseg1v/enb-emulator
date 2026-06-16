@@ -407,7 +407,8 @@ game ports the cloud exposes.
 The Windows **FreyaLauncher** can keep itself and the bundled **FreyaProxy.exe**
 current without the player re-running the installer. At startup it SHA-512s its
 own `FreyaLauncher.exe` and `bin/FreyaProxy.exe` (and the MVAS injection pair +
-`enbmod.dll`) and POSTs the hashes to `/updateCheck`. That endpoint is **served
+`enbmod.dll` + the proxy's `bin/GalaxyMap.dat` galaxy-map cache) and POSTs the
+hashes to `/updateCheck`. That endpoint is **served
 directly by freya-online** (`freya/online/server/updatecheck.go`) -- it is
 original Freya work, never part of the retail Net7SSL/net7go, so freya-online
 does NOT relay it to net7go. freya-online compares the hashes against a

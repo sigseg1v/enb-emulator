@@ -8,7 +8,6 @@ namespace N7.CliClient.Opcodes.Records;
 
 /// <summary>
 /// 0x009C WARP_INDEX. Wire: a single int32 LE warp index (-1 = none).
-/// Source: emitter PlayerConnection.cpp (SendOpcode of &amp;index, sizeof(index)).
 /// </summary>
 public sealed class WarpIndexRecord : PacketRecord
 {

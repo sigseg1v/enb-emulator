@@ -17,8 +17,6 @@ namespace N7.CliClient.Opcodes.Records;
 /// byte-swapped garbage id (the classic ntohl trap), and the camera would point
 /// at no object. Capture cross-check: object 0x000001C2 (==450) appears here
 /// (Packet #1712) and as the same id in SetTarget (#1368) and VerbUpdate (#1372).
-/// Source: struct CameraControl (PacketStructures.h), Player::SendCameraControl
-/// (PlayerConnection.cpp:4516) and its callers.
 /// </summary>
 public sealed class CameraControlRecord : PacketRecord
 {

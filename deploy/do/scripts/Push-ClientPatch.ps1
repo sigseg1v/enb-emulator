@@ -11,7 +11,7 @@
 #
 #   FreyaLauncher.exe   FreyaLauncher.cfg   FreyaProxy.exe
 #   FreyaPosFeed.dll    FreyaInject.exe     enbmod.dll
-#   manifest.json
+#   GalaxyMap.dat       manifest.json
 #
 # The Lua mod runtime (enbmod.dll) is published here and self-updated like the
 # MVAS pair. The shared Lua bootstrap (scripts/init.lua + scripts/lib/) ships in
@@ -73,6 +73,7 @@ $artifacts = @(
     @{ Local = (Join-Path $dist 'FreyaLauncher.exe');     Rel = 'FreyaLauncher.exe';     Key = 'FreyaLauncher.exe';     Ctype = 'application/octet-stream' },
     @{ Local = (Join-Path $dist 'FreyaLauncher.cfg');     Rel = 'FreyaLauncher.cfg';     Key = 'FreyaLauncher.cfg';     Ctype = 'text/plain' },
     @{ Local = (Join-Path $dist 'bin/FreyaProxy.exe');    Rel = 'bin/FreyaProxy.exe';    Key = 'FreyaProxy.exe';        Ctype = 'application/octet-stream' },
+    @{ Local = (Join-Path $dist 'bin/GalaxyMap.dat');     Rel = 'bin/GalaxyMap.dat';     Key = 'GalaxyMap.dat';         Ctype = 'application/octet-stream' },
     @{ Local = (Join-Path $dist 'bin/FreyaPosFeed.dll');  Rel = 'bin/FreyaPosFeed.dll';  Key = 'FreyaPosFeed.dll';      Ctype = 'application/octet-stream' },
     @{ Local = (Join-Path $dist 'bin/FreyaInject.exe');   Rel = 'bin/FreyaInject.exe';   Key = 'FreyaInject.exe';       Ctype = 'application/octet-stream' },
     @{ Local = (Join-Path $dist 'bin/enbmod.dll');        Rel = 'bin/enbmod.dll';        Key = 'enbmod.dll';            Ctype = 'application/octet-stream' }

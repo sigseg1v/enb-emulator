@@ -142,23 +142,33 @@ inline bool FreyaPatchClientOnce()
         FlushInstructionCache(GetCurrentProcess(), tramp, sizeof t);
         FreyaDbg("[PosFeed]  +trampoline (own page, PASSTHROUGH -- no capture)\n");
 #else
+        // NO one-shot latch: write the current player-hull transform ptr EVERY
+        // frame the loop visits it, exactly like the real recipe. The earlier
+        // "capture once, then TEST ECX,ECX / JNZ skip" latched the FIRST hull
+        // pointer seen after login and never refreshed it -- so on any sector
+        // change (gating, and notably entering a PLANET sub-sector) the client
+        // rebuilds the ship object at a NEW heap address while our slot kept the
+        // old, now-freed pointer. The feed then read garbage/zero, went silent,
+        // and the server froze the avatar at its last position (could not dock at
+        // a planet base because "you are not near it"). The decompiled Net7Proxy
+        // re-captures whenever the client's transform ptr changes (FUN_0040ebc0:
+        // `if (ptr+0x48 != cached) cached = ptr+0x48;`), i.e. it tracks the live
+        // object every poll; mirror that by always overwriting the slot. The
+        // player-hull signature gate ('S' at [EAX], 0x48 at [EAX+2]) still scopes
+        // the write to the controllable hull and is unchanged.
         unsigned char t[] = {
-            0x8b, 0x0d, 0,0,0,0,        // 0:  MOV ECX,[scratch]        (scratch @2)
-            0x85, 0xc9,                 // 6:  TEST ECX,ECX  -- captured already?
-            0x75, 0x14,                 // 8:  JNZ +0x14 -> off 30 (skip capture)
-            0x80, 0x38, 0x53,           // 10: CMP BYTE[EAX],'S'        (player hull sig)
-            0x75, 0x0f,                 // 13: JNZ +0x0f -> off 30
-            0x80, 0x78, 0x02, 0x48,     // 15: CMP BYTE[EAX+2],0x48
-            0x75, 0x09,                 // 19: JNZ +0x09 -> off 30
-            0x8b, 0x48, 0x14,           // 21: MOV ECX,[EAX+14]         (live transform ptr)
-            0x89, 0x0d, 0,0,0,0,        // 24: MOV [scratch],ECX        (scratch @26; no EBX clobber)
-            0x8b, 0x48, 0x14,           // 30: MOV ECX,[EAX+14]         (relocated original)
-            0x8d, 0x44, 0x19, 0x48,     // 33: LEA EAX,[ECX+EBX+48]     (relocated original)
-            0xe9, 0,0,0,0               // 37: JMP RET_ADDR             (rel32 @38)
+            0x80, 0x38, 0x53,           // 0:  CMP BYTE[EAX],'S'        (player hull sig)
+            0x75, 0x0f,                 // 3:  JNZ +0x0f -> off 20 (skip capture)
+            0x80, 0x78, 0x02, 0x48,     // 5:  CMP BYTE[EAX+2],0x48
+            0x75, 0x09,                 // 9:  JNZ +0x09 -> off 20
+            0x8b, 0x48, 0x14,           // 11: MOV ECX,[EAX+14]         (live transform ptr)
+            0x89, 0x0d, 0,0,0,0,        // 14: MOV [scratch],ECX        (scratch @16; ALWAYS write)
+            0x8b, 0x48, 0x14,           // 20: MOV ECX,[EAX+14]         (relocated original)
+            0x8d, 0x44, 0x19, 0x48,     // 23: LEA EAX,[ECX+EBX+48]     (relocated original)
+            0xe9, 0,0,0,0               // 27: JMP RET_ADDR             (rel32 @28)
         };
-        *((unsigned long *) &t[2])  = (unsigned long) g_freya_slot;
-        *((unsigned long *) &t[26]) = (unsigned long) g_freya_slot;
-        *((unsigned long *) &t[38]) = RET_ADDR - ((unsigned long) tramp + 42); // jmp-back rel32
+        *((unsigned long *) &t[16]) = (unsigned long) g_freya_slot;
+        *((unsigned long *) &t[28]) = RET_ADDR - ((unsigned long) tramp + 32); // jmp-back rel32
         memcpy(tramp, t, sizeof t);
         FlushInstructionCache(GetCurrentProcess(), tramp, sizeof t);
         FreyaDbg("[PosFeed]  +trampoline (own page)\n");

@@ -1472,3 +1472,38 @@ format & byte order", Trap 2).
 - **Setup**: `just play-local` (rebuilds the server image with the PlayerManufacturing
   fix). A character docked at a manufacturing terminal with analyzable/dismantlable
   items in cargo.
+
+---
+
+### [ ] CV-25 -- Position feed keeps updating after a sector change (planets / gating): can dock at a planet base
+
+- **What changed**: `freya/client-injection/ClientEngineOffsets.h` -- the in-client
+  position-feed trampoline no longer LATCHES the ship transform pointer on first
+  capture. The old sequence captured the first player-hull transform pointer seen
+  after login (`MOV ECX,[scratch]; TEST ECX,ECX; JNZ skip`) and never refreshed it,
+  with the reset-on-sector-change patch disabled. On any sector change -- gating, and
+  most visibly entering a PLANET sub-sector -- the client rebuilds the ship object at
+  a new heap address, so the latched pointer went stale; the feed read zero/garbage,
+  went silent, and the server froze the avatar at its last position. Symptom: flying
+  around a planet, position never updates server-side, so you can never get "near
+  enough" to a planet base to dock. The trampoline now writes the current
+  player-hull transform pointer to the slot every frame it runs, mirroring how the
+  real proxy continuously re-tracks the controlled ship's transform.
+- **Why a CV is needed**: this is an in-client (FreyaPosFeed.dll) hand-assembled
+  code-hook change; the CLI integration suite cannot exercise the client's engine
+  memory or the loopback MVAS datagram path, so only the real client proves it.
+  Not a server/proxy wire change -- the server-side MVAS handler is unchanged.
+- **What to look for (real client)**: fly to a planet (e.g. Inverness), fly around
+  near a planet base (Inverness Down). Your ship icon must track on the in-sector
+  map and the base must register you as "in range" so the Dock prompt works. Then
+  gate between several sectors in one session and confirm position keeps updating
+  after each gate (not just the first sector). Watch nav/HUD position, not just dock.
+- **Known caveat (multiplayer)**: the player-hull signature gate ('S' at [EAX],
+  0x48 at [EAX+2]) is a generic hull signature, not player-specific, and the GameID
+  disambiguation patch is disabled (address unverified). In a populated sector the
+  slot could momentarily track another player's hull. Acceptable for solo play and
+  strictly better than the fully-frozen-on-planet status quo; revisit if remote
+  players' positions bleed into the local feed.
+- **Setup**: rebuild the DLL (`just build-posfeed-dll`) -- already done -- then
+  relaunch with `just play-local`; the launcher re-injects the rebuilt
+  FreyaPosFeed.dll into client.exe.

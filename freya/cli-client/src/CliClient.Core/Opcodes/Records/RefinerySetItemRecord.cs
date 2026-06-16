@@ -19,9 +19,6 @@ namespace N7.CliClient.Opcodes.Records;
 /// HandleRefineSetItem ignores it entirely (it only consumes Data), so its order
 /// is unverified by the parser -- decoded LE by the packed-struct convention,
 /// which is the only reading that yields a sane id (BE would give ~471M).
-/// Source: struct ManufactureData (PacketStructures.h:1062),
-/// Player::HandleRefineSetItem (PlayerManufacturing.cpp:442). Pinned to
-/// capture_3.rar.
 /// </summary>
 public sealed class RefinerySetItemRecord : PacketRecord
 {

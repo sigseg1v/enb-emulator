@@ -14,7 +14,6 @@ namespace N7.CliClient.Opcodes.Records;
 ///   Count x { int16 Attribute; int16 VerbID };   // "enabled" pass
 /// Attribute: 0x00 ENABLE, 0x02 DIS_TOOFAR. GameID and BOTH Counts are
 /// big-endian (ntohl); the int16 verb entries are little-endian.
-/// Source: Player::UpdateVerbs (PlayerClass.cpp).
 /// </summary>
 public sealed class VerbUpdateRecord : PacketRecord
 {
