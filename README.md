@@ -22,9 +22,11 @@
 
 ## Quick Start
 
-1. install Earth & Beyond via publicly available eandb_demo.exe
+1.  For Windows: install Earth & Beyond via publicly available `eandb_demo.exe`
 
-2. patch up to ~retail (see `deploy/do/patches/enb-patch-readme.md` for more info, you need to figure out where to get this, you may be able to find the client patches from other emulators/online/your own retail cd/etc)
+    For Linux: run `./client/linux-installer/install-enb-linux.sh --demo-only`
+
+2. patch up to ~retail (see `deploy/do/patches/enb-patch-readme.md` for more info, you need to figure out where to get this, you may be able to find the client patches from other emulators/online/your own retail cd/etc). I can't promise that ALL variations are the same but in general they should all function about the same. If you skip the `--demo-only` flag it will try to install the Net-7 patched version which may or may not work with the code in this repo.
 
 3. run the following:
 ```
