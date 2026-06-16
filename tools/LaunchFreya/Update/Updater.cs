@@ -33,6 +33,7 @@ namespace LaunchFreya.Update
         public const string PosFeedRelativePath = "bin/FreyaPosFeed.dll";
         public const string InjectRelativePath = "bin/FreyaInject.exe";
         public const string EnbmodRelativePath = "bin/enbmod.dll";
+        public const string GalaxyMapRelativePath = "bin/GalaxyMap.dat";
         public const string StagingDirName = "updates";
         public const string BackupSuffix = ".old";
         // The persistent mod store + per-mod version marker. See MOD-STRUCTURE.md.
@@ -70,14 +71,15 @@ namespace LaunchFreya.Update
         // mismatch and ships that file, which is the correct recovery for a
         // partially-broken install. The MVAS pair is hashed independently (each
         // ships on its own mismatch), exactly like the proxy.
-        public (string launcherHash, string proxyHash, string posFeedHash, string injectHash, string enbmodHash) ComputeLocalHashes()
+        public (string launcherHash, string proxyHash, string posFeedHash, string injectHash, string enbmodHash, string galaxyMapHash) ComputeLocalHashes()
         {
             string launcher = HashOrNull(_selfExePath ?? Path.Combine(_baseDir, LauncherFileName));
             string proxy = HashOrNull(Path.Combine(_baseDir, "bin", "FreyaProxy.exe"));
             string posFeed = HashOrNull(Path.Combine(_baseDir, "bin", "FreyaPosFeed.dll"));
             string inject = HashOrNull(Path.Combine(_baseDir, "bin", "FreyaInject.exe"));
             string enbmod = HashOrNull(Path.Combine(_baseDir, "bin", "enbmod.dll"));
-            return (launcher, proxy, posFeed, inject, enbmod);
+            string galaxyMap = HashOrNull(Path.Combine(_baseDir, "bin", "GalaxyMap.dat"));
+            return (launcher, proxy, posFeed, inject, enbmod, galaxyMap);
         }
 
         string HashOrNull(string path)
@@ -98,11 +100,11 @@ namespace LaunchFreya.Update
         // "server not ready" -> fail-closed, Play stays disabled).
         public async Task<UpdateCheckResponse> CheckAsync(string updateCheckUrl, CancellationToken ct = default)
         {
-            var (launcher, proxy, posFeed, inject, enbmod) = ComputeLocalHashes();
-            string body = UpdateLogic.BuildRequestJson(launcher ?? "", proxy ?? "", posFeed ?? "", inject ?? "", enbmod ?? "");
+            var (launcher, proxy, posFeed, inject, enbmod, galaxyMap) = ComputeLocalHashes();
+            string body = UpdateLogic.BuildRequestJson(launcher ?? "", proxy ?? "", posFeed ?? "", inject ?? "", enbmod ?? "", galaxyMap ?? "");
             _log($"checkUpdates: POST {updateCheckUrl}");
             _log($"checkUpdates: local hashes  launcher={ShortHash(launcher)}  proxy={ShortHash(proxy)}" +
-                 $"  posFeed={ShortHash(posFeed)}  inject={ShortHash(inject)}  enbmod={ShortHash(enbmod)}");
+                 $"  posFeed={ShortHash(posFeed)}  inject={ShortHash(inject)}  enbmod={ShortHash(enbmod)}  galaxyMap={ShortHash(galaxyMap)}");
             try
             {
                 using var content = new StringContent(body, Encoding.UTF8, "application/json");

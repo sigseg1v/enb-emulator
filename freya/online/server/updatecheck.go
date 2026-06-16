@@ -45,6 +45,7 @@ const (
 	relPosFeedDll  = "bin/FreyaPosFeed.dll"
 	relInjectExe   = "bin/FreyaInject.exe"
 	relEnbmodDll   = "bin/enbmod.dll"
+	relGalaxyMap   = "bin/GalaxyMap.dat"
 )
 
 // Re-fetch the manifest at most this often on the request path.
@@ -93,6 +94,7 @@ type patcherManifest struct {
 	posFeedDll  string               // "" when the manifest omits it
 	injectExe   string               // "" when the manifest omits it
 	enbmodDll   string               // "" when the manifest omits it (Lua mod runtime)
+	galaxyMap   string               // "" when the manifest omits it (proxy galaxy-map cache)
 	mods        []manifestModEntry   // optional (id, hash) Lua mods
 	patches     []manifestPatchEntry // optional operator game-data patches
 }
@@ -133,7 +135,7 @@ func (m *patcherManifest) Load() bool {
 		return false
 	}
 
-	var launcherExe, launcherCfg, proxyExe, posFeedDll, injectExe, enbmodDll string
+	var launcherExe, launcherCfg, proxyExe, posFeedDll, injectExe, enbmodDll, galaxyMap string
 	for _, f := range doc.Files {
 		if f.RelativePath == "" || f.Sha512 == "" {
 			continue
@@ -151,6 +153,8 @@ func (m *patcherManifest) Load() bool {
 			injectExe = f.Sha512
 		case relEnbmodDll:
 			enbmodDll = f.Sha512
+		case relGalaxyMap:
+			galaxyMap = f.Sha512
 		}
 	}
 
@@ -188,13 +192,14 @@ func (m *patcherManifest) Load() bool {
 	m.posFeedDll = posFeedDll
 	m.injectExe = injectExe
 	m.enbmodDll = enbmodDll
+	m.galaxyMap = galaxyMap
 	m.mods = mods
 	m.patches = patches
 	m.loaded = true
 	m.mu.Unlock()
 
 	total := 3
-	for _, h := range []string{posFeedDll, injectExe, enbmodDll} {
+	for _, h := range []string{posFeedDll, injectExe, enbmodDll, galaxyMap} {
 		if h != "" {
 			total++
 		}
@@ -222,10 +227,10 @@ func (m *patcherManifest) Empty() bool {
 }
 
 // snapshot returns a consistent copy of the cached hashes under one lock.
-func (m *patcherManifest) snapshot() (launcherExe, launcherCfg, proxyExe, posFeedDll, injectExe, enbmodDll, dlBase string) {
+func (m *patcherManifest) snapshot() (launcherExe, launcherCfg, proxyExe, posFeedDll, injectExe, enbmodDll, galaxyMap, dlBase string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.launcherExe, m.launcherCfg, m.proxyExe, m.posFeedDll, m.injectExe, m.enbmodDll, m.dlURL
+	return m.launcherExe, m.launcherCfg, m.proxyExe, m.posFeedDll, m.injectExe, m.enbmodDll, m.galaxyMap, m.dlURL
 }
 
 func (m *patcherManifest) Mods() []manifestModEntry {
@@ -330,8 +335,9 @@ func (m *patcherManifest) handleUpdateCheck(w http.ResponseWriter, r *http.Reque
 	clientPosFeed := patcherJSONField(body, "posFeedHash")
 	clientInject := patcherJSONField(body, "injectHash")
 	clientEnbmod := patcherJSONField(body, "enbmodHash")
+	clientGalaxyMap := patcherJSONField(body, "galaxyMapHash")
 
-	launcherSrv, cfgSrv, proxySrv, posFeedSrv, injectSrv, enbmodSrv, base := m.snapshot()
+	launcherSrv, cfgSrv, proxySrv, posFeedSrv, injectSrv, enbmodSrv, galaxyMapSrv, base := m.snapshot()
 
 	// The published Lua mods and operator patches ride in the response
 	// UNCONDITIONALLY. The launcher reconciles each itself: a mod by comparing its
@@ -359,9 +365,10 @@ func (m *patcherManifest) handleUpdateCheck(w http.ResponseWriter, r *http.Reque
 	posFeedOk := posFeedSrv == "" || patcherHashEq(clientPosFeed, posFeedSrv)
 	injectOk := injectSrv == "" || patcherHashEq(clientInject, injectSrv)
 	enbmodOk := enbmodSrv == "" || patcherHashEq(clientEnbmod, enbmodSrv)
+	galaxyMapOk := galaxyMapSrv == "" || patcherHashEq(clientGalaxyMap, galaxyMapSrv)
 
 	var out string
-	if launcherOk && proxyOk && posFeedOk && injectOk && enbmodOk {
+	if launcherOk && proxyOk && posFeedOk && injectOk && enbmodOk && galaxyMapOk {
 		out = `{"status":"UP_TO_DATE"` + modsField + patchesField + `}`
 	} else {
 		var files []string
@@ -384,6 +391,9 @@ func (m *patcherManifest) handleUpdateCheck(w http.ResponseWriter, r *http.Reque
 		}
 		if !enbmodOk {
 			add(relEnbmodDll, base+"/enbmod.dll", enbmodSrv)
+		}
+		if !galaxyMapOk {
+			add(relGalaxyMap, base+"/GalaxyMap.dat", galaxyMapSrv)
 		}
 		out = `{"status":"UPDATE_NEEDED","files":[` + strings.Join(files, ",") + `]` + modsField + patchesField + `}`
 	}

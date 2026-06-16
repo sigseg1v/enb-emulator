@@ -101,10 +101,15 @@ build-proxy-win64:
         -DCMAKE_BUILD_TYPE=Release
     @echo ">>> cmake build"
     cmake --build proxy/build-win64 -j"$(nproc)"
-    @echo ">>> staging FreyaProxy.exe → bin/"
+    @echo ">>> staging FreyaProxy.exe + GalaxyMap.dat -> bin/"
     @mkdir -p bin
     @cp proxy/build-win64/FreyaProxy.exe bin/FreyaProxy.exe
-    @echo ">>> done. bin/FreyaProxy.exe is what 'just launch-net7' will spawn under WINE."
+    # The proxy serves this cached galaxy-map node data to the client when the
+    # in-game galaxy map is opened (UDPClient::SendCachedGalaxyMap). Docker mounts
+    # server/data for its proxy; the WINE proxy has no data dir, so ship it in bin/
+    # next to the exe (LaunchFreya points FREYA_GALAXY_MAP_PATH at it).
+    @cp server/data/GalaxyMap.dat bin/GalaxyMap.dat
+    @echo ">>> done. bin/FreyaProxy.exe + bin/GalaxyMap.dat are what 'just launch-net7' will spawn under WINE."
 
 # Cross-compile the standalone MVAS position-feed DLL (PB-2) as a 32-bit Win32
 # PE. It MUST be 32-bit: client.exe is a PE32/i386 process and a DLL loaded into
@@ -232,6 +237,7 @@ package-client-windows: build-proxy-win64 build-posfeed-dll build-enbmod
     @mkdir -p dist/enb-client-windows/bin
     @cp tools/LaunchFreya/bin/win-x64-publish/FreyaLauncher.exe dist/enb-client-windows/FreyaLauncher.exe
     @cp bin/FreyaProxy.exe dist/enb-client-windows/bin/FreyaProxy.exe
+    @cp bin/GalaxyMap.dat dist/enb-client-windows/bin/GalaxyMap.dat
     @cp bin/FreyaPosFeed.dll dist/enb-client-windows/bin/FreyaPosFeed.dll
     @cp bin/FreyaInject.exe dist/enb-client-windows/bin/FreyaInject.exe
     @cp bin/enbmod.dll dist/enb-client-windows/bin/enbmod.dll
@@ -241,7 +247,7 @@ package-client-windows: build-proxy-win64 build-posfeed-dll build-enbmod
     @rm -f dist/enb-client-windows.zip
     @cd dist && zip -qr enb-client-windows.zip enb-client-windows
     @echo ">>> done. dist/enb-client-windows/ (+ enb-client-windows.zip)"
-    @echo "    Contents: FreyaLauncher.exe + bin/FreyaProxy.exe + bin/FreyaPosFeed.dll + bin/FreyaInject.exe + bin/enbmod.dll + bin/scripts/ + FreyaLauncher.cfg"
+    @echo "    Contents: FreyaLauncher.exe + bin/FreyaProxy.exe + bin/GalaxyMap.dat + bin/FreyaPosFeed.dll + bin/FreyaInject.exe + bin/enbmod.dll + bin/scripts/ + FreyaLauncher.cfg"
     @echo "    User extracts the zip on Windows and runs FreyaLauncher.exe;"
     @echo "    FreyaLauncher self-updates itself + FreyaProxy + the MVAS feed pair + enbmod.dll from the server thereafter."
     @echo "    (Lua scripts/ ship once in the zip and are NOT force-synced -- they are user-editable mod content.)"
@@ -758,7 +764,11 @@ play-online CLIENT_PATH='' HOST='':
     SETTINGS_DIR=tools/LaunchFreya/bin/Debug/net10.0
     mkdir -p "$SETTINGS_DIR/bin"
     cp bin/FreyaProxy.exe "$SETTINGS_DIR/bin/FreyaProxy.exe"
-    echo ">>> staged $SETTINGS_DIR/bin/FreyaProxy.exe"
+    # Ship the cached galaxy-map data next to the proxy so the in-game galaxy map
+    # renders (the WINE proxy has no docker mount). build-proxy-win64 staged it
+    # into bin/; mirror it into the launcher's spawn dir.
+    cp bin/GalaxyMap.dat "$SETTINGS_DIR/bin/GalaxyMap.dat"
+    echo ">>> staged $SETTINGS_DIR/bin/FreyaProxy.exe + GalaxyMap.dat"
 
     # MERGE the recipe-owned keys; preserve user-owned toggles (UseClientMods,
     # window position, SettingsVersion) -- see the play-local comment.
