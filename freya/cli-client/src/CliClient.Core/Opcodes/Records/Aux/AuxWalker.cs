@@ -23,7 +23,7 @@ public readonly record struct AuxAnno(int Off, int Len, int Depth, string Name, 
 public sealed class AuxWalker
 {
     private readonly byte[] _p;
-    private readonly bool   _extended;
+    private readonly bool _extended;
     public List<AuxAnno> Annos { get; } = new();
 
     // string-plausibility tracking, to reject coincidental wrong-schema fits
@@ -124,51 +124,80 @@ public sealed class AuxWalker
                 Annos.Add(new(off, 1, depth, f.Name, _p[off] != 0 ? "true" : "false")); off += 1; return true;
             case AuxKind.U16:
                 if (off + 2 > _p.Length) return false;
-                { ushort v = BinaryPrimitives.ReadUInt16LittleEndian(_p.AsSpan(off, 2));
-                  Annos.Add(new(off, 2, depth, f.Name, $"{v}  (0x{v:X4})")); } off += 2; return true;
+                {
+                    ushort v = BinaryPrimitives.ReadUInt16LittleEndian(_p.AsSpan(off, 2));
+                    Annos.Add(new(off, 2, depth, f.Name, $"{v}  (0x{v:X4})"));
+                }
+                off += 2; return true;
             case AuxKind.U32:
                 if (off + 4 > _p.Length) return false;
-                { uint v = BinaryPrimitives.ReadUInt32LittleEndian(_p.AsSpan(off, 4));
-                  Annos.Add(new(off, 4, depth, f.Name, $"{v}  (0x{v:X8})")); } off += 4; return true;
+                {
+                    uint v = BinaryPrimitives.ReadUInt32LittleEndian(_p.AsSpan(off, 4));
+                    Annos.Add(new(off, 4, depth, f.Name, $"{v}  (0x{v:X8})"));
+                }
+                off += 4; return true;
             case AuxKind.S32:
                 if (off + 4 > _p.Length) return false;
-                { int v = BinaryPrimitives.ReadInt32LittleEndian(_p.AsSpan(off, 4));
-                  Annos.Add(new(off, 4, depth, f.Name, v.ToString(CultureInfo.InvariantCulture))); } off += 4; return true;
+                {
+                    int v = BinaryPrimitives.ReadInt32LittleEndian(_p.AsSpan(off, 4));
+                    Annos.Add(new(off, 4, depth, f.Name, v.ToString(CultureInfo.InvariantCulture)));
+                }
+                off += 4; return true;
             case AuxKind.U64:
                 if (off + 8 > _p.Length) return false;
-                { ulong v = BinaryPrimitives.ReadUInt64LittleEndian(_p.AsSpan(off, 8));
-                  Annos.Add(new(off, 8, depth, f.Name, $"{v}")); } off += 8; return true;
+                {
+                    ulong v = BinaryPrimitives.ReadUInt64LittleEndian(_p.AsSpan(off, 8));
+                    Annos.Add(new(off, 8, depth, f.Name, $"{v}"));
+                }
+                off += 8; return true;
             case AuxKind.F32:
                 if (off + 4 > _p.Length) return false;
-                { float v = BinaryPrimitives.ReadSingleLittleEndian(_p.AsSpan(off, 4));
-                  Annos.Add(new(off, 4, depth, f.Name, v.ToString("0.0##", CultureInfo.InvariantCulture))); } off += 4; return true;
+                {
+                    float v = BinaryPrimitives.ReadSingleLittleEndian(_p.AsSpan(off, 4));
+                    Annos.Add(new(off, 4, depth, f.Name, v.ToString("0.0##", CultureInfo.InvariantCulture)));
+                }
+                off += 4; return true;
             case AuxKind.F64:
                 if (off + 8 > _p.Length) return false;
-                { double v = BinaryPrimitives.ReadDoubleLittleEndian(_p.AsSpan(off, 8));
-                  Annos.Add(new(off, 8, depth, f.Name, v.ToString("0.0##", CultureInfo.InvariantCulture))); } off += 8; return true;
+                {
+                    double v = BinaryPrimitives.ReadDoubleLittleEndian(_p.AsSpan(off, 8));
+                    Annos.Add(new(off, 8, depth, f.Name, v.ToString("0.0##", CultureInfo.InvariantCulture)));
+                }
+                off += 8; return true;
             case AuxKind.Avail4:
                 if (off + 16 > _p.Length) return false;
-                { var parts = new string[4];
-                  for (int k = 0; k < 4; k++) parts[k] = $"0x{BinaryPrimitives.ReadUInt32LittleEndian(_p.AsSpan(off + 4 * k, 4)):X8}";
-                  Annos.Add(new(off, 16, depth, f.Name, "[" + string.Join(", ", parts) + "]")); } off += 16; return true;
+                {
+                    var parts = new string[4];
+                    for (int k = 0; k < 4; k++) parts[k] = $"0x{BinaryPrimitives.ReadUInt32LittleEndian(_p.AsSpan(off + 4 * k, 4)):X8}";
+                    Annos.Add(new(off, 16, depth, f.Name, "[" + string.Join(", ", parts) + "]"));
+                }
+                off += 16; return true;
             case AuxKind.Float3:
                 if (off + 12 > _p.Length) return false;
-                { var parts = new string[3];
-                  for (int k = 0; k < 3; k++) parts[k] = BinaryPrimitives.ReadSingleLittleEndian(_p.AsSpan(off + 4 * k, 4)).ToString("0.0##", CultureInfo.InvariantCulture);
-                  Annos.Add(new(off, 12, depth, f.Name, "(" + string.Join(", ", parts) + ")")); } off += 12; return true;
+                {
+                    var parts = new string[3];
+                    for (int k = 0; k < 3; k++) parts[k] = BinaryPrimitives.ReadSingleLittleEndian(_p.AsSpan(off + 4 * k, 4)).ToString("0.0##", CultureInfo.InvariantCulture);
+                    Annos.Add(new(off, 12, depth, f.Name, "(" + string.Join(", ", parts) + ")"));
+                }
+                off += 12; return true;
             case AuxKind.Mount3:
                 if (off + 12 > _p.Length) return false;
-                { uint m = BinaryPrimitives.ReadUInt32LittleEndian(_p.AsSpan(off, 4));
-                  int a = BinaryPrimitives.ReadInt32LittleEndian(_p.AsSpan(off + 4, 4));
-                  int b = BinaryPrimitives.ReadInt32LittleEndian(_p.AsSpan(off + 8, 4));
-                  Annos.Add(new(off, 12, depth, f.Name, $"mount=0x{m:X8} ({a}, {b})")); } off += 12; return true;
+                {
+                    uint m = BinaryPrimitives.ReadUInt32LittleEndian(_p.AsSpan(off, 4));
+                    int a = BinaryPrimitives.ReadInt32LittleEndian(_p.AsSpan(off + 4, 4));
+                    int b = BinaryPrimitives.ReadInt32LittleEndian(_p.AsSpan(off + 8, 4));
+                    Annos.Add(new(off, 12, depth, f.Name, $"mount=0x{m:X8} ({a}, {b})"));
+                }
+                off += 12; return true;
             case AuxKind.Str:
                 if (off + 2 > _p.Length) return false;
-                { int len = BinaryPrimitives.ReadUInt16LittleEndian(_p.AsSpan(off, 2));
-                  if (off + 2 + len > _p.Length) return false;
-                  for (int k = 0; k < len; k++) { byte b = _p[off + 2 + k]; _strBytes++; if (b >= 0x20 && b < 0x7F) _strPrintable++; }
-                  string sv = Encoding.ASCII.GetString(_p, off + 2, len);
-                  Annos.Add(new(off, 2 + len, depth, f.Name, "\"" + sv + "\"")); off += 2 + len; }
+                {
+                    int len = BinaryPrimitives.ReadUInt16LittleEndian(_p.AsSpan(off, 2));
+                    if (off + 2 + len > _p.Length) return false;
+                    for (int k = 0; k < len; k++) { byte b = _p[off + 2 + k]; _strBytes++; if (b >= 0x20 && b < 0x7F) _strPrintable++; }
+                    string sv = Encoding.ASCII.GetString(_p, off + 2, len);
+                    Annos.Add(new(off, 2 + len, depth, f.Name, "\"" + sv + "\"")); off += 2 + len;
+                }
                 return true;
             case AuxKind.Nested:
                 return WalkStruct(f.Schema!, ref off, depth + 1, f.Name);

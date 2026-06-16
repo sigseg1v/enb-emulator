@@ -42,12 +42,12 @@ namespace FactionEditor.SQL
             int lastInsertID = Convert.ToInt32(lastInsert.Rows[0]["id"]);
 
             var newRow = _matrix.NewRow();
-            newRow["id"]               = lastInsertID;
-            newRow["faction_id"]       = newID;
+            newRow["id"] = lastInsertID;
+            newRow["faction_id"] = newID;
             newRow["faction_entry_id"] = existingID;
-            newRow["base_value"]       = 0;
-            newRow["current_value"]    = 0;
-            newRow["reward_faction"]   = 0;
+            newRow["base_value"] = 0;
+            newRow["current_value"] = 0;
+            newRow["reward_faction"] = 0;
             _matrix.Rows.Add(newRow);
             newRow.AcceptChanges();
             _matrix.AcceptChanges();

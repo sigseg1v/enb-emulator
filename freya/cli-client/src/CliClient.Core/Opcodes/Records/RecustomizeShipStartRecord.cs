@@ -37,11 +37,11 @@ public sealed class RecustomizeShipStartRecord : PacketRecord
         }
 
         // -- ShipData @ 0x00 (194 bytes) --
-        FDec(sb, 0x00, "ship.Race",       ReadI32LE(Payload, 0x00));
+        FDec(sb, 0x00, "ship.Race", ReadI32LE(Payload, 0x00));
         FDec(sb, 0x04, "ship.Profession", ReadI32LE(Payload, 0x04));
-        FHex(sb, 0x08, "ship.Hull",       ReadI32LE(Payload, 0x08));
-        FHex(sb, 0x0C, "ship.Wing",       ReadI32LE(Payload, 0x0C));
-        FHex(sb, 0x10, "ship.Decal",      ReadI32LE(Payload, 0x10));
+        FHex(sb, 0x08, "ship.Hull", ReadI32LE(Payload, 0x08));
+        FHex(sb, 0x0C, "ship.Wing", ReadI32LE(Payload, 0x0C));
+        FHex(sb, 0x10, "ship.Decal", ReadI32LE(Payload, 0x10));
         FStr(sb, 0x14, 26, "ship.Name", ReadNulString(Payload.AsSpan(0x14, 26)));
         FFloat(sb, 0x2E, "ship.NameColor.H", ReadF32LE(Payload, 0x2E));
         FFloat(sb, 0x32, "ship.NameColor.S", ReadF32LE(Payload, 0x32));
@@ -73,11 +73,11 @@ public sealed class RecustomizeShipStartRecord : PacketRecord
     /// <summary>ColorInfo (17 bytes): float[3] HSV; char flat; int32 metal.</summary>
     private void WriteColor(StringBuilder sb, ref int off, string name)
     {
-        FFloat(sb, off,      $"{name}.H",     ReadF32LE(Payload, off));
-        FFloat(sb, off + 4,  $"{name}.S",     ReadF32LE(Payload, off + 4));
-        FFloat(sb, off + 8,  $"{name}.V",     ReadF32LE(Payload, off + 8));
-        FDec(sb,   off + 12, $"{name}.Flat",  Payload[off + 12]);
-        FDec(sb,   off + 13, $"{name}.Metal", ReadI32LE(Payload, off + 13));
+        FFloat(sb, off, $"{name}.H", ReadF32LE(Payload, off));
+        FFloat(sb, off + 4, $"{name}.S", ReadF32LE(Payload, off + 4));
+        FFloat(sb, off + 8, $"{name}.V", ReadF32LE(Payload, off + 8));
+        FDec(sb, off + 12, $"{name}.Flat", Payload[off + 12]);
+        FDec(sb, off + 13, $"{name}.Metal", ReadI32LE(Payload, off + 13));
         off += 17;
     }
 }

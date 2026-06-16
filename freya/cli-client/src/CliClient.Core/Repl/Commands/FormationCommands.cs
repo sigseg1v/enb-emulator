@@ -55,19 +55,19 @@ internal static class CtaRequestBuilder
 /// </summary>
 public sealed class FormationCommand : ICommandHandler
 {
-    private const int ActionSlot  = 4;
+    private const int ActionSlot = 4;
     private const int ActionBlock = 5;
-    private const int ActionPipe  = 6;
-    private const int ActionJoin  = 7;   // form up
+    private const int ActionPipe = 6;
+    private const int ActionJoin = 7;   // form up
     private const int ActionLeave = 8;   // leave formation (member)
     private const int ActionBreak = 9;   // break formation (leader)
 
     private readonly SessionContext _ctx;
     public FormationCommand(SessionContext ctx) { ArgumentNullException.ThrowIfNull(ctx); _ctx = ctx; }
 
-    public string Name    => "formation";
+    public string Name => "formation";
     public string Summary => "group formation: pipe/block/slot (leader), join, break/leave";
-    public string Usage   =>
+    public string Usage =>
         "formation <pipe|block|slot|join|break>\n" +
         "  formation pipe|block|slot  leader: set the group's formation (0x00BC Action 6/5/4).\n" +
         "  formation join             member: form up into the leader's formation (Action 7).\n" +
@@ -125,9 +125,9 @@ public sealed class FormationCommand : ICommandHandler
         string sub = args[0].ToLowerInvariant();
         switch (sub)
         {
-            case "pipe":  return await SetFormationAsync("Pipe",  ActionPipe,  g, output, ct).ConfigureAwait(false);
+            case "pipe": return await SetFormationAsync("Pipe", ActionPipe, g, output, ct).ConfigureAwait(false);
             case "block": return await SetFormationAsync("Block", ActionBlock, g, output, ct).ConfigureAwait(false);
-            case "slot":  return await SetFormationAsync("Slot Back", ActionSlot, g, output, ct).ConfigureAwait(false);
+            case "slot": return await SetFormationAsync("Slot Back", ActionSlot, g, output, ct).ConfigureAwait(false);
 
             case "join":
                 if (g.IsLeader)

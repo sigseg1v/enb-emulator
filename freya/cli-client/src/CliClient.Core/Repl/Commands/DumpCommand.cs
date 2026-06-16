@@ -30,9 +30,9 @@ public sealed class DumpCommand : ICommandHandler
         _ctx = ctx;
     }
 
-    public string Name    => "dump";
+    public string Name => "dump";
     public string Summary => "enter the sector and structurally-dump every frame the server sends";
-    public string Usage   => "dump <firstname> [--compare <replay.bin>] [--drain <seconds>]";
+    public string Usage => "dump <firstname> [--compare <replay.bin>] [--drain <seconds>]";
 
     public async Task<int> ExecuteAsync(
         IReadOnlyList<string> args, TextWriter output, CancellationToken ct)
@@ -66,7 +66,8 @@ public sealed class DumpCommand : ICommandHandler
             switch (args[i])
             {
                 case "--compare":
-                    if (i + 1 >= args.Count) {
+                    if (i + 1 >= args.Count)
+                    {
                         await output.WriteLineAsync(
                             AnsiPalette.Err("--compare needs a file path")).ConfigureAwait(false);
                         return 1;
@@ -74,7 +75,8 @@ public sealed class DumpCommand : ICommandHandler
                     comparePath = args[++i];
                     break;
                 case "--drain":
-                    if (i + 1 >= args.Count || !int.TryParse(args[++i], out int secs)) {
+                    if (i + 1 >= args.Count || !int.TryParse(args[++i], out int secs))
+                    {
                         await output.WriteLineAsync(
                             AnsiPalette.Err("--drain needs an integer seconds value")).ConfigureAwait(false);
                         return 1;
@@ -267,7 +269,7 @@ public sealed class DumpCommand : ICommandHandler
             .ConfigureAwait(false);
 
         var missing = retailCounts.Keys.Except(oursCounts.Keys).OrderBy(o => o).ToList();
-        var extra   = oursCounts.Keys.Except(retailCounts.Keys).OrderBy(o => o).ToList();
+        var extra = oursCounts.Keys.Except(retailCounts.Keys).OrderBy(o => o).ToList();
 
         if (missing.Count > 0)
         {

@@ -31,9 +31,9 @@ public sealed class FindMemberRecord : PacketRecord
         for (int i = 0; i < count; i++)
         {
             int off = 4 + i * 16;
-            FHex(sb, off,      $"[{i}].GameID",     ReadI32BE(Payload, off),      "(BE)");
-            FDec(sb, off + 4,  $"[{i}].Level",      ReadI32BE(Payload, off + 4),  "(BE)");
-            FDec(sb, off + 8,  $"[{i}].Race",       ReadI32BE(Payload, off + 8),  "(BE)");
+            FHex(sb, off, $"[{i}].GameID", ReadI32BE(Payload, off), "(BE)");
+            FDec(sb, off + 4, $"[{i}].Level", ReadI32BE(Payload, off + 4), "(BE)");
+            FDec(sb, off + 8, $"[{i}].Race", ReadI32BE(Payload, off + 8), "(BE)");
             FDec(sb, off + 12, $"[{i}].Profession", ReadI32BE(Payload, off + 12), "(BE)");
         }
     }

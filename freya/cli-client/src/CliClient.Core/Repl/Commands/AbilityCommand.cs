@@ -29,9 +29,9 @@ public sealed class AbilityCommand : ICommandHandler
     private readonly SessionContext _ctx;
     public AbilityCommand(SessionContext ctx) { ArgumentNullException.ThrowIfNull(ctx); _ctx = ctx; }
 
-    public string Name    => "ability";
+    public string Name => "ability";
     public string Summary => "activate a trained ability (optionally on a target)";
-    public string Usage   =>
+    public string Usage =>
         "ability <abilityIndex> [target]\n" +
         "  abilityIndex = the ability slot to fire (e.g. 46)\n" +
         "  target       = gid (0x..., gid=..., decimal) or object name; sends\n" +

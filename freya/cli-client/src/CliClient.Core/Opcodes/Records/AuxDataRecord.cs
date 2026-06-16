@@ -30,11 +30,11 @@ public sealed class AuxDataRecord : PacketRecord
         if (Payload.Length < 7) { Flag(sb, $"AUX_DATA truncated -- {Payload.Length} bytes, expected >= 7"); return; }
 
         ushort bodyLen = ReadU16LE(Payload, 4);
-        byte   version = Payload[6];
+        byte version = Payload[6];
         // The body-length field is set as (index-6) by most Build* paths but as
         // (index) by some diff paths, so don't gate on it -- gate on version and
         // let exact-consumption validate the walk.
-        bool   headerOk = version == 1 && Payload.Length >= 8;
+        bool headerOk = version == 1 && Payload.Length >= 8;
 
         if (headerOk && TrySchemaWalk(sb)) return;
 
@@ -75,13 +75,13 @@ public sealed class AuxDataRecord : PacketRecord
         }
         if (Payload.Length >= 10)
         {
-            ushort inlineLen  = ReadU16LE(Payload, 4);
+            ushort inlineLen = ReadU16LE(Payload, 4);
             ushort inlineType = ReadU16LE(Payload, 6);
             if (inlineType == 0x1201)
             {
                 short strLen = ReadI16LE(Payload, 8);
                 FDec(sb, 4, "InlineLen", (short)inlineLen);
-                F(sb,   6, 2, "SubType",   "0x1201  (resource name)");
+                F(sb, 6, 2, "SubType", "0x1201  (resource name)");
                 if (strLen > 0 && Payload.Length >= 10 + strLen)
                 {
                     string name = ReadNulString(Payload.AsSpan(10, strLen));
@@ -130,14 +130,14 @@ public sealed class AuxDataRecord : PacketRecord
         int off = 11;
         for (int i = 0; i < count; i++)
         {
-            uint id  = ReadU32LE(Payload, off);
+            uint id = ReadU32LE(Payload, off);
             uint val = ReadU32LE(Payload, off + 4);
-            float f  = ReadF32LE(Payload, off + 4);
+            float f = ReadF32LE(Payload, off + 4);
             string? note = float.IsFinite(f) && f != 0f
                            && System.Math.Abs(f) >= 1e-3f && System.Math.Abs(f) < 1e9f
                 ? $"(f32 {f:0.###})" : null;
-            FHex(sb, off,     $"[{i}] AbilityID", id);
-            FHex(sb, off + 4, $"[{i}] Value",     val, note);
+            FHex(sb, off, $"[{i}] AbilityID", id);
+            FHex(sb, off + 4, $"[{i}] Value", val, note);
             off += 8;
         }
         var trail = Payload.AsSpan(off, 8);

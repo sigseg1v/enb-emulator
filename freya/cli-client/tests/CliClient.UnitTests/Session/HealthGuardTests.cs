@@ -27,7 +27,7 @@ public sealed class HealthGuardTests
         g.OnDisconnect("RST from peer");
         Assert.True(g.Tripped);
         Assert.Contains("server disconnected", g.Reason!);
-        Assert.Contains("RST from peer",       g.Reason!);
+        Assert.Contains("RST from peer", g.Reason!);
         Assert.True(g.Token.IsCancellationRequested);
     }
 
@@ -107,7 +107,7 @@ public sealed class HealthGuardTests
         }
         Assert.True(g.Tripped);
         Assert.Contains("response timeout", g.Reason!);
-        Assert.Contains("test-op",          g.Reason!);
+        Assert.Contains("test-op", g.Reason!);
     }
 
     [Fact]

@@ -18,7 +18,7 @@ public sealed class CreateAttachmentRecord : PacketRecord
     {
         if (Payload.Length < 12) { Flag(sb, $"CREATE_ATTACHMENT truncated -- {Payload.Length} bytes, expected 12"); return; }
         FHex(sb, 0, "ParentID", ReadI32BE(Payload, 0), "(BE -- ntohl at emit)");
-        FHex(sb, 4, "ChildID",  ReadI32BE(Payload, 4), "(BE -- ntohl at emit)");
-        FDec(sb, 8, "Slot",     ReadI32BE(Payload, 8), "(BE -- ntohl at emit)");
+        FHex(sb, 4, "ChildID", ReadI32BE(Payload, 4), "(BE -- ntohl at emit)");
+        FDec(sb, 8, "Slot", ReadI32BE(Payload, 8), "(BE -- ntohl at emit)");
     }
 }

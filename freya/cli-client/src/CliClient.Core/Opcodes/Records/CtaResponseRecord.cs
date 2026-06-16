@@ -48,13 +48,13 @@ public sealed class CtaResponseRecord : PacketRecord
     /// </summary>
     internal static string DescribeAction(int code) => code switch
     {
-        4  => "Slot Back",
-        5  => "Block",
-        6  => "Pipe",
-        7  => "Form Up",
-        8  => "Leave Formation",
-        9  => "Break Formation",
+        4 => "Slot Back",
+        5 => "Block",
+        6 => "Pipe",
+        7 => "Form Up",
+        8 => "Leave Formation",
+        9 => "Break Formation",
         12 => "Request Target",
-        _  => "GroupAction selector",
+        _ => "GroupAction selector",
     };
 }

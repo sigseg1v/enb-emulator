@@ -23,10 +23,10 @@ namespace EnbPatcher
     public partial class MainWindow : Window
     {
         const string Net7PatchUrl = "http://patch.net-7.org/";
-        const string Me           = "./EnBPatcher.exe";
-        const string MeAlt        = "./EnBPatcher1.exe";
-        const string LauncherExe  = "./LaunchNet7.exe";
-        const string GameBinDir   = "c:\\net7\\bin";
+        const string Me = "./EnBPatcher.exe";
+        const string MeAlt = "./EnBPatcher1.exe";
+        const string LauncherExe = "./LaunchNet7.exe";
+        const string GameBinDir = "c:\\net7\\bin";
 
         readonly HttpClient _http = new HttpClient();
         readonly CancellationTokenSource _cts = new CancellationTokenSource();
@@ -69,7 +69,7 @@ namespace EnbPatcher
                 }
 
                 using var local = new FileStream(copyName, FileMode.Create, FileAccess.Write, FileShare.None);
-                using var src   = await resp.Content.ReadAsStreamAsync(ct);
+                using var src = await resp.Content.ReadAsStreamAsync(ct);
                 var buffer = new byte[2048];
                 int n;
                 while ((n = await src.ReadAsync(buffer, 0, buffer.Length, ct)) > 0)

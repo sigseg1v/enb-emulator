@@ -24,9 +24,9 @@ public sealed class NarrateOnCommand : ICommandHandler
         _ctx = ctx;
     }
 
-    public string Name    => "narrate-on";
+    public string Name => "narrate-on";
     public string Summary => "narrate inbound events as one-line notices (scanner contacts, damage, warp, sector load)";
-    public string Usage   => "narrate-on";
+    public string Usage => "narrate-on";
 
     // Only worth offering while narration is off.
     public bool Available => !_ctx.NarrateEnabled;

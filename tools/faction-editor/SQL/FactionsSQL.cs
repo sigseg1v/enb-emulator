@@ -44,9 +44,9 @@ namespace FactionEditor.SQL
 
             var newRow = _factions.NewRow();
             newRow["faction_id"] = lastInsertID;
-            newRow["name"]       = "<New Faction>";
+            newRow["name"] = "<New Faction>";
             newRow["description"] = "";
-            newRow["PDA_text"]    = "";
+            newRow["PDA_text"] = "";
             _factions.Rows.Add(newRow);
             newRow.AcceptChanges();
             _factions.AcceptChanges();

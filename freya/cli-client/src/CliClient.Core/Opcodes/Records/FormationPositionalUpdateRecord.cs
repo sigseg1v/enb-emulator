@@ -20,11 +20,11 @@ public sealed class FormationPositionalUpdateRecord : PacketRecord
     protected override void WriteFields(StringBuilder sb)
     {
         if (Payload.Length < 20) { Flag(sb, $"FORMATION_POSITIONAL_UPDATE truncated -- {Payload.Length} bytes, expected 20"); return; }
-        int   targetId = ReadI32LE(Payload, 0);
-        int   leaderId = ReadI32LE(Payload, 4);
+        int targetId = ReadI32LE(Payload, 0);
+        int leaderId = ReadI32LE(Payload, 4);
         float px = ReadF32LE(Payload, 8), py = ReadF32LE(Payload, 12), pz = ReadF32LE(Payload, 16);
-        FHex(sb,   0, "TargetID", targetId);
-        FHex(sb,   4, "LeaderID", leaderId);
+        FHex(sb, 0, "TargetID", targetId);
+        FHex(sb, 4, "LeaderID", leaderId);
         FBytes(sb, 8, 12, "Position", $"({px:0.0##}, {py:0.0##}, {pz:0.0##})");
     }
 }

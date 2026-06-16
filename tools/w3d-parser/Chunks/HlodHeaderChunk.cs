@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -31,13 +31,14 @@ namespace WestWood3D.Chunks
             w3dName = System.Text.ASCIIEncoding.ASCII.GetString(w3dNameArray);
             byte[] hierarchyNameArray = br.ReadBytes(16);
             hierarchyName = System.Text.ASCIIEncoding.ASCII.GetString(w3dNameArray);
-		
-		    if(dbg){
-			    Console.Out.WriteLine("\t Version: "+version);
-			    Console.Out.WriteLine("\t LOD Count: "+lodCount);
-			    Console.Out.WriteLine("\t Name: "+w3dName);
+
+            if (dbg)
+            {
+                Console.Out.WriteLine("\t Version: " + version);
+                Console.Out.WriteLine("\t LOD Count: " + lodCount);
+                Console.Out.WriteLine("\t Name: " + w3dName);
                 Console.Out.WriteLine("\t Hierachy Name: " + hierarchyName);
-		    }
+            }
         }
 
         [CategoryAttribute("Chunk Values"), ReadOnlyAttribute(true), DescriptionAttribute("The version of this HLOD.")]

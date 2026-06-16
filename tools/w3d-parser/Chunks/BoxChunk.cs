@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -51,8 +51,8 @@ namespace WestWood3D.Chunks
             byte[] nameArray = br.ReadBytes(chunkLength - 35);
             name = System.Text.ASCIIEncoding.ASCII.GetString(nameArray);
             rgb = Color.FromArgb(br.ReadByte(), br.ReadByte(), br.ReadByte());
-            center = new Vector3((double) br.ReadSingle(), (double) br.ReadSingle(), (double) br.ReadSingle());
-            extents = new Vector3((double)br.ReadSingle(), (double) br.ReadSingle(), (double)br.ReadSingle());
+            center = new Vector3((double)br.ReadSingle(), (double)br.ReadSingle(), (double)br.ReadSingle());
+            extents = new Vector3((double)br.ReadSingle(), (double)br.ReadSingle(), (double)br.ReadSingle());
 
             if (dbg)
             {

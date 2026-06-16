@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -33,33 +33,34 @@ namespace WestWood3D.Chunks
             flags = br.ReadInt16();
             pivot = br.ReadInt16();
             default_val = br.ReadByte();
-        	
-            if(dbg){
-	            Console.Out.WriteLine("\t First Frame: "+first_frame);
-	            Console.Out.WriteLine("\t Last Frame: "+last_frame);
-	            Console.Out.WriteLine("\t Flags: "+flags);
-	            Console.Out.WriteLine("\t Pivot: "+pivot);
+
+            if (dbg)
+            {
+                Console.Out.WriteLine("\t First Frame: " + first_frame);
+                Console.Out.WriteLine("\t Last Frame: " + last_frame);
+                Console.Out.WriteLine("\t Flags: " + flags);
+                Console.Out.WriteLine("\t Pivot: " + pivot);
                 Console.Out.WriteLine("\t Default Value: " + default_val);
             }
 
             int numBits = last_frame - first_frame + 1;
             int numBytes = (int)(numBits / 8);
-            if((numBits % 8) != 0)
-	            numBytes++;
-    		
+            if ((numBits % 8) != 0)
+                numBytes++;
+
             result_vectors = new Boolean[numBits];
-    		
+
             int k = 0;
-            for(int i = 0; i < numBytes; i++)
+            for (int i = 0; i < numBytes; i++)
             {
-	            int temp = br.ReadByte();
-	            for(int j = 0; j < 8 && k < numBits; j++)
-	            {
+                int temp = br.ReadByte();
+                for (int j = 0; j < 8 && k < numBits; j++)
+                {
                     result_vectors[k] = ((temp >> j) & 0x01) == 1;
-		            if(dbg)
+                    if (dbg)
                         Console.Out.WriteLine("\t BitChannelChunk result vector: " + result_vectors[k]);
-		            k++;
-	            }
+                    k++;
+                }
             }
         }
 

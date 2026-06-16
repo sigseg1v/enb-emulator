@@ -378,9 +378,9 @@ public sealed class SectorWorld
         int? ct = t.CreateType;
         string baseName = ct switch
         {
-            0  => "mob spawn",
-            1  => "mob",
-            3  => "planet",
+            0 => "mob spawn",
+            1 => "mob",
+            3 => "planet",
             10 => "stargate",
             11 => "stargate",
             12 => "station",
@@ -389,7 +389,7 @@ public sealed class SectorWorld
             40 => "radiation",
             41 => "gravity well",
             42 => "turret",
-            _  => t.IsNav ? NavLabel(t) : "object",
+            _ => t.IsNav ? NavLabel(t) : "object",
         };
         return baseName;
     }
@@ -403,13 +403,13 @@ public sealed class SectorWorld
     private static string NavLabel(Tracked t)
     {
         bool hidden = t.OnRadar == false;
-        bool major  = t.NavType == 2;
+        bool major = t.NavType == 2;
         return (hidden, major) switch
         {
-            (true,  true)  => "nav (hidden, major)",
-            (true,  false) => "nav (hidden)",
-            (false, true)  => "nav (major)",
-            _              => "nav",
+            (true, true) => "nav (hidden, major)",
+            (true, false) => "nav (hidden)",
+            (false, true) => "nav (major)",
+            _ => "nav",
         };
     }
 

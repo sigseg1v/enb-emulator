@@ -39,7 +39,7 @@ namespace CommonTools.Gui
         {
             String cleanedQuery = subQuery;
             String parameter = "@" + sqlParameter;
-            if(cleanedQuery.Contains(parameter))
+            if (cleanedQuery.Contains(parameter))
             {
                 int position = cleanedQuery.IndexOf(parameter);
                 cleanedQuery = cleanedQuery.Substring(0, position)

@@ -55,7 +55,7 @@ namespace SectorEditor.PiccoloShim
         {
             base.OnPointerPressed(e);
             var pt = e.GetPosition(this);
-            _lastPointer = new PointF((float) pt.X, (float) pt.Y);
+            _lastPointer = new PointF((float)pt.X, (float)pt.Y);
             _activeButton = MapButton(e.GetCurrentPoint(this).Properties);
             _dragging = true;
             Focus();
@@ -78,7 +78,7 @@ namespace SectorEditor.PiccoloShim
         {
             base.OnPointerMoved(e);
             var pt = e.GetPosition(this);
-            var canvas = new PointF((float) pt.X, (float) pt.Y);
+            var canvas = new PointF((float)pt.X, (float)pt.Y);
             var world = Camera.CanvasToWorld(canvas);
 
             if (_dragging && _capturedNode != null)
@@ -97,7 +97,7 @@ namespace SectorEditor.PiccoloShim
         {
             base.OnPointerReleased(e);
             var pt = e.GetPosition(this);
-            var world = Camera.CanvasToWorld(new PointF((float) pt.X, (float) pt.Y));
+            var world = Camera.CanvasToWorld(new PointF((float)pt.X, (float)pt.Y));
             if (_capturedNode != null)
             {
                 _capturedNode.RaiseMouseUp(MakeArgs(world, _capturedNode));
@@ -112,7 +112,7 @@ namespace SectorEditor.PiccoloShim
             base.OnPointerWheelChanged(e);
             var pt = e.GetPosition(this);
             float factor = e.Delta.Y > 0 ? 1.1f : 0.9f;
-            Camera.ZoomBy(factor, new PointF((float) pt.X, (float) pt.Y));
+            Camera.ZoomBy(factor, new PointF((float)pt.X, (float)pt.Y));
             InvalidateVisual();
         }
 

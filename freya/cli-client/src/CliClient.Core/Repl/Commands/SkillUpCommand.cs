@@ -26,9 +26,9 @@ public sealed class SkillUpCommand : ICommandHandler
     private readonly SessionContext _ctx;
     public SkillUpCommand(SessionContext ctx) { ArgumentNullException.ThrowIfNull(ctx); _ctx = ctx; }
 
-    public string Name    => "skillup";
+    public string Name => "skillup";
     public string Summary => "spend a skill point to raise a skill by one level";
-    public string Usage   =>
+    public string Usage =>
         "skillup <skillId>\n" +
         "  skillId = the skill to raise (e.g. 55)\n" +
         "  e.g.  skillup 55     train skill 55 one level";

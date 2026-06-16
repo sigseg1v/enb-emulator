@@ -134,8 +134,8 @@ namespace MissionEditor
             m_completion.setCompletionType(completionType);
 
             string value = c_ValueTxt.IsEnabled ? (c_ValueTxt.Text ?? "") : "";
-            string data  = c_DataTxt.IsEnabled  ? (c_DataTxt.Text  ?? "") : "";
-            Int32  count = -1;
+            string data = c_DataTxt.IsEnabled ? (c_DataTxt.Text ?? "") : "";
+            Int32 count = -1;
             if (c_AmountTxt.IsEnabled && !Int32.TryParse(c_AmountTxt.Text, out count)) count = -1;
 
             switch (completionType)

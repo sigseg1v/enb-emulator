@@ -42,10 +42,10 @@ namespace MissionEditor.Nodes
                 case CompletionType.Nav_Message:
                     return DataConfiguration.getDescription(DataConfiguration.DataType.sector_object, getValue());
                 case CompletionType.Fight_Mob:
-                {
-                    String mob = DataConfiguration.getDescription(DataConfiguration.DataType.mob, getValue());
-                    return getCount().ToString() + " x " + mob;
-                }
+                    {
+                        String mob = DataConfiguration.getDescription(DataConfiguration.DataType.mob, getValue());
+                        return getCount().ToString() + " x " + mob;
+                    }
                 case CompletionType.Talk_To_Npc:
                     return DataConfiguration.getDescription(DataConfiguration.DataType.npc, getValue());
                 case CompletionType.Give_Item:
@@ -56,17 +56,17 @@ namespace MissionEditor.Nodes
                 case CompletionType.Possess_Item:
                     return DataConfiguration.getDescription(DataConfiguration.DataType.item, getValue());
                 case CompletionType.Use_Skill_On_Mob_Type:
-                {
-                    String skill = DataConfiguration.getDescription(DataConfiguration.DataType.skill, getData());
-                    String mob = DataConfiguration.getDescription(DataConfiguration.DataType.mob, getValue());
-                    return skill + " > " + mob;
-                }
+                    {
+                        String skill = DataConfiguration.getDescription(DataConfiguration.DataType.skill, getData());
+                        String mob = DataConfiguration.getDescription(DataConfiguration.DataType.mob, getValue());
+                        return skill + " > " + mob;
+                    }
                 case CompletionType.Use_Skill_On_Object:
-                {
-                    String skill = DataConfiguration.getDescription(DataConfiguration.DataType.skill, getData());
-                    String mob = DataConfiguration.getDescription(DataConfiguration.DataType.sector_object, getValue());
-                    return skill + " > " + mob;
-                }
+                    {
+                        String skill = DataConfiguration.getDescription(DataConfiguration.DataType.skill, getData());
+                        String mob = DataConfiguration.getDescription(DataConfiguration.DataType.sector_object, getValue());
+                        return skill + " > " + mob;
+                    }
                 case CompletionType.Nearest_Nav:
                     return DataConfiguration.getDescription(DataConfiguration.DataType.sector_object, getValue());
             }

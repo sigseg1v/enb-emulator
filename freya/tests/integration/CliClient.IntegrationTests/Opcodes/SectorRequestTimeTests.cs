@@ -136,8 +136,8 @@ public sealed class SectorRequestTimeTests : SectorIntegrationTest
             Assert.Equal(12, span.Length);
 
             int echoedClientSent = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-            int serverReceived   = BinaryPrimitives.ReadInt32LittleEndian(span[4..8]);
-            int serverSent       = BinaryPrimitives.ReadInt32LittleEndian(span[8..12]);
+            int serverReceived = BinaryPrimitives.ReadInt32LittleEndian(span[4..8]);
+            int serverSent = BinaryPrimitives.ReadInt32LittleEndian(span[8..12]);
 
             // The single strongest assertion: the server echoed
             // back our exact tick. A sizeof(long) over-read at the

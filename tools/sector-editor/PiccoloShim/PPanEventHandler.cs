@@ -32,7 +32,7 @@ namespace SectorEditor.PiccoloShim
             if (!(p.IsMiddleButtonPressed || (p.IsLeftButtonPressed && IsOverEmptySpace(e))))
                 return;
             var pt = e.GetPosition(_canvas);
-            _lastDown = new PointF((float) pt.X, (float) pt.Y);
+            _lastDown = new PointF((float)pt.X, (float)pt.Y);
             _panning = true;
         }
 
@@ -40,10 +40,10 @@ namespace SectorEditor.PiccoloShim
         {
             if (!_panning) return;
             var pt = e.GetPosition(_canvas);
-            float dx = (float) pt.X - _lastDown.X;
-            float dy = (float) pt.Y - _lastDown.Y;
+            float dx = (float)pt.X - _lastDown.X;
+            float dy = (float)pt.Y - _lastDown.Y;
             _canvas.Camera.Pan(dx, dy);
-            _lastDown = new PointF((float) pt.X, (float) pt.Y);
+            _lastDown = new PointF((float)pt.X, (float)pt.Y);
             _canvas.InvalidateVisual();
         }
 
@@ -52,7 +52,7 @@ namespace SectorEditor.PiccoloShim
         private bool IsOverEmptySpace(PointerEventArgs e)
         {
             var pt = e.GetPosition(_canvas);
-            var world = _canvas.Camera.CanvasToWorld(new PointF((float) pt.X, (float) pt.Y));
+            var world = _canvas.Camera.CanvasToWorld(new PointF((float)pt.X, (float)pt.Y));
             return _canvas.Layer.PickTopDown(world) == null;
         }
     }

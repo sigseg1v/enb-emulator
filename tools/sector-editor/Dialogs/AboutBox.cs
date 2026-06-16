@@ -58,7 +58,7 @@ namespace SectorEditor.Dialogs
         private static T GetAttr<T>(Assembly asm) where T : System.Attribute
         {
             var attrs = asm.GetCustomAttributes(typeof(T), false);
-            return attrs.Length > 0 ? (T) attrs[0] : null;
+            return attrs.Length > 0 ? (T)attrs[0] : null;
         }
     }
 }

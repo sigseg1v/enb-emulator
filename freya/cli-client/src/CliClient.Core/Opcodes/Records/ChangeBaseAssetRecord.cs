@@ -17,9 +17,9 @@ public sealed class ChangeBaseAssetRecord : PacketRecord
     protected override void WriteFields(StringBuilder sb)
     {
         if (Payload.Length < 24) { Flag(sb, $"CHANGE_BASE_ASSET truncated -- {Payload.Length} bytes, expected 24"); return; }
-        FHex(sb,   0, "GameID",    ReadI32LE(Payload, 0));
-        FDec(sb,   4, "BaseAsset", ReadI32LE(Payload, 4));
-        FFloat(sb, 8, "Scale",     ReadF32LE(Payload, 8));
+        FHex(sb, 0, "GameID", ReadI32LE(Payload, 0));
+        FDec(sb, 4, "BaseAsset", ReadI32LE(Payload, 4));
+        FFloat(sb, 8, "Scale", ReadF32LE(Payload, 8));
         float h0 = ReadF32LE(Payload, 12), h1 = ReadF32LE(Payload, 16), h2 = ReadF32LE(Payload, 20);
         FBytes(sb, 12, 12, "HSV", $"({h0:0.0##}, {h1:0.0##}, {h2:0.0##})");
     }

@@ -65,17 +65,17 @@ public sealed class ItemBaseRecord : PacketRecord
             return;
         }
 
-        int  templateId  = ReadItemI32BE(Payload, 0);
-        int  category    = ReadI32LE(Payload, 4);
-        int  subCategory = ReadI32LE(Payload, 8);
-        int  itemType    = ReadI32LE(Payload, 12);
-        byte fieldCount  = Payload[16];
+        int templateId = ReadItemI32BE(Payload, 0);
+        int category = ReadI32LE(Payload, 4);
+        int subCategory = ReadI32LE(Payload, 8);
+        int itemType = ReadI32LE(Payload, 12);
+        byte fieldCount = Payload[16];
 
-        FHex(sb, 0,  "ItemTemplateID", templateId, "(BE)");
-        FDec(sb, 4,  "Category",       category,    CategoryName(category));
-        FDec(sb, 8,  "SubCategory",    subCategory);
-        FDec(sb, 12, "ItemType",       itemType);
-        FDec(sb, 16, "FieldCount",     fieldCount);
+        FHex(sb, 0, "ItemTemplateID", templateId, "(BE)");
+        FDec(sb, 4, "Category", category, CategoryName(category));
+        FDec(sb, 8, "SubCategory", subCategory);
+        FDec(sb, 12, "ItemType", itemType);
+        FDec(sb, 16, "FieldCount", fieldCount);
 
         int off = 17;
 
@@ -91,7 +91,7 @@ public sealed class ItemBaseRecord : PacketRecord
             {
                 if (off + 2 > Payload.Length) { Flag(sb, $"truncated before Field[{i}] string len"); return; }
                 short strLenWithNul = ReadI16LE(Payload, off);
-                int   strLen        = Math.Max(0, strLenWithNul - 1);
+                int strLen = Math.Max(0, strLenWithNul - 1);
                 if (off + 2 + strLenWithNul > Payload.Length) { Flag(sb, $"truncated inside Field[{i}] string"); return; }
                 string sv = ReadNulString(Payload.AsSpan(off + 2, strLen));
                 FStr(sb, off, 2 + strLenWithNul, $"  Field[{i}].Value", sv);
@@ -127,10 +127,10 @@ public sealed class ItemBaseRecord : PacketRecord
         if (actCount > 0)
         {
             if (off + 16 > Payload.Length) { Flag(sb, "truncated before activatable filler"); return; }
-            FDec(sb,   off,    "ActEffects.RechargeTime", ReadI32LE(Payload, off));
-            FDec(sb,   off+4,  "ActEffects.Filler",       ReadI32LE(Payload, off+4));
-            FDec(sb,   off+8,  "ActEffects.EffectRange",  ReadI32LE(Payload, off+8));
-            FDec(sb,   off+12, "ActEffects.Filler2",      ReadI32LE(Payload, off+12));
+            FDec(sb, off, "ActEffects.RechargeTime", ReadI32LE(Payload, off));
+            FDec(sb, off + 4, "ActEffects.Filler", ReadI32LE(Payload, off + 4));
+            FDec(sb, off + 8, "ActEffects.EffectRange", ReadI32LE(Payload, off + 8));
+            FDec(sb, off + 12, "ActEffects.Filler2", ReadI32LE(Payload, off + 12));
             off += 16;
         }
 
@@ -148,10 +148,10 @@ public sealed class ItemBaseRecord : PacketRecord
         if (eqCount > 0)
         {
             if (off + 16 > Payload.Length) { Flag(sb, "truncated before equippable filler"); return; }
-            FDec(sb, off,    "EqEffects.Filler[0]", ReadI32LE(Payload, off));
-            FDec(sb, off+4,  "EqEffects.Filler[1]", ReadI32LE(Payload, off+4));
-            FDec(sb, off+8,  "EqEffects.Filler[2]", ReadI32LE(Payload, off+8));
-            FDec(sb, off+12, "EqEffects.Filler[3]", ReadI32LE(Payload, off+12));
+            FDec(sb, off, "EqEffects.Filler[0]", ReadI32LE(Payload, off));
+            FDec(sb, off + 4, "EqEffects.Filler[1]", ReadI32LE(Payload, off + 4));
+            FDec(sb, off + 8, "EqEffects.Filler[2]", ReadI32LE(Payload, off + 8));
+            FDec(sb, off + 12, "EqEffects.Filler[3]", ReadI32LE(Payload, off + 12));
             off += 16;
         }
 
@@ -159,25 +159,25 @@ public sealed class ItemBaseRecord : PacketRecord
         if (off + 22 > Payload.Length) { Flag(sb, $"truncated before fixed tail (need 22B, have {Payload.Length - off}B)"); return; }
         ushort gameBase = ReadU16BE(Payload, off);
         ushort iconBase = ReadU16BE(Payload, off + 2);
-        ushort techLvl  = ReadU16BE(Payload, off + 4);
-        int    cost     = ReadItemI32BE(Payload, off + 6);
-        int    maxStack = ReadItemI32BE(Payload, off + 10);
-        int    useEff   = ReadItemI32BE(Payload, off + 14);
-        int    flags    = ReadI32LE(Payload, off + 18);
+        ushort techLvl = ReadU16BE(Payload, off + 4);
+        int cost = ReadItemI32BE(Payload, off + 6);
+        int maxStack = ReadItemI32BE(Payload, off + 10);
+        int useEff = ReadItemI32BE(Payload, off + 14);
+        int flags = ReadI32LE(Payload, off + 18);
 
-        FHex(sb, off,      "GameBaseAsset", gameBase,  "(BE)");
-        FHex(sb, off+2,    "IconBaseAsset", iconBase,  "(BE)");
-        FDec(sb, off+4,    "TechLevel",     techLvl,   "(BE)");
-        FDec(sb, off+6,    "Cost",          cost,       "(BE)");
-        FDec(sb, off+10,   "MaxStack",      maxStack,   "(BE)");
-        FHex(sb, off+14,   "UseEffect",     useEff,     "(BE)");
-        FHex(sb, off+18,   "Flags",         flags,      FlagsText(flags));
+        FHex(sb, off, "GameBaseAsset", gameBase, "(BE)");
+        FHex(sb, off + 2, "IconBaseAsset", iconBase, "(BE)");
+        FDec(sb, off + 4, "TechLevel", techLvl, "(BE)");
+        FDec(sb, off + 6, "Cost", cost, "(BE)");
+        FDec(sb, off + 10, "MaxStack", maxStack, "(BE)");
+        FHex(sb, off + 14, "UseEffect", useEff, "(BE)");
+        FHex(sb, off + 18, "Flags", flags, FlagsText(flags));
         off += 22;
 
         // -- Trailing strings --
-        off = ReadAddDataLS(sb, off, "Name",         required: true);
+        off = ReadAddDataLS(sb, off, "Name", required: true);
         if (off < 0) return;
-        off = ReadAddDataLS(sb, off, "Description",  required: false);
+        off = ReadAddDataLS(sb, off, "Description", required: false);
         if (off < 0) return;
         ReadAddDataLS(sb, off, "Manufacturer", required: false);
     }
@@ -211,8 +211,8 @@ public sealed class ItemBaseRecord : PacketRecord
         }
 
         if (off + 8 > Payload.Length) { Flag(new StringBuilder(), $"truncated before {prefix}.Flag1/2"); return -1; }
-        FHex(sb, off,   $"{prefix}.Flag1", ReadI32LE(Payload, off));
-        FHex(sb, off+4, $"{prefix}.Flag2", ReadI32LE(Payload, off+4));
+        FHex(sb, off, $"{prefix}.Flag1", ReadI32LE(Payload, off));
+        FHex(sb, off + 4, $"{prefix}.Flag2", ReadI32LE(Payload, off + 4));
         off += 8;
         return off;
     }
@@ -256,10 +256,10 @@ public sealed class ItemBaseRecord : PacketRecord
     // ---- lookup tables ----
 
     private static readonly HashSet<int> StringFields = new() { 0x01, 0x0B, 0x0D, 0x1B };
-    private static readonly HashSet<int> FloatFields  = new() { 0x00, 0x09, 0x0A, 0x14, 0x15, 0x17, 0x19, 0x1A, 0x22, 0x24, 0x25 };
+    private static readonly HashSet<int> FloatFields = new() { 0x00, 0x09, 0x0A, 0x14, 0x15, 0x17, 0x19, 0x1A, 0x22, 0x24, 0x25 };
 
     private static bool IsStringField(int id) => StringFields.Contains(id);
-    private static bool IsFloatField(int id)  => FloatFields.Contains(id);
+    private static bool IsFloatField(int id) => FloatFields.Contains(id);
 
     private static string? FieldName(int id) => id switch
     {
@@ -301,34 +301,34 @@ public sealed class ItemBaseRecord : PacketRecord
         0x23 => "Terminal Override Flags",
         0x24 => "Terminal Override Skill+",
         0x25 => "Terminal Override Crit+",
-        _    => null
+        _ => null
     };
 
     private static string? CategoryName(int cat) => cat switch
     {
-        10  => "(Weapon)",
-        11  => "(Device)",
-        12  => "(CoreItem)",
-        13  => "(Consumable)",
-        50  => "(ElectronicItem)",
-        51  => "(ReactorComponent)",
-        52  => "(FabricatedItem)",
-        53  => "(WeaponComponent)",
-        54  => "(AmmoComponent)",
+        10 => "(Weapon)",
+        11 => "(Device)",
+        12 => "(CoreItem)",
+        13 => "(Consumable)",
+        50 => "(ElectronicItem)",
+        51 => "(ReactorComponent)",
+        52 => "(FabricatedItem)",
+        53 => "(WeaponComponent)",
+        54 => "(AmmoComponent)",
         100 => "(Ammo)",
         110 => "(RewardItem)",
-        _   => null
+        _ => null
     };
 
     private static string? FlagsText(int flags)
     {
         if (flags == 0) return null;
         var parts = new List<string>();
-        if ((flags & 1)   != 0) parts.Add("NO_TRADE");
-        if ((flags & 2)   != 0) parts.Add("TEMPORARY");
-        if ((flags & 4)   != 0) parts.Add("UNIQUE");
-        if ((flags & 8)   != 0) parts.Add("NO_STORE");
-        if ((flags & 16)  != 0) parts.Add("NO_DESTROY");
+        if ((flags & 1) != 0) parts.Add("NO_TRADE");
+        if ((flags & 2) != 0) parts.Add("TEMPORARY");
+        if ((flags & 4) != 0) parts.Add("UNIQUE");
+        if ((flags & 8) != 0) parts.Add("NO_STORE");
+        if ((flags & 16) != 0) parts.Add("NO_DESTROY");
         if ((flags & 128) != 0) parts.Add("NO_MANUFACTURE");
         return "(" + string.Join(" | ", parts) + ")";
     }

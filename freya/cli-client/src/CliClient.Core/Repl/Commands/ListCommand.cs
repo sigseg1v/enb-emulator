@@ -23,9 +23,9 @@ public sealed class ListCommand : ICommandHandler
         _ctx = ctx;
     }
 
-    public string Name    => "list";
+    public string Name => "list";
     public string Summary => "in-sector: list nearby objects; else: cached characters";
-    public string Usage   => "list";
+    public string Usage => "list";
 
     // Useful once logged in (character list) or in a sector (nearby).
     public bool Available => _ctx.AvatarList is not null || _ctx.Sector is not null;

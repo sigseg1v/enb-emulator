@@ -40,12 +40,12 @@ namespace CommonToolsSmoke
                 Console.WriteLine($"login    OK: {login.Width}x{login.Height} \"{login.Title}\"");
                 login.Close();
 
-                var edit  = new DlgEditXml();
+                var edit = new DlgEditXml();
                 edit.Show();
                 Console.WriteLine($"editxml  OK: {edit.Width}x{edit.Height} \"{edit.Title}\"");
                 edit.Close();
 
-                var crit  = new DlgSearchCriteria();
+                var crit = new DlgSearchCriteria();
                 crit.Show();
                 Console.WriteLine($"crit     OK: {crit.Width}x{crit.Height} \"{crit.Title}\"");
                 crit.Close();

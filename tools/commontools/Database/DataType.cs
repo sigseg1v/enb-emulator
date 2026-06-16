@@ -9,10 +9,10 @@ namespace CommonTools.Database
     /// </summary>
     class DataType : Attribute
     {
-	    public readonly string Text;
+        public readonly string Text;
         public DataType(string text)
-	    {
-		    Text = text;
-	    }
+        {
+            Text = text;
+        }
     }
 }

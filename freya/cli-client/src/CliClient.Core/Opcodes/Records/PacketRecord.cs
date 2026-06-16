@@ -32,9 +32,9 @@ public abstract class PacketRecord : IPacketRecord
 
     protected PacketRecord(ushort opcode, ReadOnlySpan<byte> payload)
     {
-        Opcode  = opcode;
+        Opcode = opcode;
         Payload = payload.ToArray();
-        _known  = new bool[Payload.Length];
+        _known = new bool[Payload.Length];
     }
 
     // ── public API ──────────────────────────────────────────────────────────
@@ -106,7 +106,7 @@ public abstract class PacketRecord : IPacketRecord
 
     protected void FFloat(StringBuilder sb, int off, string name, float value, string? note = null)
     {
-        if (float.IsNaN(value))           Flag(sb, name + " is NaN");
+        if (float.IsNaN(value)) Flag(sb, name + " is NaN");
         else if (float.IsInfinity(value)) Flag(sb, name + " is +-Infinity");
         F(sb, off, 4, name, value.ToString("0.0##", System.Globalization.CultureInfo.InvariantCulture), note);
     }
@@ -149,7 +149,7 @@ public abstract class PacketRecord : IPacketRecord
 
     protected void FieldFloat(StringBuilder sb, string name, float value)
     {
-        if (float.IsNaN(value))           Flag(sb, name + " is NaN");
+        if (float.IsNaN(value)) Flag(sb, name + " is NaN");
         else if (float.IsInfinity(value)) Flag(sb, name + " is +-Infinity");
         Field(sb, name, value.ToString("0.0##", System.Globalization.CultureInfo.InvariantCulture));
     }
@@ -170,8 +170,8 @@ public abstract class PacketRecord : IPacketRecord
 
     protected void FlagSuspicious(StringBuilder sb, string field, int v)
     {
-        if (v == 0)                 sb.Append("  ").AppendLine(Color(AnsiPalette.Yellow, $"[!] {field} == 0 (likely uninitialised)"));
-        else if (v == -1)           sb.Append("  ").AppendLine(Color(AnsiPalette.Yellow, $"[!] {field} == -1 (sentinel)"));
+        if (v == 0) sb.Append("  ").AppendLine(Color(AnsiPalette.Yellow, $"[!] {field} == 0 (likely uninitialised)"));
+        else if (v == -1) sb.Append("  ").AppendLine(Color(AnsiPalette.Yellow, $"[!] {field} == -1 (sentinel)"));
         else if (v == int.MinValue) sb.Append("  ").AppendLine(Color(AnsiPalette.Yellow, $"[!] {field} == INT32_MIN"));
     }
 
@@ -347,7 +347,7 @@ public abstract class PacketRecord : IPacketRecord
         for (int row = 0; row < rows; row++)
         {
             int off = row * Stride;
-            int n   = Math.Min(Stride, p.Length - off);
+            int n = Math.Min(Stride, p.Length - off);
 
             sb.Append("  ").Append(Color(AnsiPalette.Gray, $"{off:X4}  "));
 
@@ -355,8 +355,8 @@ public abstract class PacketRecord : IPacketRecord
             {
                 if (i < n)
                 {
-                    int abs  = off + i;
-                    bool k   = abs < _known.Length && _known[abs];
+                    int abs = off + i;
+                    bool k = abs < _known.Length && _known[abs];
                     string bg = k ? AnsiPalette.KnownBg : AnsiPalette.UnknownBg;
                     sb.Append(Color(bg, $"{p[abs]:X2}")).Append(' ');
                 }
@@ -371,10 +371,10 @@ public abstract class PacketRecord : IPacketRecord
 
             for (int i = 0; i < n; i++)
             {
-                int abs  = off + i;
-                bool k   = abs < _known.Length && _known[abs];
+                int abs = off + i;
+                bool k = abs < _known.Length && _known[abs];
                 string bg = k ? AnsiPalette.KnownBg : AnsiPalette.UnknownBg;
-                char c   = p[abs] >= 0x20 && p[abs] < 0x7F ? (char)p[abs] : '.';
+                char c = p[abs] >= 0x20 && p[abs] < 0x7F ? (char)p[abs] : '.';
                 sb.Append(Color(bg, c.ToString()));
             }
 

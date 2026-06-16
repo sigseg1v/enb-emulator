@@ -34,8 +34,8 @@ public sealed class StarbaseRoomChangeRecord : PacketRecord
         bool s2c = Opcode == 0x00A0;
         FHex(sb, 0, "AvatarID", ReadI32LE(Payload, 0), s2c ? "(LE; moving player GameID)" : "(LE; player GameID)");
         int newRoom = ReadI32LE(Payload, 4);
-        FDec(sb, 4, "NewRoom",  newRoom, newRoom == -1 ? "(LE; -1 = left the room)" : "(LE; destination room)");
+        FDec(sb, 4, "NewRoom", newRoom, newRoom == -1 ? "(LE; -1 = left the room)" : "(LE; destination room)");
         int oldRoom = ReadI32LE(Payload, 8);
-        FDec(sb, 8, "OldRoom",  oldRoom, oldRoom == -1 ? "(LE; -1 = just entered station)" : "(LE; previous room)");
+        FDec(sb, 8, "OldRoom", oldRoom, oldRoom == -1 ? "(LE; -1 = just entered station)" : "(LE; previous room)");
     }
 }

@@ -28,9 +28,9 @@ namespace CommonTools.Gui
             guiComparisonCbo.ItemsSource = comparisons;
             guiComparisonCbo.SelectedIndex = 0;
 
-            guiOkBtn.Click          += (_, _) => OnOk();
-            guiCancelBtn.Click      += (_, _) => Close();
-            guiPatternTipBtn.Click  += (_, _) => OnPatternTip();
+            guiOkBtn.Click += (_, _) => OnOk();
+            guiCancelBtn.Click += (_, _) => Close();
+            guiPatternTipBtn.Click += (_, _) => OnPatternTip();
             guiFieldCbo.SelectionChanged += (_, _) => OnFieldSelected();
             KeyDown += OnKeyDown;
 
@@ -89,8 +89,8 @@ namespace CommonTools.Gui
             if (col == null) return;
             bool isString = col.TypeIsString;
 
-            guiPatternTxt.IsEnabled    = isString;
-            guiPatternTxt.Text         = isString ? m_searchCriteria.criteria : "";
+            guiPatternTxt.IsEnabled = isString;
+            guiPatternTxt.Text = isString ? m_searchCriteria.criteria : "";
             guiPatternTipBtn.IsEnabled = isString;
             guiComparisonCbo.IsEnabled = !isString;
             if (guiComparisonCbo.IsEnabled)
@@ -102,7 +102,7 @@ namespace CommonTools.Gui
                 guiComparisonCbo.SelectedIndex = -1;
             }
             guiComparisonTxt.IsEnabled = guiComparisonCbo.IsEnabled;
-            guiComparisonTxt.Text      = guiComparisonTxt.IsEnabled ? m_searchCriteria.criteria : "";
+            guiComparisonTxt.Text = guiComparisonTxt.IsEnabled ? m_searchCriteria.criteria : "";
         }
 
         void OnOk()
@@ -113,11 +113,11 @@ namespace CommonTools.Gui
             if (isString)
             {
                 m_searchCriteria.comparisonSymbol = (string.IsNullOrEmpty(guiPatternTxt.Text)) ? 2 : 5;
-                m_searchCriteria.criteria         = guiPatternTxt.Text ?? "";
-                m_searchCriteria.subQuery         = col.Name + " " + m_searchCriteria.getComparatorSymbol()
+                m_searchCriteria.criteria = guiPatternTxt.Text ?? "";
+                m_searchCriteria.subQuery = col.Name + " " + m_searchCriteria.getComparatorSymbol()
                                                   + " @" + col.Name;
-                m_searchCriteria.sqlParameter     = col.Name;
-                m_searchCriteria.sqlValue         = guiPatternTxt.Text ?? "";
+                m_searchCriteria.sqlParameter = col.Name;
+                m_searchCriteria.sqlValue = guiPatternTxt.Text ?? "";
             }
             else
             {
@@ -130,11 +130,11 @@ namespace CommonTools.Gui
                     return;
                 }
                 m_searchCriteria.comparisonSymbol = guiComparisonCbo.SelectedIndex;
-                m_searchCriteria.criteria         = guiComparisonTxt.Text;
-                m_searchCriteria.subQuery         = col.Name + " " + m_searchCriteria.getComparatorSymbol()
+                m_searchCriteria.criteria = guiComparisonTxt.Text;
+                m_searchCriteria.subQuery = col.Name + " " + m_searchCriteria.getComparatorSymbol()
                                                   + " @" + col.Name;
-                m_searchCriteria.sqlParameter     = col.Name;
-                m_searchCriteria.sqlValue         = guiComparisonTxt.Text;
+                m_searchCriteria.sqlParameter = col.Name;
+                m_searchCriteria.sqlValue = guiComparisonTxt.Text;
             }
             m_searchCriteria.column = col.Name;
             Close();

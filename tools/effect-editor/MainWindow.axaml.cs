@@ -156,29 +156,29 @@ namespace EffectEditor
             DataRow r = dt.Rows[0];
 
             c_EffectTypeCbo.SelectedIndex = int.Parse(r["EffectType"].ToString());
-            c_EffectName.Text     = r["Name"]?.ToString() ?? "";
-            c_EffectToolTip.Text  = r["Tooltip"]?.ToString() ?? "";
-            c_EffectDesc.Text     = r["Description"]?.ToString() ?? "";
+            c_EffectName.Text = r["Name"]?.ToString() ?? "";
+            c_EffectToolTip.Text = r["Tooltip"]?.ToString() ?? "";
+            c_EffectDesc.Text = r["Description"]?.ToString() ?? "";
 
             int flag1 = ToInt(r["flag1"]);
             int flag2 = ToInt(r["flag2"]);
-            c_TFriend.IsChecked  = (flag1 & (1 << 4)) > 0;
-            c_TEnemy.IsChecked   = (flag1 & (1 << 5)) > 0;
-            c_TGroupM.IsChecked  = (flag1 & (1 << 6)) > 0;
+            c_TFriend.IsChecked = (flag1 & (1 << 4)) > 0;
+            c_TEnemy.IsChecked = (flag1 & (1 << 5)) > 0;
+            c_TGroupM.IsChecked = (flag1 & (1 << 6)) > 0;
             c_RequireT.IsChecked = (flag2 & 1) > 0;
 
             c_EffectBuff.SelectedIndex = c_EffectBuff.Items.IndexOf(r["Buff_Name"]?.ToString() ?? "");
-            c_VisualEffect.Text        = r["VisualEffect"]?.ToString() ?? "0";
+            c_VisualEffect.Text = r["VisualEffect"]?.ToString() ?? "0";
 
-            c_VarStat1.SelectedIndex   = c_VarStat1.Items.IndexOf(r["Var1Stat"]?.ToString() ?? "");
-            c_VarStat2.SelectedIndex   = c_VarStat2.Items.IndexOf(r["Var2Stat"]?.ToString() ?? "");
-            c_VarStat3.SelectedIndex   = c_VarStat3.Items.IndexOf(r["Var3Stat"]?.ToString() ?? "");
+            c_VarStat1.SelectedIndex = c_VarStat1.Items.IndexOf(r["Var1Stat"]?.ToString() ?? "");
+            c_VarStat2.SelectedIndex = c_VarStat2.Items.IndexOf(r["Var2Stat"]?.ToString() ?? "");
+            c_VarStat3.SelectedIndex = c_VarStat3.Items.IndexOf(r["Var3Stat"]?.ToString() ?? "");
             c_ConstStat1.SelectedIndex = c_ConstStat1.Items.IndexOf(r["Constant1Stat"]?.ToString() ?? "");
             c_ConstStat2.SelectedIndex = c_ConstStat2.Items.IndexOf(r["Constant2Stat"]?.ToString() ?? "");
 
-            c_VarType1.SelectedIndex   = int.Parse(r["Var1Type"].ToString());
-            c_VarType2.SelectedIndex   = int.Parse(r["Var2Type"].ToString());
-            c_VarType3.SelectedIndex   = int.Parse(r["Var3Type"].ToString());
+            c_VarType1.SelectedIndex = int.Parse(r["Var1Type"].ToString());
+            c_VarType2.SelectedIndex = int.Parse(r["Var2Type"].ToString());
+            c_VarType3.SelectedIndex = int.Parse(r["Var3Type"].ToString());
             c_ConstType1.SelectedIndex = int.Parse(r["Constant1Type"].ToString());
             c_ConstType2.SelectedIndex = int.Parse(r["Constant2Type"].ToString());
 
@@ -212,13 +212,13 @@ namespace EffectEditor
 
             int flag1 = 0, flag2 = 0;
             if (c_TFriend.IsChecked == true) flag1 |= 1 << 4;
-            if (c_TEnemy.IsChecked  == true) flag1 |= 1 << 5;
+            if (c_TEnemy.IsChecked == true) flag1 |= 1 << 5;
             if (c_TGroupM.IsChecked == true) flag1 |= 1 << 6;
 
             // Verbatim from Form1.Save_Click -- same surprising "both bits"
             // encoding when checked vs. unchecked.
             if (c_RequireT.IsChecked == true) flag2 |= 1;
-            else                              flag2 |= 1 << 1;
+            else flag2 |= 1 << 1;
 
             if (string.IsNullOrEmpty(c_VisualEffect.Text)) c_VisualEffect.Text = "0";
 

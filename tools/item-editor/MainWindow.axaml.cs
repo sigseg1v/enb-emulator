@@ -68,9 +68,9 @@ namespace ItemEditor
         {
             _gridRows.Add(new ItemRow
             {
-                ItemID   = Convert.ToInt64(r["id"]),
-                Name     = r["name"]?.ToString() ?? "",
-                Level    = Convert.ToInt32(r["level"]),
+                ItemID = Convert.ToInt64(r["id"]),
+                Name = r["name"]?.ToString() ?? "",
+                Level = Convert.ToInt32(r["level"]),
                 Category = Convert.ToInt32(r["category"]),
             });
         }
@@ -128,27 +128,27 @@ namespace ItemEditor
         void PopulateDetails()
         {
             _suppressEditEvents = true;
-            c_IdText.Text           = _selectedItem["id"].ToString();
-            c_NameText.Text         = _selectedItem["name"]?.ToString();
-            c_LevelText.Text        = _selectedItem["level"].ToString();
-            c_TypeText.Text         = _selectedItem["type"].ToString();
-            c_CategoryText.Text     = _selectedItem["category"].ToString();
-            c_SubCategoryText.Text  = _selectedItem["sub_category"].ToString();
-            c_MaxStackText.Text     = _selectedItem["max_stack"].ToString();
-            c_PriceText.Text        = _selectedItem["price"].ToString();
+            c_IdText.Text = _selectedItem["id"].ToString();
+            c_NameText.Text = _selectedItem["name"]?.ToString();
+            c_LevelText.Text = _selectedItem["level"].ToString();
+            c_TypeText.Text = _selectedItem["type"].ToString();
+            c_CategoryText.Text = _selectedItem["category"].ToString();
+            c_SubCategoryText.Text = _selectedItem["sub_category"].ToString();
+            c_MaxStackText.Text = _selectedItem["max_stack"].ToString();
+            c_PriceText.Text = _selectedItem["price"].ToString();
             c_ManufacturerText.Text = _selectedItem["manufacturer"].ToString();
-            c_EffectIdText.Text     = CellText(_selectedItem["effect_id"]);
-            c_Asset2dText.Text      = _selectedItem["2d_asset"].ToString();
-            c_Asset3dText.Text      = _selectedItem["3d_asset"].ToString();
-            c_ItemBaseIdText.Text   = CellText(_selectedItem["item_base_id"]);
-            c_StatusText.Text       = _selectedItem["status"].ToString();
-            c_NoTrade.IsChecked     = IsSet(_selectedItem["no_trade"]);
-            c_NoStore.IsChecked     = IsSet(_selectedItem["no_store"]);
-            c_NoDestroy.IsChecked   = IsSet(_selectedItem["no_destroy"]);
-            c_NoManu.IsChecked      = IsSet(_selectedItem["no_manu"]);
-            c_Unique.IsChecked      = IsSet(_selectedItem["unique"]);
-            c_CustomFlag.IsChecked  = IsSet(_selectedItem["custom_flag"]);
-            c_DescriptionText.Text  = _selectedItem["description"]?.ToString();
+            c_EffectIdText.Text = CellText(_selectedItem["effect_id"]);
+            c_Asset2dText.Text = _selectedItem["2d_asset"].ToString();
+            c_Asset3dText.Text = _selectedItem["3d_asset"].ToString();
+            c_ItemBaseIdText.Text = CellText(_selectedItem["item_base_id"]);
+            c_StatusText.Text = _selectedItem["status"].ToString();
+            c_NoTrade.IsChecked = IsSet(_selectedItem["no_trade"]);
+            c_NoStore.IsChecked = IsSet(_selectedItem["no_store"]);
+            c_NoDestroy.IsChecked = IsSet(_selectedItem["no_destroy"]);
+            c_NoManu.IsChecked = IsSet(_selectedItem["no_manu"]);
+            c_Unique.IsChecked = IsSet(_selectedItem["unique"]);
+            c_CustomFlag.IsChecked = IsSet(_selectedItem["custom_flag"]);
+            c_DescriptionText.Text = _selectedItem["description"]?.ToString();
             _suppressEditEvents = false;
         }
 
@@ -188,26 +188,26 @@ namespace ItemEditor
 
             try
             {
-                _selectedItem["name"]         = c_NameText.Text ?? "";
-                _selectedItem["level"]        = ParseInt(c_LevelText.Text, "Level");
-                _selectedItem["type"]         = ParseLong(c_TypeText.Text, "Type");
-                _selectedItem["category"]     = ParseInt(c_CategoryText.Text, "Category");
+                _selectedItem["name"] = c_NameText.Text ?? "";
+                _selectedItem["level"] = ParseInt(c_LevelText.Text, "Level");
+                _selectedItem["type"] = ParseLong(c_TypeText.Text, "Type");
+                _selectedItem["category"] = ParseInt(c_CategoryText.Text, "Category");
                 _selectedItem["sub_category"] = ParseInt(c_SubCategoryText.Text, "Sub-category");
-                _selectedItem["max_stack"]    = ParseLong(c_MaxStackText.Text, "Max stack");
-                _selectedItem["price"]        = ParseLong(c_PriceText.Text, "Price");
+                _selectedItem["max_stack"] = ParseLong(c_MaxStackText.Text, "Max stack");
+                _selectedItem["price"] = ParseLong(c_PriceText.Text, "Price");
                 _selectedItem["manufacturer"] = ParseLong(c_ManufacturerText.Text, "Manufacturer");
-                _selectedItem["2d_asset"]     = ParseLong(c_Asset2dText.Text, "2D asset");
-                _selectedItem["3d_asset"]     = ParseLong(c_Asset3dText.Text, "3D asset");
-                _selectedItem["status"]       = ParseLong(c_StatusText.Text, "Status");
-                _selectedItem["effect_id"]    = ParseNullableLong(c_EffectIdText.Text);
+                _selectedItem["2d_asset"] = ParseLong(c_Asset2dText.Text, "2D asset");
+                _selectedItem["3d_asset"] = ParseLong(c_Asset3dText.Text, "3D asset");
+                _selectedItem["status"] = ParseLong(c_StatusText.Text, "Status");
+                _selectedItem["effect_id"] = ParseNullableLong(c_EffectIdText.Text);
                 _selectedItem["item_base_id"] = ParseNullableLong(c_ItemBaseIdText.Text);
-                _selectedItem["no_trade"]     = c_NoTrade.IsChecked == true ? 1 : 0;
-                _selectedItem["no_store"]     = c_NoStore.IsChecked == true ? 1 : 0;
-                _selectedItem["no_destroy"]   = c_NoDestroy.IsChecked == true ? 1 : 0;
-                _selectedItem["no_manu"]      = c_NoManu.IsChecked == true ? 1 : 0;
-                _selectedItem["unique"]       = c_Unique.IsChecked == true ? 1 : 0;
-                _selectedItem["custom_flag"]  = c_CustomFlag.IsChecked == true ? 1 : 0;
-                _selectedItem["description"]  = c_DescriptionText.Text ?? "";
+                _selectedItem["no_trade"] = c_NoTrade.IsChecked == true ? 1 : 0;
+                _selectedItem["no_store"] = c_NoStore.IsChecked == true ? 1 : 0;
+                _selectedItem["no_destroy"] = c_NoDestroy.IsChecked == true ? 1 : 0;
+                _selectedItem["no_manu"] = c_NoManu.IsChecked == true ? 1 : 0;
+                _selectedItem["unique"] = c_Unique.IsChecked == true ? 1 : 0;
+                _selectedItem["custom_flag"] = c_CustomFlag.IsChecked == true ? 1 : 0;
+                _selectedItem["description"] = c_DescriptionText.Text ?? "";
             }
             catch (FormatException fe)
             {

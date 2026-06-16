@@ -12,9 +12,9 @@ namespace N7.Utilities
         {
             double[] quat4d = new double[4];
 
-            double heading  = (Math.PI / 180) * headingDeg;
+            double heading = (Math.PI / 180) * headingDeg;
             double attitude = (Math.PI / 180) * attitudeDeg;
-            double bank     = (Math.PI / 180) * bankDeg;
+            double bank = (Math.PI / 180) * bankDeg;
 
             double c1 = Math.Cos(heading / 2);
             double s1 = Math.Sin(heading / 2);
@@ -59,9 +59,9 @@ namespace N7.Utilities
                 return vec3d;
             }
 
-            double yaw   = Math.Atan2(2 * q1[2] * q1[0] - 2 * q1[1] * q1[3], sqx - sqy - sqz + sqw);
+            double yaw = Math.Atan2(2 * q1[2] * q1[0] - 2 * q1[1] * q1[3], sqx - sqy - sqz + sqw);
             double pitch = Math.Asin(2 * test / unit);
-            double roll  = Math.Atan2(2 * q1[1] * q1[0] - 2 * q1[2] * q1[3], -sqx + sqy - sqz + sqw);
+            double roll = Math.Atan2(2 * q1[1] * q1[0] - 2 * q1[2] * q1[3], -sqx + sqy - sqz + sqw);
 
             vec3d[0] = (180 / Math.PI) * yaw;
             vec3d[1] = (180 / Math.PI) * pitch;

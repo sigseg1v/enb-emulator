@@ -166,9 +166,11 @@ namespace SectorEditor.Utilities
         {
             var swatch = new Border
             {
-                Width = 24, Height = 18,
+                Width = 24,
+                Height = 18,
                 Background = new SolidColorBrush(global::Avalonia.Media.Color.FromArgb(initial.A, initial.R, initial.G, initial.B)),
-                BorderBrush = Brushes.Gray, BorderThickness = new Thickness(1),
+                BorderBrush = Brushes.Gray,
+                BorderThickness = new Thickness(1),
             };
             var hex = new TextBox
             {

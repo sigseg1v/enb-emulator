@@ -45,8 +45,8 @@ namespace EffectEditor
 
         sealed class EffectSlot
         {
-            public ComboBox  EffectBox;
-            public TextBox   Var1, Var2, Var3;
+            public ComboBox EffectBox;
+            public TextBox Var1, Var2, Var3;
             public TextBlock EffectString;
             // ItemEffectID column value: 0 → none yet, !=0 → existing row.
             public int CurrentItemEffectId;
@@ -88,8 +88,8 @@ namespace EffectEditor
             var grid = new Grid
             {
                 ColumnDefinitions = ColumnDefinitions.Parse("60,*,8,60,8,60,8,60,8,*"),
-                RowDefinitions    = RowDefinitions.Parse("Auto,Auto"),
-                Margin            = new Avalonia.Thickness(0, 0, 0, 6),
+                RowDefinitions = RowDefinitions.Parse("Auto,Auto"),
+                Margin = new Avalonia.Thickness(0, 0, 0, 6),
             };
             Add(grid, new TextBlock { Text = $"Effect {idx + 1}:", VerticalAlignment = VerticalAlignment.Center }, 0, 0);
             slot.EffectBox = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -101,8 +101,8 @@ namespace EffectEditor
             slot.EffectString = new TextBlock
             {
                 VerticalAlignment = VerticalAlignment.Center,
-                TextWrapping      = Avalonia.Media.TextWrapping.Wrap,
-                Foreground        = Avalonia.Media.Brushes.DimGray,
+                TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                Foreground = Avalonia.Media.Brushes.DimGray,
             };
             Grid.SetRow(slot.EffectString, 1);
             Grid.SetColumn(slot.EffectString, 1);
@@ -141,8 +141,8 @@ namespace EffectEditor
                 _effects.Add(new EffectRow
                 {
                     EffectId = Convert.ToInt32(r["EffectID"]),
-                    Desc     = r["Description"]?.ToString() ?? "",
-                    Tooltip  = r["Tooltip"]?.ToString() ?? "",
+                    Desc = r["Description"]?.ToString() ?? "",
+                    Tooltip = r["Tooltip"]?.ToString() ?? "",
                 });
             }
         }
@@ -246,10 +246,10 @@ namespace EffectEditor
             if (con != null && con.Rows.Count > 0)
             {
                 DataRow r = con.Rows[0];
-                _currentContainer  = Convert.ToInt32(r["EffectContainerID"]);
-                c_Range.Text       = r["_Range"]?.ToString() ?? "0";
-                c_CoolDown.Text    = r["RechargeTime"]?.ToString() ?? "0";
-                c_EnergyUse.Text   = r["EnergyUse"]?.ToString() ?? "0";
+                _currentContainer = Convert.ToInt32(r["EffectContainerID"]);
+                c_Range.Text = r["_Range"]?.ToString() ?? "0";
+                c_CoolDown.Text = r["RechargeTime"]?.ToString() ?? "0";
+                c_EnergyUse.Text = r["EnergyUse"]?.ToString() ?? "0";
             }
             else
             {
@@ -321,10 +321,10 @@ namespace EffectEditor
                         {
                             output += "{" + varNum + ":";
                             int before = int.Parse(formatStr.Substring(0, y), CultureInfo.InvariantCulture);
-                            int after  = int.Parse(formatStr.Substring(y + 1, formatStr.Length - y - 1), CultureInfo.InvariantCulture);
+                            int after = int.Parse(formatStr.Substring(y + 1, formatStr.Length - y - 1), CultureInfo.InvariantCulture);
                             for (int j = 0; j < before; j++) output += "0";
                             output += ".";
-                            for (int j = 0; j < after;  j++) output += "0";
+                            for (int j = 0; j < after; j++) output += "0";
                             break;
                         }
                     }
@@ -366,10 +366,10 @@ namespace EffectEditor
 
             // Read the container controls on the UI thread before the DB write
             // (AC.4) -- Avalonia controls are UI-thread-only.
-            string itemId   = _currentItem.ToString();
+            string itemId = _currentItem.ToString();
             string coolDown = c_CoolDown.Text ?? "0";
-            string energy   = c_EnergyUse.Text ?? "0";
-            string range    = c_Range.Text ?? "0";
+            string energy = c_EnergyUse.Text ?? "0";
+            string range = c_Range.Text ?? "0";
 
             // Container row.
             if (_currentContainer == 0)

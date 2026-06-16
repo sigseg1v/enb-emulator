@@ -21,6 +21,6 @@ public sealed class OpenInterfaceRecord : PacketRecord
     {
         if (Payload.Length < 8) { Flag(sb, $"OPEN_INTERFACE truncated -- {Payload.Length} bytes, expected 8"); return; }
         FDec(sb, 0, "UIChange", ReadI32LE(Payload, 0));
-        FDec(sb, 4, "UIType",   ReadI32LE(Payload, 4));
+        FDec(sb, 4, "UIType", ReadI32LE(Payload, 4));
     }
 }

@@ -106,9 +106,9 @@ namespace SectorEditor.Dialogs
             newSectorRow["greetings"] = greetings;
             newSectorRow["sector_id"] = sp.SectorID;
 
-            float xmin = -(sp.Width / 2),  xmax = sp.Width / 2;
+            float xmin = -(sp.Width / 2), xmax = sp.Width / 2;
             float ymin = -(sp.Height / 2), ymax = sp.Height / 2;
-            float zmin = -(sp.Depth / 2),  zmax = sp.Depth / 2;
+            float zmin = -(sp.Depth / 2), zmax = sp.Depth / 2;
 
             newSectorRow["x_min"] = xmin; newSectorRow["x_max"] = xmax;
             newSectorRow["y_min"] = ymin; newSectorRow["y_max"] = ymax;

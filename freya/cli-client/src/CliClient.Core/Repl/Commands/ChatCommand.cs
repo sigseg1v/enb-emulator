@@ -45,9 +45,9 @@ public sealed class ChatCommand : ICommandHandler
         _ctx = ctx;
     }
 
-    public string Name    => "chat";
+    public string Name => "chat";
     public string Summary => "send a chat message (default channel: sector)";
-    public string Usage   => "chat [sector|gm|dev|beta|whisper] <message>";
+    public string Usage => "chat [sector|gm|dev|beta|whisper] <message>";
     public string? Placeholder => "[sector|gm|dev|beta|whisper] <message>";
 
     // Only usable once attached to an in-sector avatar.
@@ -117,11 +117,11 @@ public sealed class ChatCommand : ICommandHandler
     internal static (ChatChannel Type, string Wire) MapChannel(string channel, string message)
         => channel switch
         {
-            "sector"  => (ChatChannel.Broadcast, message),
+            "sector" => (ChatChannel.Broadcast, message),
             "whisper" => (ChatChannel.Target, message),
-            "gm"      => (ChatChannel.Broadcast, "/gm " + message),
-            "dev"     => (ChatChannel.Broadcast, "/dev " + message),
-            "beta"    => (ChatChannel.Broadcast, "/beta " + message),
-            _         => (ChatChannel.Broadcast, message),
+            "gm" => (ChatChannel.Broadcast, "/gm " + message),
+            "dev" => (ChatChannel.Broadcast, "/dev " + message),
+            "beta" => (ChatChannel.Broadcast, "/beta " + message),
+            _ => (ChatChannel.Broadcast, message),
         };
 }

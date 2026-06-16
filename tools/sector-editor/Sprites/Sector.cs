@@ -16,7 +16,7 @@ namespace SectorEditor.Sprites
     {
         public Sector(PLayer layer, string name)
         {
-            var rnd = new Random((int) DateTime.Now.Ticks);
+            var rnd = new Random((int)DateTime.Now.Ticks);
             var penColor = Color.FromArgb(rnd.Next(0, 255), rnd.Next(0, 255), rnd.Next(0, 255));
 
             var sigPen = new Pen(penColor, 2.0F) { DashStyle = DashStyle.DashDotDot };

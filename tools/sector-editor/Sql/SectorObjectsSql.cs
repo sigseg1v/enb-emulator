@@ -22,11 +22,11 @@ namespace N7.Sql
         private DataTable sectorObjects;
         private String sectorID;
 
-        private const int TYPE_MOB         = 0;
-        private const int TYPE_PLANET      = 3;
-        private const int TYPE_STARGATE    = 11;
-        private const int TYPE_STARBASE    = 12;
-        private const int TYPE_NAV_ONLY    = 37;
+        private const int TYPE_MOB = 0;
+        private const int TYPE_PLANET = 3;
+        private const int TYPE_STARGATE = 11;
+        private const int TYPE_STARBASE = 12;
+        private const int TYPE_NAV_ONLY = 37;
         private const int TYPE_HARVESTABLE = 38;
 
         public SectorObjectsSql(String sectorName)
@@ -74,12 +74,12 @@ namespace N7.Sql
             "sound_effect_id", "sound_effect_range"
         };
 
-        private static readonly String[] MobCols       = { "mob_count", "mob_spawn_radius", "respawn_time", "delayed_spawn" };
-        private static readonly String[] PlanetCols    = { "orbit_id", "orbit_dist", "orbit_angle", "orbit_rate",
+        private static readonly String[] MobCols = { "mob_count", "mob_spawn_radius", "respawn_time", "delayed_spawn" };
+        private static readonly String[] PlanetCols = { "orbit_id", "orbit_dist", "orbit_angle", "orbit_rate",
                                                            "rotate_angle", "rotate_rate", "tilt_angle", "is_landable" };
-        private static readonly String[] StargateCols  = { "classSpecific", "faction_id" };
-        private static readonly String[] StarbaseCols  = { "capShip", "dockable" };
-        private static readonly String[] HarvCols      = { "level", "field", "res_count", "spawn_radius",
+        private static readonly String[] StargateCols = { "classSpecific", "faction_id" };
+        private static readonly String[] StarbaseCols = { "capShip", "dockable" };
+        private static readonly String[] HarvCols = { "level", "field", "res_count", "spawn_radius",
                                                            "pop_rock_chance", "max_field_radius" };
 
         public void updateRow(DataRow r)

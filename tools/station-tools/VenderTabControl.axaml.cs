@@ -61,9 +61,9 @@ namespace StationTools
                 Error("You need to fill in an Item ID");
                 return false;
             }
-            if (string.IsNullOrEmpty(c_Quanity.Text))   c_Quanity.Text   = "-1";
+            if (string.IsNullOrEmpty(c_Quanity.Text)) c_Quanity.Text = "-1";
             if (string.IsNullOrEmpty(c_SellPrice.Text)) c_SellPrice.Text = "-1";
-            if (string.IsNullOrEmpty(c_BuyPrice.Text))  c_BuyPrice.Text  = "-1";
+            if (string.IsNullOrEmpty(c_BuyPrice.Text)) c_BuyPrice.Text = "-1";
             return true;
         }
 
@@ -93,10 +93,10 @@ namespace StationTools
             if (c_ItemLists.SelectedItem is not DataRowView drv) return;
 
             CurrentEditingItem = Convert.ToInt32(drv.Row["ID"]);
-            c_NewItemID.Text   = drv.Row["ItemID"].ToString();
-            c_SellPrice.Text   = drv.Row["SellPrice"].ToString();
-            c_BuyPrice.Text    = drv.Row["BuyPrice"].ToString();
-            c_Quanity.Text     = drv.Row["Qty"].ToString();
+            c_NewItemID.Text = drv.Row["ItemID"].ToString();
+            c_SellPrice.Text = drv.Row["SellPrice"].ToString();
+            c_BuyPrice.Text = drv.Row["BuyPrice"].ToString();
+            c_Quanity.Text = drv.Row["Qty"].ToString();
             VenderItemUpdate = false;
         }
 
@@ -186,8 +186,8 @@ namespace StationTools
         void OnAddGroup(object sender, RoutedEventArgs e)
         {
             if (string.IsNullOrEmpty(c_GroupName.Text)) { Error("You must specify a group name!"); return; }
-            if (string.IsNullOrEmpty(c_SellMult.Text))  c_SellMult.Text = "0";
-            if (string.IsNullOrEmpty(c_BuyMult.Text))   c_BuyMult.Text  = "0";
+            if (string.IsNullOrEmpty(c_SellMult.Text)) c_SellMult.Text = "0";
+            if (string.IsNullOrEmpty(c_BuyMult.Text)) c_BuyMult.Text = "0";
 
             DB.Instance.executeCommand(
                 "INSERT INTO \"starbase_vender_groups\" (\"GroupName\", \"SellMultiplyer\", \"BuyMultiplyer\", \"BuyOnlyList\") VALUES (@n, @s, @b, @o)",
@@ -201,8 +201,8 @@ namespace StationTools
         {
             if (VenderGroupID == 0) return;
             if (string.IsNullOrEmpty(c_GroupName.Text)) { Error("You must specify a group name!"); return; }
-            if (string.IsNullOrEmpty(c_SellMult.Text))  c_SellMult.Text = "0";
-            if (string.IsNullOrEmpty(c_BuyMult.Text))   c_BuyMult.Text  = "0";
+            if (string.IsNullOrEmpty(c_SellMult.Text)) c_SellMult.Text = "0";
+            if (string.IsNullOrEmpty(c_BuyMult.Text)) c_BuyMult.Text = "0";
 
             DB.Instance.executeCommand(
                 "UPDATE \"starbase_vender_groups\" SET \"GroupName\" = @n, \"SellMultiplyer\" = @s, \"BuyMultiplyer\" = @b, \"BuyOnlyList\" = @o WHERE \"GroupID\" = @id",
@@ -242,8 +242,8 @@ namespace StationTools
             {
                 var r = grp.Rows[0];
                 c_GroupName.Text = r["GroupName"].ToString();
-                c_SellMult.Text  = r["SellMultiplyer"].ToString();
-                c_BuyMult.Text   = r["BuyMultiplyer"].ToString();
+                c_SellMult.Text = r["SellMultiplyer"].ToString();
+                c_BuyMult.Text = r["BuyMultiplyer"].ToString();
                 c_BuyList.IsChecked = Convert.ToInt32(r["BuyOnlyList"]) == 1;
             }
 

@@ -66,9 +66,9 @@ public sealed class GlobalAvatarListCodecTests
         // Populate avatar[0].info with distinct big-endian values per field.
         byte[] payload = new byte[GlobalAvatarListCodec.WireSize];
         var info = payload.AsSpan(0, GlobalAvatarListCodec.AvatarInfoSize);
-        BinaryPrimitives.WriteInt32BigEndian(info.Slice( 0, 4), 0x01020304); // AvatarSlot
-        BinaryPrimitives.WriteInt32BigEndian(info.Slice( 4, 4), 1071);        // SectorId
-        BinaryPrimitives.WriteInt32BigEndian(info.Slice( 8, 4), 1);           // GalaxyId
+        BinaryPrimitives.WriteInt32BigEndian(info.Slice(0, 4), 0x01020304); // AvatarSlot
+        BinaryPrimitives.WriteInt32BigEndian(info.Slice(4, 4), 1071);        // SectorId
+        BinaryPrimitives.WriteInt32BigEndian(info.Slice(8, 4), 1);           // GalaxyId
         BinaryPrimitives.WriteInt32BigEndian(info.Slice(12, 4), 5);           // Count
         BinaryPrimitives.WriteInt32BigEndian(info.Slice(16, 4), 0);           // AvatarIdMsb
         BinaryPrimitives.WriteInt32BigEndian(info.Slice(20, 4), 12345);       // AvatarIdLsb

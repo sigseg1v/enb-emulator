@@ -41,19 +41,19 @@ public sealed class CaptureReplayTests
         Assert.Equal(MasterJoinCodec.WireSize, captured.Length);
 
         var codec = new MasterJoinCodec();
-        var decoded = (MasterJoinRequest) codec.DecodeInbound(captured);
+        var decoded = (MasterJoinRequest)codec.DecodeInbound(captured);
 
         // Field-by-field sanity against the fixture-comment transcription.
-        Assert.Equal(2,          decoded.Unknown1);
-        Assert.Equal(2,          decoded.Unknown2);
+        Assert.Equal(2, decoded.Unknown1);
+        Assert.Equal(2, decoded.Unknown2);
         Assert.Equal(0x40E60235, decoded.Unknown3);
         Assert.Equal(0x3E221201, decoded.AvatarIdMsb);
-        Assert.Equal(unchecked((int) 0xF7645CC0), decoded.AvatarIdLsb);
+        Assert.Equal(unchecked((int)0xF7645CC0), decoded.AvatarIdLsb);
         Assert.Equal(0x0000B05F, decoded.ToSectorId);  // 45151
-        Assert.Equal(0,          decoded.FromSectorId);
-        Assert.Equal(0,          decoded.PlayerLevel);
-        Assert.Equal(1,          decoded.Unknown8);
-        Assert.Equal(1,          decoded.Unknown9);
+        Assert.Equal(0, decoded.FromSectorId);
+        Assert.Equal(0, decoded.PlayerLevel);
+        Assert.Equal(1, decoded.Unknown8);
+        Assert.Equal(1, decoded.Unknown9);
         Assert.Equal(0x7FFFFFFF, decoded.Unknown10);
         Assert.Equal(MasterJoinCodec.TicketLength, decoded.Ticket.Length);
 
@@ -72,7 +72,7 @@ public sealed class CaptureReplayTests
         Assert.Equal(ServerRedirectCodec.WireSize, captured.Length);
 
         var codec = new ServerRedirectCodec();
-        var decoded = (ServerRedirect) codec.DecodeInbound(captured);
+        var decoded = (ServerRedirect)codec.DecodeInbound(captured);
 
         // sector_id read LE = 0xB05F = 45151, matching the ToSectorID
         // the client sent in the preceding MasterJoin frame 220 (also
@@ -104,7 +104,7 @@ public sealed class CaptureReplayTests
         // Header: size, opcode, player_id, sequence.
         Assert.Equal(40, BinaryPrimitives.ReadUInt16LittleEndian(captured.AsSpan(0, 2)));
         Assert.Equal(0x1004, BinaryPrimitives.ReadUInt16LittleEndian(captured.AsSpan(2, 2)));
-        Assert.Equal(unchecked((int) 0x4003992A),
+        Assert.Equal(unchecked((int)0x4003992A),
             BinaryPrimitives.ReadInt32LittleEndian(captured.AsSpan(4, 4)));
         int sequence = BinaryPrimitives.ReadInt32LittleEndian(captured.AsSpan(8, 4));
         Assert.Equal(1, sequence);
@@ -140,7 +140,7 @@ public sealed class CaptureReplayTests
         //   * the trailing int32 is absent (see above).
         // This is a documented preservation divergence, NOT a codec defect.
         byte[] ours = MvasClient.BuildDatagram(
-            unchecked((int) 0x4003992A), sequence, x, y, z, (hx, hy, hz));
+            unchecked((int)0x4003992A), sequence, x, y, z, (hx, hy, hz));
         Assert.Equal(36, ours.Length);
 
         // opcode + player_id + sequence (bytes 2..12) match retail exactly.

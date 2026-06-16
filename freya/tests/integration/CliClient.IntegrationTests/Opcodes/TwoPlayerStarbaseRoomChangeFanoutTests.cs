@@ -232,7 +232,7 @@ public sealed class TwoPlayerStarbaseRoomChangeFanoutTests : SectorIntegrationTe
                     Assert.Equal(12, span.Length);
 
                     int wireAvatarId = BinaryPrimitives.ReadInt32LittleEndian(span[..4]);
-                    int wireNewRoom  = BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4));
+                    int wireNewRoom = BinaryPrimitives.ReadInt32LittleEndian(span.Slice(4, 4));
                     // OldRoom (bytes [8..12)) intentionally not pinned -
                     // reflects Player A's spawn-time m_Room which is
                     // StationData-driven.

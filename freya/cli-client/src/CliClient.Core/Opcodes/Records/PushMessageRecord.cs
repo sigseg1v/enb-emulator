@@ -47,7 +47,7 @@ public sealed class PushMessageRecord : PacketRecord
 
         if (Payload.Length < o + 8)
         { Flag(sb, $"tail truncated -- need 8 bytes at offset {o}, have {Payload.Length - o}"); return; }
-        FDec(sb, o,     "Time",     ReadI32LE(Payload, o),     "(display ms)");
+        FDec(sb, o, "Time", ReadI32LE(Payload, o), "(display ms)");
         FDec(sb, o + 4, "Priority", ReadI32LE(Payload, o + 4));
     }
 

@@ -101,7 +101,7 @@ public sealed class JobAndLogoffRecordTests
         BinaryPrimitives.WriteInt32LittleEndian(count.AsSpan(0), 5);  // placeholder > entries
         var b = Concat(count,
             Entry(0x10, 0, 5, "Bounty", "RedDragon", "250 XP"),
-            Entry(0x11, 2, 9, "Haul",   "InfinityE", "450 XP"));
+            Entry(0x11, 2, 9, "Haul", "InfinityE", "450 XP"));
 
         var dump = Dump(0x0093, b);
         Assert.Contains("CountPlaceholder", dump);

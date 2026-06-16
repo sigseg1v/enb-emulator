@@ -13,9 +13,9 @@ public sealed class OpcodeNameLookupTests
     [Fact]
     public void KnownOpcodes_ResolveToTheirFieldName()
     {
-        Assert.Equal("MasterJoin",     OpcodeNameLookup.TryGetName(OpcodeId.Known.MasterJoin));
+        Assert.Equal("MasterJoin", OpcodeNameLookup.TryGetName(OpcodeId.Known.MasterJoin));
         Assert.Equal("ServerRedirect", OpcodeNameLookup.TryGetName(OpcodeId.Known.ServerRedirect));
-        Assert.Equal("Login",          OpcodeNameLookup.TryGetName(OpcodeId.Known.Login));
+        Assert.Equal("Login", OpcodeNameLookup.TryGetName(OpcodeId.Known.Login));
     }
 
     [Fact]

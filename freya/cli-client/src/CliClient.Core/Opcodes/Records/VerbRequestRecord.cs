@@ -24,7 +24,7 @@ public sealed class VerbRequestRecord : PacketRecord
     {
         if (Payload.Length < 12) { Flag(sb, $"VERB_REQUEST truncated -- {Payload.Length} bytes, expected 12"); return; }
         FHex(sb, 0, "SubjectID", ReadI32BE(Payload, 0), "(BE -- ntohl at parse)");
-        FHex(sb, 4, "ObjectID",  ReadI32BE(Payload, 4), "(BE -- ntohl at parse)");
-        FDec(sb, 8, "Action",    ReadI32LE(Payload, 8), "(LE -- raw host read)");
+        FHex(sb, 4, "ObjectID", ReadI32BE(Payload, 4), "(BE -- ntohl at parse)");
+        FDec(sb, 8, "Action", ReadI32LE(Payload, 8), "(LE -- raw host read)");
     }
 }

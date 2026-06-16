@@ -22,7 +22,7 @@ public sealed class ConfirmedActionOfferRecord : PacketRecord
     {
         if (Payload.Length < 10) { Flag(sb, $"CONFIRMED_ACTION_OFFER truncated -- {Payload.Length} bytes, expected >= 10"); return; }
         FHex(sb, 0, "ActionType", ReadI32BE(Payload, 0), "(BE)");
-        FHex(sb, 4, "ActionId",   ReadI32BE(Payload, 4), "(BE)");
+        FHex(sb, 4, "ActionId", ReadI32BE(Payload, 4), "(BE)");
         int textLen = ReadU16LE(Payload, 8);
         FDec(sb, 8, "TextLen", (short)textLen);
         if (10 + textLen > Payload.Length)

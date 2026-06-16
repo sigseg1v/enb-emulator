@@ -43,15 +43,15 @@ public sealed class StarbaseRequestRecord : PacketRecord
         byte action = Payload[8];
         string name = action switch
         {
-            1  => "leave station",
-            4  => "talk to NPC",
-            6  => "activate job terminal",
-            7  => "job description",
-            8  => "accept job",
-            9  => "accept job",
+            1 => "leave station",
+            4 => "talk to NPC",
+            6 => "activate job terminal",
+            7 => "job description",
+            8 => "accept job",
+            9 => "accept job",
             10 => "customise avatar",
             11 => "customise starship",
-            _  => "unknown action -- handler default",
+            _ => "unknown action -- handler default",
         };
         FDec(sb, 8, "Action", action, $"({name})");
 

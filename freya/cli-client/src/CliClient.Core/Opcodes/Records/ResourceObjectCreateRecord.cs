@@ -35,28 +35,28 @@ public sealed class ResourceObjectCreateRecord : PacketRecord
     {
         if (Payload.Length < 48) { Flag(sb, $"RESOURCE_OBJECT_CREATE truncated -- {Payload.Length} bytes, expected >= 48"); return; }
 
-        int   gid       = ReadI32LE(Payload, 0);
+        int gid = ReadI32LE(Payload, 0);
         short baseAsset = ReadI16LE(Payload, 4);
-        float scale     = ReadF32LE(Payload, 6);
-        float hsv0      = ReadF32LE(Payload, 10);
-        float hsv1      = ReadF32LE(Payload, 14);
-        float px        = ReadF32LE(Payload, 18);
-        float py        = ReadF32LE(Payload, 22);
-        float pz        = ReadF32LE(Payload, 26);
-        float o0        = ReadF32LE(Payload, 30);
-        float o1        = ReadF32LE(Payload, 34);
-        float o2        = ReadF32LE(Payload, 38);
-        float o3        = ReadF32LE(Payload, 42);
-        short nameLen   = ReadI16LE(Payload, 46);
+        float scale = ReadF32LE(Payload, 6);
+        float hsv0 = ReadF32LE(Payload, 10);
+        float hsv1 = ReadF32LE(Payload, 14);
+        float px = ReadF32LE(Payload, 18);
+        float py = ReadF32LE(Payload, 22);
+        float pz = ReadF32LE(Payload, 26);
+        float o0 = ReadF32LE(Payload, 30);
+        float o1 = ReadF32LE(Payload, 34);
+        float o2 = ReadF32LE(Payload, 38);
+        float o3 = ReadF32LE(Payload, 42);
+        short nameLen = ReadI16LE(Payload, 46);
 
-        FHex(sb,   0, "GameID",      gid);
-        FDec(sb,   4, "BaseAsset",   baseAsset);
-        FFloat(sb, 6, "Scale",       scale);
-        FFloat(sb, 10, "HSV0",       hsv0);
-        FFloat(sb, 14, "HSV1",       hsv1);
+        FHex(sb, 0, "GameID", gid);
+        FDec(sb, 4, "BaseAsset", baseAsset);
+        FFloat(sb, 6, "Scale", scale);
+        FFloat(sb, 10, "HSV0", hsv0);
+        FFloat(sb, 14, "HSV1", hsv1);
         FBytes(sb, 18, 12, "Position", $"({px:0.#}, {py:0.#}, {pz:0.#})");
         FBytes(sb, 30, 16, "Orientation", $"({o0:0.###}, {o1:0.###}, {o2:0.###}, {o3:0.###})");
-        FDec(sb,  46, "NameLen",     nameLen);
+        FDec(sb, 46, "NameLen", nameLen);
 
         if (nameLen < 0 || 48 + nameLen > Payload.Length)
         {

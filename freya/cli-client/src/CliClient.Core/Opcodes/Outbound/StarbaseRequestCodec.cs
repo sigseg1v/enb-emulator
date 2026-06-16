@@ -71,9 +71,9 @@ public sealed class StarbaseRequestCodec : IOpcodeCodec
         }
 
         return new StarbaseRequestMessage(
-            PlayerId:   BinaryPrimitives.ReadInt32LittleEndian(payload[0..4]),
+            PlayerId: BinaryPrimitives.ReadInt32LittleEndian(payload[0..4]),
             StarbaseId: BinaryPrimitives.ReadInt32LittleEndian(payload[4..8]),
-            Action:     payload[8]);
+            Action: payload[8]);
     }
 
     public byte[] EncodeOutbound(object message)

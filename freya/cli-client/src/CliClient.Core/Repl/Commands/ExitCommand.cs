@@ -23,9 +23,9 @@ public sealed class ExitCommand : ICommandHandler
     private readonly SessionContext _ctx;
     public ExitCommand(SessionContext ctx) { ArgumentNullException.ThrowIfNull(ctx); _ctx = ctx; }
 
-    public string Name    => "quit";
+    public string Name => "quit";
     public string Summary => "log out and exit (aliases: exit, stop)";
-    public string Usage   => "quit  (aliases: exit, stop)";
+    public string Usage => "quit  (aliases: exit, stop)";
 
     public async Task<int> ExecuteAsync(IReadOnlyList<string> args, TextWriter output, CancellationToken ct)
     {

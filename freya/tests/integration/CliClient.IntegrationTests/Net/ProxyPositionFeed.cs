@@ -36,8 +36,8 @@ namespace N7.CliClient.IntegrationTests.Net;
 public sealed class ProxyPositionFeed : IDisposable
 {
     // freya/client-injection/ClientPositionShared.h
-    private const int   DefaultPosPort = 3807;    // FREYA_CLIENT_POS_PORT
-    private const uint  Magic   = 0x4E37504Fu;   // FREYA_CLIENT_POS_MAGIC ('N7PO')
+    private const int DefaultPosPort = 3807;    // FREYA_CLIENT_POS_PORT
+    private const uint Magic = 0x4E37504Fu;   // FREYA_CLIENT_POS_MAGIC ('N7PO')
 
     private readonly UdpClient _udp;
     private readonly IPEndPoint _dst;
@@ -70,7 +70,7 @@ public sealed class ProxyPositionFeed : IDisposable
         var buf = new byte[40];
         BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(0, 4), Magic);
         BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(4, 4), ++_seq);
-        BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(8, 4),  pos.X);
+        BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(8, 4), pos.X);
         BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(12, 4), pos.Y);
         BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(16, 4), pos.Z);
         BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(20, 4), heading.X);

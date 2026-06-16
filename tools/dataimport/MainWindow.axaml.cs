@@ -21,9 +21,9 @@ namespace DataImport
             // Title carries the editor version, same as the WinForms ctor did.
             Title = Title + " " + LoginData.ApplicationVersion;
 
-            guiFileBtn.Click   += async (_, _) => await OnBrowse();
+            guiFileBtn.Click += async (_, _) => await OnBrowse();
             guiImportBtn.Click += (_, _) => OnImport();
-            guiCloseBtn.Click  += (_, _) => Close();
+            guiCloseBtn.Click += (_, _) => Close();
 
             Opened += (_, _) =>
             {

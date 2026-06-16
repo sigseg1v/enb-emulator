@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -24,7 +24,7 @@ namespace EnBIniParser
                 try
                 {
                     IniFileReader reader = new IniFileReader("C:\\Documents and Settings\\Josh\\Desktop\\effect.ini");
-                    IniFileSectionStart test = reader.GotoSection("EFFECT-"+i);
+                    IniFileSectionStart test = reader.GotoSection("EFFECT-" + i);
                     List<IniFileValue> test2 = reader.ReadSectionValues();
 
                     //Console.Out.WriteLine(test.SectionName);
@@ -35,9 +35,9 @@ namespace EnBIniParser
 
                     int effectID = int.Parse(test.SectionName.Replace("EFFECT-", ""));
 
-                    String query = "INSERT INTO effects SET effect_id='"+effectID+"', effect_class='"+effectClass+"', descriiption='"+description+"', "+
-                        "start_link_id='"+startLinkID+"', next_link_id='"+nextLinkID+"', base_asset_id='"+baseAssetID+"', "+
-                        "sound_fx_file='"+soundFxFile+"';";
+                    String query = "INSERT INTO effects SET effect_id='" + effectID + "', effect_class='" + effectClass + "', descriiption='" + description + "', " +
+                        "start_link_id='" + startLinkID + "', next_link_id='" + nextLinkID + "', base_asset_id='" + baseAssetID + "', " +
+                        "sound_fx_file='" + soundFxFile + "';";
 
                     DataTable effectInsert = Database.executeQuery(Database.DatabaseName.net7, query);
                     Console.Out.WriteLine(query);
@@ -77,7 +77,7 @@ namespace EnBIniParser
                 case "SFX":
                     soundFxFile = r.Value.ToString();
                     break;
-            }   
+            }
         }
 
         private void valueLookup(IniFileValue r)

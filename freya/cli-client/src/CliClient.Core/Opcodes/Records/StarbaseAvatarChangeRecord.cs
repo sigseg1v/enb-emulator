@@ -42,6 +42,6 @@ internal static class StarbaseActionFlag
         0x41 => "(broadcast -- send avatar to everyone)",
         0x11 => "(recustomise terminal enter)",
         0x01 => "(recustomise cancel)",
-        _    => null,
+        _ => null,
     };
 }

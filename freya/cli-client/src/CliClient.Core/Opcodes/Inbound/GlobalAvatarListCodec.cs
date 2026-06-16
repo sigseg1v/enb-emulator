@@ -176,20 +176,20 @@ public sealed class GlobalAvatarListCodec : IOpcodeCodec
         // caller's convenience. No helper closure — ReadOnlySpan<byte>
         // is a ref struct and can't be captured by a local function.
         return new AvatarInfo(
-            AvatarSlot:   BinaryPrimitives.ReadInt32BigEndian(info.Slice( 0, 4)),
-            SectorId:     BinaryPrimitives.ReadInt32BigEndian(info.Slice( 4, 4)),
-            GalaxyId:     BinaryPrimitives.ReadInt32BigEndian(info.Slice( 8, 4)),
-            Count:        BinaryPrimitives.ReadInt32BigEndian(info.Slice(12, 4)),
-            AvatarIdMsb:  BinaryPrimitives.ReadInt32BigEndian(info.Slice(16, 4)),
-            AvatarIdLsb:  BinaryPrimitives.ReadInt32BigEndian(info.Slice(20, 4)),
+            AvatarSlot: BinaryPrimitives.ReadInt32BigEndian(info.Slice(0, 4)),
+            SectorId: BinaryPrimitives.ReadInt32BigEndian(info.Slice(4, 4)),
+            GalaxyId: BinaryPrimitives.ReadInt32BigEndian(info.Slice(8, 4)),
+            Count: BinaryPrimitives.ReadInt32BigEndian(info.Slice(12, 4)),
+            AvatarIdMsb: BinaryPrimitives.ReadInt32BigEndian(info.Slice(16, 4)),
+            AvatarIdLsb: BinaryPrimitives.ReadInt32BigEndian(info.Slice(20, 4)),
             AccountIdMsb: BinaryPrimitives.ReadInt32BigEndian(info.Slice(24, 4)),
             AccountIdLsb: BinaryPrimitives.ReadInt32BigEndian(info.Slice(28, 4)),
-            AdminLevel:   BinaryPrimitives.ReadInt32BigEndian(info.Slice(32, 4)),
-            GmFlag:       BinaryPrimitives.ReadInt32BigEndian(info.Slice(36, 4)),
-            CombatLevel:  BinaryPrimitives.ReadInt32BigEndian(info.Slice(40, 4)),
+            AdminLevel: BinaryPrimitives.ReadInt32BigEndian(info.Slice(32, 4)),
+            GmFlag: BinaryPrimitives.ReadInt32BigEndian(info.Slice(36, 4)),
+            CombatLevel: BinaryPrimitives.ReadInt32BigEndian(info.Slice(40, 4)),
             ExploreLevel: BinaryPrimitives.ReadInt32BigEndian(info.Slice(44, 4)),
-            TradeLevel:   BinaryPrimitives.ReadInt32BigEndian(info.Slice(48, 4)),
-            Location:     ReadCString(info.Slice(52, 81)));
+            TradeLevel: BinaryPrimitives.ReadInt32BigEndian(info.Slice(48, 4)),
+            Location: ReadCString(info.Slice(52, 81)));
     }
 
     private static AvatarData DecodeAvatarData(ReadOnlySpan<byte> data)
@@ -223,14 +223,14 @@ public sealed class GlobalAvatarListCodec : IOpcodeCodec
         int moodType = BinaryPrimitives.ReadInt32LittleEndian(data.Slice(58, 4));
 
         return new AvatarData(
-            FirstName:     firstName,
-            LastName:      lastName,
-            AvatarType:    avatarType,
+            FirstName: firstName,
+            LastName: lastName,
+            AvatarType: avatarType,
             AvatarVersion: avatarVersion,
-            Race:          race,
-            Profession:    profession,
-            Gender:        gender,
-            MoodType:      moodType,
+            Race: race,
+            Profession: profession,
+            Gender: gender,
+            MoodType: moodType,
             RawAppearance: data.Slice(62).ToArray());
     }
 
@@ -267,13 +267,13 @@ public sealed class GlobalAvatarListCodec : IOpcodeCodec
         short unknown2 = BinaryPrimitives.ReadInt16LittleEndian(g.Slice(82, 2));
 
         return new Galaxy(
-            Name:        name,
-            GalaxyId:    galaxyId,
-            IpAddress:   ipAddress,
-            Port:        port,
-            NumPlayers:  numPlayers,
-            MaxPlayers:  maxPlayers,
-            Unknown2:    unknown2);
+            Name: name,
+            GalaxyId: galaxyId,
+            IpAddress: ipAddress,
+            Port: port,
+            NumPlayers: numPlayers,
+            MaxPlayers: maxPlayers,
+            Unknown2: unknown2);
     }
 
     private static string ReadCString(ReadOnlySpan<byte> bytes)

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -48,7 +48,7 @@ namespace WestWood3D.Chunks
 
         public override void parse(BinaryReader br, ChunkMap chkMap, Boolean dbg, int endPosition)
         {
-            if(dbg) Console.Out.WriteLine("|-| "+ ChunkHeader.W3D_CHUNK_HIERARCHY);
+            if (dbg) Console.Out.WriteLine("|-| " + ChunkHeader.W3D_CHUNK_HIERARCHY);
 
             HeaderID = (int)ChunkHeader.W3D_CHUNK_HIERARCHY;
             HeaderName = ChunkHeader.W3D_CHUNK_HIERARCHY.ToString();

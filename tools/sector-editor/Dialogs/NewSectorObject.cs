@@ -405,12 +405,12 @@ namespace SectorEditor.Dialogs
         {
             switch (_type2)
             {
-                case 0:  _mp.PositionX  = position.X * 100; _mp.PositionY  = -(position.Y * 100); break;
-                case 3:  _pp.PositionX  = position.X * 100; _pp.PositionY  = -(position.Y * 100); break;
+                case 0: _mp.PositionX = position.X * 100; _mp.PositionY = -(position.Y * 100); break;
+                case 3: _pp.PositionX = position.X * 100; _pp.PositionY = -(position.Y * 100); break;
                 case 11: _sgp.PositionX = position.X * 100; _sgp.PositionY = -(position.Y * 100); break;
                 case 12: _sbp.PositionX = position.X * 100; _sbp.PositionY = -(position.Y * 100); break;
-                case 37: _bp.PositionX  = position.X * 100; _bp.PositionY  = -(position.Y * 100); break;
-                case 38: _hp.PositionX  = position.X * 100; _hp.PositionY  = -(position.Y * 100); break;
+                case 37: _bp.PositionX = position.X * 100; _bp.PositionY = -(position.Y * 100); break;
+                case 38: _hp.PositionX = position.X * 100; _hp.PositionY = -(position.Y * 100); break;
             }
         }
     }

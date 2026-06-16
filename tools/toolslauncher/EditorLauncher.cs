@@ -21,7 +21,7 @@ namespace ToolsLauncher
         public static (bool Ok, string Detail) Launch(string editorAvaloniaName, Settings settings)
         {
             string toolsRoot = ResolveToolsRoot(settings);
-            string projDir   = Path.Combine(toolsRoot, editorAvaloniaName);
+            string projDir = Path.Combine(toolsRoot, editorAvaloniaName);
             if (!Directory.Exists(projDir))
                 return (false, $"Editor project not found: {projDir}");
 
@@ -33,11 +33,11 @@ namespace ToolsLauncher
             {
                 var psi = new ProcessStartInfo
                 {
-                    FileName               = "dotnet",
-                    WorkingDirectory       = projDir,
-                    UseShellExecute        = false,
+                    FileName = "dotnet",
+                    WorkingDirectory = projDir,
+                    UseShellExecute = false,
                     RedirectStandardOutput = false,
-                    RedirectStandardError  = false,
+                    RedirectStandardError = false,
                 };
                 psi.ArgumentList.Add("run");
                 psi.ArgumentList.Add("--project");

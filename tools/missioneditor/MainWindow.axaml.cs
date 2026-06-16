@@ -401,7 +401,7 @@ namespace MissionEditor
             {
                 switch (t)
                 {
-                    case MissionType.Npc:    code = await DataConfiguration.search(DataConfiguration.DataType.npc, this); break;
+                    case MissionType.Npc: code = await DataConfiguration.search(DataConfiguration.DataType.npc, this); break;
                     case MissionType.Sector: code = await DataConfiguration.search(DataConfiguration.DataType.sector, this); break;
                 }
             }

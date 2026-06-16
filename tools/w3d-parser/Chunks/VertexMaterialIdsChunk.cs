@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -31,7 +31,7 @@ namespace WestWood3D.Chunks
 
                 if (dbg)
                 {
-                    Console.Out.WriteLine("\t   Vertex{" + i + "} Vertex Material Id: "+ vertMaterialIds[i]);
+                    Console.Out.WriteLine("\t   Vertex{" + i + "} Vertex Material Id: " + vertMaterialIds[i]);
                 }
             }
         }

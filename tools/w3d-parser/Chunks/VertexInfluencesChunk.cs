@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -30,7 +30,7 @@ namespace WestWood3D.Chunks
                 BoneIds[i] = br.ReadInt16();
                 for (int i2 = 0; i2 < 6; i2++)
                 {
-                    br.ReadByte(); 
+                    br.ReadByte();
                 }
 
                 if (dbg)

@@ -47,9 +47,9 @@ public sealed class ObjectToObjectEffectRecord : PacketRecord
         if (Payload.Length < 12) { Flag(sb, $"OBJECT_TO_OBJECT_EFFECT truncated -- {Payload.Length} bytes, expected >= 12"); return; }
 
         ushort bitmask = ReadU16LE(Payload, 0);
-        FHex(sb, 0, "Bitmask",      bitmask, DecodeBits(bitmask));
-        FHex(sb, 2, "GameID",       ReadI32LE(Payload, 2));
-        FHex(sb, 6, "TargetID",     ReadI32LE(Payload, 6));
+        FHex(sb, 0, "Bitmask", bitmask, DecodeBits(bitmask));
+        FHex(sb, 2, "GameID", ReadI32LE(Payload, 2));
+        FHex(sb, 6, "TargetID", ReadI32LE(Payload, 6));
         FHex(sb, 10, "EffectDescID", ReadU16LE(Payload, 10));
 
         int msgEnd = IndexOfNul(12);
@@ -58,9 +58,9 @@ public sealed class ObjectToObjectEffectRecord : PacketRecord
         Mark(msgEnd, 1);
         int off = msgEnd + 1;
 
-        if (Bit(bitmask, 0) && Need(sb, ref off, 4, "EffectID"))            FHex(sb, off - 4, "EffectID", ReadI32LE(Payload, off - 4));
-        if (Bit(bitmask, 1) && Need(sb, ref off, 4, "TimeStamp"))           FHex(sb, off - 4, "TimeStamp", ReadU32LE(Payload, off - 4));
-        if (Bit(bitmask, 2) && Need(sb, ref off, 2, "Duration"))            FDec(sb, off - 2, "Duration", ReadI16LE(Payload, off - 2));
+        if (Bit(bitmask, 0) && Need(sb, ref off, 4, "EffectID")) FHex(sb, off - 4, "EffectID", ReadI32LE(Payload, off - 4));
+        if (Bit(bitmask, 1) && Need(sb, ref off, 4, "TimeStamp")) FHex(sb, off - 4, "TimeStamp", ReadU32LE(Payload, off - 4));
+        if (Bit(bitmask, 2) && Need(sb, ref off, 2, "Duration")) FDec(sb, off - 2, "Duration", ReadI16LE(Payload, off - 2));
         if (Bit(bitmask, 3) && Need(sb, ref off, 4, "OutsideTargetRadius")) FDec(sb, off - 4, "OutsideTargetRadius", ReadI32LE(Payload, off - 4));
         // bits 4 (0x10) and 5 (0x20) emit nothing on the wire.
         if (Bit(bitmask, 6) && Need(sb, ref off, 12, "TargetOffset"))
@@ -68,11 +68,11 @@ public sealed class ObjectToObjectEffectRecord : PacketRecord
             int b = off - 12;
             FBytes(sb, b, 12, "TargetOffset", $"({ReadF32LE(Payload, b):0.##}, {ReadF32LE(Payload, b + 4):0.##}, {ReadF32LE(Payload, b + 8):0.##})");
         }
-        if (Bit(bitmask, 7)  && Need(sb, ref off, 4, "Scale"))     FFloat(sb, off - 4, "Scale", ReadF32LE(Payload, off - 4));
-        if (Bit(bitmask, 8)  && Need(sb, ref off, 4, "HSVShift0")) FFloat(sb, off - 4, "HSVShift0", ReadF32LE(Payload, off - 4));
-        if (Bit(bitmask, 9)  && Need(sb, ref off, 4, "HSVShift1")) FFloat(sb, off - 4, "HSVShift1", ReadF32LE(Payload, off - 4));
+        if (Bit(bitmask, 7) && Need(sb, ref off, 4, "Scale")) FFloat(sb, off - 4, "Scale", ReadF32LE(Payload, off - 4));
+        if (Bit(bitmask, 8) && Need(sb, ref off, 4, "HSVShift0")) FFloat(sb, off - 4, "HSVShift0", ReadF32LE(Payload, off - 4));
+        if (Bit(bitmask, 9) && Need(sb, ref off, 4, "HSVShift1")) FFloat(sb, off - 4, "HSVShift1", ReadF32LE(Payload, off - 4));
         if (Bit(bitmask, 10) && Need(sb, ref off, 4, "HSVShift2")) FFloat(sb, off - 4, "HSVShift2", ReadF32LE(Payload, off - 4));
-        if (Bit(bitmask, 11) && Need(sb, ref off, 4, "Speedup"))   FFloat(sb, off - 4, "Speedup", ReadF32LE(Payload, off - 4));
+        if (Bit(bitmask, 11) && Need(sb, ref off, 4, "Speedup")) FFloat(sb, off - 4, "Speedup", ReadF32LE(Payload, off - 4));
     }
 
     private static bool Bit(ushort mask, int n) => (mask & (1 << n)) != 0;

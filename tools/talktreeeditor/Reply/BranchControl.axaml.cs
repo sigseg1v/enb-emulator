@@ -22,7 +22,7 @@ namespace TalkTreeEditor.Reply
             _treeItem = item;
             var talk = (TalkNode)item.Tag;
             _muteEvents = true;
-            c_GotoTxt.Text  = talk.id;
+            c_GotoTxt.Text = talk.id;
             c_ReplyTxt.Text = talk.text;
             _muteEvents = false;
         }
@@ -31,7 +31,7 @@ namespace TalkTreeEditor.Reply
         {
             if (_muteEvents || _treeItem == null) return;
             var talk = (TalkNode)_treeItem.Tag;
-            talk.id   = c_GotoTxt.Text  ?? "";
+            talk.id = c_GotoTxt.Text ?? "";
             talk.text = c_ReplyTxt.Text ?? "";
             _treeItem.Text = talk.ToString();
         }

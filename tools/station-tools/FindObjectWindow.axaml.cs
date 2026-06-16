@@ -46,7 +46,7 @@ namespace StationTools
             if (c_StationList.SelectedItem is DataRowView drv)
             {
                 m_StationID = Convert.ToInt32(drv.Row["StarbaseID"]);
-                m_SectorID  = Convert.ToInt32(drv.Row["SectorID"]);
+                m_SectorID = Convert.ToInt32(drv.Row["SectorID"]);
                 m_Ok = true;
             }
             Close();

@@ -76,7 +76,7 @@ namespace TalkTreeEditor.Reply
             {
                 var talk = (TalkNode)_treeItem.Tag;
                 talk.text = ((int)flag).ToString();
-                talk.id   = c_ValueTxt.Text ?? "";
+                talk.id = c_ValueTxt.Text ?? "";
                 _treeItem.Text = talk.ToString();
             }
         }

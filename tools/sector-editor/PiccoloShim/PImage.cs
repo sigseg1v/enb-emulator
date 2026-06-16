@@ -39,8 +39,8 @@ namespace SectorEditor.PiccoloShim
                 _bitmap = value;
                 if (_bitmap != null)
                 {
-                    if (Width == 0) Width = (float) _bitmap.PixelSize.Width;
-                    if (Height == 0) Height = (float) _bitmap.PixelSize.Height;
+                    if (Width == 0) Width = (float)_bitmap.PixelSize.Width;
+                    if (Height == 0) Height = (float)_bitmap.PixelSize.Height;
                 }
             }
         }

@@ -31,14 +31,14 @@ public sealed class JobListRecord : PacketRecord
                 Flag(sb, $"JOB_LIST: entry [{i}] needs 16 bytes of header at offset {off}, only {Payload.Length - off} remain");
                 return;
             }
-            FHex(sb, off,      $"[{i}].ID",       ReadI32LE(Payload, off));
-            FDec(sb, off + 4,  $"[{i}].Category", ReadI32LE(Payload, off + 4));
-            FDec(sb, off + 8,  $"[{i}].Unknown",  ReadI32LE(Payload, off + 8));
-            FDec(sb, off + 12, $"[{i}].Level",    ReadI32LE(Payload, off + 12));
+            FHex(sb, off, $"[{i}].ID", ReadI32LE(Payload, off));
+            FDec(sb, off + 4, $"[{i}].Category", ReadI32LE(Payload, off + 4));
+            FDec(sb, off + 8, $"[{i}].Unknown", ReadI32LE(Payload, off + 8));
+            FDec(sb, off + 12, $"[{i}].Level", ReadI32LE(Payload, off + 12));
             off += 16;
-            if (!TryReadCString(sb, ref off, $"[{i}].Title"))   return;
+            if (!TryReadCString(sb, ref off, $"[{i}].Title")) return;
             if (!TryReadCString(sb, ref off, $"[{i}].Sponsor")) return;
-            if (!TryReadCString(sb, ref off, $"[{i}].Reward"))  return;
+            if (!TryReadCString(sb, ref off, $"[{i}].Reward")) return;
             i++;
         }
     }

@@ -4,8 +4,8 @@ namespace MobEditor
     // AvaloniaUseCompiledBindingsByDefault.
     public sealed class MobRow
     {
-        public int    MobID { get; set; }
-        public string Name  { get; set; }
-        public int    Level { get; set; }
+        public int MobID { get; set; }
+        public string Name { get; set; }
+        public int Level { get; set; }
     }
 }

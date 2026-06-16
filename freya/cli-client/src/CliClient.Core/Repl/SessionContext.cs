@@ -536,14 +536,14 @@ public sealed class SessionContext : IAsyncDisposable
     private void AttachDumpHook(EncryptedTcpConnection? conn)
     {
         if (conn is null) return;
-        conn.PacketSent     += OnPacketSent;
+        conn.PacketSent += OnPacketSent;
         conn.PacketReceived += OnPacketReceived;
     }
 
     private void DetachDumpHook(EncryptedTcpConnection? conn)
     {
         if (conn is null) return;
-        conn.PacketSent     -= OnPacketSent;
+        conn.PacketSent -= OnPacketSent;
         conn.PacketReceived -= OnPacketReceived;
     }
 
@@ -630,7 +630,7 @@ public sealed class SessionContext : IAsyncDisposable
         {
             var span = p.Payload.Span;
             if (span.Length < 28) return;
-            int toSectorId   = BinaryPrimitives.ReadInt32BigEndian(span.Slice(20, 4));
+            int toSectorId = BinaryPrimitives.ReadInt32BigEndian(span.Slice(20, 4));
             int fromSectorId = BinaryPrimitives.ReadInt32BigEndian(span.Slice(24, 4));
             _handoffTcs = null;
             tcs.TrySetResult(new HandoffTarget(toSectorId, fromSectorId));
@@ -802,10 +802,10 @@ public sealed class SessionContext : IAsyncDisposable
 
         string channel = type switch
         {
-            ChatChannel.Target    => "whisper",
-            ChatChannel.Group     => "group",
-            ChatChannel.Guild     => "guild",
-            ChatChannel.Local     => "local",
+            ChatChannel.Target => "whisper",
+            ChatChannel.Group => "group",
+            ChatChannel.Guild => "guild",
+            ChatChannel.Local => "local",
             ChatChannel.Broadcast => "sector",
             _ => "chat",
         };

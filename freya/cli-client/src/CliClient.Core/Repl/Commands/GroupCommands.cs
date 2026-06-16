@@ -19,14 +19,14 @@ internal static class ActionPacketBuilder
 {
     public const int Invite = 10;   // invite target to group  (Target = target gid)
     public const int Accept = 11;   // accept group invitation
-    public const int Leave  = 14;   // leave group
+    public const int Leave = 14;   // leave group
 
     public static byte[] Build(int gameId, int action, int target = -1, int optionalVar = 0)
     {
         var b = new byte[16];
-        BinaryPrimitives.WriteInt32LittleEndian(b.AsSpan(0),  gameId);
-        BinaryPrimitives.WriteInt32LittleEndian(b.AsSpan(4),  action);
-        BinaryPrimitives.WriteInt32LittleEndian(b.AsSpan(8),  target);
+        BinaryPrimitives.WriteInt32LittleEndian(b.AsSpan(0), gameId);
+        BinaryPrimitives.WriteInt32LittleEndian(b.AsSpan(4), action);
+        BinaryPrimitives.WriteInt32LittleEndian(b.AsSpan(8), target);
         BinaryPrimitives.WriteInt32LittleEndian(b.AsSpan(12), optionalVar);
         return b;
     }
@@ -61,9 +61,9 @@ public sealed class GroupCommand : ICommandHandler
     private readonly SessionContext _ctx;
     public GroupCommand(SessionContext ctx) { ArgumentNullException.ThrowIfNull(ctx); _ctx = ctx; }
 
-    public string Name    => "group";
+    public string Name => "group";
     public string Summary => "group up: invite / accept / leave (create == invite the first member)";
-    public string Usage   =>
+    public string Usage =>
         "group <invite|accept|leave|create>\n" +
         "  group invite <player>  invite a tracked nearby player by name (0x002C Action 10).\n" +
         "                         A group is created by inviting -- there is no separate\n" +
@@ -97,9 +97,9 @@ public sealed class GroupCommand : ICommandHandler
         {
             "invite" => await InviteAsync(rest, output, ct).ConfigureAwait(false),
             "accept" => await AcceptAsync(output, ct).ConfigureAwait(false),
-            "leave"  => await LeaveAsync(output, ct).ConfigureAwait(false),
+            "leave" => await LeaveAsync(output, ct).ConfigureAwait(false),
             "create" => await CreateAsync(output).ConfigureAwait(false),
-            _        => await UnknownAsync(sub, output).ConfigureAwait(false),
+            _ => await UnknownAsync(sub, output).ConfigureAwait(false),
         };
     }
 

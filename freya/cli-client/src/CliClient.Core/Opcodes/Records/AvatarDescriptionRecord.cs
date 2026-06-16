@@ -40,15 +40,15 @@ public sealed class AvatarDescriptionRecord : PacketRecord
         if (Payload.Length < 245) { Flag(sb, $"AVATAR_DESCRIPTION truncated -- {Payload.Length} bytes, expected >= 245"); return; }
 
         FHex(sb, 0, "AvatarID", ReadU32LE(Payload, 0));
-        FStr(sb, 4,  20, "FirstName", ReadNulString(Payload.AsSpan(4, 20)), required: true);
-        FStr(sb, 24, 20, "LastName",  ReadNulString(Payload.AsSpan(24, 20)));
-        FHex(sb, 44, "AvatarType",  ReadI32LE(Payload, 44));
-        FDec(sb, 48, "Filler1",     Payload[48]);
-        FDec(sb, 49, "Version",     Payload[49]);
-        FDec(sb, 50, "Race",        ReadI32LE(Payload, 50));
-        FDec(sb, 54, "Profession",  ReadI32LE(Payload, 54));
-        FDec(sb, 58, "Gender",      ReadI32LE(Payload, 58));
-        FDec(sb, 62, "MoodType",    ReadI32LE(Payload, 62));
+        FStr(sb, 4, 20, "FirstName", ReadNulString(Payload.AsSpan(4, 20)), required: true);
+        FStr(sb, 24, 20, "LastName", ReadNulString(Payload.AsSpan(24, 20)));
+        FHex(sb, 44, "AvatarType", ReadI32LE(Payload, 44));
+        FDec(sb, 48, "Filler1", Payload[48]);
+        FDec(sb, 49, "Version", Payload[49]);
+        FDec(sb, 50, "Race", ReadI32LE(Payload, 50));
+        FDec(sb, 54, "Profession", ReadI32LE(Payload, 54));
+        FDec(sb, 58, "Gender", ReadI32LE(Payload, 58));
+        FDec(sb, 62, "MoodType", ReadI32LE(Payload, 62));
 
         for (int i = 0; i < AppearanceNames.Length; i++)
             FDec(sb, 66 + i, AppearanceNames[i], Payload[66 + i]);
@@ -56,9 +56,9 @@ public sealed class AvatarDescriptionRecord : PacketRecord
         foreach (var (off, name) in Triples)
             F(sb, off, 12, name, FloatTriple(off));
 
-        FDec(sb, 188, "shirt_primary_metal",   ReadI32LE(Payload, 188));
+        FDec(sb, 188, "shirt_primary_metal", ReadI32LE(Payload, 188));
         FDec(sb, 192, "shirt_secondary_metal", ReadI32LE(Payload, 192));
-        FDec(sb, 196, "pants_primary_metal",   ReadI32LE(Payload, 196));
+        FDec(sb, 196, "pants_primary_metal", ReadI32LE(Payload, 196));
         FDec(sb, 200, "pants_secondary_metal", ReadI32LE(Payload, 200));
         FDec(sb, 204, "Filler2", Payload[204]);
         F(sb, 205, 20, "height_weight_1", FloatN(205, 5));

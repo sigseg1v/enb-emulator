@@ -40,7 +40,7 @@ namespace ToolsLauncher
             var picked = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
             {
                 AllowMultiple = false,
-                Title         = title,
+                Title = title,
             });
             if (picked == null || picked.Count == 0) return null;
             return picked[0].TryGetLocalPath();
@@ -48,8 +48,8 @@ namespace ToolsLauncher
 
         void OnSave(object sender, RoutedEventArgs e)
         {
-            _settings.LaunchNet7Path       = c_LaunchNet7Txt.Text ?? "";
-            _settings.EditorsCheckoutRoot  = c_EditorsRootTxt.Text ?? "";
+            _settings.LaunchNet7Path = c_LaunchNet7Txt.Text ?? "";
+            _settings.EditorsCheckoutRoot = c_EditorsRootTxt.Text ?? "";
             _settings.Save();
             Close();
         }

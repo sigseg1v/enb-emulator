@@ -70,10 +70,10 @@ namespace ToolsLauncher
             {
                 var btn = new Button
                 {
-                    Content             = ported ? label : label + "  (not yet ported)",
-                    Tag                 = project,
+                    Content = ported ? label : label + "  (not yet ported)",
+                    Tag = project,
                     HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch,
-                    IsEnabled           = ported,
+                    IsEnabled = ported,
                 };
                 btn.Click += OnEditorButton;
                 c_EditorStack.Children.Add(btn);

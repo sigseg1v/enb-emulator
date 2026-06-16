@@ -42,11 +42,11 @@ namespace TalkTreeEditor
         // FlagControl) toggled by visibility.
         sealed class ReplyRow
         {
-            public ComboBox       TypeField;
-            public BranchControl  Branch;
-            public TradeControl   Trade;
-            public FlagControl    Flag;
-            public TreeItem       TreeItem;
+            public ComboBox TypeField;
+            public BranchControl Branch;
+            public TradeControl Trade;
+            public FlagControl Flag;
+            public TreeItem TreeItem;
         }
         const int REPLY_ROW_COUNT = 4;
         readonly List<ReplyRow> _replies = new();
@@ -72,8 +72,8 @@ namespace TalkTreeEditor
                     SelectedIndex = 0,
                 };
                 var branch = new BranchControl { IsVisible = false };
-                var trade  = new TradeControl  { IsVisible = false };
-                var flag   = new FlagControl   { IsVisible = false };
+                var trade = new TradeControl { IsVisible = false };
+                var flag = new FlagControl { IsVisible = false };
 
                 branch.GotoRequested += OnNodeGoto;
                 flag.SetStagesProvider(() => _stages);
@@ -81,7 +81,7 @@ namespace TalkTreeEditor
                 var rowPanel = new StackPanel
                 {
                     Orientation = Avalonia.Layout.Orientation.Horizontal,
-                    Spacing     = 4,
+                    Spacing = 4,
                 };
                 rowPanel.Children.Add(typeCbo);
                 rowPanel.Children.Add(branch);
@@ -92,9 +92,9 @@ namespace TalkTreeEditor
                 var row = new ReplyRow
                 {
                     TypeField = typeCbo,
-                    Branch    = branch,
-                    Trade     = trade,
-                    Flag      = flag,
+                    Branch = branch,
+                    Trade = trade,
+                    Flag = flag,
                 };
                 int captured = i;
                 typeCbo.SelectionChanged += (_, _) => OnReplyTypeSelected(captured);
@@ -135,7 +135,7 @@ namespace TalkTreeEditor
                     AddNodes(xmlDocument.DocumentElement);
                 }
                 catch (XmlException xmlEx) { ShowMessage(xmlEx.Message); }
-                catch (Exception ex)       { ShowMessage(ex.Message); }
+                catch (Exception ex) { ShowMessage(ex.Message); }
             }
             if (_roots.Count != 0)
             {
@@ -176,13 +176,13 @@ namespace TalkTreeEditor
                         }
                         else if (treeChild.Name == "Branch")
                         {
-                            string bid   = treeChild.Attributes[0].Value;
+                            string bid = treeChild.Attributes[0].Value;
                             string btext = treeChild.FirstChild.Value;
                             AddNodeBranch(textItem, bid, btext);
                         }
                         else if (treeChild.Name == "Flags")
                         {
-                            string fid   = treeChild.Attributes.Count != 0 ? treeChild.Attributes[0].Value : "";
+                            string fid = treeChild.Attributes.Count != 0 ? treeChild.Attributes[0].Value : "";
                             string ftext = treeChild.FirstChild == null ? "" : treeChild.FirstChild.Value;
                             AddNodeFlag(textItem, fid, ftext);
                         }
@@ -338,9 +338,9 @@ namespace TalkTreeEditor
 
             if (currentType == TalkNodeTypes.None)
             {
-                if (newType == TalkNodeTypes.Trade)  AddNodeTrade (_currentItem, "");
+                if (newType == TalkNodeTypes.Trade) AddNodeTrade(_currentItem, "");
                 if (newType == TalkNodeTypes.Branch) AddNodeBranch(_currentItem, "", "");
-                if (newType == TalkNodeTypes.Flags)  AddNodeFlag  (_currentItem, "", "");
+                if (newType == TalkNodeTypes.Flags) AddNodeFlag(_currentItem, "", "");
                 row.TreeItem = newType == TalkNodeTypes.Trade
                              ? _currentItem.Children[0]
                              : _currentItem.Children[_currentItem.Children.Count - 1];
@@ -348,9 +348,9 @@ namespace TalkTreeEditor
             else
             {
                 _currentItem.Children.Remove(row.TreeItem);
-                if (newType == TalkNodeTypes.Trade)  AddNodeTrade (_currentItem, "");
+                if (newType == TalkNodeTypes.Trade) AddNodeTrade(_currentItem, "");
                 if (newType == TalkNodeTypes.Branch) AddNodeBranch(_currentItem, "", "");
-                if (newType == TalkNodeTypes.Flags)  AddNodeFlag  (_currentItem, "", "");
+                if (newType == TalkNodeTypes.Flags) AddNodeFlag(_currentItem, "", "");
                 row.TreeItem = newType == TalkNodeTypes.Trade
                              ? _currentItem.Children[0]
                              : _currentItem.Children[_currentItem.Children.Count - 1];
@@ -385,8 +385,8 @@ namespace TalkTreeEditor
                 if (childIndex != -1 && childIndex != i) continue;
                 var row = _replies[i];
                 row.Branch.IsVisible = false;
-                row.Trade.IsVisible  = false;
-                row.Flag.IsVisible   = false;
+                row.Trade.IsVisible = false;
+                row.Flag.IsVisible = false;
                 if (row.TypeField.SelectedItem is not string typeName) continue;
                 if (!Enum.TryParse<TalkNodeTypes>(typeName, out var type)) continue;
                 switch (type)

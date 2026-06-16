@@ -26,11 +26,11 @@ namespace CommonTools.Gui
             guiResultLbl.Text = "";
             guiSearchCriteriaTbl.ItemsSource = m_criteria;
 
-            guiAddBtn.Click    += async (_, _) => await OnAdd();
-            guiEditBtn.Click   += async (_, _) => await OnEdit();
+            guiAddBtn.Click += async (_, _) => await OnAdd();
+            guiEditBtn.Click += async (_, _) => await OnEdit();
             guiRemoveBtn.Click += (_, _) => OnRemove();
             guiSearchBtn.Click += (_, _) => OnSearch();
-            guiOkBtn.Click     += (_, _) => OnOk();
+            guiOkBtn.Click += (_, _) => OnOk();
             guiCancelBtn.Click += (_, _) => Close();
 
             Opened += (_, _) => m_selectedId = "";
@@ -140,12 +140,12 @@ namespace CommonTools.Gui
                 string colName = ColumnData.GetName(m_columns[i]);
                 guiResultTbl.Columns.Add(new DataGridTextColumn
                 {
-                    Header  = colName,
+                    Header = colName,
                     // Plain column name -- resolved against the DataRowView by
                     // DataRowViewAccessorPlugin; the "[col]" indexer form does
                     // not resolve under Avalonia and yields empty cells.
                     Binding = new Avalonia.Data.Binding(colName),
-                    Width   = DataGridLength.SizeToCells,
+                    Width = DataGridLength.SizeToCells,
                 });
             }
 
@@ -157,7 +157,7 @@ namespace CommonTools.Gui
         {
             string query = "";
             var sqlParameters = new List<string>();
-            var sqlValues     = new List<string>();
+            var sqlValues = new List<string>();
             int parameterId = 0;
 
             foreach (SearchCriteria sc in m_criteria)

@@ -19,19 +19,19 @@ public sealed class VersionResponseCodecTests
     }
 
     [Theory]
-    [InlineData(new byte[] { 0x00, 0x00, 0x00, 0x00 }, 0, true,  false, false)]
-    [InlineData(new byte[] { 0x01, 0x00, 0x00, 0x00 }, 1, false, true,  false)]
+    [InlineData(new byte[] { 0x00, 0x00, 0x00, 0x00 }, 0, true, false, false)]
+    [InlineData(new byte[] { 0x01, 0x00, 0x00, 0x00 }, 1, false, true, false)]
     [InlineData(new byte[] { 0x02, 0x00, 0x00, 0x00 }, 2, false, false, true)]
     public void Decode_ParsesStatus_LittleEndian(
         byte[] payload, int expectedStatus, bool upToDate, bool tooOld, bool newer)
     {
         var codec = new VersionResponseCodec();
-        var result = (VersionResponse) codec.DecodeInbound(payload);
+        var result = (VersionResponse)codec.DecodeInbound(payload);
 
         Assert.Equal(expectedStatus, result.Status);
         Assert.Equal(upToDate, result.ClientUpToDate);
-        Assert.Equal(tooOld,   result.ClientTooOld);
-        Assert.Equal(newer,    result.ClientNewer);
+        Assert.Equal(tooOld, result.ClientTooOld);
+        Assert.Equal(newer, result.ClientNewer);
     }
 
     [Fact]

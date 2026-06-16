@@ -88,7 +88,7 @@ namespace MobEditor
         static T Uninitialized<T>() =>
             (T)System.Runtime.Serialization.FormatterServices.GetUninitializedObject(typeof(T));
         public static BaseAssetSQL BaseAssets() => Uninitialized<BaseAssetSQL>();
-        public static ItemBaseSQL  ItemBase()   => Uninitialized<ItemBaseSQL>();
-        public static MobItemsSQL  MobItems()   => Uninitialized<MobItemsSQL>();
+        public static ItemBaseSQL ItemBase() => Uninitialized<ItemBaseSQL>();
+        public static MobItemsSQL MobItems() => Uninitialized<MobItemsSQL>();
     }
 }

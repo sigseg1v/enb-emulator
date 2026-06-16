@@ -36,40 +36,40 @@ public sealed class StaticObjectCreateRecord : PacketRecord
     {
         if (Payload.Length < 60) { Flag(sb, $"STATIC_OBJECT_CREATE truncated -- {Payload.Length} bytes, expected >= 60"); return; }
 
-        int   gid       = ReadI32LE(Payload, 0);
-        byte  createTy  = Payload[4];
+        int gid = ReadI32LE(Payload, 0);
+        byte createTy = Payload[4];
         short baseAsset = ReadI16LE(Payload, 5);
-        float scale     = ReadF32LE(Payload, 7);
-        float h         = ReadF32LE(Payload, 11);
-        float s         = ReadF32LE(Payload, 15);
-        float v         = ReadF32LE(Payload, 19);
-        byte  rel       = Payload[23];
-        byte  posType   = Payload[24];
-        float px        = ReadF32LE(Payload, 25);
-        float py        = ReadF32LE(Payload, 29);
-        float pz        = ReadF32LE(Payload, 33);
-        float o0        = ReadF32LE(Payload, 37);
-        float o1        = ReadF32LE(Payload, 41);
-        float o2        = ReadF32LE(Payload, 45);
-        float o3        = ReadF32LE(Payload, 49);
+        float scale = ReadF32LE(Payload, 7);
+        float h = ReadF32LE(Payload, 11);
+        float s = ReadF32LE(Payload, 15);
+        float v = ReadF32LE(Payload, 19);
+        byte rel = Payload[23];
+        byte posType = Payload[24];
+        float px = ReadF32LE(Payload, 25);
+        float py = ReadF32LE(Payload, 29);
+        float pz = ReadF32LE(Payload, 33);
+        float o0 = ReadF32LE(Payload, 37);
+        float o1 = ReadF32LE(Payload, 41);
+        float o2 = ReadF32LE(Payload, 45);
+        float o3 = ReadF32LE(Payload, 49);
         float signature = ReadF32LE(Payload, 53);
-        byte  sigFlags  = Payload[57];
-        short nameLen   = ReadI16LE(Payload, 58);
+        byte sigFlags = Payload[57];
+        short nameLen = ReadI16LE(Payload, 58);
 
-        FHex(sb,   0, "GameID",       gid);
-        FDec(sb,   4, "CreateType",   createTy);
-        FDec(sb,   5, "BaseAsset",    baseAsset);
-        FFloat(sb, 7, "Scale",        scale);
-        FBytes(sb, 11, 12, "HSV",     $"H={h:0.###} S={s:0.###} V={v:0.###}");
-        FDec(sb,  23, "Relationship", rel);
-        FDec(sb,  24, "PosType",      posType);
+        FHex(sb, 0, "GameID", gid);
+        FDec(sb, 4, "CreateType", createTy);
+        FDec(sb, 5, "BaseAsset", baseAsset);
+        FFloat(sb, 7, "Scale", scale);
+        FBytes(sb, 11, 12, "HSV", $"H={h:0.###} S={s:0.###} V={v:0.###}");
+        FDec(sb, 23, "Relationship", rel);
+        FDec(sb, 24, "PosType", posType);
         FBytes(sb, 25, 12, "Position", $"({px:0.#}, {py:0.#}, {pz:0.#})");
         FBytes(sb, 37, 16, "Orientation", $"({o0:0.###}, {o1:0.###}, {o2:0.###}, {o3:0.###})");
-        FFloat(sb, 53, "Signature",   signature);
+        FFloat(sb, 53, "Signature", signature);
 
         string flags = DecodeSigFlags(sigFlags);
-        FHex(sb,  57, "SigFlags",     sigFlags, flags);
-        FDec(sb,  58, "NameLen",      nameLen);
+        FHex(sb, 57, "SigFlags", sigFlags, flags);
+        FDec(sb, 58, "NameLen", nameLen);
 
         if (nameLen < 0 || 60 + nameLen > Payload.Length)
         {

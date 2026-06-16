@@ -231,9 +231,9 @@ namespace StationTools
             try
             {
                 if (m_CurrentStationID > 0) SaveStation();
-                if (_selectedNode?.Kind == NodeKind.Room)     SaveRoom();
+                if (_selectedNode?.Kind == NodeKind.Room) SaveRoom();
                 if (_selectedNode?.Kind == NodeKind.Terminal) SaveTerminal();
-                if (_selectedNode?.Kind == NodeKind.Npc)      SaveNpc();
+                if (_selectedNode?.Kind == NodeKind.Npc) SaveNpc();
                 c_Status.Text = "saved";
             }
             catch (Exception ex) { Error("SQL: " + ex.Message); }
@@ -254,13 +254,15 @@ namespace StationTools
             if (rooms == null || rooms.Rows.Count == 0) return;
 
             m_CurrentStationType = Convert.ToInt32(rooms.Rows[0]["type"]);
-            m_CurrentStationID   = Convert.ToInt32(rooms.Rows[0]["starbase_id"]);
+            m_CurrentStationID = Convert.ToInt32(rooms.Rows[0]["starbase_id"]);
             m_CurrentStationName = stationName;
 
             var stationNode = new TreeNodeVM
             {
-                Label = stationName, Kind = NodeKind.Station,
-                Id = m_CurrentStationID, StationType = m_CurrentStationType
+                Label = stationName,
+                Kind = NodeKind.Station,
+                Id = m_CurrentStationID,
+                StationType = m_CurrentStationType
             };
             _roots.Add(stationNode);
 
@@ -270,12 +272,14 @@ namespace StationTools
                 int roomId = Convert.ToInt32(rr["room_id"]);
                 var roomNode = new TreeNodeVM
                 {
-                    Label = $"Room {rIndex}", Kind = NodeKind.Room, Id = roomId
+                    Label = $"Room {rIndex}",
+                    Kind = NodeKind.Room,
+                    Id = roomId
                 };
                 rIndex++;
 
                 var termFolder = new TreeNodeVM { Label = "Terminals", Kind = NodeKind.TerminalsFolder, Id = roomId };
-                var npcFolder  = new TreeNodeVM { Label = "NPC's",     Kind = NodeKind.NpcsFolder,      Id = roomId };
+                var npcFolder = new TreeNodeVM { Label = "NPC's", Kind = NodeKind.NpcsFolder, Id = roomId };
 
                 var terms = DB.Instance.executeQuery(
                     "SELECT \"terminal_id\", \"terminal_index\" FROM \"starbase_terminals\" WHERE \"room_id\" = @r ORDER BY \"terminal_index\"",
@@ -321,10 +325,10 @@ namespace StationTools
             {
                 switch (vm.Kind)
                 {
-                    case NodeKind.Station:  LoadStationData();  c_Tabs.SelectedIndex = 0; break;
-                    case NodeKind.Room:     LoadRoomData(vm.Id); c_Tabs.SelectedIndex = 1; break;
+                    case NodeKind.Station: LoadStationData(); c_Tabs.SelectedIndex = 0; break;
+                    case NodeKind.Room: LoadRoomData(vm.Id); c_Tabs.SelectedIndex = 1; break;
                     case NodeKind.Terminal: LoadTerminalData(vm.Id); c_Tabs.SelectedIndex = 2; break;
-                    case NodeKind.Npc:      LoadNpcData(vm.Id);  c_Tabs.SelectedIndex = 3; break;
+                    case NodeKind.Npc: LoadNpcData(vm.Id); c_Tabs.SelectedIndex = 3; break;
                 }
             }
             catch (Exception ex) { Error("Load failed: " + ex.Message); }
@@ -343,15 +347,15 @@ namespace StationTools
             if (dt == null || dt.Rows.Count == 0) { Error("Could not load station"); return; }
 
             var r = dt.Rows[0];
-            c_StationName.Text       = r["name"].ToString();
-            c_StationID.Text         = r["starbase_id"].ToString();
-            c_StationSectorID.Text   = r["sector_id"].ToString();
-            c_StationObjectID.Text   = r["target_sector_object"].ToString();
-            c_StationDisc.Text       = r["description"].ToString();
-            c_StationWelcome.Text    = r["welcome_message"].ToString();
+            c_StationName.Text = r["name"].ToString();
+            c_StationID.Text = r["starbase_id"].ToString();
+            c_StationSectorID.Text = r["sector_id"].ToString();
+            c_StationObjectID.Text = r["target_sector_object"].ToString();
+            c_StationDisc.Text = r["description"].ToString();
+            c_StationWelcome.Text = r["welcome_message"].ToString();
             int fid = Convert.ToInt32(r["faction_id"]) - 1;
             if (fid >= 0 && fid < c_StationFaction.Items.Count) c_StationFaction.SelectedIndex = fid;
-            c_StationType.SelectedIndex   = Convert.ToInt32(r["type"]);
+            c_StationType.SelectedIndex = Convert.ToInt32(r["type"]);
             c_StationActive.SelectedIndex = Convert.ToInt32(r["is_active"]);
             m_CurrentStationID = Convert.ToInt32(r["starbase_id"]);
         }
@@ -366,23 +370,23 @@ namespace StationTools
 
             var r = dt.Rows[0];
             c_RoomDiscription.Text = r["description"].ToString();
-            c_RoomFogNear.Text     = r["fog_near"].ToString();
-            c_RoomFogFar.Text      = r["fog_far"].ToString();
+            c_RoomFogNear.Text = r["fog_near"].ToString();
+            c_RoomFogFar.Text = r["fog_far"].ToString();
             c_RoomType.SelectedIndex = Convert.ToInt32(r["type"]);
-            c_RoomFogR.Text = (r["fog_red"]   == DBNull.Value ? "0" : r["fog_red"].ToString());
+            c_RoomFogR.Text = (r["fog_red"] == DBNull.Value ? "0" : r["fog_red"].ToString());
             c_RoomFogG.Text = (r["fog_green"] == DBNull.Value ? "0" : r["fog_green"].ToString());
-            c_RoomFogB.Text = (r["fog_blue"]  == DBNull.Value ? "0" : r["fog_blue"].ToString());
+            c_RoomFogB.Text = (r["fog_blue"] == DBNull.Value ? "0" : r["fog_blue"].ToString());
 
             uint style = Convert.ToUInt32(r["style"]);
-            c_RoomDeviders.IsChecked  = (style & 0x001) > 0;
-            c_RoomRafters.IsChecked   = (style & 0x002) > 0;
-            c_RoomBar.IsChecked       = (style & 0x004) > 0;
-            c_RoomTables.IsChecked    = (style & 0x008) > 0;
-            c_RoomMonitors.IsChecked  = (style & 0x010) > 0;
-            c_RoomEyecandy.IsChecked  = (style & 0x020) > 0;
+            c_RoomDeviders.IsChecked = (style & 0x001) > 0;
+            c_RoomRafters.IsChecked = (style & 0x002) > 0;
+            c_RoomBar.IsChecked = (style & 0x004) > 0;
+            c_RoomTables.IsChecked = (style & 0x008) > 0;
+            c_RoomMonitors.IsChecked = (style & 0x010) > 0;
+            c_RoomEyecandy.IsChecked = (style & 0x020) > 0;
             c_RoomSmallroom.IsChecked = (style & 0x040) > 0;
-            c_RoomAltroom.IsChecked   = (style & 0x080) > 0;
-            c_RoomFog.IsChecked       = (style & 0x100) > 0;
+            c_RoomAltroom.IsChecked = (style & 0x080) > 0;
+            c_RoomFog.IsChecked = (style & 0x100) > 0;
         }
 
         void LoadTerminalData(int terminalId)
@@ -395,9 +399,9 @@ namespace StationTools
 
             var r = dt.Rows[0];
             c_TerminalAttribute.Text = r["attribute"].ToString();
-            c_TerminalDisc.Text      = r["description"].ToString();
+            c_TerminalDisc.Text = r["description"].ToString();
             c_TerminalLocation.SelectedIndex = Convert.ToInt32(r["location"]);
-            c_TerminalType.SelectedIndex     = Convert.ToInt32(r["type"]);
+            c_TerminalType.SelectedIndex = Convert.ToInt32(r["type"]);
         }
 
         void LoadNpcData(int npcId)
@@ -411,9 +415,9 @@ namespace StationTools
 
             var r = dt.Rows[0];
             c_NPCDiscription.Text = r["description"].ToString();
-            c_NPCFirstName.Text   = r["first_name"].ToString();
-            c_NPCLastName.Text    = r["last_name"].ToString();
-            c_NPCAvatarID.Text    = r["npc_Id"].ToString();
+            c_NPCFirstName.Text = r["first_name"].ToString();
+            c_NPCLastName.Text = r["last_name"].ToString();
+            c_NPCAvatarID.Text = r["npc_Id"].ToString();
             c_NPCLocation.SelectedIndex = Convert.ToInt32(r["location"]);
             int fid = Convert.ToInt32(r["faction_id"]) - 1;
             if (fid >= 0 && fid < c_NPCFaction.Items.Count) c_NPCFaction.SelectedIndex = fid;
@@ -480,15 +484,15 @@ namespace StationTools
             if (_selectedNode == null || _selectedNode.Kind != NodeKind.Room) return;
 
             uint style = 0;
-            if (c_RoomDeviders.IsChecked  ?? false) style |= 0x001;
-            if (c_RoomRafters.IsChecked   ?? false) style |= 0x002;
-            if (c_RoomBar.IsChecked       ?? false) style |= 0x004;
-            if (c_RoomTables.IsChecked    ?? false) style |= 0x008;
-            if (c_RoomMonitors.IsChecked  ?? false) style |= 0x010;
-            if (c_RoomEyecandy.IsChecked  ?? false) style |= 0x020;
+            if (c_RoomDeviders.IsChecked ?? false) style |= 0x001;
+            if (c_RoomRafters.IsChecked ?? false) style |= 0x002;
+            if (c_RoomBar.IsChecked ?? false) style |= 0x004;
+            if (c_RoomTables.IsChecked ?? false) style |= 0x008;
+            if (c_RoomMonitors.IsChecked ?? false) style |= 0x010;
+            if (c_RoomEyecandy.IsChecked ?? false) style |= 0x020;
             if (c_RoomSmallroom.IsChecked ?? false) style |= 0x040;
-            if (c_RoomAltroom.IsChecked   ?? false) style |= 0x080;
-            if (c_RoomFog.IsChecked       ?? false) style |= 0x100;
+            if (c_RoomAltroom.IsChecked ?? false) style |= 0x080;
+            if (c_RoomFog.IsChecked ?? false) style |= 0x100;
 
             DB.Instance.executeCommand(
                 "UPDATE \"starbase_rooms\" SET \"type\" = @t, \"style\" = @s, \"fog_near\" = @fn, \"fog_far\" = @ff, " +

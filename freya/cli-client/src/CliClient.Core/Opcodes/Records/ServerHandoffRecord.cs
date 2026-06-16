@@ -28,17 +28,17 @@ public sealed class ServerHandoffRecord : PacketRecord
     {
         if (Payload.Length < 64) { Flag(sb, $"SERVER_HANDOFF truncated -- {Payload.Length} bytes, expected >= 64"); return; }
 
-        FHex(sb, 0,  "Unknown1",     ReadI32LE(Payload, 0));
-        FHex(sb, 4,  "Unknown2",     ReadI32LE(Payload, 4));
-        FHex(sb, 8,  "Unknown3",     ReadI32LE(Payload, 8));
-        FHex(sb, 12, "AvatarIdMsb",  ReadI32LE(Payload, 12));
-        FHex(sb, 16, "AvatarIdLsb",  ReadI32LE(Payload, 16));
-        FDec(sb, 20, "ToSectorID",   ReadI32BE(Payload, 20), "(BE -- ntohl at emit)");
+        FHex(sb, 0, "Unknown1", ReadI32LE(Payload, 0));
+        FHex(sb, 4, "Unknown2", ReadI32LE(Payload, 4));
+        FHex(sb, 8, "Unknown3", ReadI32LE(Payload, 8));
+        FHex(sb, 12, "AvatarIdMsb", ReadI32LE(Payload, 12));
+        FHex(sb, 16, "AvatarIdLsb", ReadI32LE(Payload, 16));
+        FDec(sb, 20, "ToSectorID", ReadI32BE(Payload, 20), "(BE -- ntohl at emit)");
         FDec(sb, 24, "FromSectorID", ReadI32BE(Payload, 24), "(BE -- ntohl at emit)");
-        FDec(sb, 28, "PlayerLevel",  ReadI32LE(Payload, 28));
-        FHex(sb, 32, "Unknown8",     ReadI32LE(Payload, 32));
-        FHex(sb, 36, "Unknown9",     ReadI32LE(Payload, 36));
-        FHex(sb, 40, "Unknown10",    ReadI32LE(Payload, 40));
+        FDec(sb, 28, "PlayerLevel", ReadI32LE(Payload, 28));
+        FHex(sb, 32, "Unknown8", ReadI32LE(Payload, 32));
+        FHex(sb, 36, "Unknown9", ReadI32LE(Payload, 36));
+        FHex(sb, 40, "Unknown10", ReadI32LE(Payload, 40));
         FBytes(sb, 44, 20, "Ticket", TicketDisplay(Payload.AsSpan(44, 20)));
 
         int off = 64;

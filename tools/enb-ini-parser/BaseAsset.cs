@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -32,7 +32,7 @@ namespace EnBIniParser
 
                     DataTable update = Database.executeQuery(Database.DatabaseName.net7, query2);
                     Console.Out.WriteLine(query2);
-                }   
+                }
             }
 
             Console.Out.WriteLine("***** Finished *****");

@@ -31,21 +31,21 @@ public sealed class ComponentPositionalUpdateRecord : PacketRecord
         if (Payload.Length < 64) { Flag(sb, $"COMPONENT_POS truncated -- {Payload.Length} bytes, expected 64"); return; }
 
         // Embedded SimplePositionalUpdate (offsets 0..47) -- identical to 0x08.
-        int   gameId = ReadI32LE(Payload, 0);
-        uint  ts     = ReadU32LE(Payload, 4);
-        float px = ReadF32LE(Payload,  8), py = ReadF32LE(Payload, 12), pz = ReadF32LE(Payload, 16);
+        int gameId = ReadI32LE(Payload, 0);
+        uint ts = ReadU32LE(Payload, 4);
+        float px = ReadF32LE(Payload, 8), py = ReadF32LE(Payload, 12), pz = ReadF32LE(Payload, 16);
         float ow = ReadF32LE(Payload, 20), ox = ReadF32LE(Payload, 24), oy = ReadF32LE(Payload, 28), oz = ReadF32LE(Payload, 32);
         float vx = ReadF32LE(Payload, 36), vy = ReadF32LE(Payload, 40), vz = ReadF32LE(Payload, 44);
-        FHex(sb,   0, "GameID",      gameId);
-        FHex(sb,   4, "TimeStamp",   ts);
-        FBytes(sb, 8,  12, "Position",    $"({px:0.0##}, {py:0.0##}, {pz:0.0##})");
+        FHex(sb, 0, "GameID", gameId);
+        FHex(sb, 4, "TimeStamp", ts);
+        FBytes(sb, 8, 12, "Position", $"({px:0.0##}, {py:0.0##}, {pz:0.0##})");
         FBytes(sb, 20, 16, "Orientation", $"({ow:0.0##}, {ox:0.0##}, {oy:0.0##}, {oz:0.0##})");
-        FBytes(sb, 36, 12, "Velocity",    $"({vx:0.0##}, {vy:0.0##}, {vz:0.0##})");
+        FBytes(sb, 36, 12, "Velocity", $"({vx:0.0##}, {vy:0.0##}, {vz:0.0##})");
 
         // Tractor-beam tail (offsets 48..63).
         FFloat(sb, 48, "ImpartedDecay", ReadF32LE(Payload, 48));
-        FFloat(sb, 52, "TractorSpeed",  ReadF32LE(Payload, 52));
-        FHex(sb,   56, "TractorID",       ReadI32LE(Payload, 56), "(object the beam acts on)");
-        FHex(sb,   60, "TractorEffectID", ReadI32LE(Payload, 60));
+        FFloat(sb, 52, "TractorSpeed", ReadF32LE(Payload, 52));
+        FHex(sb, 56, "TractorID", ReadI32LE(Payload, 56), "(object the beam acts on)");
+        FHex(sb, 60, "TractorEffectID", ReadI32LE(Payload, 60));
     }
 }

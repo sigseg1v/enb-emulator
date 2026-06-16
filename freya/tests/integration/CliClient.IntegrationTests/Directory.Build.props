@@ -13,4 +13,14 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <WarningsNotAsErrors></WarningsNotAsErrors>
   </PropertyGroup>
+
+  <!-- Phase AT: StyleCop.Analyzers (severities at `suggestion` via repo-root
+       .editorconfig, so TreatWarningsAsErrors stays green). -->
+  <ItemGroup>
+    <PackageReference Include="StyleCop.Analyzers" Version="1.2.0-beta.556">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
+    </PackageReference>
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)../../../../stylecop.json" Link="stylecop.json" />
+  </ItemGroup>
 </Project>

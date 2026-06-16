@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -101,7 +101,7 @@ namespace WestWood3D
             //Parse Headers and setup local variables
             int chunkID = br.ReadInt32();
             int currentChunkLength = br.ReadInt32() & 0x7FFFFFFF;
-            int endLength = (int) br.BaseStream.Position + currentChunkLength;
+            int endLength = (int)br.BaseStream.Position + currentChunkLength;
 
             // Lookup and create the new chunk class
             Chunk chk = chkMap.getChunk(chunkID);
@@ -115,7 +115,7 @@ namespace WestWood3D
             }
             else
             {
-                if(debugText) Console.Out.WriteLine("File: " + _filename + "\t : \tSkipping Chunk: \t " + chunkID);
+                if (debugText) Console.Out.WriteLine("File: " + _filename + "\t : \tSkipping Chunk: \t " + chunkID);
 
                 //Chunk will be skipped if its not initialized in the chunkmap
                 br.BaseStream.Seek(currentChunkLength, SeekOrigin.Current); //Advance to the next chunk
@@ -124,7 +124,7 @@ namespace WestWood3D
             // Parse any sub chunks
             while (br.BaseStream.Position < endLength)
             {
-                processChunks(chk); 
+                processChunks(chk);
             }
         } // End of processMainChunks
 

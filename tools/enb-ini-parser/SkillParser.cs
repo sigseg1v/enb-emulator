@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -154,13 +154,13 @@ namespace EnBIniParser
         private void insertIntoDB()
         {
             //Insert Skills
-           String skillsQuery = "INSERT INTO skills SET skill_id='" + skill_id + "', name='" + skill_name + "', " +
-                "description='" + description + "', is_activated='" + is_activated + "', category='" + category + "', "+
-                "warrior_max_level='"+warrior_max_level+"', sentinal_max_level='"+sentinel_max_level+"', "+
-                "privateer_max_level='"+privateer_max_level+"', defender_max_level='"+defender_max_level+"', "+
-                "explorer_max_level='"+explorer_max_level+"', seeker_max_level='"+seeker_max_level+"', "+
-                "enforcer_max_level='"+enforcer_max_level+"', scout_max_level='"+scout_max_level+"', "+
-                "tradesman_max_level='"+tradesman_max_level+"';";
+            String skillsQuery = "INSERT INTO skills SET skill_id='" + skill_id + "', name='" + skill_name + "', " +
+                 "description='" + description + "', is_activated='" + is_activated + "', category='" + category + "', " +
+                 "warrior_max_level='" + warrior_max_level + "', sentinal_max_level='" + sentinel_max_level + "', " +
+                 "privateer_max_level='" + privateer_max_level + "', defender_max_level='" + defender_max_level + "', " +
+                 "explorer_max_level='" + explorer_max_level + "', seeker_max_level='" + seeker_max_level + "', " +
+                 "enforcer_max_level='" + enforcer_max_level + "', scout_max_level='" + scout_max_level + "', " +
+                 "tradesman_max_level='" + tradesman_max_level + "';";
             DataTable skillInsert = Database.executeQuery(Database.DatabaseName.net7, skillsQuery);
 
             for (int i = 1; i < 10; i++)
@@ -204,7 +204,7 @@ namespace EnBIniParser
                 DataTable skillLevelInsert = Database.executeQuery(Database.DatabaseName.net7, skillLevelQuery);
             }
 
-            Console.Out.WriteLine("Inserting SkillID: "+skill_id+", SkillName: "+skill_name);
+            Console.Out.WriteLine("Inserting SkillID: " + skill_id + ", SkillName: " + skill_name);
         }
     }
 }

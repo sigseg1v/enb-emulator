@@ -58,7 +58,7 @@ namespace EffectEditor
                 await Show("No row selected", "Pick an effect row first.", MsBoxIcon.Warning);
                 return;
             }
-            int eid  = Convert.ToInt32(row.Row["EffectID"]);
+            int eid = Convert.ToInt32(row.Row["EffectID"]);
             string d = row.Row["Description"]?.ToString() ?? "";
             var box = MessageBoxManager.GetMessageBoxStandard(
                 "Delete Confirmation",

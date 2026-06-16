@@ -16,8 +16,8 @@ namespace MobEditor
     // item belongs to.
     public partial class ItemBaseAssetsWindow : Window
     {
-        readonly ItemBaseSQL  _itemBase;
-        readonly MobItemsSQL  _mobItems;
+        readonly ItemBaseSQL _itemBase;
+        readonly MobItemsSQL _mobItems;
         readonly BaseAssetSQL _baseAssets;
         readonly int _type;
         readonly int _mobID;
@@ -34,10 +34,10 @@ namespace MobEditor
                                     MobItemsSQL mobItems,
                                     BaseAssetSQL baseAssets)
         {
-            _type       = type;
-            _mobID      = mobID;
-            _itemBase   = itemBase;
-            _mobItems   = mobItems;
+            _type = type;
+            _mobID = mobID;
+            _itemBase = itemBase;
+            _mobItems = mobItems;
             _baseAssets = baseAssets;
             InitializeComponent();
 
@@ -58,18 +58,18 @@ namespace MobEditor
         // mob-editor/GUI/ItemBaseAssets.cs:113-156.
         int CategoryCodeFor(string label) => label switch
         {
-            "Ammo"              => 103,
-            "Devices"           => 110,
-            "Engines"           => 121,
-            "Reactors"          => 120,
-            "Shields"           => 122,
-            "Missile Weapon"    => 102,
+            "Ammo" => 103,
+            "Devices" => 110,
+            "Engines" => 121,
+            "Reactors" => 120,
+            "Shields" => 122,
+            "Missile Weapon" => 102,
             "Projectile Weapon" => 101,
-            "Beam Weapon"       => 100,
-            "Components"        => 500,
-            "Ore & Resources"   => 800,
-            "Misc. Loot"        => -1,
-            _                   => -2,
+            "Beam Weapon" => 100,
+            "Components" => 500,
+            "Ore & Resources" => 800,
+            "Misc. Loot" => -1,
+            _ => -2,
         };
 
         void OnCategoryChanged(object sender, SelectionChangedEventArgs e)
@@ -111,12 +111,12 @@ namespace MobEditor
             int selectedItemID = Convert.ToInt32(_itemsForRow[idx]["id"]);
 
             var newRow = _mobItems.getMobItemsTable().NewRow();
-            newRow["mob_id"]       = _mobID;
+            newRow["mob_id"] = _mobID;
             newRow["item_base_id"] = selectedItemID;
             newRow["usage_chance"] = 0;
-            newRow["drop_chance"]  = 0;
-            newRow["type"]         = _type;
-            newRow["qty"]          = 1;
+            newRow["drop_chance"] = 0;
+            newRow["type"] = _type;
+            newRow["qty"] = 1;
             _mobItems.getMobItemsTable().Rows.Add(newRow);
             _mobItems.getMobItemsTable().AcceptChanges();
             _mobItems.insertRecord(newRow);

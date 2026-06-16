@@ -30,13 +30,13 @@ public sealed class ObjectToObjectLinkedEffectRecord : PacketRecord
     protected override void WriteFields(StringBuilder sb)
     {
         if (Payload.Length < 58) { Flag(sb, $"OBJECT_TO_OBJECT_LINKED_EFFECT truncated -- {Payload.Length} bytes, expected 58"); return; }
-        FHex(sb, 0, "ObjectID",  ReadI32LE(Payload, 0));
+        FHex(sb, 0, "ObjectID", ReadI32LE(Payload, 0));
         FHex(sb, 4, "TimeStamp", ReadU32LE(Payload, 4));
-        FHex(sb, 8, "SourceID",  ReadI32LE(Payload, 8));
-        FDec(sb, 12, "Spacer",   Payload[12]);
+        FHex(sb, 8, "SourceID", ReadI32LE(Payload, 8));
+        FDec(sb, 12, "Spacer", Payload[12]);
         FHex(sb, 13, "TargetID", ReadI32LE(Payload, 13));
         FDec(sb, 17, "LinkedEffectDescID", ReadI16LE(Payload, 17));
-        FDec(sb, 19, "EffectDescID",       ReadI16LE(Payload, 19));
+        FDec(sb, 19, "EffectDescID", ReadI16LE(Payload, 19));
         FBytes(sb, 21, 12, "TargetOffset",
                $"({ReadF32LE(Payload, 21):0.0##}, {ReadF32LE(Payload, 25):0.0##}, {ReadF32LE(Payload, 29):0.0##})");
         FHex(sb, 33, "Unknown", ReadI32LE(Payload, 33));

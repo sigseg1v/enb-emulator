@@ -65,13 +65,13 @@ namespace SectorEditor.Sprites
             float fognear = float.Parse(r["fog_near"].ToString());
             float fogfar = float.Parse(r["fog_far"].ToString());
             int debrismode = int.Parse(r["debris_mode"].ToString());
-            bool lightbackdrop = (bool) r["light_backdrop"];
-            bool fogbackdrop = (bool) r["fog_backdrop"];
-            bool swapbackdrop = (bool) r["swap_backdrop"];
+            bool lightbackdrop = (bool)r["light_backdrop"];
+            bool fogbackdrop = (bool)r["fog_backdrop"];
+            bool swapbackdrop = (bool)r["swap_backdrop"];
             float backdropfognear = float.Parse(r["backdrop_fog_near"].ToString());
             float backdropfogfar = float.Parse(r["backdrop_fog_far"].ToString());
             float maxtilt = float.Parse(r["max_tilt"].ToString());
-            bool autolevel = (bool) r["auto_level"];
+            bool autolevel = (bool)r["auto_level"];
             float impulserate = float.Parse(r["impulse_rate"].ToString());
             float decayvelocity = float.Parse(r["decay_velocity"].ToString());
             float decayspin = float.Parse(r["decay_spin"].ToString());
@@ -138,41 +138,41 @@ namespace SectorEditor.Sprites
             string changedValue = _changedValue.Replace("'", "''");
             switch (propertyName)
             {
-                case "Name":               dr["name"] = changedValue; break;
+                case "Name": dr["name"] = changedValue; break;
                 case "Width":
                 case "Height":
                 case "Depth":
-                    if (sp.Width != 0)  { dr["x_min"] = -(sp.Width / 2);  dr["x_max"] = sp.Width / 2; }
+                    if (sp.Width != 0) { dr["x_min"] = -(sp.Width / 2); dr["x_max"] = sp.Width / 2; }
                     if (sp.Height != 0) { dr["y_min"] = -(sp.Height / 2); dr["y_max"] = sp.Height / 2; }
-                    if (sp.Depth != 0)  { dr["z_min"] = -(sp.Depth / 2);  dr["z_max"] = sp.Depth / 2; }
+                    if (sp.Depth != 0) { dr["z_min"] = -(sp.Depth / 2); dr["z_max"] = sp.Depth / 2; }
                     break;
                 // NOTE: original code wrote dr["grix_x"] (typo for grid_x) — preserved
                 // verbatim; if anyone ever validates this against the schema, they'll
                 // need a separate audit pass to decide whether to fix-up or migrate.
-                case "GridX":              dr["grix_x"] = int.Parse(changedValue); break;
-                case "GridY":              dr["grix_y"] = int.Parse(changedValue); break;
-                case "GridZ":              dr["grix_z"] = int.Parse(changedValue); break;
-                case "FogNear":            dr["fog_near"] = float.Parse(changedValue); break;
-                case "FogFar":             dr["fog_far"] = float.Parse(changedValue); break;
-                case "DebrisMode":         dr["debris_mode"] = int.Parse(changedValue); break;
-                case "LightBackdrop":      dr["light_backdrop"] = bool.Parse(changedValue); break;
-                case "FogBackdrop":        dr["fog_backdrop"] = bool.Parse(changedValue); break;
-                case "SwapBackdrop":       dr["swap_backdrop"] = bool.Parse(changedValue); break;
-                case "BackdropFogNear":    dr["backdrop_fog_near"] = float.Parse(changedValue); break;
-                case "BackdropFogFar":     dr["backdrop_fog_far"] = float.Parse(changedValue); break;
+                case "GridX": dr["grix_x"] = int.Parse(changedValue); break;
+                case "GridY": dr["grix_y"] = int.Parse(changedValue); break;
+                case "GridZ": dr["grix_z"] = int.Parse(changedValue); break;
+                case "FogNear": dr["fog_near"] = float.Parse(changedValue); break;
+                case "FogFar": dr["fog_far"] = float.Parse(changedValue); break;
+                case "DebrisMode": dr["debris_mode"] = int.Parse(changedValue); break;
+                case "LightBackdrop": dr["light_backdrop"] = bool.Parse(changedValue); break;
+                case "FogBackdrop": dr["fog_backdrop"] = bool.Parse(changedValue); break;
+                case "SwapBackdrop": dr["swap_backdrop"] = bool.Parse(changedValue); break;
+                case "BackdropFogNear": dr["backdrop_fog_near"] = float.Parse(changedValue); break;
+                case "BackdropFogFar": dr["backdrop_fog_far"] = float.Parse(changedValue); break;
                 // NOTE: original used "mex_tilt" — typo preserved verbatim, same caveat as above.
-                case "MaxTilt":            dr["mex_tilt"] = float.Parse(changedValue); break;
-                case "AutoLevel":          dr["auto_level"] = bool.Parse(changedValue); break;
-                case "ImpulseRate":        dr["impulse_rate"] = float.Parse(changedValue); break;
-                case "DecayVelocity":      dr["decay_velocity"] = float.Parse(changedValue); break;
-                case "DecaySpin":          dr["decay_spin"] = float.Parse(changedValue); break;
-                case "BackdropAsset":      dr["backdrop_asset"] = int.Parse(changedValue); break;
-                case "Greetings":          dr["greetings"] = changedValue; break;
-                case "Notes":              dr["notes"] = changedValue; break;
-                case "SystemID":           dr["system_id"] = int.Parse(changedValue); break;
-                case "GalaxyX":            dr["galaxy_x"] = float.Parse(changedValue); break;
-                case "GalaxyY":            dr["galaxy_y"] = float.Parse(changedValue); break;
-                case "GalaxyZ":            dr["galaxy_z"] = float.Parse(changedValue); break;
+                case "MaxTilt": dr["mex_tilt"] = float.Parse(changedValue); break;
+                case "AutoLevel": dr["auto_level"] = bool.Parse(changedValue); break;
+                case "ImpulseRate": dr["impulse_rate"] = float.Parse(changedValue); break;
+                case "DecayVelocity": dr["decay_velocity"] = float.Parse(changedValue); break;
+                case "DecaySpin": dr["decay_spin"] = float.Parse(changedValue); break;
+                case "BackdropAsset": dr["backdrop_asset"] = int.Parse(changedValue); break;
+                case "Greetings": dr["greetings"] = changedValue; break;
+                case "Notes": dr["notes"] = changedValue; break;
+                case "SystemID": dr["system_id"] = int.Parse(changedValue); break;
+                case "GalaxyX": dr["galaxy_x"] = float.Parse(changedValue); break;
+                case "GalaxyY": dr["galaxy_y"] = float.Parse(changedValue); break;
+                case "GalaxyZ": dr["galaxy_z"] = float.Parse(changedValue); break;
                 case "SectorType":
                     if (changedValue == "Space Sector") dr["sector_type"] = 0;
                     else if (changedValue == "Rocky Planet Surface") dr["sector_type"] = 1;

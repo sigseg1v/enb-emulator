@@ -10,10 +10,10 @@ namespace CommonTools.Database
     /// </summary>
     class ColName : Attribute
     {
-	    public readonly string Text;
+        public readonly string Text;
         public ColName(string text)
-	    {
-		    Text = text;
-	    }
+        {
+            Text = text;
+        }
     }
 }

@@ -42,9 +42,9 @@ namespace TalkTreeEditor
 
                 var branch = new Reply.BranchControl();
                 Console.WriteLine($"branch   OK: ctor");
-                var trade  = new Reply.TradeControl();
+                var trade = new Reply.TradeControl();
                 Console.WriteLine($"trade    OK: ctor");
-                var flag   = new Reply.FlagControl();
+                var flag = new Reply.FlagControl();
                 Console.WriteLine($"flag     OK: ctor");
 
                 Console.WriteLine("smoke OK: all 4 talktreeeditor controls instantiated");

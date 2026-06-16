@@ -28,7 +28,7 @@ namespace SectorEditor.PiccoloShim
                 if (!_havePrev) { _lastWorld = e.Position; _havePrev = true; return; }
                 float dx = e.Position.X - _lastWorld.X;
                 float dy = e.Position.Y - _lastWorld.Y;
-                ((PNode) sender).TranslateBy(dx, dy);
+                ((PNode)sender).TranslateBy(dx, dy);
                 _lastWorld = e.Position;
             };
             node.MouseUp += (_, _) => _havePrev = false;

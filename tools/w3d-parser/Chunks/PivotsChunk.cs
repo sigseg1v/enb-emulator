@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections;
 using System.Linq;
@@ -26,7 +26,7 @@ namespace WestWood3D.Chunks
             int NumPivots = chunkLength / 60;
             pivot_data = new object[NumPivots][];
 
-            for (int i = 0; i < NumPivots ; i++)
+            for (int i = 0; i < NumPivots; i++)
             {
                 byte[] pivotNameArray = br.ReadBytes(16);
                 String PivotName = System.Text.ASCIIEncoding.ASCII.GetString(pivotNameArray);
@@ -68,7 +68,7 @@ namespace WestWood3D.Chunks
                     Console.Out.WriteLine("\t Rotation: (" + rotation[0] + ", "
                             + rotation[1] + ", " + rotation[2] + ", " + rotation[3]
                             + ")");
-                } 
+                }
             }
         }
 

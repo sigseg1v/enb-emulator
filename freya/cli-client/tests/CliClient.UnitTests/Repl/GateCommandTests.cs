@@ -21,9 +21,9 @@ public sealed class GateCommandTests
 
         Assert.Equal(16, frame.Length);
         Assert.Equal(0x4003992a, BinaryPrimitives.ReadInt32LittleEndian(frame.AsSpan(0)));
-        Assert.Equal(18,         BinaryPrimitives.ReadInt32LittleEndian(frame.AsSpan(4)));
+        Assert.Equal(18, BinaryPrimitives.ReadInt32LittleEndian(frame.AsSpan(4)));
         Assert.Equal(0x00000215, BinaryPrimitives.ReadInt32LittleEndian(frame.AsSpan(8)));
-        Assert.Equal(0,          BinaryPrimitives.ReadInt32LittleEndian(frame.AsSpan(12)));
+        Assert.Equal(0, BinaryPrimitives.ReadInt32LittleEndian(frame.AsSpan(12)));
     }
 
     [Fact]

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -42,7 +42,7 @@ namespace WestWood3D.Chunks
                 for (int i2 = 0; i2 < 2; i2++)
                 {
                     reserved[i2] = br.ReadInt32();
-                }  
+                }
             }
         }
 

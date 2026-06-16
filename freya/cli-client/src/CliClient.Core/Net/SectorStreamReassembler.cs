@@ -35,9 +35,9 @@ namespace N7.CliClient.Net;
 public sealed class SectorStreamReassembler
 {
     private const int HeaderSize = 12;            // EnbUdpHeader
-    private const ushort PacketSequence  = 0x2016;
+    private const ushort PacketSequence = 0x2016;
     private const ushort PacketCSequence = 0x201A;
-    private const ushort ToggleSendFreq  = 0x1007;
+    private const ushort ToggleSendFreq = 0x1007;
 
     private static readonly IReadOnlyList<Packet> None = Array.Empty<Packet>();
 
@@ -88,7 +88,7 @@ public sealed class SectorStreamReassembler
         List<Packet>? frames = null;
         while (_stream.Count >= PacketHeader.WireSize)
         {
-            int size  = _stream[0] | (_stream[1] << 8);
+            int size = _stream[0] | (_stream[1] << 8);
             ushort op = (ushort)(_stream[2] | (_stream[3] << 8));
             if (size < PacketHeader.WireSize || size > 65535)
             {

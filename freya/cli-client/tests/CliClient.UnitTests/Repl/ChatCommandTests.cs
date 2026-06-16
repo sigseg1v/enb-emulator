@@ -13,11 +13,11 @@ namespace N7.CliClient.UnitTests.Repl;
 public sealed class ChatCommandTests
 {
     [Theory]
-    [InlineData("sector",  "hello",  ChatChannel.Broadcast, "hello")]
-    [InlineData("whisper", "psst",   ChatChannel.Target,    "psst")]
-    [InlineData("gm",      "help me", ChatChannel.Broadcast, "/gm help me")]
-    [InlineData("dev",     "ping",   ChatChannel.Broadcast, "/dev ping")]
-    [InlineData("beta",    "yo",     ChatChannel.Broadcast, "/beta yo")]
+    [InlineData("sector", "hello", ChatChannel.Broadcast, "hello")]
+    [InlineData("whisper", "psst", ChatChannel.Target, "psst")]
+    [InlineData("gm", "help me", ChatChannel.Broadcast, "/gm help me")]
+    [InlineData("dev", "ping", ChatChannel.Broadcast, "/dev ping")]
+    [InlineData("beta", "yo", ChatChannel.Broadcast, "/beta yo")]
     public void MapChannel_ProducesFaithfulWire(
         string channel, string message, ChatChannel expectedType, string expectedWire)
     {

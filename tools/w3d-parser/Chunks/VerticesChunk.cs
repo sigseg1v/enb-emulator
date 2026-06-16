@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -38,7 +38,7 @@ namespace WestWood3D.Chunks
                 }
             }
 
-            
+
         }
 
         [CategoryAttribute("Chunk Values"), ReadOnlyAttribute(true), DescriptionAttribute("An array of Vertices.")]

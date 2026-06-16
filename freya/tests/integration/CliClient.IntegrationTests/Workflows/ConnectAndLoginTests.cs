@@ -42,12 +42,12 @@ public sealed class ConnectAndLoginTests
         var workflow = new ConnectAndLogin(
             new ConnectAndLoginOptions
             {
-                LoginHost  = _server.LoginHost,
-                LoginPort  = _server.LoginPort,
+                LoginHost = _server.LoginHost,
+                LoginPort = _server.LoginPort,
                 GlobalHost = _server.GlobalHost,
                 GlobalPort = _server.GlobalPort,
-                Username   = account.Username,
-                Password   = account.Password,
+                Username = account.Username,
+                Password = account.Password,
                 IdleDuration = TimeSpan.FromSeconds(2),
                 AcceptUntrustedLoginCertificate = true,
             },
@@ -78,12 +78,12 @@ public sealed class ConnectAndLoginTests
         var workflow = new ConnectAndLogin(
             new ConnectAndLoginOptions
             {
-                LoginHost  = _server.LoginHost,
-                LoginPort  = _server.LoginPort,
+                LoginHost = _server.LoginHost,
+                LoginPort = _server.LoginPort,
                 GlobalHost = _server.GlobalHost,
                 GlobalPort = _server.GlobalPort,
-                Username   = account.Username,
-                Password   = "wrong_" + account.Password,
+                Username = account.Username,
+                Password = "wrong_" + account.Password,
                 IdleDuration = TimeSpan.FromSeconds(1),
                 AcceptUntrustedLoginCertificate = true,
             },

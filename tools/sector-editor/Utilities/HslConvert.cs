@@ -38,9 +38,9 @@ namespace SectorEditor.Utilities
                 g = HueToRgb(p, q, h);
                 b = HueToRgb(p, q, h - 1.0 / 3);
             }
-            byte cr = (byte) Math.Round(Math.Clamp(r, 0, 1) * 255);
-            byte cg = (byte) Math.Round(Math.Clamp(g, 0, 1) * 255);
-            byte cb = (byte) Math.Round(Math.Clamp(b, 0, 1) * 255);
+            byte cr = (byte)Math.Round(Math.Clamp(r, 0, 1) * 255);
+            byte cg = (byte)Math.Round(Math.Clamp(g, 0, 1) * 255);
+            byte cb = (byte)Math.Round(Math.Clamp(b, 0, 1) * 255);
             return Color.FromArgb(255, cr, cg, cb);
         }
 
@@ -60,7 +60,7 @@ namespace SectorEditor.Utilities
                 else h = (r - g) / d + 4;
                 h /= 6.0;
             }
-            return new HSL { H = (float) h, S = (float) s, L = (float) l };
+            return new HSL { H = (float)h, S = (float)s, L = (float)l };
         }
 
         private static double HueToRgb(double p, double q, double t)

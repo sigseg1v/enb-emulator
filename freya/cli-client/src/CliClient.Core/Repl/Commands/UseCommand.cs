@@ -26,9 +26,9 @@ public sealed class UseCommand : ICommandHandler
     private readonly SessionContext _ctx;
     public UseCommand(SessionContext ctx) { ArgumentNullException.ThrowIfNull(ctx); _ctx = ctx; }
 
-    public string Name    => "use";
+    public string Name => "use";
     public string Summary => "activate an equipped item (fire weapon / toggle device)";
-    public string Usage   =>
+    public string Usage =>
         "use <slot> [invNum]\n" +
         "  slot   = equipment slot index to activate\n" +
         "  invNum = inventory page (default 2, matches the retail client)\n" +

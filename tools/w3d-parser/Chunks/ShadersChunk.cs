@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -97,7 +97,7 @@ namespace WestWood3D.Chunks
                     Console.Out.WriteLine("\t Shader " + i + " AlphaTest: " + alpha_test);
                     Console.Out.WriteLine("\t Shader " + i + " PostDetailColorFunc: " + post_detail_color_func);
                     Console.Out.WriteLine("\t Shader " + i + " PostDetailAlphaFunc: " + post_detail_alpha_func);
-                } 
+                }
             }
         }
 

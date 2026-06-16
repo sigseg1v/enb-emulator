@@ -27,9 +27,9 @@ public sealed class InvCommand : ICommandHandler
     private readonly SessionContext _ctx;
     public InvCommand(SessionContext ctx) { ArgumentNullException.ThrowIfNull(ctx); _ctx = ctx; }
 
-    public string Name    => "inv";
+    public string Name => "inv";
     public string Summary => "move an item (cargo/equip/vault/vendor/space)";
-    public string Usage   =>
+    public string Usage =>
         "inv <from> <fromSlot> <to> <toSlot> [num]\n" +
         "  from/to = cargo | equip | vault | vendor | space | manufacture\n" +
         "  fromSlot/toSlot = slot index; toSlot may be 'free' (-1) for first free\n" +
@@ -91,12 +91,12 @@ public sealed class InvCommand : ICommandHandler
 
     private static InventoryContainer? ParseContainer(string s) => s.ToLowerInvariant() switch
     {
-        "cargo"                  => InventoryContainer.Cargo,
-        "equip" or "equipped"    => InventoryContainer.Equip,
-        "vault" or "secure"      => InventoryContainer.Vault,
+        "cargo" => InventoryContainer.Cargo,
+        "equip" or "equipped" => InventoryContainer.Equip,
+        "vault" or "secure" => InventoryContainer.Vault,
         "vendor" or "sell" or "buy" => InventoryContainer.Vendor,
-        "space" or "jettison"    => InventoryContainer.Space,
-        "manufacture" or "manu"  => InventoryContainer.Manufacture,
+        "space" or "jettison" => InventoryContainer.Space,
+        "manufacture" or "manu" => InventoryContainer.Manufacture,
         _ => null,
     };
 

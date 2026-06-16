@@ -17,9 +17,9 @@ public sealed class GuildPlayerPermissionsRecord : PacketRecord
     protected override void WriteFields(StringBuilder sb)
     {
         if (Payload.Length < 16) { Flag(sb, $"GUILD_PLAYER_PERMISSIONS truncated -- {Payload.Length} bytes, expected 16"); return; }
-        FHex(sb,  0, "Permission", ReadI32BE(Payload,  0), "(BE -- htonl at emit)");
-        FDec(sb,  4, "MaxPromote", ReadI32BE(Payload,  4), "(BE)");
-        FDec(sb,  8, "MaxRemove",  ReadI32BE(Payload,  8), "(BE)");
-        FDec(sb, 12, "MinDemote",  ReadI32BE(Payload, 12), "(BE)");
+        FHex(sb, 0, "Permission", ReadI32BE(Payload, 0), "(BE -- htonl at emit)");
+        FDec(sb, 4, "MaxPromote", ReadI32BE(Payload, 4), "(BE)");
+        FDec(sb, 8, "MaxRemove", ReadI32BE(Payload, 8), "(BE)");
+        FDec(sb, 12, "MinDemote", ReadI32BE(Payload, 12), "(BE)");
     }
 }

@@ -42,7 +42,7 @@ namespace SectorEditor.Sprites
             float sigRadius = float.Parse(r["signature"].ToString());
             float rrRadius = float.Parse(r["radar_range"].ToString());
             float explorationRange = float.Parse(r["exploration_range"].ToString());
-            appearsInRadar = (bool) r["appears_in_radar"];
+            appearsInRadar = (bool)r["appears_in_radar"];
             int navType = int.Parse(r["nav_type"].ToString());
 
             float sigDia = (sigRadius * 2) / 100;
@@ -61,14 +61,14 @@ namespace SectorEditor.Sprites
 
             float sigX = (x / 100) - ((sigDia / 2) - (decorationImage.Width / 2));
             float sigY = (y / 100) - ((sigDia / 2) - (decorationImage.Height / 2));
-            float rrX  = (x / 100) - ((rrDia / 2)  - (decorationImage.Width / 2));
-            float rrY  = (y / 100) - ((rrDia / 2)  - (decorationImage.Height / 2));
+            float rrX = (x / 100) - ((rrDia / 2) - (decorationImage.Width / 2));
+            float rrY = (y / 100) - ((rrDia / 2) - (decorationImage.Height / 2));
             float expX = (x / 100) - ((expDia / 2) - (decorationImage.Width / 2));
             float expY = (y / 100) - ((expDia / 2) - (decorationImage.Height / 2));
 
             var sigPen = new Pen(Color.DarkSlateGray, 3.0F);
-            var rrPen  = new Pen(Color.Gray,          2.0F) { DashStyle = DashStyle.Dash };
-            var expPen = new Pen(Color.LightGray,     1.0F) { DashStyle = DashStyle.DashDotDot };
+            var rrPen = new Pen(Color.Gray, 2.0F) { DashStyle = DashStyle.Dash };
+            var expPen = new Pen(Color.LightGray, 1.0F) { DashStyle = DashStyle.DashDotDot };
 
             var sigCircle = PPath.CreateEllipse(sigX, sigY, sigDia, sigDia);
             sigCircle.Pen = sigPen;
@@ -99,7 +99,7 @@ namespace SectorEditor.Sprites
             decorationImage.Tag = this;
 
             decorationImage.MouseDown += Image_MouseDown;
-            decorationImage.MouseUp   += Image_MouseUp;
+            decorationImage.MouseUp += Image_MouseUp;
             decorationImage.MouseDrag += Image_MouseDrag;
 
             layer.AddChild(decorationImage);
@@ -110,20 +110,20 @@ namespace SectorEditor.Sprites
             int objectType = int.Parse(r["type"].ToString());
             string oType = objectType switch
             {
-                0  => "Mobs",
-                3  => "Planets",
+                0 => "Mobs",
+                3 => "Planets",
                 11 => "Stargates",
                 12 => "Starbases",
                 37 => "Decorations",
                 38 => "Harvestables",
-                _  => "",
+                _ => "",
             };
 
             dp = new BaseProps();
             dp.SectorID = int.Parse(r["sector_id"].ToString());
             dp.NavType = r["nav_type"].ToString();
             dp.Signature = float.Parse(r["signature"].ToString());
-            dp.IsHuge = (bool) r["is_huge"];
+            dp.IsHuge = (bool)r["is_huge"];
             dp.BaseXP = int.Parse(r["base_xp"].ToString());
             dp.ExplorationRange = float.Parse(r["exploration_range"].ToString());
             dp.BaseAssetID = int.Parse(r["base_asset_id"].ToString());
@@ -153,12 +153,12 @@ namespace SectorEditor.Sprites
             if (double.IsNaN(ang1[0])) ang1[0] = 0;
             if (double.IsNaN(ang1[1])) ang1[1] = 0;
             if (double.IsNaN(ang1[2])) ang1[2] = 0;
-            dp.Orientation_Yaw   = Math.Round(ang1[0], 0);
+            dp.Orientation_Yaw = Math.Round(ang1[0], 0);
             dp.Orientation_Pitch = Math.Round(ang1[1], 0);
-            dp.Orientation_Roll  = Math.Round(ang1[2], 0);
+            dp.Orientation_Roll = Math.Round(ang1[2], 0);
 
             dp.Name = r["name"].ToString();
-            dp.AppearsInRadar = (bool) r["appears_in_radar"];
+            dp.AppearsInRadar = (bool)r["appears_in_radar"];
             dp.RadarRange = float.Parse(r["radar_range"].ToString());
             dp.Destination = int.Parse(r["gate_to"].ToString());
             dp.SoundEffect = int.Parse(r["sound_effect_id"].ToString());
@@ -236,46 +236,46 @@ namespace SectorEditor.Sprites
                 case "Scale":
                     dr["scale"] = float.Parse(changedValue); break;
                 case "PositionX":
-                {
-                    dr["position_x"] = float.Parse(changedValue);
-                    float dx = (float.Parse(changedValue) / 100) - decorationImage.X;
-                    decorationImage.TranslateBy(dx, 0);
-                    break;
-                }
+                    {
+                        dr["position_x"] = float.Parse(changedValue);
+                        float dx = (float.Parse(changedValue) / 100) - decorationImage.X;
+                        decorationImage.TranslateBy(dx, 0);
+                        break;
+                    }
                 case "PositionY":
-                {
-                    dr["position_y"] = float.Parse(changedValue);
-                    float dy = (float.Parse(changedValue) / 100) - decorationImage.Y;
-                    decorationImage.TranslateBy(0, dy);
-                    break;
-                }
+                    {
+                        dr["position_y"] = float.Parse(changedValue);
+                        float dy = (float.Parse(changedValue) / 100) - decorationImage.Y;
+                        decorationImage.TranslateBy(0, dy);
+                        break;
+                    }
                 case "PositionZ":
                     dr["position_z"] = float.Parse(changedValue); break;
                 case "Orientation_Yaw":
                 case "Orientation_Pitch":
                 case "Orientation_Roll":
-                {
-                    var qtmp = new N7.Utilities.QuaternionCalc();
-                    double[] q1 = qtmp.AngleToQuat(dp.Orientation_Yaw, dp.Orientation_Pitch, dp.Orientation_Roll);
-                    dr["orientation_z"] = q1[0];
-                    dr["orientation_u"] = q1[1];
-                    dr["orientation_v"] = q1[2];
-                    dr["orientation_w"] = q1[3];
-                    break;
-                }
+                    {
+                        var qtmp = new N7.Utilities.QuaternionCalc();
+                        double[] q1 = qtmp.AngleToQuat(dp.Orientation_Yaw, dp.Orientation_Pitch, dp.Orientation_Roll);
+                        dr["orientation_z"] = q1[0];
+                        dr["orientation_u"] = q1[1];
+                        dr["orientation_v"] = q1[2];
+                        dr["orientation_w"] = q1[3];
+                        break;
+                    }
                 case "Name":
-                {
-                    dr["name"] = changedValue;
-                    float x = decorationImage.X;
-                    float y = decorationImage.Y;
-                    var nameNode = (PText) decorationImage.GetChild(3);
-                    nameNode.Text = changedValue;
-                    nameNode.TextAlignment = StringAlignment.Center;
-                    nameNode.X = x - (nameNode.Width / 2);
-                    nameNode.Y = y - 20;
-                    _grid.OnCellChanged("name", changedValue);
-                    break;
-                }
+                    {
+                        dr["name"] = changedValue;
+                        float x = decorationImage.X;
+                        float y = decorationImage.Y;
+                        var nameNode = (PText)decorationImage.GetChild(3);
+                        nameNode.Text = changedValue;
+                        nameNode.TextAlignment = StringAlignment.Center;
+                        nameNode.X = x - (nameNode.Width / 2);
+                        nameNode.Y = y - 20;
+                        _grid.OnCellChanged("name", changedValue);
+                        break;
+                    }
                 case "AppearsInRadar":
                     dr["appears_in_radar"] = bool.Parse(changedValue);
                     changeImage(bool.Parse(changedValue) ? 1 : 0);

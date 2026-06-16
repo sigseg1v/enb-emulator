@@ -67,9 +67,9 @@ public sealed class UndockCommand : ICommandHandler
     private readonly SessionContext _ctx;
     public UndockCommand(SessionContext ctx) { ArgumentNullException.ThrowIfNull(ctx); _ctx = ctx; }
 
-    public string Name    => "undock";
+    public string Name => "undock";
     public string Summary => "launch out of the station into space (0x004E StarbaseRequest, Action=1)";
-    public string Usage   =>
+    public string Usage =>
         "undock\n" +
         "  Sends the retail Launch packet (0x004E STARBASE_REQUEST with Action=1),\n" +
         "  waits for the server's 0x003A SERVER_HANDOFF, then re-joins the parent\n" +

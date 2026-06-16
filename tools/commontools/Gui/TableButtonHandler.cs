@@ -35,9 +35,9 @@ namespace CommonTools.Gui
         {
             int count = table.SelectedItems != null ? table.SelectedItems.Count : 0;
             if (delete != null) delete.IsEnabled = count != 0;
-            if (edit   != null) edit.IsEnabled   = false;
-            if (up     != null) up.IsEnabled     = count == 1 && table.SelectedIndex > 0;
-            if (down   != null) down.IsEnabled   = count == 1 && table.SelectedIndex < (table.ItemCount - 1);
+            if (edit != null) edit.IsEnabled = false;
+            if (up != null) up.IsEnabled = count == 1 && table.SelectedIndex > 0;
+            if (down != null) down.IsEnabled = count == 1 && table.SelectedIndex < (table.ItemCount - 1);
         }
 
         void OnMoveUp(object sender, RoutedEventArgs e)

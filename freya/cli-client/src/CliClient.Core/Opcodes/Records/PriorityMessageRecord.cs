@@ -36,7 +36,7 @@ public sealed class PriorityMessageRecord : PacketRecord
         off = end2 + 1;
 
         if (off + 8 > Payload.Length) { Flag(sb, $"PRIORITY_MESSAGE missing trailing Time/Priority -- {Payload.Length - off} bytes left"); return; }
-        FDec(sb, off,     "Time",     ReadI32LE(Payload, off));
+        FDec(sb, off, "Time", ReadI32LE(Payload, off));
         FDec(sb, off + 4, "Priority", ReadI32LE(Payload, off + 4));
     }
 

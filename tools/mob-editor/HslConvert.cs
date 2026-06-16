@@ -20,8 +20,8 @@ namespace MobEditor
             }
             else
             {
-                double q  = l < 0.5 ? l * (1 + s) : l + s - l * s;
-                double p  = 2 * l - q;
+                double q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+                double p = 2 * l - q;
                 r = HueToRgb(p, q, h + 1.0 / 3);
                 g = HueToRgb(p, q, h);
                 b = HueToRgb(p, q, h - 1.0 / 3);
@@ -37,7 +37,7 @@ namespace MobEditor
             if (t < 0) t += 1;
             if (t > 1) t -= 1;
             if (t < 1.0 / 6) return p + (q - p) * 6 * t;
-            if (t < 0.5)     return q;
+            if (t < 0.5) return q;
             if (t < 2.0 / 3) return p + (q - p) * (2.0 / 3 - t) * 6;
             return p;
         }

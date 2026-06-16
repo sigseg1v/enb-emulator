@@ -37,7 +37,7 @@ public sealed class VersionRequestCodecTests
         var codec = new VersionRequestCodec();
         var original = new VersionRequest(123, 456);
         var encoded = codec.EncodeOutbound(original);
-        var decoded = (VersionRequest) codec.DecodeInbound(encoded);
+        var decoded = (VersionRequest)codec.DecodeInbound(encoded);
         Assert.Equal(original, decoded);
     }
 

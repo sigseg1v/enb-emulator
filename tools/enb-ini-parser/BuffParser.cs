@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -25,7 +25,7 @@ namespace EnBIniParser
                 try
                 {
                     IniFileReader reader = new IniFileReader("C:\\Documents and Settings\\Josh\\Desktop\\buffdef.ini");
-                    IniFileSectionStart test = reader.GotoSection("BUFF-"+i);
+                    IniFileSectionStart test = reader.GotoSection("BUFF-" + i);
                     List<IniFileValue> test2 = reader.ReadSectionValues();
 
                     foreach (IniFileValue r in test2)
@@ -35,9 +35,9 @@ namespace EnBIniParser
 
                     id = int.Parse(test.SectionName.Replace("BUFF-", ""));
 
-                    String query = "INSERT INTO buffs SET buff_id='" + id + "', type='"+type+"', "+
-                        "asset_name='"+asset_name+"', asset_id='"+asset_id+"', tooltip='"+tooltip+"', "+
-                        "alt_tooltip='"+alt_tooltip+"', is_good_buff='"+is_good_buff+"';";
+                    String query = "INSERT INTO buffs SET buff_id='" + id + "', type='" + type + "', " +
+                        "asset_name='" + asset_name + "', asset_id='" + asset_id + "', tooltip='" + tooltip + "', " +
+                        "alt_tooltip='" + alt_tooltip + "', is_good_buff='" + is_good_buff + "';";
 
                     DataTable buffInsert = Database.executeQuery(Database.DatabaseName.net7, query);
                     Console.Out.WriteLine(query);

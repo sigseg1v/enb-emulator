@@ -63,7 +63,7 @@ namespace LaunchFreya.Network
             _upstreamPort = upstreamPort;
             _upstreamIsLoopback = IsLoopback(upstreamHost);
             _log = log ?? (_ => { });
-            _v4 = new TcpListener(IPAddress.Loopback,     ListenPort);
+            _v4 = new TcpListener(IPAddress.Loopback, ListenPort);
             _v6 = new TcpListener(IPAddress.IPv6Loopback, ListenPort);
         }
 
@@ -77,7 +77,7 @@ namespace LaunchFreya.Network
                     client = await listener.AcceptTcpClientAsync(_cts.Token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) { break; }
-                catch (ObjectDisposedException)    { break; }
+                catch (ObjectDisposedException) { break; }
                 catch (Exception ex)
                 {
                     _log($"auth relay accept failed: {ex.Message}");

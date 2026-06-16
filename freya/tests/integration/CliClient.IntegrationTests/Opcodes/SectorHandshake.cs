@@ -316,8 +316,8 @@ public static class SectorHandshake
         => WithProxyRecycleOnWedgeAsync(
             server, ct,
             () => ReestablishOnceAsync(server, authTicket, slot, sectorId, ct));
-            // No clearSlot: the avatar is expected to already exist; the redo
-            // reconnects against it rather than recreating it.
+    // No clearSlot: the avatar is expected to already exist; the redo
+    // reconnects against it rather than recreating it.
 
     // One reconnect attempt against an existing avatar; see ReestablishAsync.
     private static async Task<Session> ReestablishOnceAsync(

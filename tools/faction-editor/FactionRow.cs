@@ -5,7 +5,7 @@ namespace FactionEditor
     // binding pipeline can't address nested types cleanly.
     public sealed class FactionRow
     {
-        public int    FactionID { get; set; }
-        public string Name      { get; set; }
+        public int FactionID { get; set; }
+        public string Name { get; set; }
     }
 }

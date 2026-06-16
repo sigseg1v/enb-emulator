@@ -44,8 +44,8 @@ namespace SectorEditor.PiccoloShim
                 typeface,
                 FontSize,
                 Brushes_Avalonia.White);
-            Width = (float) _ft.Width;
-            Height = (float) _ft.Height;
+            Width = (float)_ft.Width;
+            Height = (float)_ft.Height;
         }
 
         public override void Render(DrawingContext ctx)

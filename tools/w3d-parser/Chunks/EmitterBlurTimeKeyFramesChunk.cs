@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -27,13 +27,14 @@ namespace WestWood3D.Chunks
             HeaderName = ChunkHeader.W3D_CHUNK_EMITTER_BLUR_TIME_KEYFRAMES.ToString();
 
             key_frame_count = br.ReadInt32();
-    	    random = br.ReadSingle();
-    	    reserved = br.ReadInt32();
-        	
-    	    if(dbg){
+            random = br.ReadSingle();
+            reserved = br.ReadInt32();
+
+            if (dbg)
+            {
                 Console.Out.WriteLine("\t  Key Frame Count: " + key_frame_count);
-			    Console.Out.WriteLine("\t  Random: "+random);
-    	    }
+                Console.Out.WriteLine("\t  Random: " + random);
+            }
 
             if (key_frame_count == 0)
             {
@@ -41,31 +42,35 @@ namespace WestWood3D.Chunks
                 time = new float[1];
                 blur_time = new float[1];
 
-        	    time[0] = br.ReadSingle();
-			    blur_time[0] = br.ReadSingle();
-    			
-			    if(dbg){
-	        	    Console.Out.WriteLine("\t  ********** Blur Time KeyFrame 0 **********");
-	        	    Console.Out.WriteLine("\t  Time: "+time);
-	    		    Console.Out.WriteLine("\t  Blur Time: "+blur_time);
-			    }
-        		
-    	    }else{
+                time[0] = br.ReadSingle();
+                blur_time[0] = br.ReadSingle();
+
+                if (dbg)
+                {
+                    Console.Out.WriteLine("\t  ********** Blur Time KeyFrame 0 **********");
+                    Console.Out.WriteLine("\t  Time: " + time);
+                    Console.Out.WriteLine("\t  Blur Time: " + blur_time);
+                }
+
+            }
+            else
+            {
                 time = new float[key_frame_count];
                 blur_time = new float[key_frame_count];
 
                 for (int i = 0; i < key_frame_count; i++)
                 {
-    			    time[i] = br.ReadSingle();
-    			    blur_time[i] = br.ReadSingle();
-        			
-    			    if(dbg){
-	    			    Console.Out.WriteLine("\t  ********** Blur Time KeyFrame "+i+"**********");
-	            	    Console.Out.WriteLine("\t  Time: "+time);
-	        		    Console.Out.WriteLine("\t  Blur Time: "+blur_time);
-    			    }
-    		    }    
-    	    }
+                    time[i] = br.ReadSingle();
+                    blur_time[i] = br.ReadSingle();
+
+                    if (dbg)
+                    {
+                        Console.Out.WriteLine("\t  ********** Blur Time KeyFrame " + i + "**********");
+                        Console.Out.WriteLine("\t  Time: " + time);
+                        Console.Out.WriteLine("\t  Blur Time: " + blur_time);
+                    }
+                }
+            }
         }
 
         [CategoryAttribute("Chunk Values"), ReadOnlyAttribute(true), DescriptionAttribute("The amount of keyframes affected by the blur time.")]

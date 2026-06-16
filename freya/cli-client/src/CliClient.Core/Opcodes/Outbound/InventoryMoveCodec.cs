@@ -92,12 +92,12 @@ public sealed class InventoryMoveCodec : IOpcodeCodec
         }
 
         return new InventoryMoveMessage(
-            GameId:   BinaryPrimitives.ReadInt32BigEndian(payload[0..4]),
-            FromInv:  BinaryPrimitives.ReadInt32BigEndian(payload[4..8]),
+            GameId: BinaryPrimitives.ReadInt32BigEndian(payload[0..4]),
+            FromInv: BinaryPrimitives.ReadInt32BigEndian(payload[4..8]),
             FromSlot: BinaryPrimitives.ReadInt32BigEndian(payload[8..12]),
-            ToInv:    BinaryPrimitives.ReadInt32BigEndian(payload[12..16]),
-            ToSlot:   BinaryPrimitives.ReadInt32BigEndian(payload[16..20]),
-            Num:      BinaryPrimitives.ReadInt32BigEndian(payload[20..24]));
+            ToInv: BinaryPrimitives.ReadInt32BigEndian(payload[12..16]),
+            ToSlot: BinaryPrimitives.ReadInt32BigEndian(payload[16..20]),
+            Num: BinaryPrimitives.ReadInt32BigEndian(payload[20..24]));
     }
 
     public byte[] EncodeOutbound(object message)
@@ -109,9 +109,9 @@ public sealed class InventoryMoveCodec : IOpcodeCodec
 
         byte[] buf = new byte[Size];
         Span<byte> span = buf;
-        BinaryPrimitives.WriteInt32BigEndian(span[0..4],   move.GameId);
-        BinaryPrimitives.WriteInt32BigEndian(span[4..8],   move.FromInv);
-        BinaryPrimitives.WriteInt32BigEndian(span[8..12],  move.FromSlot);
+        BinaryPrimitives.WriteInt32BigEndian(span[0..4], move.GameId);
+        BinaryPrimitives.WriteInt32BigEndian(span[4..8], move.FromInv);
+        BinaryPrimitives.WriteInt32BigEndian(span[8..12], move.FromSlot);
         BinaryPrimitives.WriteInt32BigEndian(span[12..16], move.ToInv);
         BinaryPrimitives.WriteInt32BigEndian(span[16..20], move.ToSlot);
         BinaryPrimitives.WriteInt32BigEndian(span[20..24], move.Num);

@@ -23,9 +23,9 @@ public sealed class EnterCommand : ICommandHandler
         _ctx = ctx;
     }
 
-    public string Name    => "enter";
+    public string Name => "enter";
     public string Summary => "enter the world as the named character";
-    public string Usage   => "enter <firstname>";
+    public string Usage => "enter <firstname>";
     public string? Placeholder => "<firstname>";
 
     // Available once logged in with a character list to pick from; a primary

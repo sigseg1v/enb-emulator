@@ -25,6 +25,6 @@ public sealed class CameraControlRecord : PacketRecord
     {
         if (Payload.Length < 8) { Flag(sb, $"CAMERA_CONTROL truncated -- {Payload.Length} bytes, expected 8"); return; }
         FHex(sb, 0, "Message", ReadI32BE(Payload, 0), "(BE -- pre-swapped at emit)");
-        FHex(sb, 4, "GameID",  ReadI32BE(Payload, 4), "(BE -- ntohl at emit)");
+        FHex(sb, 4, "GameID", ReadI32BE(Payload, 4), "(BE -- ntohl at emit)");
     }
 }

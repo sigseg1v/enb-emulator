@@ -18,16 +18,16 @@ public sealed class MessageStringRecord : PacketRecord
     {
         if (Payload.Length < 3) { Flag(sb, $"MESSAGE_STRING truncated -- {Payload.Length} bytes, expected >= 3"); return; }
         short length = ReadI16LE(Payload, 0);
-        byte  color  = Payload[2];
-        int   msgLen = Math.Max(0, Math.Min(length, Payload.Length - 3));
-        string msg   = length > 0 ? ReadNulString(Payload.AsSpan(3, msgLen)) : "";
+        byte color = Payload[2];
+        int msgLen = Math.Max(0, Math.Min(length, Payload.Length - 3));
+        string msg = length > 0 ? ReadNulString(Payload.AsSpan(3, msgLen)) : "";
         FDec(sb, 0, "Length", length, "(strlen+1)");
-        FDec(sb, 2, "Color",  color,
-            color == 5  ? "(top panel green)"      :
-            color == 4  ? "(group purple)"          :
-            color == 7  ? "(system)"                :
-            color == 17 ? "(yellow warning)"        :
-            color == 11 ? "(orange warning)"        : null);
+        FDec(sb, 2, "Color", color,
+            color == 5 ? "(top panel green)" :
+            color == 4 ? "(group purple)" :
+            color == 7 ? "(system)" :
+            color == 17 ? "(yellow warning)" :
+            color == 11 ? "(orange warning)" : null);
         FStr(sb, 3, msgLen, "Message", msg);
     }
 }

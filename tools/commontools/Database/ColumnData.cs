@@ -140,6 +140,6 @@ namespace CommonTools.Database
 
             return (Data == "true" || Data == "1");
         }
-    
+
     }
 }

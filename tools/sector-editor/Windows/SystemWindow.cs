@@ -110,10 +110,10 @@ namespace SectorEditor.Windows
 
             switch (propertyName)
             {
-                case "Name":     dr["name"] = changedValue; break;
-                case "GalaxyX":  dr["galaxy_x"] = float.Parse(changedValue); break;
-                case "GalaxyY":  dr["galaxy_y"] = float.Parse(changedValue); break;
-                case "GalaxyZ":  dr["galaxy_z"] = float.Parse(changedValue); break;
+                case "Name": dr["name"] = changedValue; break;
+                case "GalaxyX": dr["galaxy_x"] = float.Parse(changedValue); break;
+                case "GalaxyY": dr["galaxy_y"] = float.Parse(changedValue); break;
+                case "GalaxyZ": dr["galaxy_z"] = float.Parse(changedValue); break;
                 case "Color":
                     if (_changedValue is Color color)
                     {
@@ -122,7 +122,7 @@ namespace SectorEditor.Windows
                         dr["color_b"] = color.B;
                     }
                     break;
-                case "Notes":    dr["notes"] = changedValue; break;
+                case "Notes": dr["notes"] = changedValue; break;
             }
 
             if (dr.RowState != DataRowState.Modified)

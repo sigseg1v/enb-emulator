@@ -24,9 +24,9 @@ namespace FactionEditor
     // and faction_matrix rows via the SQL wrappers.
     public partial class MainWindow : Window
     {
-        FactionsSQL      _factions;
+        FactionsSQL _factions;
         FactionMatrixSQL _factionMatrix;
-        DataRow          _facRow;
+        DataRow _facRow;
 
         readonly ObservableCollection<FactionRow> _gridRows = new();
         readonly Dictionary<string, FactionMatrixProps> _matrixProps = new();
@@ -93,7 +93,7 @@ namespace FactionEditor
             {
                 try
                 {
-                    _factions      = new FactionsSQL();
+                    _factions = new FactionsSQL();
                     _factionMatrix = new FactionMatrixSQL();
                 }
                 catch (Exception ex)
@@ -114,7 +114,7 @@ namespace FactionEditor
                 _gridRows.Add(new FactionRow
                 {
                     FactionID = Convert.ToInt32(r["faction_id"]),
-                    Name      = r["name"]?.ToString() ?? "",
+                    Name = r["name"]?.ToString() ?? "",
                 });
             }
             c_Status.Text = $"{_gridRows.Count} factions loaded.";
@@ -139,26 +139,26 @@ namespace FactionEditor
             if (_facRow == null) return;
 
             _suppressEditEvents = true;
-            c_NameText.Text        = _facRow["name"]?.ToString();
+            c_NameText.Text = _facRow["name"]?.ToString();
             c_DescriptionText.Text = _facRow["description"]?.ToString();
-            c_PdaText.Text         = _facRow["PDA_text"]?.ToString();
+            c_PdaText.Text = _facRow["PDA_text"]?.ToString();
             _suppressEditEvents = false;
 
             var fmRows = _factionMatrix.getRowsByID(id);
             foreach (var dr in fmRows)
             {
-                int feID         = Convert.ToInt32(dr["faction_entry_id"]);
-                var entryRow     = _factions.getRowByID(feID);
+                int feID = Convert.ToInt32(dr["faction_entry_id"]);
+                var entryRow = _factions.getRowByID(feID);
                 if (entryRow == null) continue;
 
                 var fmp = new FactionMatrixProps
                 {
-                    ID             = Convert.ToInt32(dr["id"]),
-                    FactionID      = id,
+                    ID = Convert.ToInt32(dr["id"]),
+                    FactionID = id,
                     FactionEntryID = feID,
-                    BaseValue      = Convert.ToInt32(dr["base_value"]),
-                    CurrentValue   = Convert.ToInt32(dr["current_value"]),
-                    RewardFaction  = Convert.ToInt32(dr["reward_faction"]) != 0,
+                    BaseValue = Convert.ToInt32(dr["base_value"]),
+                    CurrentValue = Convert.ToInt32(dr["current_value"]),
+                    RewardFaction = Convert.ToInt32(dr["reward_faction"]) != 0,
                 };
                 var name = entryRow["name"]?.ToString() ?? feID.ToString();
                 c_FactionList.Items.Add(name);
@@ -169,12 +169,12 @@ namespace FactionEditor
         void OnFactionListSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (c_FactionList.SelectedItem is not string name) { ClearPropsPanel(); return; }
-            if (!_matrixProps.TryGetValue(name, out var fmp))  { ClearPropsPanel(); return; }
+            if (!_matrixProps.TryGetValue(name, out var fmp)) { ClearPropsPanel(); return; }
             _currentProps = fmp;
 
             _suppressEditEvents = true;
-            c_BaseValue.Value        = fmp.BaseValue;
-            c_CurrentValue.Text      = fmp.CurrentValue.ToString();
+            c_BaseValue.Value = fmp.BaseValue;
+            c_CurrentValue.Text = fmp.CurrentValue.ToString();
             c_RewardFaction.IsChecked = fmp.RewardFaction;
             _suppressEditEvents = false;
         }
@@ -182,8 +182,8 @@ namespace FactionEditor
         void ClearPropsPanel()
         {
             _suppressEditEvents = true;
-            c_BaseValue.Value        = 0;
-            c_CurrentValue.Text      = "";
+            c_BaseValue.Value = 0;
+            c_CurrentValue.Text = "";
             c_RewardFaction.IsChecked = false;
             _suppressEditEvents = false;
         }
@@ -216,8 +216,8 @@ namespace FactionEditor
         {
             try
             {
-                var tmp     = _factions.newRecord();
-                int newId   = Convert.ToInt32(tmp["faction_id"]);
+                var tmp = _factions.newRecord();
+                int newId = Convert.ToInt32(tmp["faction_id"]);
 
                 // Mirror the original: create a faction_matrix row for
                 // every other faction so the new faction has a relation
@@ -232,7 +232,7 @@ namespace FactionEditor
                 _gridRows.Add(new FactionRow
                 {
                     FactionID = newId,
-                    Name      = tmp["name"]?.ToString() ?? "",
+                    Name = tmp["name"]?.ToString() ?? "",
                 });
                 c_FactionGrid.SelectedItem = _gridRows[^1];
                 c_FactionGrid.ScrollIntoView(_gridRows[^1], null);
@@ -246,9 +246,9 @@ namespace FactionEditor
             if (_facRow == null) return;
             try
             {
-                _facRow["name"]        = c_NameText.Text        ?? "";
+                _facRow["name"] = c_NameText.Text ?? "";
                 _facRow["description"] = c_DescriptionText.Text ?? "";
-                _facRow["PDA_text"]    = c_PdaText.Text         ?? "";
+                _facRow["PDA_text"] = c_PdaText.Text ?? "";
 
                 _factions.updateRecord(_facRow);
                 int factionID = Convert.ToInt32(_facRow["faction_id"]);

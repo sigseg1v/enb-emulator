@@ -75,12 +75,12 @@ public sealed class ChatLogTests
         try
         {
             using (var log = ChatLog.OpenFile(file)) log.Log("Alice", "first");
-            using (var log = ChatLog.OpenFile(file)) log.Log("Bob",   "second");
+            using (var log = ChatLog.OpenFile(file)) log.Log("Bob", "second");
 
             string[] lines = File.ReadAllLines(file);
             Assert.Equal(2, lines.Length);
-            Assert.Contains("Alice: first",  lines[0]);
-            Assert.Contains("Bob: second",   lines[1]);
+            Assert.Contains("Alice: first", lines[0]);
+            Assert.Contains("Bob: second", lines[1]);
         }
         finally
         {

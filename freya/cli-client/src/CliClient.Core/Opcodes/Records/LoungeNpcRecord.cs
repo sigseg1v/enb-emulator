@@ -29,22 +29,22 @@ public sealed class LoungeNpcRecord : PacketRecord
     {
         if (Payload.Length < 8) { Flag(sb, $"LOUNGE_NPC truncated -- {Payload.Length} bytes, expected >= 8"); return; }
         int stationType = ReadI32LE(Payload, 0);
-        int roomCount   = ReadI32LE(Payload, 4);
+        int roomCount = ReadI32LE(Payload, 4);
         FDec(sb, 0, "StationType", stationType);
-        FDec(sb, 4, "RoomCount",   roomCount);
+        FDec(sb, 4, "RoomCount", roomCount);
         const int RoomSize = 28;
         int off = 8 + roomCount * RoomSize;
         for (int r = 0; r < roomCount; r++)
         {
             int roff = 8 + r * RoomSize;
             if (roff + RoomSize > Payload.Length) break;
-            int   roomNum   = ReadI32LE(Payload, roff);
-            int   roomStyle = ReadI32LE(Payload, roff + 4);
-            float fogNear   = ReadF32LE(Payload, roff + 8);
-            float fogFar    = ReadF32LE(Payload, roff + 12);
-            float fogR      = ReadF32LE(Payload, roff + 16);
-            float fogG      = ReadF32LE(Payload, roff + 20);
-            float fogB      = ReadF32LE(Payload, roff + 24);
+            int roomNum = ReadI32LE(Payload, roff);
+            int roomStyle = ReadI32LE(Payload, roff + 4);
+            float fogNear = ReadF32LE(Payload, roff + 8);
+            float fogFar = ReadF32LE(Payload, roff + 12);
+            float fogR = ReadF32LE(Payload, roff + 16);
+            float fogG = ReadF32LE(Payload, roff + 20);
+            float fogB = ReadF32LE(Payload, roff + 24);
             FBytes(sb, roff, RoomSize, $"  Room[{r}]", $"num={roomNum} style={roomStyle} fog=({fogNear:0.##},{fogFar:0.##}) rgb=({fogR:0.##},{fogG:0.##},{fogB:0.##})");
         }
         if (off + 4 > Payload.Length) { Flag(sb, "truncated before NumTerms"); return; }
@@ -55,13 +55,13 @@ public sealed class LoungeNpcRecord : PacketRecord
         if (termsEnd > Payload.Length) { Flag(sb, $"truncated: need {termsEnd - Payload.Length} more bytes for terms"); return; }
         for (int t = 0; t < numTerms; t++, off += TermSize)
         {
-            int room     = ReadI32LE(Payload, off);
+            int room = ReadI32LE(Payload, off);
             int location = ReadI32LE(Payload, off + 4);
             int termType = ReadI32LE(Payload, off + 8);
             FBytes(sb, off, TermSize, $"  Term[{t}]", $"room={room} loc={location} type={termType}");
         }
         if (off + 4 > Payload.Length) { Flag(sb, "truncated before NumNPCs"); return; }
-        int numNpcs   = ReadI32LE(Payload, off);
+        int numNpcs = ReadI32LE(Payload, off);
         FDec(sb, off, "NumNPCs", numNpcs); off += 4;
         const int NpcHdr = 24;          // 6 int32: Room, Location, NPCID, BoothType, Unknown1, Unknown2
         const int AvatarSize = 241;     // fixed ATTRIB_PACKED AvatarData
@@ -74,15 +74,15 @@ public sealed class LoungeNpcRecord : PacketRecord
                 Flag(sb, $"NPC[{n}] truncated: need {off + NpcSize - Payload.Length} more bytes");
                 return;
             }
-            int room   = ReadI32LE(Payload, off);
-            int loc    = ReadI32LE(Payload, off + 4);
-            int npcId  = ReadI32LE(Payload, off + 8);
-            int booth  = ReadI32LE(Payload, off + 12);
-            int unk1   = ReadI32LE(Payload, off + 16);
-            int unk2   = ReadI32LE(Payload, off + 20);
-            int avOff  = off + NpcHdr;
+            int room = ReadI32LE(Payload, off);
+            int loc = ReadI32LE(Payload, off + 4);
+            int npcId = ReadI32LE(Payload, off + 8);
+            int booth = ReadI32LE(Payload, off + 12);
+            int unk1 = ReadI32LE(Payload, off + 16);
+            int unk2 = ReadI32LE(Payload, off + 20);
+            int avOff = off + NpcHdr;
             string first = ReadNulString(Payload.AsSpan(avOff, NameLen));
-            string last  = ReadNulString(Payload.AsSpan(avOff + NameLen, NameLen));
+            string last = ReadNulString(Payload.AsSpan(avOff + NameLen, NameLen));
             FBytes(sb, off, NpcHdr, $"  NPC[{n}]",
                    $"room={room} loc={loc} npcId=0x{npcId:X4} booth={booth} unk=({unk1},{unk2})");
             FBytes(sb, avOff, NameLen * 2, "    name", $"{Quote(first)} / {Quote(last)}");

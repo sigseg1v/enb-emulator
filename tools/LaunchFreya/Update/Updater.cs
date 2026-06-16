@@ -553,9 +553,9 @@ namespace LaunchFreya.Update
             {
                 psi = new ProcessStartInfo
                 {
-                    FileName        = exePath,
+                    FileName = exePath,
                     UseShellExecute = false,
-                    CreateNoWindow  = true,
+                    CreateNoWindow = true,
                 };
                 psi.ArgumentList.Add(enbInstallDir);
             }
@@ -565,9 +565,9 @@ namespace LaunchFreya.Update
                 string dirDos = WinePathToDos(enbInstallDir) ?? enbInstallDir;
                 psi = new ProcessStartInfo
                 {
-                    FileName        = "wine",
+                    FileName = "wine",
                     UseShellExecute = false,
-                    CreateNoWindow  = true,
+                    CreateNoWindow = true,
                 };
                 psi.ArgumentList.Add(exeDos);
                 psi.ArgumentList.Add(dirDos);
@@ -589,11 +589,11 @@ namespace LaunchFreya.Update
             {
                 var psi = new ProcessStartInfo
                 {
-                    FileName               = "wine",
-                    UseShellExecute        = false,
+                    FileName = "wine",
+                    UseShellExecute = false,
                     RedirectStandardOutput = true,
-                    RedirectStandardError  = true,
-                    CreateNoWindow         = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
                 };
                 psi.ArgumentList.Add("winepath");
                 psi.ArgumentList.Add("-w");

@@ -130,11 +130,11 @@ public sealed class LineEditor : ILineInput
                     return committed;
 
                 case ConsoleKey.Tab:
-                {
-                    bool back = (k.Modifiers & ConsoleModifiers.Shift) != 0;
-                    HandleTab(buffer, ref cursor, ref inMenu, menu, ref menuIndex, ref preMenu, back);
-                    break;
-                }
+                    {
+                        bool back = (k.Modifiers & ConsoleModifiers.Shift) != 0;
+                        HandleTab(buffer, ref cursor, ref inMenu, menu, ref menuIndex, ref preMenu, back);
+                        break;
+                    }
 
                 case ConsoleKey.Backspace:
                     inMenu = false;

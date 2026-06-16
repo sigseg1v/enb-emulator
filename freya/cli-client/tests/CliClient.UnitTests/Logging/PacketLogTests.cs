@@ -21,7 +21,7 @@ public sealed class PacketLogTests
         using var log = new PacketLog(sw);
 
         log.Log(PacketDirection.Outbound, MakePacket(0x0035, new byte[] { 1, 2, 3 }));
-        log.Log(PacketDirection.Inbound,  MakePacket(0x0036, new byte[] { 4 }));
+        log.Log(PacketDirection.Inbound, MakePacket(0x0036, new byte[] { 4 }));
 
         string[] lines = sw.ToString()
             .Split('\n', StringSplitOptions.RemoveEmptyEntries)
@@ -54,11 +54,11 @@ public sealed class PacketLogTests
         var root = doc.RootElement;
 
         Assert.Equal("2026-05-24T18:30:00.0000000+00:00", root.GetProperty("ts").GetString());
-        Assert.Equal("outbound",                          root.GetProperty("direction").GetString());
-        Assert.Equal("0x0035",                            root.GetProperty("opcode_hex").GetString());
-        Assert.Equal("MasterJoin",                        root.GetProperty("opcode_name").GetString());
-        Assert.Equal(2,                                   root.GetProperty("length").GetInt32());
-        Assert.Equal("cafe",                              root.GetProperty("payload_hex").GetString());
+        Assert.Equal("outbound", root.GetProperty("direction").GetString());
+        Assert.Equal("0x0035", root.GetProperty("opcode_hex").GetString());
+        Assert.Equal("MasterJoin", root.GetProperty("opcode_name").GetString());
+        Assert.Equal(2, root.GetProperty("length").GetInt32());
+        Assert.Equal("cafe", root.GetProperty("payload_hex").GetString());
         Assert.False(root.TryGetProperty("decoded", out _));
     }
 
@@ -135,7 +135,7 @@ public sealed class PacketLogTests
             using var d1 = JsonDocument.Parse(lines[0]);
             using var d2 = JsonDocument.Parse(lines[1]);
             Assert.Equal("outbound", d1.RootElement.GetProperty("direction").GetString());
-            Assert.Equal("inbound",  d2.RootElement.GetProperty("direction").GetString());
+            Assert.Equal("inbound", d2.RootElement.GetProperty("direction").GetString());
         }
         finally
         {

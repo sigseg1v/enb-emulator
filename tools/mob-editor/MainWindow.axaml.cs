@@ -26,18 +26,18 @@ namespace MobEditor
     // shipped in this repo.
     public partial class MainWindow : Window
     {
-        MobsSQL       _mobs;
-        MobItemsSQL   _mobItems;
-        FactionSql    _factions;
-        BaseAssetSQL  _baseAssets;
-        ItemBaseSQL   _itemBase;
+        MobsSQL _mobs;
+        MobItemsSQL _mobItems;
+        FactionSql _factions;
+        BaseAssetSQL _baseAssets;
+        ItemBaseSQL _itemBase;
 
         DataRow _selectedMob;
         readonly ObservableCollection<MobRow> _gridRows = new();
 
         // Order-preserving parallel lists. ListBox stores display strings;
         // _equippedRows[i] and _inventoryRows[i] hold the backing DataRows.
-        readonly List<DataRow> _equippedRows  = new();
+        readonly List<DataRow> _equippedRows = new();
         readonly List<DataRow> _inventoryRows = new();
         DataRow _selectedEquipped;
         DataRow _selectedInventory;
@@ -75,11 +75,11 @@ namespace MobEditor
             {
                 try
                 {
-                    _mobs       = new MobsSQL();
-                    _mobItems   = new MobItemsSQL();
-                    _factions   = new FactionSql();
+                    _mobs = new MobsSQL();
+                    _mobItems = new MobItemsSQL();
+                    _factions = new FactionSql();
                     _baseAssets = new BaseAssetSQL();
-                    _itemBase   = new ItemBaseSQL();
+                    _itemBase = new ItemBaseSQL();
                 }
                 catch (Exception ex)
                 {
@@ -135,7 +135,7 @@ namespace MobEditor
             _gridRows.Add(new MobRow
             {
                 MobID = Convert.ToInt32(r["mob_id"]),
-                Name  = r["name"]?.ToString() ?? "",
+                Name = r["name"]?.ToString() ?? "",
                 Level = Convert.ToInt32(r["level"]),
             });
         }
@@ -177,22 +177,22 @@ namespace MobEditor
         {
             _suppressEditEvents = true;
             _selectedMob = null;
-            c_NameText.Text         = "";
+            c_NameText.Text = "";
             c_LevelCombo.SelectedIndex = -1;
-            c_TypeCombo.SelectedIndex  = -1;
+            c_TypeCombo.SelectedIndex = -1;
             c_FactionCombo.SelectedIndex = 0;
-            c_BaseAssetText.Text    = "";
-            c_ScaleText.Text        = "";
-            c_AiText.Text           = "";
-            c_HueValue.Value        = 0;
+            c_BaseAssetText.Text = "";
+            c_ScaleText.Text = "";
+            c_AiText.Text = "";
+            c_HueValue.Value = 0;
             c_SaturationValue.Value = 0;
-            c_LightnessValue.Value  = 0;
+            c_LightnessValue.Value = 0;
             UpdateTintSwatch();
-            c_ShieldModValue.Value  = 0;
-            c_DamageModValue.Value  = 0;
-            c_RangeModValue.Value   = 0;
-            _equippedRows.Clear();   c_EquippedList.Items.Clear();
-            _inventoryRows.Clear();  c_InventoryList.Items.Clear();
+            c_ShieldModValue.Value = 0;
+            c_DamageModValue.Value = 0;
+            c_RangeModValue.Value = 0;
+            _equippedRows.Clear(); c_EquippedList.Items.Clear();
+            _inventoryRows.Clear(); c_InventoryList.Items.Clear();
             ClearEquippedProps();
             ClearInventoryProps();
             _suppressEditEvents = false;
@@ -202,10 +202,10 @@ namespace MobEditor
         {
             _suppressEditEvents = true;
 
-            c_NameText.Text      = _selectedMob["name"]?.ToString();
+            c_NameText.Text = _selectedMob["name"]?.ToString();
             int level = Convert.ToInt32(_selectedMob["level"]);
             c_LevelCombo.SelectedItem = level;
-            int type  = Convert.ToInt32(_selectedMob["type"]);
+            int type = Convert.ToInt32(_selectedMob["type"]);
             if (type >= 0 && type < s_Types.Length)
                 c_TypeCombo.SelectedItem = s_Types[type];
             else c_TypeCombo.SelectedIndex = -1;
@@ -217,17 +217,17 @@ namespace MobEditor
                 : factionName;
 
             c_BaseAssetText.Text = _selectedMob["base_asset_id"].ToString();
-            c_ScaleText.Text     = _selectedMob["scale"].ToString();
-            c_AiText.Text        = _selectedMob["ai"]?.ToString();
+            c_ScaleText.Text = _selectedMob["scale"].ToString();
+            c_AiText.Text = _selectedMob["ai"]?.ToString();
 
-            c_HueValue.Value        = ToDecimal(_selectedMob["h"]);
+            c_HueValue.Value = ToDecimal(_selectedMob["h"]);
             c_SaturationValue.Value = ToDecimal(_selectedMob["s"]);
-            c_LightnessValue.Value  = ToDecimal(_selectedMob["v"]);
+            c_LightnessValue.Value = ToDecimal(_selectedMob["v"]);
             UpdateTintSwatch();
 
-            c_ShieldModValue.Value  = ToDecimal(_selectedMob["shield_modifier"]);
-            c_DamageModValue.Value  = ToDecimal(_selectedMob["damage_modifier"]);
-            c_RangeModValue.Value   = ToDecimal(_selectedMob["range_modifier"]);
+            c_ShieldModValue.Value = ToDecimal(_selectedMob["shield_modifier"]);
+            c_DamageModValue.Value = ToDecimal(_selectedMob["damage_modifier"]);
+            c_RangeModValue.Value = ToDecimal(_selectedMob["range_modifier"]);
 
             PopulateMobItems(Convert.ToInt32(_selectedMob["mob_id"]));
 
@@ -249,7 +249,7 @@ namespace MobEditor
             foreach (var dr in _mobItems.getRowsByID(mobID))
             {
                 int ibID = Convert.ToInt32(dr["item_base_id"]);
-                int t    = Convert.ToInt32(dr["type"]);
+                int t = Convert.ToInt32(dr["type"]);
                 var ibRow = _itemBase.getRowByID(ibID);
                 string label = ibRow != null
                     ? $"[{ibID}]  {ibRow["name"]}  (cat {ibRow["sub_category"]})"
@@ -374,8 +374,8 @@ namespace MobEditor
             _selectedEquipped = _equippedRows[idx];
             _suppressEditEvents = true;
             c_EquippedUsage.Value = ToDecimal(_selectedEquipped["usage_chance"]);
-            c_EquippedDrop.Value  = ToDecimal(_selectedEquipped["drop_chance"]);
-            c_EquippedQty.Value   = ToDecimal(_selectedEquipped["qty"]);
+            c_EquippedDrop.Value = ToDecimal(_selectedEquipped["drop_chance"]);
+            c_EquippedQty.Value = ToDecimal(_selectedEquipped["qty"]);
             _suppressEditEvents = false;
         }
 
@@ -384,8 +384,8 @@ namespace MobEditor
             _suppressEditEvents = true;
             _selectedEquipped = null;
             c_EquippedUsage.Value = 0;
-            c_EquippedDrop.Value  = 0;
-            c_EquippedQty.Value   = 0;
+            c_EquippedDrop.Value = 0;
+            c_EquippedQty.Value = 0;
             _suppressEditEvents = false;
         }
 
@@ -414,7 +414,7 @@ namespace MobEditor
             _selectedInventory = _inventoryRows[idx];
             _suppressEditEvents = true;
             c_InventoryDrop.Value = ToDecimal(_selectedInventory["drop_chance"]);
-            c_InventoryQty.Value  = ToDecimal(_selectedInventory["qty"]);
+            c_InventoryQty.Value = ToDecimal(_selectedInventory["qty"]);
             _suppressEditEvents = false;
         }
 
@@ -423,7 +423,7 @@ namespace MobEditor
             _suppressEditEvents = true;
             _selectedInventory = null;
             c_InventoryDrop.Value = 0;
-            c_InventoryQty.Value  = 0;
+            c_InventoryQty.Value = 0;
             _suppressEditEvents = false;
         }
 
@@ -550,7 +550,7 @@ namespace MobEditor
             try
             {
                 _mobs.updateRecord(_selectedMob);
-                foreach (var dr in _equippedRows)  _mobItems.updateRecord(dr);
+                foreach (var dr in _equippedRows) _mobItems.updateRecord(dr);
                 foreach (var dr in _inventoryRows) _mobItems.updateRecord(dr);
                 c_Status.Text = $"Saved mob {_selectedMob["mob_id"]}.";
             }

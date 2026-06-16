@@ -210,9 +210,9 @@ public sealed class Repl
         private readonly Repl _owner;
         public HelpCommand(Repl owner) { _owner = owner; }
 
-        public string Name    => "help";
+        public string Name => "help";
         public string Summary => "list commands or show usage for one";
-        public string Usage   => "help [command]";
+        public string Usage => "help [command]";
 
         public async Task<int> ExecuteAsync(
             IReadOnlyList<string> args, TextWriter output, CancellationToken ct)
@@ -243,9 +243,9 @@ public sealed class Repl
 
     private sealed class QuitCommand : ICommandHandler
     {
-        public string Name    => "quit";
+        public string Name => "quit";
         public string Summary => "exit the REPL (alias: exit)";
-        public string Usage   => "quit  (alias: exit)";
+        public string Usage => "quit  (alias: exit)";
 
         public Task<int> ExecuteAsync(
             IReadOnlyList<string> args, TextWriter output, CancellationToken ct)

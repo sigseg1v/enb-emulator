@@ -23,8 +23,8 @@ namespace N7.CliClient.Opcodes.Inbound;
 public sealed record VersionResponse(int Status)
 {
     public bool ClientUpToDate => Status == 0;
-    public bool ClientTooOld   => Status == 1;
-    public bool ClientNewer    => Status == 2;
+    public bool ClientTooOld => Status == 1;
+    public bool ClientNewer => Status == 2;
 }
 
 /// <summary>Codec for opcode 0x0001 VERSION_RESPONSE (server → client).</summary>

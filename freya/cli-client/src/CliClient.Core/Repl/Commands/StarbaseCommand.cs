@@ -28,9 +28,9 @@ public sealed class StarbaseCommand : ICommandHandler
     private readonly SessionContext _ctx;
     public StarbaseCommand(SessionContext ctx) { ArgumentNullException.ThrowIfNull(ctx); _ctx = ctx; }
 
-    public string Name    => "starbase";
+    public string Name => "starbase";
     public string Summary => "interact with a docked station (talk to NPC / exit / job terminal)";
-    public string Usage   =>
+    public string Usage =>
         "starbase <talk|exit|job|jobdesc> [targetId]\n" +
         "  talk <id>    open the talk tree of NPC/fixture <id> (vendor, mission, ...)\n" +
         "  exit         launch back into space\n" +
@@ -57,11 +57,11 @@ public sealed class StarbaseCommand : ICommandHandler
         string verb = args[0].ToLowerInvariant();
         byte action = verb switch
         {
-            "talk"    => StarbaseRequestMessage.ActionTalkToNpc,
-            "exit"    => StarbaseRequestMessage.ActionExitStation,
-            "job"     => StarbaseRequestMessage.ActionJobTerminal,
+            "talk" => StarbaseRequestMessage.ActionTalkToNpc,
+            "exit" => StarbaseRequestMessage.ActionExitStation,
+            "job" => StarbaseRequestMessage.ActionJobTerminal,
             "jobdesc" => StarbaseRequestMessage.ActionJobDescription,
-            _         => 0,
+            _ => 0,
         };
         if (action == 0)
         {

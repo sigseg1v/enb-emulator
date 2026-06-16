@@ -34,34 +34,34 @@ namespace MissionEditor.Nodes
             switch (m_conditionType)
             {
                 case ConditionType.Item_Required:
-                {
-                    String item = DataConfiguration.getDescription(DataConfiguration.DataType.item, getFlag());
-                    return getValue() + " x " + item;
-                }
+                    {
+                        String item = DataConfiguration.getDescription(DataConfiguration.DataType.item, getFlag());
+                        return getValue() + " x " + item;
+                    }
                 case ConditionType.Faction_Required:
-                {
-                    String item = DataConfiguration.getDescription(DataConfiguration.DataType.faction, getFlag());
-                    return getValue() + " x " + item;
-                }
+                    {
+                        String item = DataConfiguration.getDescription(DataConfiguration.DataType.faction, getFlag());
+                        return getValue() + " x " + item;
+                    }
                 case ConditionType.Race:
-                {
-                    Races race;
-                    if (Enumeration.TryParse<Races>(m_value, out race))
-                        return race.ToString();
-                    break;
-                }
+                    {
+                        Races race;
+                        if (Enumeration.TryParse<Races>(m_value, out race))
+                            return race.ToString();
+                        break;
+                    }
                 case ConditionType.Profession:
-                {
-                    Professions profession;
-                    if (Enumeration.TryParse<Professions>(m_value, out profession))
-                        return profession.ToString();
-                    break;
-                }
+                    {
+                        Professions profession;
+                        if (Enumeration.TryParse<Professions>(m_value, out profession))
+                            return profession.ToString();
+                        break;
+                    }
                 case ConditionType.Mission_Required:
-                {
-                    String mission = DataConfiguration.getDescription(DataConfiguration.DataType.mission, getValue());
-                    return mission;
-                }
+                    {
+                        String mission = DataConfiguration.getDescription(DataConfiguration.DataType.mission, getValue());
+                        return mission;
+                    }
             }
             return m_value;
         }

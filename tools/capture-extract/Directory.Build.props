@@ -13,4 +13,15 @@
     <WarningsNotAsErrors></WarningsNotAsErrors>
     <DefaultItemExcludes>$(DefaultItemExcludes)</DefaultItemExcludes>
   </PropertyGroup>
+
+  <!-- Phase AT: StyleCop.Analyzers (this props OVERRIDES the parent
+       tools/Directory.Build.props, so the analyzer is declared here too).
+       Severities at `suggestion` via repo-root .editorconfig. -->
+  <ItemGroup>
+    <PackageReference Include="StyleCop.Analyzers" Version="1.2.0-beta.556">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
+    </PackageReference>
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)../../stylecop.json" Link="stylecop.json" />
+  </ItemGroup>
 </Project>

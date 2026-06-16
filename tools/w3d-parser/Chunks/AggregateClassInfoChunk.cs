@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -25,9 +25,9 @@ namespace WestWood3D.Chunks
 
             original_class_id = br.ReadInt32();
             flags = br.ReadInt32();
-            
+
             //Unknown Bytes
-            br.ReadBytes(chunkLength - 8); 
+            br.ReadBytes(chunkLength - 8);
 
             if (dbg)
             {

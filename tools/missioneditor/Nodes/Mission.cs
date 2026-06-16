@@ -41,7 +41,7 @@ namespace MissionEditor.Nodes
             m_overallLevel = -1;
             m_xml = "";
             if (hasConditions()) { m_conditions.Clear(); }
-            if (hasStages())     { m_stages.Clear(); }
+            if (hasStages()) { m_stages.Clear(); }
         }
 
         public void setId(String id) { m_id = id; }

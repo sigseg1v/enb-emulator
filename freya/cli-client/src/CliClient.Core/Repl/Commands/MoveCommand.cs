@@ -32,8 +32,8 @@ namespace N7.CliClient.Repl.Commands;
 public sealed class MoveCommand : ICommandHandler
 {
     private const float DefaultSpeed = 1500f;   // units/sec when no ship aux MaxSpeed seen
-    private const float ArriveDelta  = 1200f;   // stop when this close to target
-    private const int   MaxTicks     = 1200;    // hard cap so a bad target can't loop forever
+    private const float ArriveDelta = 1200f;   // stop when this close to target
+    private const int MaxTicks = 1200;    // hard cap so a bad target can't loop forever
     private const float OverrideEpsilon = 50f;  // server-override detection threshold (units)
 
     private readonly SessionContext _ctx;
@@ -44,9 +44,9 @@ public sealed class MoveCommand : ICommandHandler
         _ctx = ctx;
     }
 
-    public string Name    => "move";
+    public string Name => "move";
     public string Summary => "fly toward coords or a target gid (drives MVAS)";
-    public string Usage   =>
+    public string Usage =>
         "move <x> <y> <z>\n" +
         "move <gid>                   (gid = 0x.. / decimal / a tracked name; flies to its position)\n" +
         "  opens the sector UDP client, orients toward the target, flies at engine\n" +

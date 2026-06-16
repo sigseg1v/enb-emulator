@@ -14,16 +14,16 @@ namespace CommonTools.Gui
             InitializeComponent();
             m_xml = "";
 
-            guiOkBtn.Click     += (_, _) => { m_madeSelection = true; m_xml = guiXmlTxt.Text; Close(); };
+            guiOkBtn.Click += (_, _) => { m_madeSelection = true; m_xml = guiXmlTxt.Text; Close(); };
             guiCancelBtn.Click += (_, _) => Close();
-            KeyDown            += OnKeyDown;
+            KeyDown += OnKeyDown;
 
             Opened += (_, _) =>
             {
                 m_madeSelection = false;
                 guiXmlTxt.Focus();
                 guiXmlTxt.SelectionStart = 0;
-                guiXmlTxt.SelectionEnd   = 0;
+                guiXmlTxt.SelectionEnd = 0;
                 guiXmlTxt.TextChanged += OnTextChanged;
             };
         }

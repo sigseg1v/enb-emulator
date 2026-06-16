@@ -40,12 +40,12 @@ namespace CommonTools.Gui
             };
 
             LoginButton.Click += async (_, _) => await AcceptedLoginInformation();
-            ExitLogin.Click   += (_, _) => { m_Cancel = true; Close(); };
+            ExitLogin.Click += (_, _) => { m_Cancel = true; Close(); };
 
             foreach (var tb in new[] { LoginUsername, LoginPassword, SQLServer, SQLPort })
             {
                 tb.TextChanged += (_, _) => m_HasChanged = true;
-                tb.KeyDown     += OnTextBoxKey;
+                tb.KeyDown += OnTextBoxKey;
             }
         }
 
@@ -100,8 +100,8 @@ namespace CommonTools.Gui
         {
             LoginUsername.Text = LoginData.User;
             LoginPassword.Text = LoginData.Pass;
-            SQLServer.Text     = LoginData.Host;
-            SQLPort.Text       = LoginData.Port.ToString();
+            SQLServer.Text = LoginData.Host;
+            SQLPort.Text = LoginData.Port.ToString();
         }
 
         void WriteConfiguration()
@@ -196,7 +196,7 @@ namespace CommonTools.Gui
         static string m_ApplicationVersion;
 
         public static string Host { get => m_Host; set => m_Host = value; }
-        public static int Port    { get => m_Port; set => m_Port = value; }
+        public static int Port { get => m_Port; set => m_Port = value; }
         public static string User { get => m_User; set => m_User = value; }
         public static string Pass { get => m_Pass; set => m_Pass = value; }
 
@@ -269,9 +269,9 @@ namespace CommonTools.Gui
                     }
                 }
             }
-            string major    = majorVersion == -1 ? "?" : version.Substring(0, majorVersion);
-            string minor    = majorVersion == -1 || minorVersion == -1 ? "?" : version.Substring(majorVersion + 1, minorVersion - majorVersion - 1);
-            string build    = minorVersion == -1 || buildIndex == -1 ? "?" : version.Substring(minorVersion + 1, buildIndex - minorVersion - 1);
+            string major = majorVersion == -1 ? "?" : version.Substring(0, majorVersion);
+            string minor = majorVersion == -1 || minorVersion == -1 ? "?" : version.Substring(majorVersion + 1, minorVersion - majorVersion - 1);
+            string build = minorVersion == -1 || buildIndex == -1 ? "?" : version.Substring(minorVersion + 1, buildIndex - minorVersion - 1);
             string revision = buildIndex == -1 || revisionIndex == -1 ? "?" : version.Substring(buildIndex + 1, revisionIndex - buildIndex - 1);
             return FormattedVersion(major, minor, build, revision);
         }

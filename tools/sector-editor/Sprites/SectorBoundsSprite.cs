@@ -20,7 +20,7 @@ namespace SectorEditor.Sprites
             float y = -(height / 2);
 
             var boundsPen = new Pen(Color.Red, 10.0F) { DashStyle = DashStyle.DashDotDot };
-            var xEdgePen  = new Pen(Color.White, 2.5F) { DashStyle = DashStyle.Solid };
+            var xEdgePen = new Pen(Color.White, 2.5F) { DashStyle = DashStyle.Solid };
 
             var boundsRectangle = PPath.CreateRectangle(x, y, width, height);
             boundsRectangle.Brush = Brushes.Transparent;
@@ -38,19 +38,22 @@ namespace SectorEditor.Sprites
             {
                 TextBrush = Brushes.White,
                 TextAlignment = StringAlignment.Center,
-                X = 5, Y = 5,
+                X = 5,
+                Y = 5,
             };
             var posX = new PText("+X")
             {
                 TextBrush = Brushes.White,
                 TextAlignment = StringAlignment.Center,
-                X = 52, Y = -9,
+                X = 52,
+                Y = -9,
             };
             var posY = new PText("+Y")
             {
                 TextBrush = Brushes.White,
                 TextAlignment = StringAlignment.Center,
-                X = -12, Y = 52,
+                X = -12,
+                Y = 52,
             };
 
             boundsRectangle.AddChild(xy);
