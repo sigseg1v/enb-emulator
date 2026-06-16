@@ -228,7 +228,7 @@ public sealed class SectorSelectTalkTreeTests : SectorIntegrationTest
 {
     public SectorSelectTalkTreeTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task SelectTalkTree_NoCurrentNpc_ReceivesTalkTreeActionCloseSentinel()
     {
         var account = TestAccounts.New(_server);

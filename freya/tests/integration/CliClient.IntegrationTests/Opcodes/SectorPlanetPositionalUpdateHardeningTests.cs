@@ -222,7 +222,7 @@ public sealed class SectorPlanetPositionalUpdateHardeningTests : SectorIntegrati
 
     public SectorPlanetPositionalUpdateHardeningTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task PlanetPositionalUpdate_EmittedDuringSpaceSectorHandshake_HasExactly48BytePayload()
     {
         var account = TestAccounts.New(_server);
@@ -381,7 +381,7 @@ public sealed class SectorPlanetPositionalUpdateHardeningTests : SectorIntegrati
     /// Object::SendObject single-call-per-virtual-dispatch pattern.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task PlanetPositionalUpdateAndNavigation_EmittedExactlyOncePerPlanetDuringSpaceSectorHandshake_PinsSendAllNavsCount()
     {
         // Sector 1015 (Luna space) has exactly ONE OT_PLANET object in

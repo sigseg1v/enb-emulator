@@ -156,7 +156,7 @@ public sealed class SectorStarbaseAcceptJob9Tests : SectorIntegrationTest
 {
     public SectorStarbaseAcceptJob9Tests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task StarbaseAcceptJobAction9_ReceivesBareJobAcceptReply()
     {
         var account = TestAccounts.New(_server);

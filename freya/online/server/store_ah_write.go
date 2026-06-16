@@ -385,6 +385,67 @@ func (s *Store) PlaceBid(ctx context.Context, accountID int64, listingID int64) 
 	return s.singleListing(ctx, listingID), nil
 }
 
+// botPlaceBid places a faucet bid from the AhBot account on a PLAYER listing. It
+// mirrors the no-bidder branch of PlaceBid but, like the listing faucet
+// (botPostOne), moves no money out of the AhBot wallet: the AhBot is an NPC
+// liquidity source, not a player, so it pays nothing up front (its seeded wallet
+// is 0 -- see freya_online_bots.sql). If it ends up the winning bidder at expiry,
+// resolveOneExpired pays the SELLER the standing bid (deliverCredits) -- the
+// faucet buying the player's item -- and the won item is delivered to AhBot's
+// mailbox and never looted (the mail sweeper reaps it), exactly as faucet sales
+// already work.
+//
+// Eligibility is re-validated UNDER THE ROW LOCK so the AhBot can never race
+// ahead of, or outbid, a real player: it bids only when the listing is still
+// active, unexpired, not AhBot's own, and still has no high bidder. A bid that
+// arrived between the sweep read and this lock yields errListingGone (callers
+// treat that as a benign miss, not an error).
+func (s *Store) botPlaceBid(ctx context.Context, listingID int64) error {
+	return s.serialTx(ctx, func(tx pgx.Tx) error {
+		var (
+			sellerAccount int64
+			startBid      int64
+			hadBidder     bool
+			expiresAt     time.Time
+		)
+		err := tx.QueryRow(ctx, `
+			SELECT seller_account_id, start_bid,
+			       high_bidder_avatar_id IS NOT NULL, expires_at
+			  FROM auction_listings
+			 WHERE id = $1 AND status = 0
+			 FOR UPDATE`, listingID).
+			Scan(&sellerAccount, &startBid, &hadBidder, &expiresAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errListingGone
+		}
+		if err != nil {
+			return err
+		}
+		if time.Now().After(expiresAt) {
+			return errListingGone
+		}
+		if sellerAccount == ahBotAccountID {
+			return errOwnListing
+		}
+		// Never outbid: a real bid landed since the sweep read. Stand down.
+		if hadBidder {
+			return errListingGone
+		}
+
+		// The AhBot's first (and only) bid lands at start_bid. No wallet debit.
+		if _, err := tx.Exec(ctx, `
+			UPDATE auction_listings
+			   SET current_bid = $2, high_bidder_avatar_id = $3, high_bidder_account_id = $4
+			 WHERE id = $1`, listingID, startBid, ahBotAvatarID, ahBotAccountID); err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `
+			INSERT INTO auction_bids (listing_id, bidder_avatar_id, bidder_account_id, amount)
+			VALUES ($1,$2,$3,$4)`, listingID, ahBotAvatarID, ahBotAccountID, startBid)
+		return err
+	})
+}
+
 // Buyout buys a listing outright at its buyout price.
 func (s *Store) Buyout(ctx context.Context, accountID int64, listingID int64) error {
 	return s.serialTx(ctx, func(tx pgx.Tx) error {

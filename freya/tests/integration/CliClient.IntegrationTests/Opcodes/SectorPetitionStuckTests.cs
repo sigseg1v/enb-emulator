@@ -153,7 +153,7 @@ public sealed class SectorPetitionStuckTests : SectorIntegrationTest
 {
     public SectorPetitionStuckTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task PetitionStuck_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

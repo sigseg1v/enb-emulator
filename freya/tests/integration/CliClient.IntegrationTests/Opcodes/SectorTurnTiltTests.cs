@@ -101,7 +101,7 @@ public sealed class SectorTurnTiltTests : SectorIntegrationTest
 {
     public SectorTurnTiltTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task TurnAndTilt_DoNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

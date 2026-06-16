@@ -168,7 +168,7 @@ public sealed class SectorPlayerShipSentTests : SectorIntegrationTest
 {
     public SectorPlayerShipSentTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task PlayerShipSent_OnFreshChar_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

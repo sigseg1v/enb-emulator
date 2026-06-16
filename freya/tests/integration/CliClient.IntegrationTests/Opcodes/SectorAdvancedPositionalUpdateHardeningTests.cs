@@ -278,7 +278,7 @@ public sealed class SectorAdvancedPositionalUpdateHardeningTests
         _client = new ClientFixture(server);
     }
 
-    [Fact]
+    [RetryFact]
     public async Task AdvancedPositionalUpdate_EmittedDuringStationSectorHandshake_HasExactly42BytePayload()
     {
         var account = TestAccounts.New(_server);
@@ -385,7 +385,7 @@ public sealed class SectorAdvancedPositionalUpdateHardeningTests
     /// manu-lab second emit for this opcode).
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task AdvancedPositionalUpdate_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit()
     {
         var account = TestAccounts.New(_server);

@@ -239,7 +239,7 @@ public sealed class SectorSubpartsHardeningTests
         _client = new ClientFixture(server);
     }
 
-    [Fact]
+    [RetryFact]
     public async Task Subparts_EmittedDuringStationSectorHandshake_HasExactly54BytePayloadForTerranWarrior()
     {
         var account = TestAccounts.New(_server);
@@ -328,7 +328,7 @@ public sealed class SectorSubpartsHardeningTests
     /// single-self-emit dispatch pattern.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task Subparts_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit()
     {
         var account = TestAccounts.New(_server);

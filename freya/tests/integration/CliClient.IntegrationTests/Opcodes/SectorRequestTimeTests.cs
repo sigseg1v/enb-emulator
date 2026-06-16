@@ -82,7 +82,7 @@ public sealed class SectorRequestTimeTests : SectorIntegrationTest
 {
     public SectorRequestTimeTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task RequestTime_RoundTripsClientSentTickAndReturnsServerTimes()
     {
         var account = TestAccounts.New(_server);

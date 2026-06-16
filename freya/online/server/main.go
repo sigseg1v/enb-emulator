@@ -112,6 +112,12 @@ func main() {
 		startBots(ctx, store)
 	}
 
+	// AhBot auto-bidding (FREYA_AH_BOT_BID_ITEMS, default on): bid on player
+	// listings so a posted item always has a buyer of last resort.
+	if cfg.AhBotBidEnabled {
+		startBotBidder(ctx, store)
+	}
+
 	servers := startServers(cfg, root)
 
 	// Graceful shutdown.

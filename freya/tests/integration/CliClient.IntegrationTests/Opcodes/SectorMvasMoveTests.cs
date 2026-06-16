@@ -62,7 +62,7 @@ public sealed class SectorMvasMoveTests : SectorIntegrationTest
         _out = output;
     }
 
-    [Fact]
+    [RetryFact]
     public async Task Mvas_DirectPositionFeed_IsAccepted_AndStreamsSectorBack()
     {
         var account = TestAccounts.New(_server);

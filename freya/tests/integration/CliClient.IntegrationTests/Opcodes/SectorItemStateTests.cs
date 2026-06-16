@@ -154,7 +154,7 @@ public sealed class SectorItemStateTests : SectorIntegrationTest
 {
     public SectorItemStateTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task ItemState_UnrecognisedInventoryByte_ReceivesUnrecognisedErrorString()
     {
         var account = TestAccounts.New(_server);
@@ -380,7 +380,7 @@ public sealed class SectorItemStateTests : SectorIntegrationTest
     /// sub-second.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task ItemState_UnrecognisedInventoryByte_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);

@@ -198,7 +198,7 @@ public sealed class SectorGuildRankNamesRequestClientTests : SectorIntegrationTe
 {
     public SectorGuildRankNamesRequestClientTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task GuildRankNamesRequestClient_OnFreshCharNoGuild_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

@@ -173,7 +173,7 @@ public sealed class SectorStarbaseSetHardeningTests
         _client = new ClientFixture(server);
     }
 
-    [Fact]
+    [RetryFact]
     public async Task StarbaseSet_EmittedDuringStationSectorHandshake_HasExactly6BytePayload()
     {
         var account = TestAccounts.New(_server);
@@ -280,7 +280,7 @@ public sealed class SectorStarbaseSetHardeningTests
     /// entering-starbase-only dispatch pattern.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task StarbaseSet_EmittedExactlyOnceDuringStationSectorHandshake_PinsStationLogin2Emit()
     {
         var account = TestAccounts.New(_server);

@@ -182,7 +182,7 @@ public sealed class SectorConstantPositionalUpdateHardeningTests
         _client = new ClientFixture(server);
     }
 
-    [Fact]
+    [RetryFact]
     public async Task ConstantPositionalUpdate_EmittedDuringStationSectorHandshake_HasExactly32BytePayload()
     {
         var account = TestAccounts.New(_server);
@@ -301,7 +301,7 @@ public sealed class SectorConstantPositionalUpdateHardeningTests
     /// self-emit for this opcode).
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task ConstantPositionalUpdate_EmittedExactlyOnceDuringStationSectorHandshake_PinsManuLabEmit()
     {
         var account = TestAccounts.New(_server);

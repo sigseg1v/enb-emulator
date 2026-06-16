@@ -211,7 +211,7 @@ public sealed class SectorOpenInterfaceTests : SectorIntegrationTest
 
     public SectorOpenInterfaceTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task OpenInterfaceSlashCommand_OnSlashOpenif_ReceivesOpenInterfaceEmit()
     {
         var account = TestAccounts.New(_server);

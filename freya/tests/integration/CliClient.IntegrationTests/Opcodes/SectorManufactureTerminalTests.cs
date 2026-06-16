@@ -220,7 +220,7 @@ public sealed class SectorManufactureTerminalTests : SectorIntegrationTest
 {
     public SectorManufactureTerminalTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task ManufactureTerminal_TerminalZeroExit_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

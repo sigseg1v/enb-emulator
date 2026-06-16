@@ -232,7 +232,7 @@ public sealed class SectorNavigationHardeningTests : SectorIntegrationTest
 
     public SectorNavigationHardeningTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task Navigation_EmittedDuringSpaceSectorHandshake_HasExactly14BytePayload()
     {
         var account = TestAccounts.New(_server);

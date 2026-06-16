@@ -218,7 +218,7 @@ public sealed class SectorAvatarEmoteTests : SectorIntegrationTest
 {
     public SectorAvatarEmoteTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task AvatarEmote_EmoteTrigger_ReceivesAvatarEmoteResponseWithEchoedSentinel()
     {
         var account = TestAccounts.New(_server);

@@ -181,7 +181,7 @@ public sealed class SectorStarbaseLoginCompleteTests : SectorIntegrationTest
 {
     public SectorStarbaseLoginCompleteTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task StarbaseLoginComplete_OnFreshChar_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

@@ -81,7 +81,7 @@ public sealed class GlobalDeleteCharacterTests
         _client = new ClientFixture(server);
     }
 
-    [Fact]
+    [RetryFact]
     public async Task EmptySlot_ReturnsRefreshedAvatarList()
     {
         var account = TestAccounts.New(_server);

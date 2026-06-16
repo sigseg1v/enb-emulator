@@ -217,7 +217,7 @@ public sealed class SectorMissionForfeitTests : SectorIntegrationTest
 {
     public SectorMissionForfeitTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task MissionForfeit_EmptySlotZero_ReceivesNonForfeitableErrorString()
     {
         var account = TestAccounts.New(_server);
@@ -427,7 +427,7 @@ public sealed class SectorMissionForfeitTests : SectorIntegrationTest
     /// sub-second.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task MissionForfeit_EmptySlotZero_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);

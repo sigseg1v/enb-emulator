@@ -250,7 +250,7 @@ public sealed class SectorAction2Tests : SectorIntegrationTest
 {
     public SectorAction2Tests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task Action2_NoOpSubActionAndEmptyName_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

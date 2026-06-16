@@ -252,6 +252,47 @@ C++ source directly). The Go server must reproduce:
   used item_base.price (~10x too high) instead of buying_price -- inflated
   every min-bid step and the 10% deposit by an order of magnitude.
 
+### AQ-4b AhBot auto-bidding (FREYA_AH_BOT_BID_ITEMS, default ON)  -- DONE (pending runtime verify)
+- [x] New env knob `FREYA_AH_BOT_BID_ITEMS` (config.go, default ON -- `!= "0"`),
+      wired in main.go (`startBotBidder`), documented in both compose files.
+      Independent of FREYA_AH_BOTS: it bids on PLAYER listings, not faucet stock.
+- [x] `startBotBidder` loop (bots.go): ticks every 30 min (`botBidInterval`);
+      NO immediate startup pass (probabilities are per-check, so firing on every
+      restart would inflate the rate).
+- [x] `botBidSweep` (bots.go): scans active, unexpired, non-AhBot listings that
+      have NO high bidder; resolves each item's category from the content pool
+      (separate DB, one `id = ANY($1)` query); computes the AhBot's own min bid
+      `round(item_value * 1.10 * botPriceMultiplier(cat))` (same formula as
+      botPostOne, reusing the stored item_value = vendor*stack); ratio =
+      current_bid / ahMinBid; rolls `botBidChance(ratio)`.
+- [x] `botBidChance` (bots.go) -- per-check probability curve, anchors per spec
+      with linear interpolation: <=0.50 -> 20%, 0.75 -> 5%, 0.90 -> 1%,
+      1.20 -> 0.5%, >1.20 -> 0% (ignore). Unit-tested (bots_test.go: anchors,
+      midpoint linearity, monotonic non-increasing).
+- [x] `botPlaceBid` (store_ah_write.go): faucet bid under a row lock. Re-checks
+      eligibility (active / unexpired / not own / still no bidder) so it can
+      never race ahead of or OUTBID a real player -- it only ever places the
+      FIRST bid (at start_bid). Like botPostOne it moves NO money out of the
+      AhBot wallet (seeded 0); if it wins at expiry, resolveOneExpired pays the
+      seller (deliverCredits) and the won item lands in AhBot's never-looted
+      mailbox. AhBot only bids, never buys out.
+- Rules satisfied: never outbid a player (only touches no-bidder listings);
+      never bid when already high bidder (same); never bid >120%; ignores own
+      listings (errOwnListing guard). The "you get credits back if outbid / you
+      lose" behaviour was ALREADY correct: PlaceBid/Buyout refund the previous
+      high bidder via deliverCredits the instant they are outbid, so every loser
+      is whole; only the eventual winner's held bid is consumed (it buys the
+      item).
+- [x] RUNTIME-VERIFIED against live Postgres (bots_integration_test.go, gated on
+      FREYA_TEST_DB; run vs the freya-dev DB on :5759):
+      `TestIT_BotPlaceBid_BecomesHighBidder_NoWalletDebit` (AhBot becomes high
+      bidder at start_bid, bid row recorded, wallet unchanged),
+      `TestIT_BotPlaceBid_NeverOutbidsAPlayer` (errListingGone once a human holds
+      the bid -> never outbids), `TestIT_BotBidSweep_BidsCheapIgnoresOverpriced`
+      (real sweep bid 9/40 dirt-cheap listings ~= the 20% rate, left the
+      >120%-overpriced one untouched). Live freya-online container logs
+      "AH bot-bidding ENABLED ... interval=30m0s" at boot.
+
 ### AQ-5 React + TS SPA
 - [x] Import Freya Online.html design (fetched via owner-provided API URL,
       extracted to `freya/online/design/`; all .jsx/.css read in full)

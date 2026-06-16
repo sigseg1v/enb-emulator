@@ -325,7 +325,17 @@ void Player::ReSendOpcodes(unsigned char *data, short bytes)
 	}
 }
 
-#define ITEMS_PER_TICK 2 //send 2 extra items per tick
+// Item-list rows streamed per login-thread tick (~100ms, see RunLoginThread).
+// At 2/tick a large vendor (~500-item general/ammo store) took ~25s to populate
+// its trade window -- 500 rows / 2 per tick / 10 ticks-per-sec. Each row is one
+// 0x0025 ITEM_BASE datagram that occupies a slot in the 64-deep reliable-UDP
+// resend ring (RESEND_ELEMENTS); the proxy's NACK window is ~300-600ms
+// (PACKET_RESEND_INTERVAL_MS). At 8/tick that is at most ~48 datagrams in flight
+// over a 600ms window, comfortably under 64, so no ring entry is evicted before
+// the proxy can request a resend (the "stranded on the load screen" failure).
+// 8/tick loads the same 500-item vendor in ~6s. Going higher needs the resend
+// ring deepened in lockstep, which has to be validated against the real client.
+#define ITEMS_PER_TICK 8
 bool Player::SendItemList()
 {
 	bool in_progress = false;
@@ -3148,7 +3158,16 @@ void Player::HandleInventoryMove(unsigned char *data)
 		Source = *PlayerIndex()->VendorInv.Item[InvMo.FromSlot].GetData();
 		m_Mutex.Unlock();
 
-		if (InvMo.ToInv == 1)	//buy item
+		// A purchase from the vendor (FromInv == 4). The drag-and-drop gesture
+		// reports the destination as cargo (ToInv == 1, ToSlot == -1 auto), but
+		// the in-window "Buy" / "Buy Stack" buttons report the destination as the
+		// vendor's own inventory type (ToInv == 4, ToSlot == 0). Both are the same
+		// operation -- buy the stock into the cargo hold -- so accept either. The
+		// buy below resolves the destination via CargoAddItem and never indexes
+		// ToSlot, so honouring ToInv == 4 adds no slot-indexing risk. Previously
+		// only ToInv == 1 was honoured, so the Buy buttons silently did nothing
+		// and only drag-and-drop worked.
+		if (InvMo.ToInv == 1 || InvMo.ToInv == 4)	//buy item
 		{
 			ItemBase * myItem = g_ItemBaseMgr->GetItem(Source.ItemTemplateID);
 

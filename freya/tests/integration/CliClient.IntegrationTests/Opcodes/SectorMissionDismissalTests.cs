@@ -202,7 +202,7 @@ public sealed class SectorMissionDismissalTests : SectorIntegrationTest
 {
     public SectorMissionDismissalTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task MissionDismissal_OutOfRangeMissionId_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

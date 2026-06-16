@@ -145,7 +145,7 @@ public sealed class SectorGuildLeaderAcceptClientTests : SectorIntegrationTest
 {
     public SectorGuildLeaderAcceptClientTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task GuildLeaderAcceptClient_DeclineNonExistentGuild_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

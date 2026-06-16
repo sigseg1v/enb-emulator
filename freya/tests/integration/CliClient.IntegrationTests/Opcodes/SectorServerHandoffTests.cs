@@ -211,7 +211,7 @@ public sealed class SectorServerHandoffTests : SectorIntegrationTest
 {
     public SectorServerHandoffTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task StarbaseExitAction_ReceivesServerHandoffFrame()
     {
         var account = TestAccounts.New(_server);

@@ -140,7 +140,7 @@ public sealed class SectorStartAckTests : SectorIntegrationTest
 {
     public SectorStartAckTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task StartAck_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

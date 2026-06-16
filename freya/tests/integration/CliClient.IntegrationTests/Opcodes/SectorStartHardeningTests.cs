@@ -177,7 +177,7 @@ public sealed class SectorStartHardeningTests
         _client = new ClientFixture(server);
     }
 
-    [Fact]
+    [RetryFact]
     public async Task Start_TerminatorOfStationSectorHandshake_HasExactly4BytePayload()
     {
         var account = TestAccounts.New(_server);

@@ -75,7 +75,46 @@ const (
 	botQualityMax  = 200.0
 
 	botOreStack = 20
+
+	// How often the AhBot looks for player listings to bid on. The per-listing
+	// bid probabilities below are calibrated as "chance to bid PER CHECK", so this
+	// interval and botBidChance are coupled -- changing one without the other
+	// changes the effective bid rate.
+	botBidInterval = 30 * time.Minute
 )
+
+// botBidChance returns the per-check probability (0..1) that the AhBot bids on a
+// player listing, as a function of ratio = current asking price / the AhBot's
+// own minimum bid for the same item+stack. The cheaper a listing is relative to
+// what the AhBot would price it at, the likelier the AhBot snaps it up; once it
+// is priced above 120% of the AhBot's number the AhBot ignores it entirely.
+//
+// Anchor points (per spec), with linear interpolation between them:
+//
+//	ratio <= 0.50 -> 20%   (a steal: at or under half the AhBot's min bid)
+//	ratio  = 0.75 ->  5%
+//	ratio  = 0.90 ->  1%
+//	ratio  = 1.20 ->  0.5%
+//	ratio  > 1.20 ->  0%   (overpriced: ignore)
+func botBidChance(ratio float64) float64 {
+	switch {
+	case ratio <= 0.50:
+		return 0.20
+	case ratio <= 0.75:
+		return botLerp(ratio, 0.50, 0.75, 0.20, 0.05)
+	case ratio <= 0.90:
+		return botLerp(ratio, 0.75, 0.90, 0.05, 0.01)
+	case ratio <= 1.20:
+		return botLerp(ratio, 0.90, 1.20, 0.01, 0.005)
+	default:
+		return 0
+	}
+}
+
+// botLerp linearly interpolates y across [x0,x1] -> [y0,y1] for x in that range.
+func botLerp(x, x0, x1, y0, y1 float64) float64 {
+	return y0 + (y1-y0)*(x-x0)/(x1-x0)
+}
 
 // Candidate category sets. ANY($1) over these in the content DB.
 var (
@@ -281,4 +320,128 @@ func botPostOne(ctx context.Context, s *Store) error {
 		ahBotAvatarID, ahBotAccountID, cand.id, stack, quality, structure,
 		itemValue, startBid, buyout, expires)
 	return err
+}
+
+// startBotBidder launches the AhBot auto-bid loop (FREYA_AH_BOT_BID_ITEMS,
+// default on). Every botBidInterval it rolls, per eligible player listing,
+// whether to place a faucet bid. It does NOT run an immediate pass at startup --
+// the probabilities are per-30-minute-check, so firing on every restart would
+// inflate the effective rate.
+func startBotBidder(ctx context.Context, s *Store) {
+	go func() {
+		log.Printf("freya-online: AH bot-bidding ENABLED (AhBot acct %d); interval=%s",
+			ahBotAccountID, botBidInterval)
+		t := time.NewTicker(botBidInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				botBidSweep(ctx, s)
+			}
+		}
+	}()
+}
+
+// botBidSweep considers every ACTIVE player listing that currently has NO bidder
+// and rolls botBidChance against it. The AhBot only ever places the FIRST bid on
+// a listing: it never bids on its own faucet stock, never bids when it is already
+// the high bidder, and -- because it only touches no-bidder listings -- never
+// outbids a player who has already bid. It only ever bids (never buys out).
+func botBidSweep(ctx context.Context, s *Store) {
+	type cand struct {
+		id         int64
+		itemID     int
+		currentBid int64
+		itemValue  int64
+	}
+	rows, err := s.user.Query(ctx, `
+		SELECT id, item_id, current_bid, item_value
+		  FROM auction_listings
+		 WHERE status = 0
+		   AND seller_account_id <> $1
+		   AND high_bidder_avatar_id IS NULL
+		   AND expires_at > now()`, ahBotAccountID)
+	if err != nil {
+		log.Printf("freya-online: AH bot-bid: scan listings failed: %v", err)
+		return
+	}
+	var cands []cand
+	idSet := map[int]struct{}{}
+	for rows.Next() {
+		var c cand
+		if err := rows.Scan(&c.id, &c.itemID, &c.currentBid, &c.itemValue); err != nil {
+			rows.Close()
+			log.Printf("freya-online: AH bot-bid: scan row failed: %v", err)
+			return
+		}
+		cands = append(cands, c)
+		idSet[c.itemID] = struct{}{}
+	}
+	rows.Close()
+	if len(cands) == 0 {
+		return
+	}
+
+	// Resolve each item's category (drives botPriceMultiplier) from the content
+	// pool in one query -- it is a different database, so no cross-DB join.
+	ids := make([]int, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+	catRows, err := s.content.Query(ctx,
+		`SELECT id, category FROM item_base WHERE id = ANY($1)`, ids)
+	if err != nil {
+		log.Printf("freya-online: AH bot-bid: resolve categories failed: %v", err)
+		return
+	}
+	cats := map[int]int64{}
+	for catRows.Next() {
+		var id int
+		var category int64
+		if err := catRows.Scan(&id, &category); err != nil {
+			catRows.Close()
+			log.Printf("freya-online: AH bot-bid: scan category failed: %v", err)
+			return
+		}
+		cats[id] = category
+	}
+	catRows.Close()
+
+	placed := 0
+	for _, c := range cands {
+		category, ok := cats[c.itemID]
+		if !ok {
+			continue // item not in the catalogue any more -- skip quietly
+		}
+		// The AhBot's own minimum bid for this item+stack: the same 110%-of-value
+		// (x per-category multiplier) it uses when it lists (botPostOne). The stored
+		// item_value already encodes vendor * stack, so reuse it directly.
+		ahMinBid := int64(math.Round(float64(c.itemValue) * 1.10 * botPriceMultiplier(category)))
+		if ahMinBid < 1 {
+			ahMinBid = 1
+		}
+		ratio := float64(c.currentBid) / float64(ahMinBid)
+		chance := botBidChance(ratio)
+		if chance <= 0 {
+			continue // priced above 120% of the AhBot's number -- ignore
+		}
+		if rand.Float64() >= chance {
+			continue
+		}
+		if err := s.botPlaceBid(ctx, c.id); err != nil {
+			// errListingGone just means a real player bid (or expiry) beat us to it
+			// between the scan and the locked re-check -- expected, not an error.
+			if err != errListingGone {
+				log.Printf("freya-online: AH bot-bid: listing %d: %v", c.id, err)
+			}
+			continue
+		}
+		placed++
+	}
+	if placed > 0 {
+		log.Printf("freya-online: AH bot-bid: placed %d bid(s) across %d eligible listing(s)",
+			placed, len(cands))
+	}
 }

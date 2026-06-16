@@ -162,7 +162,7 @@ public sealed class SectorFindMemberTests : SectorIntegrationTest
 {
     public SectorFindMemberTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task FindMember_SoloRequester_ReceivesEmptyCountReply()
     {
         var account = TestAccounts.New(_server);

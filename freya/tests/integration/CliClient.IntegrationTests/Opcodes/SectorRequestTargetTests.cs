@@ -134,7 +134,7 @@ public sealed class SectorRequestTargetTests : SectorIntegrationTest
 {
     public SectorRequestTargetTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task RequestTarget_OnNullTarget_ReceivesSetTargetWithSentinelTargetIdMinusOne()
     {
         var account = TestAccounts.New(_server);

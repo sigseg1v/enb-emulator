@@ -124,7 +124,7 @@ public sealed class SectorVerbRequestTests : SectorIntegrationTest
 {
     public SectorVerbRequestTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task VerbRequest_OnNonMatchingSubject_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

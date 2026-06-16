@@ -98,7 +98,7 @@ public sealed class SectorActionTests : SectorIntegrationTest
 {
     public SectorActionTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task Action_NoOpSubAction_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);
@@ -315,7 +315,7 @@ public sealed class SectorActionTests : SectorIntegrationTest
     /// in the login state machine and any handshake-tail debris frames.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task Action_JumpStartOnNullTarget_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);

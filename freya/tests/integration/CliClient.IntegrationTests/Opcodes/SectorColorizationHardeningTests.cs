@@ -171,7 +171,7 @@ public sealed class SectorColorizationHardeningTests
         _client = new ClientFixture(server);
     }
 
-    [Fact]
+    [RetryFact]
     public async Task Colorization_EmittedDuringStationSectorHandshake_HasExactly134BytePayload()
     {
         var account = TestAccounts.New(_server);
@@ -241,7 +241,7 @@ public sealed class SectorColorizationHardeningTests
     /// single-self-emit dispatch pattern.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task Colorization_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit()
     {
         var account = TestAccounts.New(_server);

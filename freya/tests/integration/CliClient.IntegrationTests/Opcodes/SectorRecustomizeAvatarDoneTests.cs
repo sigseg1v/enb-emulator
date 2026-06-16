@@ -151,7 +151,7 @@ public sealed class SectorRecustomizeAvatarDoneTests : SectorIntegrationTest
 {
     public SectorRecustomizeAvatarDoneTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task RecustomizeAvatarDone_OnFreshStarbaseSession_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

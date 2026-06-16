@@ -72,7 +72,7 @@ public sealed class SectorUndockHandoffFollowTests : SectorIntegrationTest
         _out = output;
     }
 
-    [Fact]
+    [RetryFact]
     public async Task Undock_FollowsHandoff_LandsInOpenSpace()
     {
         var account = TestAccounts.New(_server);

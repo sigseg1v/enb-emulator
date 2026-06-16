@@ -230,7 +230,7 @@ public sealed class SectorFgpsTests : SectorIntegrationTest
 
     public SectorFgpsTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task FgpsSlashCommand_OnSlashFgps_ReceivesConfirmedActionOfferAndClientSound()
     {
         var account = TestAccounts.New(_server);

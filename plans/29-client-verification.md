@@ -1507,3 +1507,56 @@ format & byte order", Trap 2).
 - **Setup**: rebuild the DLL (`just build-posfeed-dll`) -- already done -- then
   relaunch with `just play-local`; the launcher re-injects the rebuilt
   FreyaPosFeed.dll into client.exe.
+
+---
+
+### [ ] CV-26 -- Vendor trade window populates quickly (large vendor in ~6s, not ~25-30s)
+
+- **What changed**: `server/src/PlayerConnection.cpp` -- `ITEMS_PER_TICK` raised
+  from 2 to 8. The vendor/vault/cargo item lists are streamed from the login
+  thread (`RunLoginThread`, ~100ms/tick) one `0x0025 ITEM_BASE` datagram per row.
+  At 2/tick a ~500-item general/ammo vendor took ~25-30s to fill its trade
+  window (reported live). Each datagram occupies a reliable-UDP resend ring slot
+  (RESEND_ELEMENTS=64); at 8/tick at most ~48 are in flight over the proxy's
+  ~600ms NACK window, safely under 64, so no ring entry is evicted before a
+  resend can be served. 8/tick loads the same vendor in ~6s.
+- **Why a CV is needed**: changes server emit timing/batching (not packet
+  bytes -- the 0x0025 frames are unchanged and already byte-pinned). The risk it
+  must clear on the real client is ring-overflow: too fast a burst would strand
+  the client on a hole it can't get resent (the CV-23/24 failure mode). Only the
+  real client + proxy prove the new rate stays within the ring.
+- **What to look for (real client)**: dock at a starbase with a big vendor (a
+  general store / ammo vendor with hundreds of items). The trade window's item
+  list must fill in a few seconds, and every item must appear (no missing rows,
+  no stall on the load screen, no stuck-populating window). Also open the vault
+  (96 slots) and confirm it fills fast and completely. Repeat a few times.
+- **Setup**: `just rebuild server` then `just play-local`.
+
+---
+
+### [ ] CV-27 -- Vendor "Buy" / "Buy Stack" buttons actually purchase (not just drag-and-drop)
+
+- **What changed**: `server/src/PlayerConnection.cpp` -- the vendor-source branch
+  of `HandleInventoryMove` (case 4) now treats a purchase as valid when
+  `ToInv == 1` OR `ToInv == 4` (was `ToInv == 1` only). Drag-and-drop from the
+  vendor window reports the destination as cargo (`ToInv=1`, concrete `ToSlot`),
+  but the in-window "Buy" / "Buy Stack" buttons report it as the vendor's own
+  type (`ToInv=4`, `ToSlot=0`). The server only honoured `ToInv==1`, so the
+  buttons silently did nothing and only drag-and-drop worked (reported live:
+  "can only drag and drop ammo"). The buy resolves the cargo slot via
+  `CargoAddItem` and never indexes `ToSlot`, so accepting `ToInv==4` runs the
+  same purchase path with no slot-indexing risk.
+- **Primary source**: behavioural analysis of the retail client's vendor Buy
+  buttons (they emit `0x0027` with `FromInv=4, ToInv=4, ToSlot=0, Num=`quantity).
+  The captured drag-and-drop buy (VendorInvEco dg #12: `FromInv=4, ToInv=1,
+  ToSlot=31`) confirms the drag path's `ToInv=1`.
+- **CLI parse + test**: `InventoryMoveCodecTests.Encode_BuyViaButton_*` pins the
+  exact 24-byte Buy-button frame (`ToInv=4, ToSlot=0`); the drag path stays
+  pinned by `Encode_BuyIntoCargoSlot31_MatchesCapture_dg12`.
+- **What to look for (real client)**: at a vendor, select an item (e.g. ammo),
+  click "Buy" (buys 1) and "Buy Stack" (buys the chosen quantity). The item must
+  land in cargo and credits must be deducted -- without dragging. Confirm the
+  quantity slider's amount is what gets bought, and that insufficient-credits /
+  full-cargo still refuse cleanly.
+- **Setup**: `just rebuild server` then `just play-local`. A character at a
+  vendor with credits and free cargo space.

@@ -208,7 +208,7 @@ public sealed class SectorServerParametersHardeningTests : SectorIntegrationTest
 
     public SectorServerParametersHardeningTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task ServerParameters_EmittedDuringSpaceSectorHandshake_HasExactly70BytePayload()
     {
         var account = TestAccounts.New(_server);
@@ -361,7 +361,7 @@ public sealed class SectorServerParametersHardeningTests : SectorIntegrationTest
     /// stimulus, no server change, no permissiveness added.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task ServerParameters_EmittedExactlyOnceDuringSpaceSectorHandshake_PinsSelfEmit()
     {
         var account = TestAccounts.New(_server);

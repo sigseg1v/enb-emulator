@@ -298,6 +298,11 @@ services:
       # AH faucet bots. ON by default to keep the Auction House stocked; set
       # FREYA_AH_BOTS=0 in the droplet .env to disable.
       FREYA_AH_BOTS: "${FREYA_AH_BOTS:-1}"
+      # AhBot auto-bidding. ON by default: the AhBot bids on player listings
+      # priced at or below its own number, so a posted item always has a buyer
+      # of last resort. Set FREYA_AH_BOT_BID_ITEMS=0 in the droplet .env to
+      # disable.
+      FREYA_AH_BOT_BID_ITEMS: "${FREYA_AH_BOT_BID_ITEMS:-1}"
     volumes:
       # The real (CN=${DOMAIN}) cert/key; freya-online reads <DOMAIN>.cer /
       # <DOMAIN>.pem from FREYA_CERT_DIR.

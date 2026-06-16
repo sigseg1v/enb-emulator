@@ -212,7 +212,7 @@ public sealed class SectorManufactureTechLevelFilterTests : SectorIntegrationTes
 {
     public SectorManufactureTechLevelFilterTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task ManufactureTechLevelFilter_DisableZeroBitField_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

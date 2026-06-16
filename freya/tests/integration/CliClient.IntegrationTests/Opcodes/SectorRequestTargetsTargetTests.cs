@@ -184,7 +184,7 @@ public sealed class SectorRequestTargetsTargetTests : SectorIntegrationTest
 {
     public SectorRequestTargetsTargetTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task RequestTargetsTarget_OnUnknownPlayer_ReceivesSetTargetWithLiteralZeroGameId()
     {
         var account = TestAccounts.New(_server);

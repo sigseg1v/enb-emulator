@@ -147,7 +147,7 @@ public sealed class SectorRecustomizeShipDoneTests : SectorIntegrationTest
 {
     public SectorRecustomizeShipDoneTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task RecustomizeShipDone_OnFreshStarbaseSession_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

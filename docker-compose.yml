@@ -354,6 +354,11 @@ services:
       # AhBot account (see bots.go); set FREYA_AH_BOTS=0 in the host env to
       # disable.
       FREYA_AH_BOTS: "${FREYA_AH_BOTS:-1}"
+      # AhBot auto-bidding. ON by default: the AhBot bids on PLAYER listings
+      # priced at or below what it would list the same item for, so a posted
+      # item always has a buyer of last resort (see botBidSweep in bots.go).
+      # Set FREYA_AH_BOT_BID_ITEMS=0 in the host env to disable.
+      FREYA_AH_BOT_BID_ITEMS: "${FREYA_AH_BOT_BID_ITEMS:-1}"
     volumes:
       # Same dev certs the server uses; the Go service reads
       # <DOMAIN>.cer / <DOMAIN>.pem from FREYA_CERT_DIR.

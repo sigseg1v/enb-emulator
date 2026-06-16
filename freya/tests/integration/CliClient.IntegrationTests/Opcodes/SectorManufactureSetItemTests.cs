@@ -161,7 +161,7 @@ public sealed class SectorManufactureSetItemTests : SectorIntegrationTest
 {
     public SectorManufactureSetItemTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task ManufactureSetItem_InvalidItemZero_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

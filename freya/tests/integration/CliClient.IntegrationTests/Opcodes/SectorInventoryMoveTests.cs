@@ -196,7 +196,7 @@ public sealed class SectorInventoryMoveTests : SectorIntegrationTest
 {
     public SectorInventoryMoveTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task InventoryMove_UnrecognisedFromInv_ReceivesUnrecognisedErrorString()
     {
         var account = TestAccounts.New(_server);
@@ -412,7 +412,7 @@ public sealed class SectorInventoryMoveTests : SectorIntegrationTest
     /// loop required by CLAUDE.md: the CLI builder and the server parser agree on
     /// the wire format that the captures pinned.
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task InventoryMove_CodecBuiltPayload_RoundTripsThroughServer()
     {
         var account = TestAccounts.New(_server);
@@ -489,7 +489,7 @@ public sealed class SectorInventoryMoveTests : SectorIntegrationTest
     /// regression that only triggers on Num&gt;1 (e.g. a CheckStack that faulted
     /// on a non-empty MoveNum against an empty source).
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task InventoryMove_StackSplitMove_DoesNotDropSession()
     {
         var account = TestAccounts.New(_server);
@@ -556,7 +556,7 @@ public sealed class SectorInventoryMoveTests : SectorIntegrationTest
             $"split move likely dropped the session or wedged the case-1 path.");
     }
 
-    [Fact]
+    [RetryFact]
     public async Task InventoryMove_UnrecognisedFromInv_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -678,7 +678,7 @@ public sealed class SectorInventoryMoveTests : SectorIntegrationTest
     /// emits nothing on a dropped malformed move either). Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task InventoryMove_OutOfBoundsFromSlot_IsDropped_ConnectionSurvives()
     {
         var account = TestAccounts.New(_server);

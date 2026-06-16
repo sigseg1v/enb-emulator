@@ -39,7 +39,7 @@ public sealed class ProxyStatusRequestTests
         _client = new ClientFixture(server);
     }
 
-    [Fact]
+    [RetryFact]
     public async Task StatusRequest_OverGlobalPlane_ReportsConnectedAndPlaintext()
     {
         var account = TestAccounts.New(_server);

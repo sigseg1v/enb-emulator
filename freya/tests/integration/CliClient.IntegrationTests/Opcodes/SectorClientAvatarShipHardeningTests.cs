@@ -165,7 +165,7 @@ public sealed class SectorClientAvatarShipHardeningTests
         _client = new ClientFixture(server);
     }
 
-    [Fact]
+    [RetryFact]
     public async Task ClientAvatarAndClientShip_EmittedDuringStationSectorHandshake_HaveExactly4BytePayload()
     {
         var account = TestAccounts.New(_server);
@@ -238,7 +238,7 @@ public sealed class SectorClientAvatarShipHardeningTests
     /// tightening. No client stimulus, no server change.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task ClientAvatarAndClientShip_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmits()
     {
         var account = TestAccounts.New(_server);

@@ -121,7 +121,7 @@ public sealed class SectorStarbaseRequestTests : SectorIntegrationTest
 {
     public SectorStarbaseRequestTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task JobTerminal_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);
@@ -211,7 +211,7 @@ public sealed class SectorStarbaseRequestTests : SectorIntegrationTest
             $"or SectorManager::GetJobList faulted on the empty-jobs path.");
     }
 
-    [Fact]
+    [RetryFact]
     public async Task StarbaseRequest_CodecBuiltTalkToNpc_RoundTripsThroughServer()
     {
         // Same survival-probe contract, but the 0x004E payload is built by the

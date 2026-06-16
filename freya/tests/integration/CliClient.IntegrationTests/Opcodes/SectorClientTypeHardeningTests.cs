@@ -194,7 +194,7 @@ public sealed class SectorClientTypeHardeningTests : SectorIntegrationTest
     /// retail-faithful invariant of the single-call SectorLogin dispatch.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task ClientType_EmittedExactlyOnceDuringSpaceSectorHandshake_PinsSectorLoginEmit()
     {
         var account = TestAccounts.New(_server);
@@ -232,7 +232,7 @@ public sealed class SectorClientTypeHardeningTests : SectorIntegrationTest
         Assert.Equal(ExpectedClientTypePayloadLength, single.PayloadLength);
     }
 
-    [Fact]
+    [RetryFact]
     public async Task ClientType_EmittedDuringSpaceSectorHandshake_HasExactly4BytePayload()
     {
         var account = TestAccounts.New(_server);

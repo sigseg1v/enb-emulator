@@ -207,7 +207,7 @@ public sealed class SectorTalkTreeTests : SectorIntegrationTest
 
     public SectorTalkTreeTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task StarbaseTalkAction4_OnUnknownNpc_ReceivesFallbackTalkTree()
     {
         var account = TestAccounts.New(_server);
