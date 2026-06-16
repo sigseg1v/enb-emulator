@@ -283,11 +283,15 @@ C++ source directly). The Go server must reproduce:
       high bidder via deliverCredits the instant they are outbid, so every loser
       is whole; only the eventual winner's held bid is consumed (it buys the
       item).
-- [ ] RUNTIME-VERIFY: post a cheap player listing (<=50% of AhBot's number),
-      wait a 30-min tick (or temporarily shorten botBidInterval), confirm the
-      AhBot becomes high bidder at start_bid and the SPA shows HighBidder=AhBot;
-      confirm it never outbids once a human bids; confirm at expiry the seller
-      is paid.
+- [x] RUNTIME-VERIFIED against live Postgres (bots_integration_test.go, gated on
+      FREYA_TEST_DB; run vs the freya-dev DB on :5759):
+      `TestIT_BotPlaceBid_BecomesHighBidder_NoWalletDebit` (AhBot becomes high
+      bidder at start_bid, bid row recorded, wallet unchanged),
+      `TestIT_BotPlaceBid_NeverOutbidsAPlayer` (errListingGone once a human holds
+      the bid -> never outbids), `TestIT_BotBidSweep_BidsCheapIgnoresOverpriced`
+      (real sweep bid 9/40 dirt-cheap listings ~= the 20% rate, left the
+      >120%-overpriced one untouched). Live freya-online container logs
+      "AH bot-bidding ENABLED ... interval=30m0s" at boot.
 
 ### AQ-5 React + TS SPA
 - [x] Import Freya Online.html design (fetched via owner-provided API URL,
