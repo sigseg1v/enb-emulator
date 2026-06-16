@@ -8292,3 +8292,36 @@ real-client CV check before any wire change).
   advances the same keystream). docker-compose mounts server/data at the proxy's
   database path. The server-side Type-5..9 streaming (Z-5) stays a lower-priority gap.
   CV-MAP filed (plans/29). Primary source cap6.
+
+## 2026-06-16 -- Dead-code purge (code-lint-cleanup branch)
+
+Pre-lint cleanup pass, removing code already superseded by a shipped replacement.
+
+- **WinForms editor suite removed.** All 13 paired WinForms tools + loose
+  siblings deleted (683 files) now that every Avalonia replacement
+  (`tools/<name>-avalonia`) builds clean and reached parity. Verified no
+  kept/Avalonia project crossed the boundary (no `ProjectReference`/`HintPath`).
+  See plans/12-phase-l-avalonia.md. The "keep both UIs in parallel" decision is
+  now retired -- Avalonia is the sole UI. Commit 1435091a.
+
+- **C++ login-server removed.** Net7SSL was already deleted in f1ac7628 (its
+  responsibilities moved to `login-server/net7go` Go + `freya/online` per the
+  AQ-7 cutover); the leftover untracked local `Net7SSL/build/` artifact was
+  wiped this pass. **Net7Mysql** (the 2010 MFC MySQL admin GUI, 57 files) and
+  the two vendored MySQL Connector/C `.lib` blobs
+  (`login-server/Net7Mysql/libmySQL.lib`, `server/third_party/libmysql.lib`)
+  are also deleted -- the runtime server speaks Postgres via libpqxx (Phase N),
+  so nothing links MySQL on any platform anymore. Removed the `mysql-legacy`
+  docker-compose service + `mysqldata` volume, the `.gitignore` re-include, the
+  THIRD_PARTY_BINARIES.md row, and the now-dead `*/mysql/` exclusion paths in
+  the SQL-audit + mojibake guards. Updated CLAUDE.md (4 stale Net7SSL/Net7Mysql
+  references).
+
+- **KEPT: `db/mysql/*.sql` (the original 2010 tada-o dumps).** These are NOT
+  dead -- they are the provenance/source-of-truth for the Postgres conversion
+  (`db/postgres/convert.sh` derives from them) and the canonical reference for
+  auditing the migrated schema. In a preservation project, deleting the source
+  material the current schema was derived from is a real loss, so they stay.
+  This is the one deletion candidate I deliberately did NOT remove despite the
+  "kill mysql stuff" directive; flagging it for the owner to override if the
+  intent was to drop the historical dumps too.

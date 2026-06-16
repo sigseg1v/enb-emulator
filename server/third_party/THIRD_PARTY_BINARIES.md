@@ -8,7 +8,6 @@ These are precompiled `.lib` (Windows static archive) files vendored from upstre
 | `lua.lib` | Lua 5.x static lib (MSVC9, x86) | https://www.lua.org/ | Same reason. Linux builds use system `liblua5.x-dev`. |
 | `tinyxmld.lib` | TinyXML (debug build, MSVC9, x86) | http://www.grinninglizard.com/tinyxml/ | Used by `TalkTreeParser`, `MissionDatabaseSQL`, etc. Linux uses system `libtinyxml-dev`. |
 | `libeay32.lib` | OpenSSL libcrypto (old MSVC9 build) | https://www.openssl.org/ | OpenSSL 1.0.x era. Phase E handles migration to 3.x. |
-| `libmySQL.lib` (in `login-server/Net7Mysql/`) | MySQL Connector/C static lib | https://dev.mysql.com/downloads/connector/c/ | Login server connects to MySQL. Phase C migrates to Postgres + libpqxx. |
 
 In `server/src/LUA/` there are MSVC9 prebuilds of Lua + Luabind for **both** x86 and x64. Same status — kept for Windows builds, not used on Linux.
 
