@@ -57,6 +57,13 @@ type Config struct {
 	// with a rarity/quality/price-distributed pool of listings (see bots.go).
 	AhBotsEnabled bool // FREYA_AH_BOTS=1
 
+	// AhBot auto-bidding. When on (the DEFAULT), the AhBot periodically bids on
+	// PLAYER listings priced at or below what it would list the same item for, so
+	// a player's items always have a buyer of last resort (see botBidSweep in
+	// bots.go). Independent of AhBotsEnabled: it bids on player listings, not its
+	// own faucet stock. Set FREYA_AH_BOT_BID_ITEMS=0 to disable.
+	AhBotBidEnabled bool // FREYA_AH_BOT_BID_ITEMS, default 1 (on)
+
 	// Login-flood defence for the website API (Phase AR-1, see ratelimit.go).
 	// Per-IP token bucket bounds brute-force; the Argon2 concurrency cap bounds
 	// memory. Rate <= 0 disables the per-IP limiter.
@@ -114,6 +121,7 @@ func loadConfig() Config {
 		PatcherDLBase:      strings.TrimRight(env("FREYA_PATCHER_DL_BASE", ""), "/"),
 		StatusStaleSecs:    stale,
 		AhBotsEnabled:      env("FREYA_AH_BOTS", "") == "1",
+		AhBotBidEnabled:    env("FREYA_AH_BOT_BID_ITEMS", "1") != "0",
 		LoginRatePerMin:    envInt("FREYA_LOGIN_RATE_PER_MIN", 60),
 		LoginBurst:         envInt("FREYA_LOGIN_BURST", 20),
 		ArgonMaxConcurrent: envInt("FREYA_ARGON_MAX_CONCURRENT", 4),
