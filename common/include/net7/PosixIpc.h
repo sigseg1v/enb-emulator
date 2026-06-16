@@ -47,9 +47,15 @@ public:
     // Reopen the recv socket (mirrors Win32 ResetMailSystem behaviour).
     void Reset();
 
-    bool valid() const { return m_recv_fd >= 0; }
-    const std::string& recv_path() const { return m_recv_path; }
-    const std::string& send_path() const { return m_send_path; }
+    bool valid() const {
+        return m_recv_fd >= 0;
+    }
+    const std::string& recv_path() const {
+        return m_recv_path;
+    }
+    const std::string& send_path() const {
+        return m_send_path;
+    }
 
 private:
     bool OpenRecv();
@@ -63,6 +69,6 @@ private:
     std::string m_send_path;
 };
 
-}  // namespace net7ipc
+} // namespace net7ipc
 
-#endif  // NET7_POSIX_IPC_H_
+#endif // NET7_POSIX_IPC_H_

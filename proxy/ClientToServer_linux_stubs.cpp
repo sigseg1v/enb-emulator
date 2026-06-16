@@ -53,22 +53,23 @@ namespace {
 // longs from m_RecvBuffer (Major, Minor) and returns a single int32_t status
 // in the VersionResponse. Status: 0 = version OK, 1 = client too old,
 // 2 = client newer than this server (per Win32 ClientToGlobalServer.cpp:94-115).
-void HandleVersionRequest_Linux(Connection *conn, unsigned char *recv_buf)
-{
-    VersionRequest *request = (VersionRequest *) recv_buf;
-    long major = (long) ntohl((uint32_t) request->Major);
-    long minor = (long) ntohl((uint32_t) request->Minor);
+void HandleVersionRequest_Linux(Connection* conn, unsigned char* recv_buf) {
+    VersionRequest* request = (VersionRequest*)recv_buf;
+    long major = (long)ntohl((uint32_t)request->Major);
+    long minor = (long)ntohl((uint32_t)request->Minor);
 
     int32_t status;
-    if (major == 42 && minor == 0)        status = 0;
-    else if (major < 42)                  status = 1;
-    else                                  status = 2;
+    if (major == 42 && minor == 0)
+        status = 0;
+    else if (major < 42)
+        status = 1;
+    else
+        status = 2;
 
-    LogMessage("<client> VersionRequest major=%ld minor=%ld -> status=%d\n",
-               major, minor, (int) status);
+    LogMessage("<client> VersionRequest major=%ld minor=%ld -> status=%d\n", major, minor,
+               (int)status);
 
-    conn->SendResponse(ENB_OPCODE_0001_VERSION_RESPONSE,
-                       (unsigned char *) &status, sizeof(status));
+    conn->SendResponse(ENB_OPCODE_0001_VERSION_RESPONSE, (unsigned char*)&status, sizeof(status));
 }
 
 // Phase AH: answer the CLI's 0x3009 status request with the proxy's own view
@@ -76,8 +77,7 @@ void HandleVersionRequest_Linux(Connection *conn, unsigned char *recv_buf)
 // the proxy -- nothing is forwarded to the server, and the reply touches no
 // game state. The proxy is the only component that negotiates the proxy<->server
 // DTLS, so it is the ground-truth source for whether that leg is encrypted.
-void HandleCliStatusRequest_Linux(Connection *conn, ServerManager &mgr)
-{
+void HandleCliStatusRequest_Linux(Connection* conn, ServerManager& mgr) {
     ProxyStatusReply reply;
     memset(&reply, 0, sizeof(reply));
 
@@ -87,22 +87,22 @@ void HandleCliStatusRequest_Linux(Connection *conn, ServerManager &mgr)
     // Live (handshake-complete) associations across both server-facing legs:
     // the master/sector send socket and the global control-plane socket.
     size_t established = 0;
-    if (mgr.m_UDPConnection)   established += mgr.m_UDPConnection->EstablishedDtls();
-    if (mgr.m_UDPGlobalClient) established += mgr.m_UDPGlobalClient->EstablishedDtls();
-    reply.dtls_live_assocs = established > 255 ? 255 : (uint8_t) established;
+    if (mgr.m_UDPConnection)
+        established += mgr.m_UDPConnection->EstablishedDtls();
+    if (mgr.m_UDPGlobalClient)
+        established += mgr.m_UDPGlobalClient->EstablishedDtls();
+    reply.dtls_live_assocs = established > 255 ? 255 : (uint8_t)established;
 
     // The proxy has an active server-side UDP link once the master socket exists.
     reply.connected = mgr.m_UDPConnection ? 1 : 0;
 
-    conn->SendResponse(ENB_OPCODE_300A_CLI_STATUS_REPLY,
-                       (unsigned char *) &reply, sizeof(reply));
+    conn->SendResponse(ENB_OPCODE_300A_CLI_STATUS_REPLY, (unsigned char*)&reply, sizeof(reply));
 }
 
 } // namespace
 
-void Connection::ProcessGlobalServerOpcode(short opcode, short bytes)
-{
-    switch ((unsigned short) opcode) {
+void Connection::ProcessGlobalServerOpcode(short opcode, short bytes) {
+    switch ((unsigned short)opcode) {
     case ENB_OPCODE_0000_VERSION_REQUEST:
         HandleVersionRequest_Linux(this, m_RecvBuffer);
         break;
@@ -135,8 +135,9 @@ void Connection::ProcessGlobalServerOpcode(short opcode, short bytes)
         break;
 
     default:
-        LogMessage("Linux stub: ProcessGlobalServerOpcode 0x%04x (%d bytes) -- not yet implemented\n",
-                   (unsigned short) opcode, (int) bytes);
+        LogMessage(
+            "Linux stub: ProcessGlobalServerOpcode 0x%04x (%d bytes) -- not yet implemented\n",
+            (unsigned short)opcode, (int)bytes);
         break;
     }
 }
@@ -153,33 +154,38 @@ void Connection::ProcessGlobalServerOpcode(short opcode, short bytes)
 // false unless the input is exactly the expected hex length with no stray
 // characters. The proxy does not link libsodium, so this is a small local
 // decoder for the 32-hex login-ticket suffix.
-static bool ProxyHexToBin(const char *hex, unsigned char *out, size_t out_len)
-{
-    if (!hex) return false;
-    for (size_t i = 0; i < out_len; ++i)
-    {
+static bool ProxyHexToBin(const char* hex, unsigned char* out, size_t out_len) {
+    if (!hex)
+        return false;
+    for (size_t i = 0; i < out_len; ++i) {
         int hi = -1, lo = -1;
         char ch = hex[i * 2], cl = hex[i * 2 + 1];
-        if (ch >= '0' && ch <= '9') hi = ch - '0';
-        else if (ch >= 'a' && ch <= 'f') hi = ch - 'a' + 10;
-        else if (ch >= 'A' && ch <= 'F') hi = ch - 'A' + 10;
-        if (cl >= '0' && cl <= '9') lo = cl - '0';
-        else if (cl >= 'a' && cl <= 'f') lo = cl - 'a' + 10;
-        else if (cl >= 'A' && cl <= 'F') lo = cl - 'A' + 10;
-        if (hi < 0 || lo < 0) return false;
+        if (ch >= '0' && ch <= '9')
+            hi = ch - '0';
+        else if (ch >= 'a' && ch <= 'f')
+            hi = ch - 'a' + 10;
+        else if (ch >= 'A' && ch <= 'F')
+            hi = ch - 'A' + 10;
+        if (cl >= '0' && cl <= '9')
+            lo = cl - '0';
+        else if (cl >= 'a' && cl <= 'f')
+            lo = cl - 'a' + 10;
+        else if (cl >= 'A' && cl <= 'F')
+            lo = cl - 'A' + 10;
+        if (hi < 0 || lo < 0)
+            return false;
         out[i] = (unsigned char)((hi << 4) | lo);
     }
     // require the suffix to end right after the hex (NUL terminator)
     return hex[out_len * 2] == '\0';
 }
 
-void Connection::HandleGlobalConnect()
-{
+void Connection::HandleGlobalConnect() {
     // Frame payload layout (matches Win32 ClientToGlobalServer.cpp:124):
     //   [u32 ticket_len][char ticket[ticket_len]]
     // Tickets are issued by Net7SSL's VerifyAccountInfo path and look
     // like "USERNAME-EXTRABYTES"; the dash splits user from auth tail.
-    char *ticket = (char *) &m_RecvBuffer[4];
+    char* ticket = (char*)&m_RecvBuffer[4];
 
     // Phase AH (AH-8): learn the per-packet auth token from the ticket suffix
     // ("USERNAME-<32 hex>") BEFORE SendTicket goes on the wire, so even the
@@ -187,26 +193,25 @@ void Connection::HandleGlobalConnect()
     // mutate `ticket` (the later strrchr truncation does); the suffix is the
     // 16-byte binary form of the CSPRNG login-ticket token. The server only
     // enforces it on gameplay datagrams, so a malformed suffix here is non-fatal.
-    if (g_ServerMgr)
-    {
+    if (g_ServerMgr) {
         // The token is the trailing 32 hex chars; split on the LAST '-' so a
         // username containing a dash still yields the correct suffix. (The
         // issuer formats "USERNAME-<32hex>" and the token is pure hex, so it
         // never contains a dash itself.) ProxyHexToBin requires exactly 32 hex
         // followed by NUL, so a malformed suffix simply leaves the token unset.
-        const char *dash = strrchr(ticket, '-');
+        const char* dash = strrchr(ticket, '-');
         unsigned char tok[16];
         if (dash && ProxyHexToBin(dash + 1, tok, sizeof(tok)))
             g_ServerMgr->SetAuthToken(tok);
     }
 
-    UDPClient *gc = g_ServerMgr ? g_ServerMgr->m_UDPGlobalClient : nullptr;
+    UDPClient* gc = g_ServerMgr ? g_ServerMgr->m_UDPGlobalClient : nullptr;
     if (!gc) {
         LogMessage("HandleGlobalConnect: no global UDP client wired -- dropping\n");
         return;
     }
 
-    char *avatar_list = gc->SendTicket(ticket);
+    char* avatar_list = gc->SendTicket(ticket);
     if (!avatar_list) {
         // Server rejected or timed out. ProcessGlobalError will have
         // already routed a 0x0075 error back if the server replied
@@ -221,57 +226,55 @@ void Connection::HandleGlobalConnect()
     // so the dashed name must survive intact. Truncating ticket in place is
     // safe -- it lives in m_RecvBuffer and we don't touch the payload again,
     // and SendTicket already consumed the full ticket above.
-    char *last_dash = strrchr(ticket, '-');
-    if (last_dash) *last_dash = '\0';
+    char* last_dash = strrchr(ticket, '-');
+    if (last_dash)
+        *last_dash = '\0';
     m_AccountUsername = ticket;
     gc->SetAccountName(m_AccountUsername);
 
     memcpy(&m_Player_Avatar_List, avatar_list, sizeof(GlobalAvatarList));
-    SendResponse(ENB_OPCODE_0070_GLOBAL_AVATAR_LIST,
-                 (unsigned char *) avatar_list, sizeof(GlobalAvatarList));
+    SendResponse(ENB_OPCODE_0070_GLOBAL_AVATAR_LIST, (unsigned char*)avatar_list,
+                 sizeof(GlobalAvatarList));
 }
 
-void Connection::HandleDeleteCharacter()
-{
-    long character_slot = (long) ntohl(*(uint32_t *) m_RecvBuffer);
+void Connection::HandleDeleteCharacter() {
+    long character_slot = (long)ntohl(*(uint32_t*)m_RecvBuffer);
 
-    UDPClient *gc = g_ServerMgr ? g_ServerMgr->m_UDPGlobalClient : nullptr;
+    UDPClient* gc = g_ServerMgr ? g_ServerMgr->m_UDPGlobalClient : nullptr;
     if (!gc) {
         LogMessage("HandleDeleteCharacter: no global UDP client -- dropping\n");
         return;
     }
 
-    char *avatar_list = gc->DeleteCharacter(character_slot);
+    char* avatar_list = gc->DeleteCharacter(character_slot);
     if (avatar_list) {
         memcpy(&m_Player_Avatar_List, avatar_list, sizeof(GlobalAvatarList));
-        SendResponse(ENB_OPCODE_0070_GLOBAL_AVATAR_LIST,
-                     (unsigned char *) avatar_list, sizeof(GlobalAvatarList));
+        SendResponse(ENB_OPCODE_0070_GLOBAL_AVATAR_LIST, (unsigned char*)avatar_list,
+                     sizeof(GlobalAvatarList));
     }
 }
 
-void Connection::HandleCreateCharacter()
-{
-    GlobalCreateCharacter *create = (GlobalCreateCharacter *) m_RecvBuffer;
+void Connection::HandleCreateCharacter() {
+    GlobalCreateCharacter* create = (GlobalCreateCharacter*)m_RecvBuffer;
 
-    UDPClient *gc = g_ServerMgr ? g_ServerMgr->m_UDPGlobalClient : nullptr;
+    UDPClient* gc = g_ServerMgr ? g_ServerMgr->m_UDPGlobalClient : nullptr;
     if (!gc) {
         LogMessage("HandleCreateCharacter: no global UDP client -- dropping\n");
         return;
     }
 
-    char *avatar_list = gc->CreateCharacter(create);
+    char* avatar_list = gc->CreateCharacter(create);
     if (avatar_list) {
         memcpy(&m_Player_Avatar_List, avatar_list, sizeof(GlobalAvatarList));
-        SendResponse(ENB_OPCODE_0070_GLOBAL_AVATAR_LIST,
-                     (unsigned char *) avatar_list, sizeof(GlobalAvatarList));
+        SendResponse(ENB_OPCODE_0070_GLOBAL_AVATAR_LIST, (unsigned char*)avatar_list,
+                     sizeof(GlobalAvatarList));
     }
 }
 
-void Connection::HandleGlobalTicketRequest()
-{
-    long char_slot = (long) ntohl(*(uint32_t *) m_RecvBuffer);
+void Connection::HandleGlobalTicketRequest() {
+    long char_slot = (long)ntohl(*(uint32_t*)m_RecvBuffer);
 
-    UDPClient *gc = g_ServerMgr ? g_ServerMgr->m_UDPGlobalClient : nullptr;
+    UDPClient* gc = g_ServerMgr ? g_ServerMgr->m_UDPGlobalClient : nullptr;
     if (!gc) {
         LogMessage("HandleGlobalTicketRequest: no global UDP client -- dropping\n");
         return;
@@ -280,13 +283,13 @@ void Connection::HandleGlobalTicketRequest()
     long avatar_id = gc->SendAvatarLogin(char_slot);
     if (avatar_id == -1) {
         LogMessage("GlobalTicketRequest(): error obtaining slot -- galaxy-full reply\n");
-        SendGlobalTicket(0x40000000, 0, 1002, false);   // 1002 = galaxy full
+        SendGlobalTicket(0x40000000, 0, 1002, false); // 1002 = galaxy full
         return;
     }
 
     LogMessage("GlobalTicketRequest: user='%s' slot=%ld avatar_id=%ld\n",
-               m_AccountUsername ? m_AccountUsername : "(unknown)",
-               (long) char_slot, (long) avatar_id);
+               m_AccountUsername ? m_AccountUsername : "(unknown)", (long)char_slot,
+               (long)avatar_id);
 
     ProcessGlobalTicket(char_slot);
 }
@@ -301,56 +304,56 @@ namespace {
 // Keep all 15 entries in lock-step with that header -- when codes get added on
 // the server/login side, append here in the same order or GlobalError() will
 // silently drop the new code (it bounds-checks against g_GlobalErrorMsgCount).
-static const char *g_GlobalErrorMsg[] = {
-    "Error: You have been temporarily banned.",                                                                                                          //  0  G_ERROR_BANNED_ACCOUNT
-    "Sorry, that name has already been taken. Please try again.",                                                                                        //  1  G_ERROR_NICKNAME_USED
-    "Sorry, your name can only contain the letters a-z. No spaces or other special characters are allowed.  Please try again.",                          //  2  G_ERROR_INVALID_CHARS
-    "Sorry, this name is too short. It must contain at least 3 characters. Please try again.",                                                           //  3  G_ERROR_TOO_SHORT
-    "Sorry, this name needs enough vowels (a,e,i,o,u & y) to be pronouncable. Please try again.",                                                        //  4  G_ERROR_ONE_VOWEL
-    "Sorry, there are too many repeating characters in this name. Please try again.",                                                                    //  5  G_ERROR_REPEATING_CHAR
-    "Sorry, this name contains a reserved or illegal word. Please try again.",                                                                           //  6  G_ERROR_RESTRICTED_LIST
-    "Error: Ticket Validation Failed.",                                                                                                                  //  7  G_ERROR_TICKET_INVALID
-    "Error: Authentication Server (AUTHD) is unavailable.  Try again in a few minutes.",                                                                 //  8  G_ERROR_AUTH_SERVER_DOWN
-    "Error: You have not compleated registration.",                                                                                                      //  9  G_ERROR_INACTIVE_ACCOUNT
-    "Sorry, that ship name is not allowed. Please try again",                                                                                            // 10  G_ERROR_RESTRICTED_SHIP
-    "Sorry, Net7 experienced an internal error. Please submit a bug report",                                                                             // 11  G_ERROR_NET7_INTERNAL
-    "Sorry, the server is not currently accepting new logins.  Please try again later.",                                                                 // 12  G_ERROR_STRESS_TEST_CLOSED
-    "Error: That account is already logged in.",                                                                                                         // 13  G_ERROR_ACCOUNT_IN_USE
-    "Sorry, the server is shutting down.  Please try again later.",                                                                                      // 14  G_ERROR_SERVER_SHUTDOWN
+static const char* g_GlobalErrorMsg[] = {
+    "Error: You have been temporarily banned.",                   //  0  G_ERROR_BANNED_ACCOUNT
+    "Sorry, that name has already been taken. Please try again.", //  1  G_ERROR_NICKNAME_USED
+    "Sorry, your name can only contain the letters a-z. No spaces or other special characters are "
+    "allowed.  Please try again.", //  2  G_ERROR_INVALID_CHARS
+    "Sorry, this name is too short. It must contain at least 3 characters. Please try again.", //  3  G_ERROR_TOO_SHORT
+    "Sorry, this name needs enough vowels (a,e,i,o,u & y) to be pronouncable. Please try again.", //  4  G_ERROR_ONE_VOWEL
+    "Sorry, there are too many repeating characters in this name. Please try again.", //  5  G_ERROR_REPEATING_CHAR
+    "Sorry, this name contains a reserved or illegal word. Please try again.", //  6  G_ERROR_RESTRICTED_LIST
+    "Error: Ticket Validation Failed.", //  7  G_ERROR_TICKET_INVALID
+    "Error: Authentication Server (AUTHD) is unavailable.  Try again in a few minutes.", //  8  G_ERROR_AUTH_SERVER_DOWN
+    "Error: You have not compleated registration.",           //  9  G_ERROR_INACTIVE_ACCOUNT
+    "Sorry, that ship name is not allowed. Please try again", // 10  G_ERROR_RESTRICTED_SHIP
+    "Sorry, Net7 experienced an internal error. Please submit a bug report", // 11  G_ERROR_NET7_INTERNAL
+    "Sorry, the server is not currently accepting new logins.  Please try again later.", // 12  G_ERROR_STRESS_TEST_CLOSED
+    "Error: That account is already logged in.",                    // 13  G_ERROR_ACCOUNT_IN_USE
+    "Sorry, the server is shutting down.  Please try again later.", // 14  G_ERROR_SERVER_SHUTDOWN
 };
 static const int g_GlobalErrorMsgCount =
     (int)(sizeof(g_GlobalErrorMsg) / sizeof(g_GlobalErrorMsg[0]));
 
 } // namespace
 
-void Connection::GlobalError(int Error)
-{
+void Connection::GlobalError(int Error) {
     if (Error < 0 || Error >= g_GlobalErrorMsgCount) {
         LogMessage("GlobalError: unknown error code %d -- dropping\n", Error);
         return;
     }
 
-    const char *msg = g_GlobalErrorMsg[Error];
+    const char* msg = g_GlobalErrorMsg[Error];
     size_t msg_len = strlen(msg);
 
     // Wire layout (matches Win32 ClientToGlobalServer.cpp:36-49):
     //   [u32 length][u32 be(Error+7)][char msg[length]]
     char buffer[1024];
-    char *p = buffer;
-    *((int *) p) = (int) msg_len; p += 4;
-    *((int *) p) = (int) ntohl((uint32_t)(Error + 7)); p += 4;
+    char* p = buffer;
+    *((int*)p) = (int)msg_len;
+    p += 4;
+    *((int*)p) = (int)ntohl((uint32_t)(Error + 7));
+    p += 4;
     memcpy(p, msg, msg_len);
     p += msg_len;
 
-    SendResponse(ENB_OPCODE_0075_GLOBAL_ERROR,
-                 (unsigned char *) buffer, (size_t)(p - buffer));
+    SendResponse(ENB_OPCODE_0075_GLOBAL_ERROR, (unsigned char*)buffer, (size_t)(p - buffer));
 }
 
-void Connection::SendGlobalTicket(long avatar_id, long sector_id, long level, bool issue)
-{
+void Connection::SendGlobalTicket(long avatar_id, long sector_id, long level, bool issue) {
     GlobalTicket ticket;
     memset(&ticket, 0, sizeof(ticket));
-    unsigned char *ptr_ticket = (unsigned char *) &ticket;
+    unsigned char* ptr_ticket = (unsigned char*)&ticket;
     int index = 0;
 
     // Layout reproduced from Win32 ClientToGlobalServer.cpp:207-238.
@@ -368,31 +371,29 @@ void Connection::SendGlobalTicket(long avatar_id, long sector_id, long level, bo
     index = 32;
     AddData(ptr_ticket, level, index);
     index = 48;
-    AddDataS(ptr_ticket, (char *) "MY_Avatar_Ticket", index);
+    AddDataS(ptr_ticket, (char*)"MY_Avatar_Ticket", index);
 
-    SendResponse(ENB_OPCODE_006F_GLOBAL_TICKET,
-                 (unsigned char *) &ticket, sizeof(ticket));
+    SendResponse(ENB_OPCODE_006F_GLOBAL_TICKET, (unsigned char*)&ticket, sizeof(ticket));
 }
 
-void Connection::ProcessGlobalTicket(long char_slot)
-{
+void Connection::ProcessGlobalTicket(long char_slot) {
     // m_Player_Avatar_List is in network byte order (server fills it
     // via BuildAvatarList → BE on the wire). Pull out the two fields
     // ProcessGlobalTicket needs.
-    m_SectorID = (long) ntohl((uint32_t) m_Player_Avatar_List.avatar[char_slot].info.sector_id);
-    long admin_level = (long) ntohl((uint32_t) m_Player_Avatar_List.avatar[char_slot].info.admin_level);
+    m_SectorID = (long)ntohl((uint32_t)m_Player_Avatar_List.avatar[char_slot].info.sector_id);
+    long admin_level =
+        (long)ntohl((uint32_t)m_Player_Avatar_List.avatar[char_slot].info.admin_level);
 
-    UDPClient *gc = g_ServerMgr ? g_ServerMgr->m_UDPGlobalClient : nullptr;
+    UDPClient* gc = g_ServerMgr ? g_ServerMgr->m_UDPGlobalClient : nullptr;
     long player_id = gc ? gc->PlayerID() : 0;
 
-    LogMessage("ProcessGlobalTicket: GameID=0x%08lx sector=%ld admin=%ld\n",
-               (long) player_id, (long) m_SectorID, (long) admin_level);
+    LogMessage("ProcessGlobalTicket: GameID=0x%08lx sector=%ld admin=%ld\n", (long)player_id,
+               (long)m_SectorID, (long)admin_level);
 
     SendGlobalTicket(player_id, m_SectorID, admin_level, true);
 }
 
-void Connection::SendAvatarList(long /*account_id*/)
-{
+void Connection::SendAvatarList(long /*account_id*/) {
     // The Win32 body of this is fully commented out -- the avatar list
     // is sent inline from HandleGlobalConnect / HandleCreateCharacter
     // / HandleDeleteCharacter using the buffer returned by SendTicket
@@ -432,23 +433,19 @@ void Connection::SendAvatarList(long /*account_id*/)
 
 namespace {
 
-void ProcessAction_Linux(Connection * /*conn*/, ActionPacket * /*action*/)
-{
+void ProcessAction_Linux(Connection* /*conn*/, ActionPacket* /*action*/) {
     // Win32 (ClientToSectorServer.cpp:706-740) is a switch on action->Action
     // with all six cases (7/8/18/19/28/29) having commented-out
     // //LogMessage bodies. Mirror as a no-op.
 }
 
-void HandleStarbaseRoomChange_Linux(Connection * /*conn*/,
-                                    StarbaseRoomChange * /*change*/)
-{
+void HandleStarbaseRoomChange_Linux(Connection* /*conn*/, StarbaseRoomChange* /*change*/) {
     // Win32 (ClientToSectorServer.cpp:742-750) has only a
     // `if (change->NewRoom == -1) { //LogMessage("Leaving starbase?\n"); }`
     // with the log line commented out -- net no-op. Mirror.
 }
 
-void HandleWarp_Linux(Connection * /*conn*/)
-{
+void HandleWarp_Linux(Connection* /*conn*/) {
     // Win32 (ClientToSectorServer.cpp:752-756) calls
     //     g_ServerMgr->m_UDPClient->SendPositionIfChanged();
     // to flush a positional update before warp so the client doesn't
@@ -461,11 +458,10 @@ void HandleWarp_Linux(Connection * /*conn*/)
 
 } // namespace
 
-void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
-{
+void Connection::ProcessSectorServerOpcode(short opcode, short bytes) {
     unsigned long tick = GetNet7TickCount();
 
-    switch ((unsigned short) opcode) {
+    switch ((unsigned short)opcode) {
     case ENB_OPCODE_0002_LOGIN:
         // Matches Win32 ClientToSectorServer.cpp:22-31. Activates the proxy↔
         // server connection state so subsequent UDP traffic from the game server
@@ -509,8 +505,7 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
         if (g_ServerMgr->m_UDPGlobalClient) {
             g_ServerMgr->m_UDPGlobalClient->SetConnectionActive(true);
             g_ServerMgr->m_UDPGlobalClient->SetLoginComplete(false);
-            g_ServerMgr->m_UDPGlobalClient->SetPlayerID(
-                g_ServerMgr->m_UDPClient->PlayerID());
+            g_ServerMgr->m_UDPGlobalClient->SetPlayerID(g_ServerMgr->m_UDPClient->PlayerID());
             g_ServerMgr->m_UDPGlobalClient->SendServerKeepalive();
             g_ServerMgr->m_UDPGlobalClient->StartMVASKeepalive();
         }
@@ -527,21 +522,18 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
         // KillTCPConnection lives in UDPProxyToClient.cpp which is
         // WIN32-walled; the equivalent close happens naturally as the
         // server tears the connection state on its side).
-        if (!g_ServerMgr || !g_ServerMgr->m_UDPConnection ||
-            !g_ServerMgr->m_UDPClient) break;
+        if (!g_ServerMgr || !g_ServerMgr->m_UDPConnection || !g_ServerMgr->m_UDPClient)
+            break;
 
-        g_ServerMgr->m_UDPConnection->ForwardClientOpcode(
-            opcode, bytes, (char *) m_RecvBuffer);
+        g_ServerMgr->m_UDPConnection->ForwardClientOpcode(opcode, bytes, (char*)m_RecvBuffer);
 
         long player_id = g_ServerMgr->m_UDPClient->PlayerID();
         if (g_ServerMgr->m_UDPClient->GetSectorID() > 9999) {
             g_ServerMgr->m_UDPConnection->ForwardClientOpcode(
-                ENB_OPCODE_3008_STARBASE_LOGIN_COMPLETE,
-                sizeof(player_id), (char *) &player_id);
+                ENB_OPCODE_3008_STARBASE_LOGIN_COMPLETE, sizeof(player_id), (char*)&player_id);
         } else {
-            g_ServerMgr->m_UDPConnection->ForwardClientOpcode(
-                ENB_OPCODE_3004_PLAYER_SHIP_SENT,
-                sizeof(player_id), (char *) &player_id);
+            g_ServerMgr->m_UDPConnection->ForwardClientOpcode(ENB_OPCODE_3004_PLAYER_SHIP_SENT,
+                                                              sizeof(player_id), (char*)&player_id);
             // Win32 also KillTCPConnection() here -- see note above.
         }
         g_ServerMgr->m_UDPClient->SetLoginComplete(true);
@@ -549,8 +541,8 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
         if (g_ServerMgr->m_UDPGlobalClient)
             g_ServerMgr->m_UDPGlobalClient->SetLoginComplete(true);
 
-        LogMessage("<client> START_ACK -> server (player_id=%ld start_id=%ld)\n",
-                   (long) player_id, (long) *((int32_t *) &m_RecvBuffer[0]));
+        LogMessage("<client> START_ACK -> server (player_id=%ld start_id=%ld)\n", (long)player_id,
+                   (long)*((int32_t*)&m_RecvBuffer[0]));
         m_SectorTCPRequest = false;
         return; // do NOT fall through to bottom forward (we already forwarded)
     }
@@ -574,12 +566,11 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
         // speed to 0 in that case so the gate degrades to "never throttle,
         // always forward" -- the server, not the proxy, decides on a short
         // frame, and we never silently drop one on a stale-buffer misread.
-        float speed = (bytes >= 8) ? *((float *) &m_RecvBuffer[4]) : 0.0f;
+        float speed = (bytes >= 8) ? *((float*)&m_RecvBuffer[4]) : 0.0f;
         if (tick <= (m_Turn_Sent + 250) && speed != 0.0f) {
             return; // throttled while moving
         }
-        g_ServerMgr->m_UDPConnection->ForwardClientOpcode(
-            opcode, bytes, (char *) m_RecvBuffer);
+        g_ServerMgr->m_UDPConnection->ForwardClientOpcode(opcode, bytes, (char*)m_RecvBuffer);
         m_Turn_Sent = tick;
         return; // do NOT fall through
     }
@@ -587,12 +578,11 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
     case ENB_OPCODE_0013_TILT: {
         // Same moving-only 250ms throttle as TURN, with its own timestamp and
         // the same undersized-frame guard (read speed only when present).
-        float speed = (bytes >= 8) ? *((float *) &m_RecvBuffer[4]) : 0.0f;
+        float speed = (bytes >= 8) ? *((float*)&m_RecvBuffer[4]) : 0.0f;
         if (tick <= (m_Tilt_Sent + 250) && speed != 0.0f) {
             return; // throttled while moving
         }
-        g_ServerMgr->m_UDPConnection->ForwardClientOpcode(
-            opcode, bytes, (char *) m_RecvBuffer);
+        g_ServerMgr->m_UDPConnection->ForwardClientOpcode(opcode, bytes, (char*)m_RecvBuffer);
         m_Tilt_Sent = tick;
         return; // do NOT fall through
     }
@@ -600,9 +590,8 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
     case ENB_OPCODE_002C_ACTION:
         // Win32 ClientToSectorServer.cpp:88-92. Forward explicitly, then
         // call ProcessAction (all sub-cases are //commented-out logs).
-        g_ServerMgr->m_UDPConnection->ForwardClientOpcode(
-            opcode, bytes, (char *) m_RecvBuffer);
-        ProcessAction_Linux(this, (ActionPacket *) m_RecvBuffer);
+        g_ServerMgr->m_UDPConnection->ForwardClientOpcode(opcode, bytes, (char*)m_RecvBuffer);
+        ProcessAction_Linux(this, (ActionPacket*)m_RecvBuffer);
         return; // do NOT fall through (we already forwarded explicitly)
 
     case ENB_OPCODE_009B_WARP:
@@ -620,8 +609,7 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
     case ENB_OPCODE_009F_STARBASE_ROOM_CHANGE:
         // Win32 calls HandleStarbaseRoomChange (ClientToSectorServer.cpp:94-96),
         // whose body is entirely commented out -- net no-op. Falls through.
-        HandleStarbaseRoomChange_Linux(this,
-            (StarbaseRoomChange *) m_RecvBuffer);
+        HandleStarbaseRoomChange_Linux(this, (StarbaseRoomChange*)m_RecvBuffer);
         break;
 
     case ENB_OPCODE_00B9_LOGOFF_REQUEST:
@@ -634,17 +622,17 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
         LogMessage("<client> SectorServer LOGOFF_REQUEST\n");
         break;
 
-    // NOTE: 0x3A SERVER_HANDOFF has NO client->server case here on purpose.
-    // In a known-good proxy<->client stream 0x3A is a SERVER->client opcode
-    // (the proxy consumes the handoff side-effects in
-    // UDPClient::IncommingOpcodePreProcessing on the S->C path, then forwards
-    // it to the client). A client-originated 0x3A is not a real flow; were
-    // one to arrive it simply falls to the default forward below, exactly as
-    // the reference C->S sector dispatch does.
+        // NOTE: 0x3A SERVER_HANDOFF has NO client->server case here on purpose.
+        // In a known-good proxy<->client stream 0x3A is a SERVER->client opcode
+        // (the proxy consumes the handoff side-effects in
+        // UDPClient::IncommingOpcodePreProcessing on the S->C path, then forwards
+        // it to the client). A client-originated 0x3A is not a real flow; were
+        // one to arrive it simply falls to the default forward below, exactly as
+        // the reference C->S sector dispatch does.
 
     default:
         LogVMessage("Linux: ProcessSectorServerOpcode 0x%04x (%d bytes) -- forwarding to server\n",
-                    (unsigned short) opcode, (int) bytes);
+                    (unsigned short)opcode, (int)bytes);
         break;
     }
 
@@ -653,7 +641,6 @@ void Connection::ProcessSectorServerOpcode(short opcode, short bytes)
     // authority on whether the opcode is meaningful in this connection
     // state; the proxy's job is just to relay.
     if (g_ServerMgr && g_ServerMgr->m_UDPConnection) {
-        g_ServerMgr->m_UDPConnection->ForwardClientOpcode(
-            opcode, bytes, (char *) m_RecvBuffer);
+        g_ServerMgr->m_UDPConnection->ForwardClientOpcode(opcode, bytes, (char*)m_RecvBuffer);
     }
 }

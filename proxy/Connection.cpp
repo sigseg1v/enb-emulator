@@ -20,102 +20,87 @@ extern bool g_ShuttingDown;
 
 // This helper function is referenced by _beginthread to launch the TCP thread.
 #ifdef NET7_LEGACY_WIN32
-void __cdecl LaunchSendThread(void *arg)
-{
-    ((Connection *) arg)->RunSendThread();
+void __cdecl LaunchSendThread(void* arg) {
+    ((Connection*)arg)->RunSendThread();
     _endthread();
 }
-void __cdecl LaunchRecvThread(void *arg)
-{
-    ((Connection *) arg)->RunRecvThread();
+void __cdecl LaunchRecvThread(void* arg) {
+    ((Connection*)arg)->RunRecvThread();
     _endthread();
 }
 #else // Linux
-void * LaunchSendThread(void *arg)
-{
-    ((Connection *) arg)->RunSendThread();
+void* LaunchSendThread(void* arg) {
+    ((Connection*)arg)->RunSendThread();
     return NULL;
 }
-void * LaunchRecvThread(void *arg)
-{
-    ((Connection *) arg)->RunRecvThread();
+void* LaunchRecvThread(void* arg) {
+    ((Connection*)arg)->RunRecvThread();
     return NULL;
 }
 #endif
 
-Connection::Connection(SOCKET s, ServerManager &server_mgr, short port, int server_type, unsigned long* ip_addr)
-	: m_Socket(s),
-	  m_ServerMgr(server_mgr),
-	  m_TcpPort(port),
-	  m_ServerType(server_type)
-{
+Connection::Connection(SOCKET s, ServerManager& server_mgr, short port, int server_type,
+                       unsigned long* ip_addr)
+    : m_Socket(s), m_ServerMgr(server_mgr), m_TcpPort(port), m_ServerType(server_type) {
     // Mark this as an active connection
-	m_ConnectionActive = true;
+    m_ConnectionActive = true;
 
     // Thread is not running (yet)
     m_TcpThreadRunning = false;
 
-	m_TcpShutdownCycle = 0;
+    m_TcpShutdownCycle = 0;
 
     // Disable packet logging
     m_PacketLoggingEnabled = false;
 
     m_AvatarID = -1;
 
-	if (ip_addr)
-	{
-		m_IPaddr = *ip_addr;
-	}
+    if (ip_addr) {
+        m_IPaddr = *ip_addr;
+    }
 
-	m_Tilt_Sent = 0;
-	m_Turn_Sent = 0;
+    m_Tilt_Sent = 0;
+    m_Turn_Sent = 0;
 
-	// Launch the Receiver thread
+    // Launch the Receiver thread
 #ifdef NET7_LEGACY_WIN32
-	_beginthread(&LaunchRecvThread, 0, this);
+    _beginthread(&LaunchRecvThread, 0, this);
 #else
-    pthread_create(&m_Thread, NULL, &LaunchRecvThread, (void *) this);
+    pthread_create(&m_Thread, NULL, &LaunchRecvThread, (void*)this);
 #endif
 }
 
-Connection::~Connection()
-{
-    if (m_Socket != INVALID_SOCKET)
-    {
+Connection::~Connection() {
+    if (m_Socket != INVALID_SOCKET) {
         closesocket(m_Socket);
-		m_Socket = INVALID_SOCKET;
+        m_Socket = INVALID_SOCKET;
     }
-	
-	m_TcpThreadRunning = false;
+
+    m_TcpThreadRunning = false;
 
     // Allow the thread to die
-	int limit = 100;
-	while (m_TcpThreadRunning)
-	{
-		Sleep(20);
-		if (--limit < 0)
-		{
-			break;
-		}
-	}
+    int limit = 100;
+    while (m_TcpThreadRunning) {
+        Sleep(20);
+        if (--limit < 0) {
+            break;
+        }
+    }
 
     // Give the send thread time to die
-	Sleep(200);
+    Sleep(200);
 }
 
-bool Connection::IsActive()
-{
-	return m_ConnectionActive;
+bool Connection::IsActive() {
+    return m_ConnectionActive;
 }
 
-void Connection::Send(unsigned char *Buffer, int length)
-{
+void Connection::Send(unsigned char* Buffer, int length) {
     m_SendQueue.Add(Buffer, length);
     ResumeThread(m_SendThreadHandle);
 }
 
-void Connection::SetRC4Key(unsigned char *rc4_key)
-{
+void Connection::SetRC4Key(unsigned char* rc4_key) {
     /*
     LogMessage("SetRC4Key: %02x %02x %02x %02x %02x %02x %02x %02x\n",
         rc4_key[0],
@@ -129,192 +114,173 @@ void Connection::SetRC4Key(unsigned char *rc4_key)
     */
 
     m_CryptOut.PrepareKey(rc4_key, RC4_KEY_SIZE);
-	m_CryptIn.PrepareKey(rc4_key, RC4_KEY_SIZE);
+    m_CryptIn.PrepareKey(rc4_key, RC4_KEY_SIZE);
 }
 
-bool Connection::DoKeyExchange()
-{
+bool Connection::DoKeyExchange() {
     unsigned char buffer[128];
-    unsigned char *p = buffer;
+    unsigned char* p = buffer;
     int length = 0;
 
-	//LogMessage("DoKeyExchange sending public RSA-155 key:\n");
+    //LogMessage("DoKeyExchange sending public RSA-155 key:\n");
 
     // Send the RSA Public Key to the client
     length += m_WestwoodRSA.GetModulus(&p);
     length += m_WestwoodRSA.GetPublicExponent(&p);
-    send(m_Socket, (char *) buffer, length, 0);
+    send(m_Socket, (char*)buffer, length, 0);
 
-	// Read only 4 bytes to obtain the key length
-    length = recv(m_Socket, (char *) buffer, 4, 0);
-	if (length <= 0)
-	{
+    // Read only 4 bytes to obtain the key length
+    length = recv(m_Socket, (char*)buffer, 4, 0);
+    if (length <= 0) {
         // Lost connection, exit without displaying an error
         // This allows a server ping with no consequences
-		return false;
-	}
-
-    if (length != 4)
-	{
-		LogMessage("ERROR: DoKeyExchange expecting 4 byte key length, length = %d\n", length);
         return false;
-	}
+    }
+
+    if (length != 4) {
+        LogMessage("ERROR: DoKeyExchange expecting 4 byte key length, length = %d\n", length);
+        return false;
+    }
 
     // Phase K Wave 11: wire field is 4B big-endian. `unsigned long *` on
     // Linux reads 8B (OOB by 4B into the 4-byte recv buffer) -- works by
     // accident because ntohl truncates to uint32_t and the OOB high bytes
     // happen to be zero, but it's UB and asymmetric with the real Win32
     // client (which sends exactly 4B per RsaHandshake.cs:101).
-    long key_length = (long) ntohl(*((uint32_t *) buffer));
-	if (key_length < 64)
-	{
-		LogMessage("!!!!!!!!!!!!!!! I would have terminated here\n");
-	}
-    if ((key_length < 63) || (key_length > 65))
-    {
-		LogMessage("ERROR: DoKeyExchange key_length = %d\n", key_length);
-		return false;
-	}
+    long key_length = (long)ntohl(*((uint32_t*)buffer));
+    if (key_length < 64) {
+        LogMessage("!!!!!!!!!!!!!!! I would have terminated here\n");
+    }
+    if ((key_length < 63) || (key_length > 65)) {
+        LogMessage("ERROR: DoKeyExchange key_length = %d\n", key_length);
+        return false;
+    }
 
     // Get the encrypted RC4 Session Key response from the client
-    length = recv(m_Socket, (char *) buffer, key_length, 0);
-	if (length <= 0)
-	{
+    length = recv(m_Socket, (char*)buffer, key_length, 0);
+    if (length <= 0) {
         // Lost connection, exit without displaying an error
-		return false;
-	}
+        return false;
+    }
 
     // make sure we were able to read the entire key
-    if (length != key_length)
-	{
-		LogMessage("ERROR: DoKeyExchange key_length = %d, recv_length = %d\n", key_length, length);
-		return false;
-	}
+    if (length != key_length) {
+        LogMessage("ERROR: DoKeyExchange key_length = %d, recv_length = %d\n", key_length, length);
+        return false;
+    }
 
     //LogMessage("DoKeyExchange received encrypted RC4 session key from client\n");
     // disregard leading byte if it is zero
     p = buffer;
-    if ((key_length == WWRSA_BLOCK_SIZE + 1) && (*p == 0))
-    {
+    if ((key_length == WWRSA_BLOCK_SIZE + 1) && (*p == 0)) {
         key_length--;
         p++;
     }
 
     // validate the key length against the expected value
-    if (key_length != WWRSA_BLOCK_SIZE)
-	{
-		LogMessage("ERROR: DoKeyExchange key_length = %d\n", key_length);
+    if (key_length != WWRSA_BLOCK_SIZE) {
+        LogMessage("ERROR: DoKeyExchange key_length = %d\n", key_length);
         return false;
-	}
+    }
 
     // Decrypt the RC4 Session Key
     unsigned char rc4key[WWRSA_BLOCK_SIZE];
-    if (!m_WestwoodRSA.Decrypt(p, WWRSA_BLOCK_SIZE, rc4key))
-    {
-		LogMessage("ERROR: DoKeyExchange m_WestwoodRSA.Decrypt failed\n");
+    if (!m_WestwoodRSA.Decrypt(p, WWRSA_BLOCK_SIZE, rc4key)) {
+        LogMessage("ERROR: DoKeyExchange m_WestwoodRSA.Decrypt failed\n");
         return false;
-	}
+    }
 
     unsigned char rc4_key_buffer[RC4_KEY_SIZE];
 
     // Reverse the order of the decrypted RC4 Session Key
-	rc4_key_buffer[0] = rc4key[0x3f];
-	rc4_key_buffer[1] = rc4key[0x3e];
-	rc4_key_buffer[2] = rc4key[0x3d];
-	rc4_key_buffer[3] = rc4key[0x3c];
-	rc4_key_buffer[4] = rc4key[0x3b];
-	rc4_key_buffer[5] = rc4key[0x3a];
-	rc4_key_buffer[6] = rc4key[0x39];
-	rc4_key_buffer[7] = rc4key[0x38];
+    rc4_key_buffer[0] = rc4key[0x3f];
+    rc4_key_buffer[1] = rc4key[0x3e];
+    rc4_key_buffer[2] = rc4key[0x3d];
+    rc4_key_buffer[3] = rc4key[0x3c];
+    rc4_key_buffer[4] = rc4key[0x3b];
+    rc4_key_buffer[5] = rc4key[0x3a];
+    rc4_key_buffer[6] = rc4key[0x39];
+    rc4_key_buffer[7] = rc4key[0x38];
 
-	SetRC4Key(rc4_key_buffer);
+    SetRC4Key(rc4_key_buffer);
 
     return (true);
 }
 
-bool Connection::DoClientKeyExchange()
-{
-	// Generate RC4 key
-	unsigned int i = 0;
-	unsigned char rc4key[RC4_KEY_SIZE];
+bool Connection::DoClientKeyExchange() {
+    // Generate RC4 key
+    unsigned int i = 0;
+    unsigned char rc4key[RC4_KEY_SIZE];
     unsigned char buffer[128];
 
     memset(rc4key, 0, sizeof(rc4key));
     SetRC4Key(rc4key);
 
-	// Receive the pubic key packet
+    // Receive the pubic key packet
     Sleep(20);
     memset(buffer, 0, sizeof(buffer));
-    int count = recv(m_Socket, (char *) buffer, 74, 0);
-	if (count != 74)
-	{
-		LogMessage("ERROR: DoClientKeyExchange recv returned %d\n", count);
-		return false;
-	}
+    int count = recv(m_Socket, (char*)buffer, 74, 0);
+    if (count != 74) {
+        LogMessage("ERROR: DoClientKeyExchange recv returned %d\n", count);
+        return false;
+    }
 
     // Ignore whatever public key packet we receive
 
-	// Phase K Wave 11: wire prefix is 4B (Win32 sizeof(long)==4). On Linux
-	// sizeof(long)==8 inflated every offset and sent 4 extra zero bytes --
-	// Linux-to-Linux worked by accident, Linux-to-Win32 would not.
-	// Clear the buffer
-	memset(buffer, 0, WWRSA_BLOCK_SIZE - RC4_KEY_SIZE + sizeof(uint32_t));
+    // Phase K Wave 11: wire prefix is 4B (Win32 sizeof(long)==4). On Linux
+    // sizeof(long)==8 inflated every offset and sent 4 extra zero bytes --
+    // Linux-to-Linux worked by accident, Linux-to-Win32 would not.
+    // Clear the buffer
+    memset(buffer, 0, WWRSA_BLOCK_SIZE - RC4_KEY_SIZE + sizeof(uint32_t));
 
-	// Put the length in front of the buffer
-	unsigned char *key = buffer + sizeof(uint32_t);
-	*((uint32_t *) buffer) = ntohl(WWRSA_BLOCK_SIZE);
+    // Put the length in front of the buffer
+    unsigned char* key = buffer + sizeof(uint32_t);
+    *((uint32_t*)buffer) = ntohl(WWRSA_BLOCK_SIZE);
 
-	// Copy the RC4 key to the bottom of the buffer
-	unsigned char *dest = &key[WWRSA_BLOCK_SIZE - 1];
-	unsigned char *src = rc4key;
-	for (i = 0; i < RC4_KEY_SIZE; i++)
-	{
-		*dest-- = *src++;
-	}
+    // Copy the RC4 key to the bottom of the buffer
+    unsigned char* dest = &key[WWRSA_BLOCK_SIZE - 1];
+    unsigned char* src = rc4key;
+    for (i = 0; i < RC4_KEY_SIZE; i++) {
+        *dest-- = *src++;
+    }
 
-	// Encrypt the RC4 key
-	m_WestwoodRSA.Encrypt(key, WWRSA_BLOCK_SIZE, key);
+    // Encrypt the RC4 key
+    m_WestwoodRSA.Encrypt(key, WWRSA_BLOCK_SIZE, key);
 
-	//LogMessage("Sending encrypted RC4 session key...\n");
-	// Send the encrypted RC4 key to the server
+    //LogMessage("Sending encrypted RC4 session key...\n");
+    // Send the encrypted RC4 key to the server
     // Phase K Wave 11: wire shape = 4B length + WWRSA_BLOCK_SIZE block.
     int length = WWRSA_BLOCK_SIZE + sizeof(uint32_t);
-    send(m_Socket, (char *) buffer, length, 0);
+    send(m_Socket, (char*)buffer, length, 0);
 
     LogMessage("Client Key exchange complete\n");
 
-	return (true);
+    return (true);
 }
 
-void Connection::RunSendThread()
-{
-	unsigned char *msg = NULL;
+void Connection::RunSendThread() {
+    unsigned char* msg = NULL;
     long suspend_counter = 40;
     int length;
-    while (!g_ServerShutdown && m_TcpThreadRunning)
-    {
-        while (m_SendQueue.CheckQueue(&msg, &length))
-        {
+    while (!g_ServerShutdown && m_TcpThreadRunning) {
+        while (m_SendQueue.CheckQueue(&msg, &length)) {
             suspend_counter = 40;
-            if (length > 0)
-            {
-                if (m_ServerType != CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY)
-                {
+            if (length > 0) {
+                if (m_ServerType != CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY) {
                     m_CryptOut.RC4(msg, length);
                 }
-				/*else
+                /*else
 				{
 					LogMessage("Sent opcode 0x%04x\n", *((short *) &msg[2]));
 				}*/
 
-                send(m_Socket, (char *) msg, length, 0);
-                
-                delete [] msg;
+                send(m_Socket, (char*)msg, length, 0);
+
+                delete[] msg;
             }
         }
         suspend_counter--;
-        if (suspend_counter < 1)
-        {
+        if (suspend_counter < 1) {
             //LogMessage("Suspend thread\n");
             SuspendThread(m_SendThreadHandle); //suspend until we're stimulated again
         }
@@ -376,209 +342,178 @@ void Connection::RunSendThread()
     }
 }*/
 
-void Connection::RunRecvThread()
-{
-	if (m_ServerType == CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY)
-    {
+void Connection::RunRecvThread() {
+    if (m_ServerType == CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY) {
         LogMessage("TCP login link established.\n");
+    } else if (m_ServerType < CONNECTION_TYPE_MASTER_SERVER_TO_SECTOR_SERVER) {
+        if (!DoKeyExchange()) {
+            m_ConnectionActive = false;
+            LogMessage("Client key exchange failed.  Connection thread exiting\n");
+            return;
+        }
+    } else {
+        if (!DoClientKeyExchange()) {
+            m_ConnectionActive = false;
+            LogMessage("Server/Server key exchange failed.  Connection thread exiting\n");
+            return;
+        }
     }
-    else if (m_ServerType < CONNECTION_TYPE_MASTER_SERVER_TO_SECTOR_SERVER)
-	{
-		if (!DoKeyExchange())
-		{
-			m_ConnectionActive = false;
-			LogMessage("Client key exchange failed.  Connection thread exiting\n");
-			return;
-		}
-	}
-	else
-	{
-		if (!DoClientKeyExchange())
-		{
-			m_ConnectionActive = false;
-			LogMessage("Server/Server key exchange failed.  Connection thread exiting\n");
-			return;
-		}
-	}
 
     m_TcpThreadRunning = true;
 
     // Launch the Send Thread
 #ifdef NET7_LEGACY_WIN32
-  	UINT uiThreadId = 0;
-    m_SendThreadHandle = (HANDLE)_beginthreadex(NULL, 0, SocketSendThread, this, CREATE_SUSPENDED, &uiThreadId);
-	//_beginthread(&LaunchSendThread, 0, this);
+    UINT uiThreadId = 0;
+    m_SendThreadHandle =
+        (HANDLE)_beginthreadex(NULL, 0, SocketSendThread, this, CREATE_SUSPENDED, &uiThreadId);
+    //_beginthread(&LaunchSendThread, 0, this);
 #else
-    pthread_create(&m_Thread, NULL, &LaunchSendThread, (void *) this);
+    pthread_create(&m_Thread, NULL, &LaunchSendThread, (void*)this);
 #endif
 
-	EnbTcpHeader header;
+    EnbTcpHeader header;
     memset(&header, 0, sizeof(header));
-	char *ptr_hdr = (char*)&header;
+    char* ptr_hdr = (char*)&header;
 
-    while (!g_ServerShutdown && m_TcpThreadRunning && !g_ShuttingDown) 
-    {
+    while (!g_ServerShutdown && m_TcpThreadRunning && !g_ShuttingDown) {
         // Read the opcode and the message length
         Sleep(1);
         int length = 0;
-		int repeats = 0;
-		
-		length = recv(m_Socket, ptr_hdr, 4, 0);
+        int repeats = 0;
 
-		while(length < 4 && length > 0)
-		{
-			length += recv(m_Socket, (ptr_hdr + length), 4-length, 0);
+        length = recv(m_Socket, ptr_hdr, 4, 0);
 
-			if(length == -1 || repeats++ > 3)
-			{
-				//break out and let the program handle it normally.
-				break;
-			}
-			else if(length != 4)
-			{
-				LogMessage("Format error, length = %d\n", length);
-			}
-			LogMessage("%s Receive header: %d\n", (m_ServerType == CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY ? "server->proxy" : "client->proxy"), length);
-			repeats++;
-		}
-               
-        if (length == 4)
-        {
-            if (m_PacketLoggingEnabled)
-            {
-			    LogMessage("Received 4 byte header (encrypted):\n");
-                DumpBuffer((unsigned char *) &header, length);
+        while (length < 4 && length > 0) {
+            length += recv(m_Socket, (ptr_hdr + length), 4 - length, 0);
+
+            if (length == -1 || repeats++ > 3) {
+                //break out and let the program handle it normally.
+                break;
+            } else if (length != 4) {
+                LogMessage("Format error, length = %d\n", length);
+            }
+            LogMessage("%s Receive header: %d\n",
+                       (m_ServerType == CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY ? "server->proxy"
+                                                                               : "client->proxy"),
+                       length);
+            repeats++;
+        }
+
+        if (length == 4) {
+            if (m_PacketLoggingEnabled) {
+                LogMessage("Received 4 byte header (encrypted):\n");
+                DumpBuffer((unsigned char*)&header, length);
             }
 
-            if (m_ServerType != CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY && m_ServerType != CONNECTION_TYPE_GLOBAL_PROXY_TO_SERVER)
-            {
-                m_CryptIn.RC4((unsigned char *) &header, length);
+            if (m_ServerType != CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY &&
+                m_ServerType != CONNECTION_TYPE_GLOBAL_PROXY_TO_SERVER) {
+                m_CryptIn.RC4((unsigned char*)&header, length);
             }
 
-            if (m_PacketLoggingEnabled)
-            {
-			    LogMessage("Received 4 byte header (decrypted):\n");
-                DumpBuffer((unsigned char *) &header, length);
+            if (m_PacketLoggingEnabled) {
+                LogMessage("Received 4 byte header (decrypted):\n");
+                DumpBuffer((unsigned char*)&header, length);
             }
 
             unsigned short bytes = header.size - sizeof(EnbTcpHeader);
-			short opcode = header.opcode;
+            short opcode = header.opcode;
 
-			// Read the message
+            // Read the message
             // TODO: peek to determine if we have enough data...
-			// TODO: wait if we don't have enough data
+            // TODO: wait if we don't have enough data
             Sleep(1);
 
-			int received = recv(m_Socket, (char *) m_RecvBuffer, bytes, 0);
+            int received = recv(m_Socket, (char*)m_RecvBuffer, bytes, 0);
 
-			if (bytes < 25000) //This should catch out of range lengths
-			{
-				while (received < bytes)
-				{
-					int rcv = recv(m_Socket, (char *) (m_RecvBuffer + received), bytes - received, 0);
-					if (rcv > 0)
-					{
-						received += rcv;
-					}
-					else
-					{
-						break;
-					}
-				}
-			}
-			else
-			{
-				bytes = received;
-			}
+            if (bytes < 25000) //This should catch out of range lengths
+            {
+                while (received < bytes) {
+                    int rcv = recv(m_Socket, (char*)(m_RecvBuffer + received), bytes - received, 0);
+                    if (rcv > 0) {
+                        received += rcv;
+                    } else {
+                        break;
+                    }
+                }
+            } else {
+                bytes = received;
+            }
 
-			if (received == bytes)
-			{
-                if (m_ServerType != CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY && m_ServerType != CONNECTION_TYPE_GLOBAL_PROXY_TO_SERVER)
-                {
+            if (received == bytes) {
+                if (m_ServerType != CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY &&
+                    m_ServerType != CONNECTION_TYPE_GLOBAL_PROXY_TO_SERVER) {
                     m_CryptIn.RC4(m_RecvBuffer, bytes);
                 }
 
-                if (m_PacketLoggingEnabled)
-                {
+                if (m_PacketLoggingEnabled) {
                     LogMessage("Received %d byte packet\n", received);
-				    DumpBuffer(m_RecvBuffer,bytes);
+                    DumpBuffer(m_RecvBuffer, bytes);
                 }
 
-                switch (m_ServerType)
-				{
-				case CONNECTION_TYPE_CLIENT_TO_GLOBAL_SERVER :
-					//LogMessage("ERROR!!: Global Server opcode received!\n");
-					//LogMessage("Received Client to Global Opcode: 0x%x\n", opcode);
-					ProcessGlobalServerOpcode(opcode, bytes);
-					break;
+                switch (m_ServerType) {
+                case CONNECTION_TYPE_CLIENT_TO_GLOBAL_SERVER:
+                    //LogMessage("ERROR!!: Global Server opcode received!\n");
+                    //LogMessage("Received Client to Global Opcode: 0x%x\n", opcode);
+                    ProcessGlobalServerOpcode(opcode, bytes);
+                    break;
 
-				case CONNECTION_TYPE_CLIENT_TO_MASTER_SERVER :
-					//LogMessage("Received Client to Master Opcode: 0x%x\n", opcode);
-					ProcessMasterServerOpcode(opcode, bytes);
-					break;
+                case CONNECTION_TYPE_CLIENT_TO_MASTER_SERVER:
+                    //LogMessage("Received Client to Master Opcode: 0x%x\n", opcode);
+                    ProcessMasterServerOpcode(opcode, bytes);
+                    break;
 
-				case CONNECTION_TYPE_CLIENT_TO_SECTOR_SERVER :
-					ProcessSectorServerOpcode(opcode, bytes);
+                case CONNECTION_TYPE_CLIENT_TO_SECTOR_SERVER:
+                    ProcessSectorServerOpcode(opcode, bytes);
                     //LogMessage("Received SS Opcode: 0x%x\n", opcode);
-					break;
+                    break;
 
-				case CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY :
+                case CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY:
                     //send these opcodes straight to the client
-					ProcessProxyServerOpcode(opcode, bytes);
-					break;
+                    ProcessProxyServerOpcode(opcode, bytes);
+                    break;
 
-				case CONNECTION_TYPE_SECTOR_SERVER_TO_SECTOR_SERVER :
-					//ProcessSectorServerToSectorServerOpcode(opcode, bytes);
-					break;
+                case CONNECTION_TYPE_SECTOR_SERVER_TO_SECTOR_SERVER:
+                    //ProcessSectorServerToSectorServerOpcode(opcode, bytes);
+                    break;
 
-				case CONNECTION_TYPE_GLOBAL_PROXY_TO_SERVER:
-					ProcessProxyGlobalOpcode(opcode, bytes);
-					break;
-				}
-			}
-			else
-			{
-				LogMessage("Error receiving TCP packet on port %d, got %d bytes, expecting %d -- aborting!\n", m_TcpPort, received, bytes);
-				if (received > 0 && g_Debug && received < 10000)
-				{
-					DumpBuffer(m_RecvBuffer, received);
-				}
-				m_TcpThreadRunning = false;
-			}
-		}
-		else if (length == 0)
-		{
-			LogMessage("TCP connection on port %d closed gracefully\n", m_TcpPort);
-			m_TcpThreadRunning = false;
-		}
-		else if (length == -1)
-		{
+                case CONNECTION_TYPE_GLOBAL_PROXY_TO_SERVER:
+                    ProcessProxyGlobalOpcode(opcode, bytes);
+                    break;
+                }
+            } else {
+                LogMessage("Error receiving TCP packet on port %d, got %d bytes, expecting %d -- "
+                           "aborting!\n",
+                           m_TcpPort, received, bytes);
+                if (received > 0 && g_Debug && received < 10000) {
+                    DumpBuffer(m_RecvBuffer, received);
+                }
+                m_TcpThreadRunning = false;
+            }
+        } else if (length == 0) {
+            LogMessage("TCP connection on port %d closed gracefully\n", m_TcpPort);
+            m_TcpThreadRunning = false;
+        } else if (length == -1) {
             DWORD error = WSAGetLastError();
-            if (error == WSAECONNRESET)
-            {
-    			LogMessage("TCP connection on port %d was reset\n", m_TcpPort);
+            if (error == WSAECONNRESET) {
+                LogMessage("TCP connection on port %d was reset\n", m_TcpPort);
+            } else {
+                LogMessage("Error receiving header on port %d, error=%d -- aborting\n", m_TcpPort,
+                           error);
             }
-            else
-            {
-    			LogMessage("Error receiving header on port %d, error=%d -- aborting\n", m_TcpPort, error);
-            }
-			m_TcpThreadRunning = false;
-		}
-		else
-		{
-			LogMessage("Error receiving 4 byte header on port %d, length = %d bytes -- aborting\n", m_TcpPort, length);
-			m_TcpThreadRunning = false;
-		}
+            m_TcpThreadRunning = false;
+        } else {
+            LogMessage("Error receiving 4 byte header on port %d, length = %d bytes -- aborting\n",
+                       m_TcpPort, length);
+            m_TcpThreadRunning = false;
+        }
     }
 
-	LogDebug("Connection thread exiting\n");
+    LogDebug("Connection thread exiting\n");
 
-    switch (m_ServerType)
-    {
+    switch (m_ServerType) {
     case CONNECTION_TYPE_CLIENT_TO_SECTOR_SERVER:
         g_ServerMgr->m_ConnectionCount--;
-        if (g_ServerMgr->m_ConnectionCount == 0)
-        {
+        if (g_ServerMgr->m_ConnectionCount == 0) {
             LogMessage("Client connections terminated\n");
             g_ServerMgr->m_SectorConnection = (0);
         }
@@ -589,37 +524,33 @@ void Connection::RunRecvThread()
         break;
 
     case CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY:
-	case CONNECTION_TYPE_GLOBAL_PROXY_TO_SERVER:
+    case CONNECTION_TYPE_GLOBAL_PROXY_TO_SERVER:
         g_ServerMgr->m_UDPConnection->BlankTCPConnection();
         break;
 
     default:
         break;
-
     }
 
     m_TcpThreadRunning = false;
-	m_ConnectionActive = false;
+    m_ConnectionActive = false;
     ResumeThread(m_SendThreadHandle);
 }
 
-void Connection::SendResponse(short opcode, unsigned char *data, size_t length, long sequence_num)
-{
+void Connection::SendResponse(short opcode, unsigned char* data, size_t length, long sequence_num) {
     //attempt to isolate why this crashes from time to time.
-	*((short *) &m_SendBuffer[0]) = (short) length + sizeof(long);
-	*((short *) &m_SendBuffer[2]) = opcode;
+    *((short*)&m_SendBuffer[0]) = (short)length + sizeof(long);
+    *((short*)&m_SendBuffer[2]) = opcode;
 
-	if (length)
-	{
-		memcpy(m_SendBuffer + sizeof(long), data, length);
-	}
+    if (length) {
+        memcpy(m_SendBuffer + sizeof(long), data, length);
+    }
 
-	int bytes = length + sizeof(long);
+    int bytes = length + sizeof(long);
 
-    if (m_PacketLoggingEnabled)
-    {
-	    LogMessage("Sending %d bytes (unencrypted)\n", bytes);
-	    DumpBuffer(m_SendBuffer, bytes);
+    if (m_PacketLoggingEnabled) {
+        LogMessage("Sending %d bytes (unencrypted)\n", bytes);
+        DumpBuffer(m_SendBuffer, bytes);
     }
 
     //LogMessage("Sending opcode #%x: 0x%04x [%x]\n", sequence_num, opcode, length);
@@ -631,37 +562,34 @@ void Connection::SendResponse(short opcode, unsigned char *data, size_t length, 
 
     //send(m_Socket, (char *) m_SendBuffer, bytes, 0);
 
-	Send(m_SendBuffer, bytes);
+    Send(m_SendBuffer, bytes);
 }
 
-void Connection::SendResponseDirect(short opcode, unsigned char *data, size_t length)
-{
-	*((short *) &m_SendBuffer[0]) = (short) length + sizeof(long);
-	*((short *) &m_SendBuffer[2]) = opcode;
+void Connection::SendResponseDirect(short opcode, unsigned char* data, size_t length) {
+    *((short*)&m_SendBuffer[0]) = (short)length + sizeof(long);
+    *((short*)&m_SendBuffer[2]) = opcode;
 
-	if (length)
-	{
-		memcpy(m_SendBuffer + sizeof(long), data, length);
-	}
+    if (length) {
+        memcpy(m_SendBuffer + sizeof(long), data, length);
+    }
 
-	int bytes = length + sizeof(long);
+    int bytes = length + sizeof(long);
 
-    send(m_Socket, (char *) m_SendBuffer, bytes, 0);
+    send(m_Socket, (char*)m_SendBuffer, bytes, 0);
 }
 
-void Connection::QueueResponse(unsigned char *packet, short &index, short opcode, unsigned char *data, size_t length)
-{
-    u8 *ptr = packet + index;
+void Connection::QueueResponse(unsigned char* packet, short& index, short opcode,
+                               unsigned char* data, size_t length) {
+    u8* ptr = packet + index;
 
-    *((short *) &ptr[0]) = (short) length + sizeof(long);
-	*((short *) &ptr[2]) = opcode;
+    *((short*)&ptr[0]) = (short)length + sizeof(long);
+    *((short*)&ptr[2]) = opcode;
 
-	if (length)
-	{
-		memcpy(ptr + sizeof(long), data, length);
-	}
+    if (length) {
+        memcpy(ptr + sizeof(long), data, length);
+    }
 
-	int bytes = length + sizeof(long);
+    int bytes = length + sizeof(long);
 
     /*if (m_ServerType != CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY)
     {
@@ -671,93 +599,75 @@ void Connection::QueueResponse(unsigned char *packet, short &index, short opcode
     index += bytes;
 }
 
-void Connection::SendQueuedPacket(unsigned char *data, short length)
-{
+void Connection::SendQueuedPacket(unsigned char* data, short length) {
     Send(data, length);
 }
 
-void Connection::QueuePacket(u8 *packet, short &index, unsigned char *data, size_t length)
-{
-	if (length > 0)
-	{
-		memcpy(packet + index, data, length);
+void Connection::QueuePacket(u8* packet, short& index, unsigned char* data, size_t length) {
+    if (length > 0) {
+        memcpy(packet + index, data, length);
         m_CryptOut.RC4(packet + index, length);
         index += length;
-	}
-    else
-    {
+    } else {
         LogMessage("Packet has no length\n");
     }
 }
 
-void Connection::SendResponseTestFile(short opcode, char *filename)
-{
-	int length = 0;
+void Connection::SendResponseTestFile(short opcode, char* filename) {
+    int length = 0;
     char old_path[MAX_PATH];
     GetCurrentDirectory(sizeof(old_path), old_path);
     SetCurrentDirectory(SERVER_DATABASE_PATH);
-    FILE *f = fopen(filename, "rb");
-	if (f)
-    {
-        fseek(f,0,SEEK_END);
+    FILE* f = fopen(filename, "rb");
+    if (f) {
+        fseek(f, 0, SEEK_END);
         long size = ftell(f);
-        if ((size > 0) && (size < TCP_BUFFER_SIZE))
-        {
+        if ((size > 0) && (size < TCP_BUFFER_SIZE)) {
             LogMessage("Loading test data '%s'\n", filename);
-            fseek(f,0,SEEK_SET);
-            unsigned char * buffer = new unsigned char[size];
+            fseek(f, 0, SEEK_SET);
+            unsigned char* buffer = new unsigned char[size];
             fread(buffer, 1, size, f);
-			SendResponse(opcode, buffer, size);			
-            delete [] buffer;
-        }
-        else
-        {
+            SendResponse(opcode, buffer, size);
+            delete[] buffer;
+        } else {
             LogMessage("SendTestPacket: Invalid file length %d : '%s'\n", length, filename);
         }
         fclose(f);
-    }
-    else
-    {
+    } else {
         LogMessage("SendTestData: Unable to open %s\n", filename);
     }
 }
 
-void Connection::SendSectorAssignment(long sector_id)
-{
-	SendResponse(ENB_OPCODE_7801_SECTOR_ASSIGNMENT, (unsigned char *) &sector_id, sizeof(sector_id));
+void Connection::SendSectorAssignment(long sector_id) {
+    SendResponse(ENB_OPCODE_7801_SECTOR_ASSIGNMENT, (unsigned char*)&sector_id, sizeof(sector_id));
 }
 
-void Connection::TerminateConnection()
-{
+void Connection::TerminateConnection() {
     m_TcpThreadRunning = false;
-	m_ConnectionActive = false;
+    m_ConnectionActive = false;
 }
 
-UINT WINAPI Connection::SocketSendThread(void *Param)
-{
-	Connection* p_this = reinterpret_cast<Connection*>( Param );
+UINT WINAPI Connection::SocketSendThread(void* Param) {
+    Connection* p_this = reinterpret_cast<Connection*>(Param);
 
-	p_this->RunSendThread();
+    p_this->RunSendThread();
 
     _endthread();
 
-	return 1;
+    return 1;
 }
 
-bool Connection::CheckTCPShutdownCycle()
-{
-	if (m_TcpShutdownCycle != 0)
-	{
-		unsigned long tick = GetNet7TickCount();
-		
-		if (m_TcpShutdownCycle < tick)
-		{
-			LogMessage("Shutdown the thread!\n");
-			return true;
-		}
-	}
+bool Connection::CheckTCPShutdownCycle() {
+    if (m_TcpShutdownCycle != 0) {
+        unsigned long tick = GetNet7TickCount();
 
-	return false;
+        if (m_TcpShutdownCycle < tick) {
+            LogMessage("Shutdown the thread!\n");
+            return true;
+        }
+    }
+
+    return false;
 }
 
 #else // !WIN32 -- Linux partial port
@@ -782,23 +692,23 @@ bool Connection::CheckTCPShutdownCycle()
 namespace {
 
 // recv exactly n bytes or fail. Returns true iff exactly n bytes read.
-bool RecvAll(int sock, unsigned char* buf, int n)
-{
+bool RecvAll(int sock, unsigned char* buf, int n) {
     int got = 0;
     while (got < n) {
-        int r = (int) recv(sock, buf + got, n - got, 0);
-        if (r <= 0) return false;
+        int r = (int)recv(sock, buf + got, n - got, 0);
+        if (r <= 0)
+            return false;
         got += r;
     }
     return true;
 }
 
-bool SendAll(int sock, const unsigned char* buf, int n)
-{
+bool SendAll(int sock, const unsigned char* buf, int n) {
     int sent = 0;
     while (sent < n) {
-        int r = (int) send(sock, buf + sent, n - sent, MSG_NOSIGNAL);
-        if (r <= 0) return false;
+        int r = (int)send(sock, buf + sent, n - sent, MSG_NOSIGNAL);
+        if (r <= 0)
+            return false;
         sent += r;
     }
     return true;
@@ -809,45 +719,34 @@ bool SendAll(int sock, const unsigned char* buf, int n)
 // server ping), <n means the peer closed mid-message (a truncated handshake).
 // Lets callers stay silent on a clean pre-handshake close while still flagging
 // a genuinely malformed partial read.
-int RecvCount(int sock, unsigned char* buf, int n)
-{
+int RecvCount(int sock, unsigned char* buf, int n) {
     int got = 0;
     while (got < n) {
-        int r = (int) recv(sock, buf + got, n - got, 0);
-        if (r <= 0) break;
+        int r = (int)recv(sock, buf + got, n - got, 0);
+        if (r <= 0)
+            break;
         got += r;
     }
     return got;
 }
 
-}  // namespace
+} // namespace
 
 static void* LaunchConnectionWorker(void* arg);
 
-Connection::Connection(SOCKET s, ServerManager &server_mgr, short port,
-                       int server_type, unsigned long* ip_addr)
-    : m_Socket(s),
-      m_ConnectionActive(true),
-      m_TcpThreadRunning(true),
-      m_SectorTCPRequest(false),
-      m_TcpShutdownCycle(0),
-      m_ServerType(server_type),
-      m_TcpPort(port),
-      m_UDPClient(nullptr),
-      m_AccountUsername(nullptr),
-      m_ServerMgr(server_mgr),
-      m_AvatarID(-1),
-      m_SectorID(0),
-      m_PacketLoggingEnabled(false),
-      m_IPaddr(0),
-      m_SendThreadHandle{},  // pthread_t on Linux; field is unused on the Linux stub path
-      m_Tilt_Sent(0),
-      m_Turn_Sent(0)
-{
-    if (ip_addr) m_IPaddr = *ip_addr;
-    unsigned char *ip = (unsigned char *) &m_IPaddr;
-    LogMessage("Net7Proxy: accept on port %d from %u.%u.%u.%u\n",
-               m_TcpPort, ip[0], ip[1], ip[2], ip[3]);
+Connection::Connection(SOCKET s, ServerManager& server_mgr, short port, int server_type,
+                       unsigned long* ip_addr)
+    : m_Socket(s), m_ConnectionActive(true), m_TcpThreadRunning(true), m_SectorTCPRequest(false),
+      m_TcpShutdownCycle(0), m_ServerType(server_type), m_TcpPort(port), m_UDPClient(nullptr),
+      m_AccountUsername(nullptr), m_ServerMgr(server_mgr), m_AvatarID(-1), m_SectorID(0),
+      m_PacketLoggingEnabled(false), m_IPaddr(0),
+      m_SendThreadHandle{}, // pthread_t on Linux; field is unused on the Linux stub path
+      m_Tilt_Sent(0), m_Turn_Sent(0) {
+    if (ip_addr)
+        m_IPaddr = *ip_addr;
+    unsigned char* ip = (unsigned char*)&m_IPaddr;
+    LogMessage("Net7Proxy: accept on port %d from %u.%u.%u.%u\n", m_TcpPort, ip[0], ip[1], ip[2],
+               ip[3]);
 
     pthread_create(&m_Thread, nullptr, &LaunchConnectionWorker, this);
     pthread_detach(m_Thread);
@@ -862,9 +761,16 @@ Connection::~Connection() {
     }
 }
 
-bool Connection::IsActive()                    { return m_ConnectionActive; }
-bool Connection::CheckTCPShutdownCycle()       { return !m_ConnectionActive; }
-void Connection::TerminateConnection()         { m_ConnectionActive = false; m_TcpThreadRunning = false; }
+bool Connection::IsActive() {
+    return m_ConnectionActive;
+}
+bool Connection::CheckTCPShutdownCycle() {
+    return !m_ConnectionActive;
+}
+void Connection::TerminateConnection() {
+    m_ConnectionActive = false;
+    m_TcpThreadRunning = false;
+}
 
 // Build [size, opcode, payload...] frame, RC4-encrypt the whole thing
 // (size field included -- matches the Win32 wire format at Connection.cpp:597-626),
@@ -892,37 +798,36 @@ void Connection::TerminateConnection()         { m_ConnectionActive = false; m_T
 // across SendAll so the encrypted bytes leave the socket as a
 // contiguous frame -- interleaving partial sends from two threads would
 // produce a frame the client cannot decrypt.
-void Connection::SendResponse(short opcode, unsigned char* data,
-                              size_t length, long /*sequence_num*/)
-{
-    if (m_Socket == INVALID_SOCKET || !m_ConnectionActive) return;
+void Connection::SendResponse(short opcode, unsigned char* data, size_t length,
+                              long /*sequence_num*/) {
+    if (m_Socket == INVALID_SOCKET || !m_ConnectionActive)
+        return;
     if (length > MAX_BUFFER - sizeof(EnbTcpHeader)) {
-        LogMessage("SendResponse: payload %zu too large for opcode 0x%04x\n",
-                   length, (unsigned short) opcode);
+        LogMessage("SendResponse: payload %zu too large for opcode 0x%04x\n", length,
+                   (unsigned short)opcode);
         return;
     }
 
     m_Mutex.Lock();
 
     size_t total = length + sizeof(EnbTcpHeader);
-    *((short *) &m_SendBuffer[0]) = (short) total;
-    *((short *) &m_SendBuffer[2]) = opcode;
+    *((short*)&m_SendBuffer[0]) = (short)total;
+    *((short*)&m_SendBuffer[2]) = opcode;
     if (length && data) {
         memcpy(m_SendBuffer + sizeof(EnbTcpHeader), data, length);
     }
 
     if (m_ServerType != CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY &&
         m_ServerType != CONNECTION_TYPE_GLOBAL_PROXY_TO_SERVER) {
-        m_CryptOut.RC4(m_SendBuffer, (int) total);
+        m_CryptOut.RC4(m_SendBuffer, (int)total);
     }
 
-    bool ok = SendAll((int) m_Socket, m_SendBuffer, (int) total);
+    bool ok = SendAll((int)m_Socket, m_SendBuffer, (int)total);
 
     m_Mutex.Unlock();
 
     if (!ok) {
-        LogMessage("SendResponse: send failed on port %d (errno=%d)\n",
-                   m_TcpPort, errno);
+        LogMessage("SendResponse: send failed on port %d (errno=%d)\n", m_TcpPort, errno);
         m_TcpThreadRunning = false;
         m_ConnectionActive = false;
     }
@@ -931,14 +836,13 @@ void Connection::SendResponse(short opcode, unsigned char* data,
 // Mirror of server/src/Connection.cpp::DoKeyExchange (Net-7 raw RSA+RC4).
 // Server sends 74-byte pubkey, then reads 4-byte length + key_length-byte
 // encrypted block, decrypts to recover the reversed RC4 session key.
-bool Connection::DoKeyExchange()
-{
+bool Connection::DoKeyExchange() {
     unsigned char buffer[128];
-    unsigned char *p = buffer;
-    int length = (int) m_WestwoodRSA.GetModulus(&p);
-    length += (int) m_WestwoodRSA.GetPublicExponent(&p);
+    unsigned char* p = buffer;
+    int length = (int)m_WestwoodRSA.GetModulus(&p);
+    length += (int)m_WestwoodRSA.GetPublicExponent(&p);
 
-    if (!SendAll((int) m_Socket, buffer, length)) {
+    if (!SendAll((int)m_Socket, buffer, length)) {
         LogMessage("DoKeyExchange: pubkey send failed (errno=%d)\n", errno);
         return false;
     }
@@ -949,21 +853,21 @@ bool Connection::DoKeyExchange()
     // read (some bytes, then a close) is a genuinely malformed handshake worth
     // logging.
     {
-        int got = RecvCount((int) m_Socket, buffer, 4);
+        int got = RecvCount((int)m_Socket, buffer, 4);
         if (got == 0)
-            return false;            // clean probe/ping -- silent, by design
+            return false; // clean probe/ping -- silent, by design
         if (got != 4) {
             LogMessage("DoKeyExchange: short read on 4-byte key length (got %d)\n", got);
             return false;
         }
     }
     // Phase K Wave 11: see notes at top DoKeyExchange -- wire field is 4B.
-    long key_length = (long) ntohl(*((uint32_t *) buffer));
+    long key_length = (long)ntohl(*((uint32_t*)buffer));
     if ((key_length < WWRSA_BLOCK_SIZE) || (key_length > (WWRSA_BLOCK_SIZE + 1))) {
         LogMessage("DoKeyExchange: bad key_length = %ld\n", key_length);
         return false;
     }
-    if (!RecvAll((int) m_Socket, buffer, (int) key_length)) {
+    if (!RecvAll((int)m_Socket, buffer, (int)key_length)) {
         LogMessage("DoKeyExchange: failed to read %ld-byte encrypted key\n", key_length);
         return false;
     }
@@ -993,8 +897,7 @@ bool Connection::DoKeyExchange()
     return true;
 }
 
-void Connection::RunRecvThread()
-{
+void Connection::RunRecvThread() {
     if (!DoKeyExchange()) {
         m_ConnectionActive = false;
         m_TcpThreadRunning = false;
@@ -1009,37 +912,35 @@ void Connection::RunRecvThread()
     memset(&header, 0, sizeof(header));
 
     while (m_TcpThreadRunning && m_ConnectionActive && !g_ServerShutdown) {
-        if (!RecvAll((int) m_Socket, (unsigned char *) &header, sizeof(header))) {
+        if (!RecvAll((int)m_Socket, (unsigned char*)&header, sizeof(header))) {
             // Distinguish graceful close from error to match Win32 logging.
             int e = errno;
             if (e == ECONNRESET) {
                 LogMessage("TCP connection on port %d was reset\n", m_TcpPort);
             } else {
-                LogMessage("TCP connection on port %d closed (errno=%d)\n",
-                           m_TcpPort, e);
+                LogMessage("TCP connection on port %d closed (errno=%d)\n", m_TcpPort, e);
             }
             break;
         }
 
         if (m_ServerType != CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY &&
             m_ServerType != CONNECTION_TYPE_GLOBAL_PROXY_TO_SERVER) {
-            m_CryptIn.RC4((unsigned char *) &header, sizeof(header));
+            m_CryptIn.RC4((unsigned char*)&header, sizeof(header));
         }
 
         short opcode = header.opcode;
-        int payload_bytes = (int) (unsigned short) header.size - (int) sizeof(EnbTcpHeader);
+        int payload_bytes = (int)(unsigned short)header.size - (int)sizeof(EnbTcpHeader);
 
         if (payload_bytes < 0 || payload_bytes >= MAX_BUFFER) {
-            LogMessage("Bad frame on port %d: size=%u opcode=0x%04x -- aborting\n",
-                       m_TcpPort, (unsigned short) header.size,
-                       (unsigned short) opcode);
+            LogMessage("Bad frame on port %d: size=%u opcode=0x%04x -- aborting\n", m_TcpPort,
+                       (unsigned short)header.size, (unsigned short)opcode);
             break;
         }
 
         if (payload_bytes > 0) {
-            if (!RecvAll((int) m_Socket, m_RecvBuffer, payload_bytes)) {
-                LogMessage("Short payload read on port %d: opcode=0x%04x expected=%d\n",
-                           m_TcpPort, (unsigned short) opcode, payload_bytes);
+            if (!RecvAll((int)m_Socket, m_RecvBuffer, payload_bytes)) {
+                LogMessage("Short payload read on port %d: opcode=0x%04x expected=%d\n", m_TcpPort,
+                           (unsigned short)opcode, payload_bytes);
                 break;
             }
             if (m_ServerType != CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY &&
@@ -1048,7 +949,7 @@ void Connection::RunRecvThread()
             }
         }
 
-        short bytes = (short) payload_bytes;
+        short bytes = (short)payload_bytes;
 
         switch (m_ServerType) {
         case CONNECTION_TYPE_CLIENT_TO_GLOBAL_SERVER:
@@ -1062,7 +963,7 @@ void Connection::RunRecvThread()
             break;
         default:
             LogMessage("Linux stub: unhandled server type %d, opcode 0x%04x (%d bytes)\n",
-                       m_ServerType, (unsigned short) opcode, bytes);
+                       m_ServerType, (unsigned short)opcode, bytes);
             break;
         }
     }
@@ -1072,9 +973,8 @@ void Connection::RunRecvThread()
     m_TcpThreadRunning = false;
 }
 
-static void* LaunchConnectionWorker(void* arg)
-{
-    ((Connection*) arg)->RunRecvThread();
+static void* LaunchConnectionWorker(void* arg) {
+    ((Connection*)arg)->RunRecvThread();
     return nullptr;
 }
 

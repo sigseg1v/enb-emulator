@@ -8,23 +8,22 @@
 
 class ServerManager;
 
-class SSL_Listener
-{
+class SSL_Listener {
 public:
-    SSL_Listener(unsigned long ip_address, unsigned short port, ServerManager &server_mgr);
+    SSL_Listener(unsigned long ip_address, unsigned short port, ServerManager& server_mgr);
     virtual ~SSL_Listener();
 
 public:
     void RunThread();
-	void Shutdown();
+    void Shutdown();
 
 private:
-    Mutex    m_Mutex;
+    Mutex m_Mutex;
     uint16_t m_TcpPort;
     unsigned long m_IpAddress;
-	ServerManager &m_ServerMgr;
-    SOCKET  m_ListenerSocket;
-	bool	m_SslListenerThreadRunning;
+    ServerManager& m_ServerMgr;
+    SOCKET m_ListenerSocket;
+    bool m_SslListenerThreadRunning;
     pthread_t m_Thread;
 };
 

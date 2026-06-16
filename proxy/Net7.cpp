@@ -23,19 +23,19 @@ char g_DomainName[MAX_PATH];
 // Empty string means "no upstream configured"; the game-server resolver
 // then falls back to its docker-compose default ("server").
 char g_UpstreamHost[MAX_PATH];
-char *g_server_addr = (0);
-char *default_addr = "127.0.0.1";
-char *g_internal_addr = (0);
+char* g_server_addr = (0);
+char* default_addr = "127.0.0.1";
+char* g_internal_addr = (0);
 
 bool g_Debug = false;
 bool g_ServerShutdown = false; // Terminated the global Server
 
-char *g_exe;
-char *g_cmd;
+char* g_exe;
+char* g_cmd;
 
-ServerManager * g_ServerMgr = 0;
-GMemoryHandler * g_GlobMemMgr = 0;
-AccountManager * g_AccountMgr = 0;
+ServerManager* g_ServerMgr = 0;
+GMemoryHandler* g_GlobMemMgr = 0;
+AccountManager* g_AccountMgr = 0;
 
 bool g_OpcodeDebugging = false;
 
@@ -64,16 +64,13 @@ char g_DtlsCaFile[MAX_PATH] = {0};
 // Resolve the proxy<->server DTLS policy ONCE, before any UDPClient is built.
 // Fail-closed: if DTLS is required (not opted out) but cannot be configured,
 // the proxy refuses to start rather than silently falling back to cleartext.
-static void InitProxyDtlsPolicy()
-{
-    if (net7::DtlsPlaintextOptedOut())
-    {
+static void InitProxyDtlsPolicy() {
+    if (net7::DtlsPlaintextOptedOut()) {
         g_DtlsPlaintext = true;
         LogMessage("\n");
         LogMessage("==========================================================\n");
         LogMessage("  WARNING: UDP ENCRYPTION DISABLED (proxy<->server DTLS off)\n");
-        LogMessage("  %s=%s is set.\n",
-                   net7::kDtlsOptOutEnv, net7::kDtlsOptOutSentinel);
+        LogMessage("  %s=%s is set.\n", net7::kDtlsOptOutEnv, net7::kDtlsOptOutSentinel);
         LogMessage("  The proxy<->server UDP leg runs CLEARTEXT and\n");
         LogMessage("  UNAUTHENTICATED. This is for local/offline debugging\n");
         LogMessage("  ONLY -- never run a real deployment like this.\n");
@@ -85,10 +82,10 @@ static void InitProxyDtlsPolicy()
     // DTLS required. Connect-by-IP / verify-by-name: resolve the cert hostname.
     // NET7_GAME_SERVER_DOMAIN is the explicit knob; otherwise the upstream host
     // name (NET7_UPSTREAM_HOST / g_UpstreamHost) is typically the cert SAN.
-    const char *dom = getenv("NET7_GAME_SERVER_DOMAIN");
-    if ((!dom || !*dom) && g_UpstreamHost[0]) dom = g_UpstreamHost;
-    if (!dom || !*dom)
-    {
+    const char* dom = getenv("NET7_GAME_SERVER_DOMAIN");
+    if ((!dom || !*dom) && g_UpstreamHost[0])
+        dom = g_UpstreamHost;
+    if (!dom || !*dom) {
         LogMessage("FATAL: proxy<->server DTLS is required but no server cert\n"
                    "  hostname is configured. Set NET7_GAME_SERVER_DOMAIN to the\n"
                    "  game server's certificate hostname, or set %s=%s\n"
@@ -98,36 +95,33 @@ static void InitProxyDtlsPolicy()
     }
     snprintf(g_DtlsVerifyDomain, MAX_PATH, "%s", dom);
 
-    const char *ca = getenv("NET7_DTLS_CA");
+    const char* ca = getenv("NET7_DTLS_CA");
     snprintf(g_DtlsCaFile, MAX_PATH, "%s", (ca && *ca) ? ca : "");
 
     // Probe-build a client transport so a misconfiguration fails the process at
     // startup (fail-closed) instead of at first connect.
     net7::DtlsTransport probe(net7::DtlsRole::Client);
     probe.SetVerifyHostname(g_DtlsVerifyDomain);
-    if (g_DtlsCaFile[0] && !probe.SetVerifyCaFile(g_DtlsCaFile))
-    {
-        LogMessage("FATAL: proxy<->server DTLS CA '%s' failed to load: %s\n",
-                   g_DtlsCaFile, probe.LastError().c_str());
+    if (g_DtlsCaFile[0] && !probe.SetVerifyCaFile(g_DtlsCaFile)) {
+        LogMessage("FATAL: proxy<->server DTLS CA '%s' failed to load: %s\n", g_DtlsCaFile,
+                   probe.LastError().c_str());
         exit(EXIT_FAILURE);
     }
-    if (!probe.Ok())
-    {
+    if (!probe.Ok()) {
         LogMessage("FATAL: proxy<->server DTLS client transport failed to "
-                   "configure: %s\n", probe.LastError().c_str());
+                   "configure: %s\n",
+                   probe.LastError().c_str());
         exit(EXIT_FAILURE);
     }
 
     LogMessage("Net7Proxy: proxy<->server DTLS ENABLED (verify host '%s', CA: %s)\n",
-               g_DtlsVerifyDomain,
-               g_DtlsCaFile[0] ? g_DtlsCaFile : "system trust store");
+               g_DtlsVerifyDomain, g_DtlsCaFile[0] ? g_DtlsCaFile : "system trust store");
 }
 
-void Usage()
-{
-	printf("Net7Proxy Usage:\n\n");
-	printf("Starts E&B client to interface with server:\n");
-	printf("   Net7Proxy /ADDRESS:(ip address)\n");
+void Usage() {
+    printf("Net7Proxy Usage:\n\n");
+    printf("Starts E&B client to interface with server:\n");
+    printf("   Net7Proxy /ADDRESS:(ip address)\n");
 }
 
 // SERVER-SIDE main. Net7Proxy here is the TCP entry point for the
@@ -142,11 +136,10 @@ void Usage()
 //   - patch the client in memory (Detours)
 //   - open a UDP receive connection to verify a server is reachable;
 //     server-side Net7Proxy IS the server.
-int main(int argc, char* argv[])
-{
+int main(int argc, char* argv[]) {
     g_StartTick = Net7TickMs();
     g_internal_addr = default_addr;
-    g_server_addr  = default_addr;
+    g_server_addr = default_addr;
 
     // Make stdout line-buffered so `docker logs -f` shows messages as
     // they happen (default for a non-tty is fully-buffered).
@@ -159,8 +152,7 @@ int main(int argc, char* argv[])
     {
         WSADATA wsa_data;
         int wsa_err = WSAStartup(MAKEWORD(2, 2), &wsa_data);
-        if (wsa_err != 0)
-        {
+        if (wsa_err != 0) {
             fprintf(stderr, "WSAStartup failed: %d\n", wsa_err);
             return 1;
         }
@@ -170,45 +162,27 @@ int main(int argc, char* argv[])
     printf("Net7Proxy version %s\n", VERSION);
     fflush(stdout);
 
-    for (int i = 1; i < argc; i++)
-    {
-        if (strncmp(argv[i], "/ADDRESS:", 9) == 0)
-        {
+    for (int i = 1; i < argc; i++) {
+        if (strncmp(argv[i], "/ADDRESS:", 9) == 0) {
             g_internal_addr = argv[i] + 9;
-        }
-        else if (strncmp(argv[i], "/LC", 3) == 0)
-        {
+        } else if (strncmp(argv[i], "/LC", 3) == 0) {
             g_LocalCert = true;
-        }
-        else if (strncmp(argv[i], "/OPCODES", 8) == 0)
-        {
+        } else if (strncmp(argv[i], "/OPCODES", 8) == 0) {
             g_OpcodeDebugging = true;
-        }
-        else if (strncmp(argv[i], "/SSL:", 5) == 0)
-        {
+        } else if (strncmp(argv[i], "/SSL:", 5) == 0) {
             long ssl_p = atoi(argv[i] + 5);
-            if (ssl_p > 0)
-            {
+            if (ssl_p > 0) {
                 ssl_port = (unsigned short)ssl_p;
             }
-        }
-        else if (strncmp(argv[i], "/UPSTREAM:", 10) == 0)
-        {
+        } else if (strncmp(argv[i], "/UPSTREAM:", 10) == 0) {
             snprintf(g_UpstreamHost, MAX_PATH, "%s", argv[i] + 10);
-        }
-        else if (strncmp(argv[i], "/CLIENT:", 8) == 0)
-        {
+        } else if (strncmp(argv[i], "/CLIENT:", 8) == 0) {
             // Legacy launcher arg — accepted for backward compatibility.
             // The launcher (tools/LaunchFreya) now owns client
             // spawning, so the proxy ignores this.
-        }
-        else if (strncmp(argv[i], "/L", 2) == 0
-              && strncmp(argv[i], "/LC", 3) != 0)
-        {
+        } else if (strncmp(argv[i], "/L", 2) == 0 && strncmp(argv[i], "/LC", 3) != 0) {
             // Legacy launcher arg paired with /CLIENT: — accept + ignore.
-        }
-        else
-        {
+        } else {
             printf("Unrecognized switch: '%s'\n", argv[i]);
             Usage();
             return 1;
@@ -219,7 +193,7 @@ int main(int argc, char* argv[])
     // at runtime with NET7_DOMAIN; default is loopback so the cert (CN =
     // localhost) validates without any external DNS setup.
     {
-        const char *env_domain = getenv("NET7_DOMAIN");
+        const char* env_domain = getenv("NET7_DOMAIN");
         snprintf(g_DomainName, MAX_PATH, "%s",
                  (env_domain && *env_domain) ? env_domain : "localhost");
     }
@@ -236,34 +210,28 @@ int main(int argc, char* argv[])
     // explicitly set, in which case the explicit override wins (useful for
     // split-deployment debugging where the proxy and game server live on
     // separate boxes).
-    if (g_UpstreamHost[0] == '\0')
-    {
-        const char *env_upstream = getenv("NET7_UPSTREAM_HOST");
-        if (env_upstream && *env_upstream)
-        {
+    if (g_UpstreamHost[0] == '\0') {
+        const char* env_upstream = getenv("NET7_UPSTREAM_HOST");
+        if (env_upstream && *env_upstream) {
             snprintf(g_UpstreamHost, MAX_PATH, "%s", env_upstream);
         }
     }
-    if (g_UpstreamHost[0] != '\0')
-    {
+    if (g_UpstreamHost[0] != '\0') {
         LogMessage("Net7Proxy: upstream host = %s\n", g_UpstreamHost);
 
-        const char *env_game_host = getenv("NET7_GAME_SERVER_HOST");
-        if (!env_game_host || !*env_game_host)
-        {
+        const char* env_game_host = getenv("NET7_GAME_SERVER_HOST");
+        if (!env_game_host || !*env_game_host) {
             // setenv(name, value, overwrite=0) is a no-op if it's already set
             // with a non-empty value; we've already gated on that, so this
             // sets it for real. POSIX setenv copies, so g_UpstreamHost's
             // lifetime doesn't matter.
             setenv("NET7_GAME_SERVER_HOST", g_UpstreamHost, 0);
-            LogMessage("Net7Proxy: aliasing NET7_GAME_SERVER_HOST = %s\n",
-                       g_UpstreamHost);
-        }
-        else
-        {
+            LogMessage("Net7Proxy: aliasing NET7_GAME_SERVER_HOST = %s\n", g_UpstreamHost);
+        } else {
             LogMessage("Net7Proxy: NET7_GAME_SERVER_HOST already set to '%s' "
                        "-- keeping it (split-deployment override wins over "
-                       "NET7_UPSTREAM_HOST)\n", env_game_host);
+                       "NET7_UPSTREAM_HOST)\n",
+                       env_game_host);
         }
     }
 
@@ -272,10 +240,10 @@ int main(int argc, char* argv[])
     // regardless of m_IpAddress.
     unsigned long ip_address_internal = inet_addr(g_internal_addr);
 
-    LogMessage("Net7Proxy: binding TCP %d (MASTER_SERVER_PORT) on %s\n",
-               MASTER_SERVER_PORT, g_internal_addr);
-    LogMessage("Net7Proxy: binding TCP %d (GLOBAL_SERVER_PORT) on %s\n",
-               GLOBAL_SERVER_PORT, g_internal_addr);
+    LogMessage("Net7Proxy: binding TCP %d (MASTER_SERVER_PORT) on %s\n", MASTER_SERVER_PORT,
+               g_internal_addr);
+    LogMessage("Net7Proxy: binding TCP %d (GLOBAL_SERVER_PORT) on %s\n", GLOBAL_SERVER_PORT,
+               g_internal_addr);
 
     // Phase AH: resolve the proxy<->server DTLS policy BEFORE any UDPClient is
     // constructed. Fail-closed (exit) on misconfiguration unless the operator
@@ -286,12 +254,8 @@ int main(int argc, char* argv[])
     // The "is_master_server", "max_sectors", "standalone" constructor args
     // are ServerManager's; for the proxy-as-listener role we want the
     // master-server path (RunMasterServer creates the TCP listeners).
-    ServerManager server_mgr(true /*master*/,
-                             ip_address_internal,
-                             (short) PROXY_LOCAL_TCP_PORT,
-                             (short) 1,
-                             true /*standalone*/,
-                             ip_address_internal);
+    ServerManager server_mgr(true /*master*/, ip_address_internal, (short)PROXY_LOCAL_TCP_PORT,
+                             (short)1, true /*standalone*/, ip_address_internal);
 
     // Phase K: stand up a UDPClient pointing at the game server's
     // UDP_MASTER_SERVER_PORT (3808). HandleMasterJoin will use this to
@@ -312,9 +276,7 @@ int main(int argc, char* argv[])
     // single peer and would drop them. In opted-out plaintext mode the master
     // socket stays connected to 3808, preserving the exact legacy behaviour
     // (only 3808 traffic is accepted; a stray 3806 datagram is kernel-dropped).
-    UDPClient udp_to_master(UDP_MASTER_SERVER_PORT,
-                            CLIENT_TYPE_FIXED_PORT,
-                            ip_address_internal,
+    UDPClient udp_to_master(UDP_MASTER_SERVER_PORT, CLIENT_TYPE_FIXED_PORT, ip_address_internal,
                             !g_DtlsPlaintext /*unconnected when DTLS on*/);
 
     server_mgr.SetUDPConnections(&udp_to_master, &udp_to_master);
@@ -343,9 +305,7 @@ int main(int argc, char* argv[])
     // the same default-peer for outgoing sendto() while accepting recv()
     // from any peer port (with a source-IP whitelist check in
     // UDP_RecvFromServer).
-    UDPClient udp_to_global(UDP_GLOBAL_SERVER_PORT,
-                            CLIENT_TYPE_FIXED_PORT,
-                            ip_address_internal,
+    UDPClient udp_to_global(UDP_GLOBAL_SERVER_PORT, CLIENT_TYPE_FIXED_PORT, ip_address_internal,
                             true /*unconnected*/);
 
     server_mgr.SetGlobalUDPClient(&udp_to_global);
@@ -357,21 +317,20 @@ int main(int argc, char* argv[])
 
 long g_AddrStore = 0x00b6e5a8; //this virtual offset places us within the known .data area offset.
 
-unsigned long GetNet7TickCount()
-{
+unsigned long GetNet7TickCount() {
     return ((Net7TickMs() - g_StartTick) & 0x7FFFFFFF);
 }
 
 // ShutdownClient is a no-op server-side (there is no game client in this
 // process); kept because the master-server teardown path calls it.
-bool ShutdownClient() { return true; }
+bool ShutdownClient() {
+    return true;
+}
 
-void WaitForLogin()
-{
-	long counter = 0;
-	while (!g_LoggedIn && counter < 300 && !g_ServerShutdown)
-	{
-		usleep(250 * 1000);
-		counter++;
-	}
+void WaitForLogin() {
+    long counter = 0;
+    while (!g_LoggedIn && counter < 300 && !g_ServerShutdown) {
+        usleep(250 * 1000);
+        counter++;
+    }
 }

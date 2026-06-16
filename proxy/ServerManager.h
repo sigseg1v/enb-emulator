@@ -12,86 +12,89 @@ class SectorManager;
 class ConnectionManager;
 class UDPClient;
 
-class ServerManager
-{
+class ServerManager {
 public:
-    ServerManager(bool is_sector_server, unsigned long ip_address, short port, short max_sectors, bool standalone, unsigned long internal_ip_address = 0);
+    ServerManager(bool is_sector_server, unsigned long ip_address, short port, short max_sectors,
+                  bool standalone, unsigned long internal_ip_address = 0);
     virtual ~ServerManager();
 
 public:
-	void	RunServer();
-	bool	SetupSectorServer(long sector_id);
-	bool	IsSectorServerReady(short port);
-	void	SetSectorServerReady(short port, bool ready);
-	void	SetUDPConnections(UDPClient *connection, UDPClient *send);
-	void	SetGlobalUDPClient(UDPClient *global) { m_UDPGlobalClient = global; }
-    void    SetPlayerMgrGlobalMemoryHandler();
+    void RunServer();
+    bool SetupSectorServer(long sector_id);
+    bool IsSectorServerReady(short port);
+    void SetSectorServerReady(short port, bool ready);
+    void SetUDPConnections(UDPClient* connection, UDPClient* send);
+    void SetGlobalUDPClient(UDPClient* global) {
+        m_UDPGlobalClient = global;
+    }
+    void SetPlayerMgrGlobalMemoryHandler();
 
     // Phase AH (AH-8): the account's per-packet auth token (16-byte binary
     // login-ticket suffix), learned at global connect and prepended by
     // UDPClient::UDP_Send to every C->S DTLS datagram. The proxy is a
     // single-client bridge, so one token per process. Zero/unset until the
     // ticket is seen; the server only enforces it on gameplay datagrams.
-    void    SetAuthToken(const unsigned char *tok)
-            { memcpy(m_AuthToken, tok, sizeof(m_AuthToken)); m_AuthTokenSet = true; }
+    void SetAuthToken(const unsigned char* tok) {
+        memcpy(m_AuthToken, tok, sizeof(m_AuthToken));
+        m_AuthTokenSet = true;
+    }
 
-    void    ResetChatFileTimer();
-    void    ResetLogFileTimer();
+    void ResetChatFileTimer();
+    void ResetLogFileTimer();
 
 private:
-    void    ServerCheck();
-	void	MainLoop();
-	void	RunMasterServer();
-	void	RunSectorServer();
-    bool    RegisterSectorServer(short first_port, short max_sectors);
+    void ServerCheck();
+    void MainLoop();
+    void RunMasterServer();
+    void RunSectorServer();
+    bool RegisterSectorServer(short first_port, short max_sectors);
 
 public:
-	// Applies to all servers
-	ConnectionManager	m_ConnectionMgr;
-	bool				m_IsMasterServer;
-    bool                m_IsStandaloneServer;
+    // Applies to all servers
+    ConnectionManager m_ConnectionMgr;
+    bool m_IsMasterServer;
+    bool m_IsStandaloneServer;
 
-	// Applies only to Master Server
-	AccountManager    * m_AccountMgr;
+    // Applies only to Master Server
+    AccountManager* m_AccountMgr;
 
-	// Applies only to Sector Server
-	SectorManager	  * m_SectorMgrList[MAX_SECTORS];
-	UDPClient	      * m_UDPConnection;  // used for sending to different ports
-    UDPClient         * m_UDPClient;   // used for receiving from the server
+    // Applies only to Sector Server
+    SectorManager* m_SectorMgrList[MAX_SECTORS];
+    UDPClient* m_UDPConnection; // used for sending to different ports
+    UDPClient* m_UDPClient;     // used for receiving from the server
     // Phase K: dedicated UDPClient for the proxy<->server "global" plane
     // (peer = UDP_GLOBAL_SERVER_PORT 3810). Connected SOCK_DGRAM filters
     // by peer port on Linux, so the master plane (m_UDPConnection /
     // m_UDPClient -> UDP_MASTER_SERVER_PORT 3808) and the global plane
     // cannot share a socket here. See proxy/UDPClient_linux.cpp header
     // for the request/reply sequences.
-    UDPClient         * m_UDPGlobalClient;
-	SectorServerManager	m_SectorServerMgr;
-	short				m_Port;
-    short               m_MaxSectors;
-	unsigned long		m_IpAddress;
-	unsigned long		m_IpAddressInternal;
-	long				m_SectorID;
-    int                 m_LogFileTimer;
-    int                 m_ChatFileTimer;
-    FILE              * m_LogFile;
-    FILE              * m_ChatFile;
-	bool				m_AllowCreate;
-	bool				m_DumpXML;
+    UDPClient* m_UDPGlobalClient;
+    SectorServerManager m_SectorServerMgr;
+    short m_Port;
+    short m_MaxSectors;
+    unsigned long m_IpAddress;
+    unsigned long m_IpAddressInternal;
+    long m_SectorID;
+    int m_LogFileTimer;
+    int m_ChatFileTimer;
+    FILE* m_LogFile;
+    FILE* m_ChatFile;
+    bool m_AllowCreate;
+    bool m_DumpXML;
 
-	// Phase AH (AH-8): per-packet auth token state (see SetAuthToken above).
-	unsigned char		m_AuthToken[16];
-	bool				m_AuthTokenSet;
+    // Phase AH (AH-8): per-packet auth token state (see SetAuthToken above).
+    unsigned char m_AuthToken[16];
+    bool m_AuthTokenSet;
 
-    StringManager     * m_StringMgr;
+    StringManager* m_StringMgr;
 
-    Connection        * m_SectorConnection; //local connection to client
-    Connection        * m_GlobalConnection;
-    Connection        * m_MasterConnection;
-    long                m_ConnectionCount;
+    Connection* m_SectorConnection; //local connection to client
+    Connection* m_GlobalConnection;
+    Connection* m_MasterConnection;
+    long m_ConnectionCount;
 
 private:
-    Mutex               m_Mutex;
-
+    Mutex m_Mutex;
 };
 
 #endif // _SERVER_MANAGER_H_INCLUDED_

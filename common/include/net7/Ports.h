@@ -25,26 +25,26 @@
 // Authentication. Net7SSL terminates TLSv1.3, parses /AuthLogin against
 // the user DB, and issues a 20-byte ticket the client carries through the
 // global → master → sector handoff chain.
-#define SSL_PORT                    443     // handles authentication (0x01BB)
+#define SSL_PORT 443 // handles authentication (0x01BB)
 
 // TCP control plane.
-#define GLOBAL_SERVER_PORT          3805    // proxy listener; multiplexes galaxies
-#define MASTER_SERVER_PORT          3801    // per-galaxy master handler
-#define SECTOR_SERVER_PORT          3501    // base port for sector servers; each sector adds an offset
+#define GLOBAL_SERVER_PORT 3805 // proxy listener; multiplexes galaxies
+#define MASTER_SERVER_PORT 3801 // per-galaxy master handler
+#define SECTOR_SERVER_PORT 3501 // base port for sector servers; each sector adds an offset
 
 // Proxy's own local TCP terminator. Distinct from SECTOR_SERVER_PORT
 // because the proxy itself binds 3500 and forwards to 3501+ sector
 // servers behind it. Comment in the original Net7SSL.h header:
 //   "we start from 3501 now because 3500 is used as the local TCP port in Net7Proxy"
-#define PROXY_LOCAL_TCP_PORT        3500
+#define PROXY_LOCAL_TCP_PORT 3500
 
 // MVAS launcher hookup (client-side process; here for the port number only).
-#define MVAS_LOGIN_PORT             3806
+#define MVAS_LOGIN_PORT 3806
 
 // Out-of-band logins/UDP control.
-#define SSL_LOCALCERT_LOGIN_PORT    3807
-#define UDP_MASTER_SERVER_PORT      3808
-#define PROXY_SERVER_PORT           3809
+#define SSL_LOCALCERT_LOGIN_PORT 3807
+#define UDP_MASTER_SERVER_PORT 3808
+#define PROXY_SERVER_PORT 3809
 
 // Phase K continuation (2026-05-24): the proxy->server "global" control
 // plane (ticket validation, avatar list, char create/delete) was TCP in
@@ -57,11 +57,11 @@
 // UDP_Connection::HandleGlobalOpcode (server/src/UDPConnection.cpp:203,
 // handlers in server/src/UDP_Global.cpp) — we bind UDP here and the
 // proxy gets a second UDPClient instance pointed at it.
-#define UDP_GLOBAL_SERVER_PORT      3810
+#define UDP_GLOBAL_SERVER_PORT 3810
 
 // Connection-type tags (constants, not ports — kept here because they're
 // referenced in the same blocks the port macros are):
-#define CLIENT_TYPE_FIXED_PORT      1
-#define CLIENT_TYPE_MULTI_PORT      2
+#define CLIENT_TYPE_FIXED_PORT 1
+#define CLIENT_TYPE_MULTI_PORT 2
 
 #endif // _NET7_PORTS_H_INCLUDED_

@@ -133,16 +133,16 @@ uint32_t time_debug = 0;
 // login state machine advancing even when the client gets nothing.
 // ---------------------------------------------------------------------------
 static bool s_drop_init = false;
-static bool s_drop_all  = false;
+static bool s_drop_all = false;
 static bool s_drop_mask[0x1000];
 
-static void init_drop_filter_once()
-{
-    if (s_drop_init) return;
+static void init_drop_filter_once() {
+    if (s_drop_init)
+        return;
     s_drop_init = true;
     memset(s_drop_mask, 0, sizeof(s_drop_mask));
 
-    const char *drop_all = getenv("PROXY_S2C_DROP_ALL");
+    const char* drop_all = getenv("PROXY_S2C_DROP_ALL");
     if (drop_all && drop_all[0] == '1') {
         s_drop_all = true;
         LogMessage("UDPClient(Linux): bisection: PROXY_S2C_DROP_ALL=1 "
@@ -150,17 +150,19 @@ static void init_drop_filter_once()
         return;
     }
 
-    const char *list = getenv("PROXY_S2C_DROP");
-    if (!list || !list[0]) return;
+    const char* list = getenv("PROXY_S2C_DROP");
+    if (!list || !list[0])
+        return;
 
     char buf[512];
     strncpy(buf, list, sizeof(buf) - 1);
     buf[sizeof(buf) - 1] = '\0';
 
     int dropped = 0;
-    for (char *tok = strtok(buf, ","); tok; tok = strtok(NULL, ",")) {
-        while (*tok == ' ') tok++;
-        unsigned int op = (unsigned int) strtoul(tok, NULL, 0);
+    for (char* tok = strtok(buf, ","); tok; tok = strtok(NULL, ",")) {
+        while (*tok == ' ')
+            tok++;
+        unsigned int op = (unsigned int)strtoul(tok, NULL, 0);
         if (op > 0 && op < 0x1000) {
             s_drop_mask[op] = true;
             dropped++;
@@ -168,15 +170,17 @@ static void init_drop_filter_once()
     }
     if (dropped) {
         LogMessage("UDPClient(Linux): bisection: PROXY_S2C_DROP set "
-                   "(%d opcodes suppressed): %s\n", dropped, list);
+                   "(%d opcodes suppressed): %s\n",
+                   dropped, list);
     }
 }
 
-static bool should_drop_s2c(unsigned short opcode)
-{
+static bool should_drop_s2c(unsigned short opcode) {
     init_drop_filter_once();
-    if (s_drop_all) return true;
-    if (opcode < 0x1000 && s_drop_mask[opcode]) return true;
+    if (s_drop_all)
+        return true;
+    if (opcode < 0x1000 && s_drop_mask[opcode])
+        return true;
     return false;
 }
 
@@ -213,7 +217,7 @@ static bool should_drop_s2c(unsigned short opcode)
 // set it. `just packet-replay <capture>` does.
 // ---------------------------------------------------------------------------
 static bool s_replay_init = false;
-static bool s_replay_on   = false;
+static bool s_replay_on = false;
 static std::deque<std::vector<unsigned char>> s_replay_q[0x1000];
 
 // Identity rewrite (Phase K Wave 325). The retail payloads in the replay
@@ -232,28 +236,29 @@ static std::deque<std::vector<unsigned char>> s_replay_q[0x1000];
 // payload starts with s_retail_avatar_id (in which case orig[0..3] is the
 // live id). After learning, every substituted payload gets every 4-byte
 // LE occurrence of s_retail_avatar_id rewritten to s_live_avatar_id.
-static uint32_t s_retail_avatar_id = 0;   // parsed from replay metadata
-static uint32_t s_live_avatar_id   = 0;   // from env or learned
+static uint32_t s_retail_avatar_id = 0; // parsed from replay metadata
+static uint32_t s_live_avatar_id = 0;   // from env or learned
 
-static void init_replay_once()
-{
-    if (s_replay_init) return;
+static void init_replay_once() {
+    if (s_replay_init)
+        return;
     s_replay_init = true;
 
-    const char *path = getenv("PROXY_S2C_REPLAY");
-    if (!path || !path[0]) return;
+    const char* path = getenv("PROXY_S2C_REPLAY");
+    if (!path || !path[0])
+        return;
 
-    FILE *f = fopen(path, "rb");
+    FILE* f = fopen(path, "rb");
     if (!f) {
-        LogMessage("UDPClient(Linux): replay: PROXY_S2C_REPLAY=%s open failed: %s\n",
-                   path, strerror(errno));
+        LogMessage("UDPClient(Linux): replay: PROXY_S2C_REPLAY=%s open failed: %s\n", path,
+                   strerror(errno));
         return;
     }
 
     char magic[9];
     unsigned char ver = 0;
-    if (fread(magic, 1, 9, f) != 9 || memcmp(magic, "ENBREPLAY", 9) != 0
-        || fread(&ver, 1, 1, f) != 1 || ver != 1) {
+    if (fread(magic, 1, 9, f) != 9 || memcmp(magic, "ENBREPLAY", 9) != 0 ||
+        fread(&ver, 1, 1, f) != 1 || ver != 1) {
         LogMessage("UDPClient(Linux): replay: bad magic or version in %s\n", path);
         fclose(f);
         return;
@@ -283,11 +288,17 @@ static void init_replay_once()
     for (uint32_t i = 0; i < nframes; i++) {
         uint16_t opcode = 0;
         uint32_t plen = 0;
-        if (fread(&opcode, 1, 2, f) != 2) break;
-        if (fread(&plen, 1, 4, f) != 4) break;
+        if (fread(&opcode, 1, 2, f) != 2)
+            break;
+        if (fread(&plen, 1, 4, f) != 4)
+            break;
         std::vector<unsigned char> payload(plen);
-        if (plen && fread(payload.data(), 1, plen, f) != plen) break;
-        if (opcode >= 0x1000) { skipped_oversized++; continue; }
+        if (plen && fread(payload.data(), 1, plen, f) != plen)
+            break;
+        if (opcode >= 0x1000) {
+            skipped_oversized++;
+            continue;
+        }
         s_replay_q[opcode].push_back(std::move(payload));
         loaded++;
     }
@@ -304,26 +315,25 @@ static void init_replay_once()
     // Parse "avatar_id=0xNNNNNNNN" out of the metadata block so the
     // rewrite pass knows what 4-byte LE pattern to scrub. The extractor
     // emits avatar_id in 0x-prefixed hex; tolerate decimal too.
-    const char *meta_str = meta.data();
-    const char *k = strstr(meta_str, "avatar_id=");
+    const char* meta_str = meta.data();
+    const char* k = strstr(meta_str, "avatar_id=");
     if (k) {
         k += strlen("avatar_id=");
         unsigned long parsed = strtoul(k, nullptr, 0);
         if (parsed && parsed <= 0xFFFFFFFFul) {
-            s_retail_avatar_id = (uint32_t) parsed;
-            LogMessage("UDPClient(Linux): replay: retail_avatar_id=0x%08x\n",
-                       s_retail_avatar_id);
+            s_retail_avatar_id = (uint32_t)parsed;
+            LogMessage("UDPClient(Linux): replay: retail_avatar_id=0x%08x\n", s_retail_avatar_id);
         }
     }
 
     // Optional explicit override of the live avatar_id. Useful when the
     // operator already knows which avatar will be selected (e.g. seeded
     // via SQL) and wants to skip the lazy-learn step.
-    const char *live_env = getenv("PROXY_LIVE_AVATAR_ID");
+    const char* live_env = getenv("PROXY_LIVE_AVATAR_ID");
     if (live_env && live_env[0]) {
         unsigned long live = strtoul(live_env, nullptr, 0);
         if (live && live <= 0xFFFFFFFFul) {
-            s_live_avatar_id = (uint32_t) live;
+            s_live_avatar_id = (uint32_t)live;
             LogMessage("UDPClient(Linux): replay: live_avatar_id=0x%08x "
                        "(from PROXY_LIVE_AVATAR_ID env)\n",
                        s_live_avatar_id);
@@ -332,44 +342,39 @@ static void init_replay_once()
 }
 
 // Read a u32 LE from buf at offset, bounds-safe.
-static uint32_t read_u32le(const unsigned char *buf, size_t len, size_t off)
-{
-    if (off + 4 > len) return 0;
-    return (uint32_t) buf[off]
-         | ((uint32_t) buf[off + 1] << 8)
-         | ((uint32_t) buf[off + 2] << 16)
-         | ((uint32_t) buf[off + 3] << 24);
+static uint32_t read_u32le(const unsigned char* buf, size_t len, size_t off) {
+    if (off + 4 > len)
+        return 0;
+    return (uint32_t)buf[off] | ((uint32_t)buf[off + 1] << 8) | ((uint32_t)buf[off + 2] << 16) |
+           ((uint32_t)buf[off + 3] << 24);
 }
 
 // Scan `payload` for every 4-byte LE occurrence of `from` and overwrite
 // each with `to`. Returns the number of replacements. Naive O(n) scan;
 // payloads are at most a few KB so allocation-free byte-walk is fine.
-static unsigned rewrite_u32le(std::vector<unsigned char> &payload,
-                              uint32_t from, uint32_t to)
-{
-    if (from == 0 || to == 0 || from == to || payload.size() < 4) return 0;
+static unsigned rewrite_u32le(std::vector<unsigned char>& payload, uint32_t from, uint32_t to) {
+    if (from == 0 || to == 0 || from == to || payload.size() < 4)
+        return 0;
     unsigned char from_b[4] = {
-        (unsigned char) (from & 0xFF),
-        (unsigned char) ((from >> 8) & 0xFF),
-        (unsigned char) ((from >> 16) & 0xFF),
-        (unsigned char) ((from >> 24) & 0xFF),
+        (unsigned char)(from & 0xFF),
+        (unsigned char)((from >> 8) & 0xFF),
+        (unsigned char)((from >> 16) & 0xFF),
+        (unsigned char)((from >> 24) & 0xFF),
     };
     unsigned char to_b[4] = {
-        (unsigned char) (to & 0xFF),
-        (unsigned char) ((to >> 8) & 0xFF),
-        (unsigned char) ((to >> 16) & 0xFF),
-        (unsigned char) ((to >> 24) & 0xFF),
+        (unsigned char)(to & 0xFF),
+        (unsigned char)((to >> 8) & 0xFF),
+        (unsigned char)((to >> 16) & 0xFF),
+        (unsigned char)((to >> 24) & 0xFF),
     };
     unsigned hits = 0;
     for (size_t i = 0; i + 4 <= payload.size(); i++) {
-        if (payload[i]   == from_b[0]
-         && payload[i+1] == from_b[1]
-         && payload[i+2] == from_b[2]
-         && payload[i+3] == from_b[3]) {
-            payload[i]   = to_b[0];
-            payload[i+1] = to_b[1];
-            payload[i+2] = to_b[2];
-            payload[i+3] = to_b[3];
+        if (payload[i] == from_b[0] && payload[i + 1] == from_b[1] && payload[i + 2] == from_b[2] &&
+            payload[i + 3] == from_b[3]) {
+            payload[i] = to_b[0];
+            payload[i + 1] = to_b[1];
+            payload[i + 2] = to_b[2];
+            payload[i + 3] = to_b[3];
             hits++;
             i += 3; // skip past the rewrite (loop ++ adds the 4th)
         }
@@ -382,12 +387,11 @@ static unsigned rewrite_u32le(std::vector<unsigned char> &payload,
 // summary (our_len, retail_len, byte-prefix match) so the operator can
 // see at-a-glance how close our generated payload was. On miss, logs a
 // MISS line and returns false; caller sends original.
-static bool replay_substitute_s2c(unsigned short opcode,
-                                  const unsigned char *orig, size_t orig_len,
-                                  std::vector<unsigned char> &out)
-{
+static bool replay_substitute_s2c(unsigned short opcode, const unsigned char* orig, size_t orig_len,
+                                  std::vector<unsigned char>& out) {
     init_replay_once();
-    if (!s_replay_on || opcode >= 0x1000) return false;
+    if (!s_replay_on || opcode >= 0x1000)
+        return false;
 
     if (s_replay_q[opcode].empty()) {
         LogMessage("UDPClient(Linux): replay: MISS op=0x%04x our=%zu "
@@ -407,12 +411,11 @@ static bool replay_substitute_s2c(unsigned short opcode,
     // other opcodes -- if the first emit isn't one of those, learning
     // simply waits for the next compatible opcode; the rewrite is a
     // no-op until learned.
-    if (s_live_avatar_id == 0 && s_retail_avatar_id != 0
-        && out.size() >= 4 && orig_len >= 4) {
+    if (s_live_avatar_id == 0 && s_retail_avatar_id != 0 && out.size() >= 4 && orig_len >= 4) {
         uint32_t retail_head = read_u32le(out.data(), out.size(), 0);
-        uint32_t live_head   = read_u32le(orig, orig_len, 0);
-        if (retail_head == s_retail_avatar_id && live_head != 0
-            && live_head != s_retail_avatar_id) {
+        uint32_t live_head = read_u32le(orig, orig_len, 0);
+        if (retail_head == s_retail_avatar_id && live_head != 0 &&
+            live_head != s_retail_avatar_id) {
             s_live_avatar_id = live_head;
             LogMessage("UDPClient(Linux): replay: LEARN live_avatar_id="
                        "0x%08x from op=0x%04x\n",
@@ -427,7 +430,8 @@ static bool replay_substitute_s2c(unsigned short opcode,
 
     size_t prefix = 0;
     size_t n = orig_len < out.size() ? orig_len : out.size();
-    while (prefix < n && orig[prefix] == out[prefix]) prefix++;
+    while (prefix < n && orig[prefix] == out[prefix])
+        prefix++;
     LogMessage("UDPClient(Linux): replay: SUB op=0x%04x our=%zu retail=%zu "
                "prefix_match=%zu rewrites=%u\n",
                opcode, orig_len, out.size(), prefix, hits);
@@ -454,13 +458,12 @@ static bool replay_substitute_s2c(unsigned short opcode,
 // "datafile" for the 0x2010 DATA_FILE non-galaxy-map path.
 // ---------------------------------------------------------------------------
 static bool s_hexdump_init = false;
-static bool s_hexdump_on   = false;
+static bool s_hexdump_on = false;
 
-static bool hexdump_enabled()
-{
+static bool hexdump_enabled() {
     if (!s_hexdump_init) {
         s_hexdump_init = true;
-        const char *v = getenv("PROXY_S2C_HEXDUMP");
+        const char* v = getenv("PROXY_S2C_HEXDUMP");
         if (v && v[0] == '1') {
             s_hexdump_on = true;
             LogMessage("UDPClient(Linux): PROXY_S2C_HEXDUMP=1 -- dumping every "
@@ -470,17 +473,17 @@ static bool hexdump_enabled()
     return s_hexdump_on;
 }
 
-static void dump_s2c_hex(const char *tag, unsigned short opcode,
-                         const unsigned char *bytes, size_t len)
-{
-    if (!hexdump_enabled()) return;
+static void dump_s2c_hex(const char* tag, unsigned short opcode, const unsigned char* bytes,
+                         size_t len) {
+    if (!hexdump_enabled())
+        return;
 
     // Header row mirrors the capture-file [length, opcode] preamble. The
     // wire frame the client sees is sizeof(short)*2 (length+opcode) + len
     // bytes, so we print the same length the client will decode.
-    unsigned int frame_len = (unsigned int) len + 4;
-    LogMessage("HEX(%s) op=0x%04x len=0x%04x (%u bytes payload, %u on wire)\n",
-               tag, opcode, frame_len, (unsigned) len, frame_len);
+    unsigned int frame_len = (unsigned int)len + 4;
+    LogMessage("HEX(%s) op=0x%04x len=0x%04x (%u bytes payload, %u on wire)\n", tag, opcode,
+               frame_len, (unsigned)len, frame_len);
 
     char line[128];
     char ascii[17];
@@ -489,10 +492,9 @@ static void dump_s2c_hex(const char *tag, unsigned short opcode,
         int pos = 0;
         for (size_t i = 0; i < 16; i++) {
             if (i < n) {
-                pos += snprintf(line + pos, sizeof(line) - pos,
-                                "%02X ", bytes[off + i]);
+                pos += snprintf(line + pos, sizeof(line) - pos, "%02X ", bytes[off + i]);
                 unsigned char c = bytes[off + i];
-                ascii[i] = (c >= 0x20 && c < 0x7F) ? (char) c : '.';
+                ascii[i] = (c >= 0x20 && c < 0x7F) ? (char)c : '.';
             } else {
                 pos += snprintf(line + pos, sizeof(line) - pos, "   ");
                 ascii[i] = ' ';
@@ -516,29 +518,27 @@ static void dump_s2c_hex(const char *tag, unsigned short opcode,
 // SERVER_HANDOFF, START). We preserve that here so the UDPClient state
 // machine sees the same transitions.
 // ---------------------------------------------------------------------------
-void UDPClient::ProcessClientOpcode(char *msg, EnbUdpHeader *header)
-{
+void UDPClient::ProcessClientOpcode(char* msg, EnbUdpHeader* header) {
     short opcode = header->opcode;
-    short bytes  = (short)(header->size - sizeof(EnbUdpHeader));
+    short bytes = (short)(header->size - sizeof(EnbUdpHeader));
 
     if (!ConnectionActive()) {
         LogVMessage("UDPClient(Linux): direct opcode 0x%04x while connection inactive\n",
-                    (unsigned short) opcode);
+                    (unsigned short)opcode);
     }
 
-    if (should_drop_s2c((unsigned short) opcode)) {
+    if (should_drop_s2c((unsigned short)opcode)) {
         LogVMessage("UDPClient(Linux): bisection: DROP direct 0x%04x [%d bytes]\n",
-                    (unsigned short) opcode, (int) bytes);
+                    (unsigned short)opcode, (int)bytes);
     } else if (g_ServerMgr && g_ServerMgr->m_SectorConnection) {
         std::vector<unsigned char> sub;
-        bool subbed = replay_substitute_s2c(
-            (unsigned short) opcode,
-            (const unsigned char *) msg, (size_t) bytes, sub);
-        unsigned char *out_buf = subbed ? sub.data() : (unsigned char *) msg;
-        size_t         out_len = subbed ? sub.size() : (size_t) bytes;
-        dump_s2c_hex("direct", (unsigned short) opcode, out_buf, out_len);
-        g_ServerMgr->m_SectorConnection->SendResponse(
-            opcode, out_buf, (short) out_len, header->packet_sequence);
+        bool subbed = replay_substitute_s2c((unsigned short)opcode, (const unsigned char*)msg,
+                                            (size_t)bytes, sub);
+        unsigned char* out_buf = subbed ? sub.data() : (unsigned char*)msg;
+        size_t out_len = subbed ? sub.size() : (size_t)bytes;
+        dump_s2c_hex("direct", (unsigned short)opcode, out_buf, out_len);
+        g_ServerMgr->m_SectorConnection->SendResponse(opcode, out_buf, (short)out_len,
+                                                      header->packet_sequence);
     }
 
     IncommingOpcodePreProcessing(opcode, msg, bytes);
@@ -549,11 +549,8 @@ void UDPClient::ProcessClientOpcode(char *msg, EnbUdpHeader *header)
 // three opcodes the proxy intercepts: LOGOFF_CONFIRMATION,
 // SERVER_HANDOFF, START. Mirrors Win32 UDPProxyToClient.cpp:61-95.
 // ---------------------------------------------------------------------------
-void UDPClient::IncommingOpcodePreProcessing(short opcode, char *msg, short bytes,
-                                             bool tcp)
-{
-    switch (opcode)
-    {
+void UDPClient::IncommingOpcodePreProcessing(short opcode, char* msg, short bytes, bool tcp) {
+    switch (opcode) {
     case ENB_OPCODE_00BA_LOGOFF_CONFIRMATION:
         LogMessage("UDPClient(Linux): ---> LogOff confirm\n");
         // Arm the auto-shutdown: the player has logged off, so once the client
@@ -640,24 +637,25 @@ void UDPClient::IncommingOpcodePreProcessing(short opcode, char *msg, short byte
 // A missing/unreadable file is logged as a real WARNING (the map will render
 // empty) -- it is not silently swallowed -- but it never crashes the proxy.
 // ---------------------------------------------------------------------------
-void UDPClient::SendCachedGalaxyMap()
-{
-    if (!g_ServerMgr || !g_ServerMgr->m_SectorConnection) return;
+void UDPClient::SendCachedGalaxyMap() {
+    if (!g_ServerMgr || !g_ServerMgr->m_SectorConnection)
+        return;
 
     char path[MAX_PATH];
-    const char *env_path = getenv("FREYA_GALAXY_MAP_PATH");
+    const char* env_path = getenv("FREYA_GALAXY_MAP_PATH");
     if (env_path && env_path[0]) {
         snprintf(path, sizeof(path), "%s", env_path);
     } else {
         snprintf(path, sizeof(path), "%sGalaxyMap.dat", SERVER_DATABASE_PATH);
     }
 
-    FILE *f = fopen(path, "rb");
+    FILE* f = fopen(path, "rb");
     if (!f) {
         LogMessage("UDPClient(Linux): WARNING SendCachedGalaxyMap: cannot open "
                    "galaxy-map cache '%s' (errno=%d) -- in-game galaxy map will "
                    "render empty. Set FREYA_GALAXY_MAP_PATH or mount the data "
-                   "dir at the proxy's database path.\n", path, errno);
+                   "dir at the proxy's database path.\n",
+                   path, errno);
         m_PacketDropThisSession = 0;
         m_PacketTimer = 100;
         return;
@@ -676,10 +674,10 @@ void UDPClient::SendCachedGalaxyMap()
         return;
     }
 
-    std::vector<unsigned char> buf((size_t) file_size);
-    size_t got = fread(buf.data(), 1, (size_t) file_size, f);
+    std::vector<unsigned char> buf((size_t)file_size);
+    size_t got = fread(buf.data(), 1, (size_t)file_size, f);
     fclose(f);
-    if (got != (size_t) file_size) {
+    if (got != (size_t)file_size) {
         LogMessage("UDPClient(Linux): WARNING SendCachedGalaxyMap: short read on "
                    "'%s' (%zu of %ld bytes) -- not served.\n",
                    path, got, file_size);
@@ -691,33 +689,36 @@ void UDPClient::SendCachedGalaxyMap()
     // Walk the [len:u16][opcode:u16][body] frames. `len` includes the 4-byte
     // header; body length = len - 4. Re-emit each record through SendResponse,
     // which re-frames it byte-identically to its on-disk form.
-    size_t index   = 0;
-    int    records = 0;
+    size_t index = 0;
+    int records = 0;
     while (index + 4 <= buf.size()) {
-        unsigned short frame_len = *((unsigned short *) &buf[index]);
-        unsigned short opcode    = *((unsigned short *) &buf[index + 2]);
+        unsigned short frame_len = *((unsigned short*)&buf[index]);
+        unsigned short opcode = *((unsigned short*)&buf[index + 2]);
         if (frame_len < 4 || index + frame_len > buf.size()) {
             LogMessage("UDPClient(Linux): WARNING SendCachedGalaxyMap: malformed "
                        "frame at offset %zu (len=%u) in '%s' -- stopping after "
-                       "%d records.\n", index, frame_len, path, records);
+                       "%d records.\n",
+                       index, frame_len, path, records);
             break;
         }
         if (opcode != ENB_OPCODE_0097_GALAXY_MAP) {
             LogMessage("UDPClient(Linux): WARNING SendCachedGalaxyMap: unexpected "
                        "inner opcode 0x%04x at offset %zu in '%s' -- stopping "
-                       "after %d records.\n", opcode, index, path, records);
+                       "after %d records.\n",
+                       opcode, index, path, records);
             break;
         }
-        unsigned short body_len = (unsigned short) (frame_len - 4);
-        g_ServerMgr->m_SectorConnection->SendResponse(
-            ENB_OPCODE_0097_GALAXY_MAP, &buf[index + 4], body_len);
+        unsigned short body_len = (unsigned short)(frame_len - 4);
+        g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_0097_GALAXY_MAP, &buf[index + 4],
+                                                      body_len);
         index += frame_len;
         records++;
     }
 
     SetReceivedGalaxyMap();
     LogVMessage("UDPClient(Linux): served galaxy-map cache '%s' (%d records, "
-                "%ld bytes).\n", path, records, file_size);
+                "%ld bytes).\n",
+                path, records, file_size);
 
     m_PacketDropThisSession = 0;
     m_PacketTimer = 100;
@@ -730,29 +731,26 @@ void UDPClient::SendCachedGalaxyMap()
 // forwarded verbatim. Linux drops the galaxy-map cache call (see above)
 // and forwards the rest. Mirrors Win32 UDPProxyToClient.cpp:107-131.
 // ---------------------------------------------------------------------------
-void UDPClient::SendClientDataFile(char *msg, EnbUdpHeader *header)
-{
+void UDPClient::SendClientDataFile(char* msg, EnbUdpHeader* header) {
     m_Resync = true;
 
-    short inner_length = *((short *) &msg[0]);
-    short inner_opcode = *((short *) &msg[2]);
+    short inner_length = *((short*)&msg[0]);
+    short inner_opcode = *((short*)&msg[2]);
 
-    if (!g_ServerMgr || !g_ServerMgr->m_SectorConnection) return;
+    if (!g_ServerMgr || !g_ServerMgr->m_SectorConnection)
+        return;
 
-    switch (inner_opcode)
-    {
+    switch (inner_opcode) {
     case ENB_OPCODE_0097_GALAXY_MAP:
         SendCachedGalaxyMap();
         break;
 
     default:
         // payload starts at offset 4 (after inner [size, opcode] header)
-        dump_s2c_hex("datafile", (unsigned short) inner_opcode,
-                     (const unsigned char *) msg + 4,
+        dump_s2c_hex("datafile", (unsigned short)inner_opcode, (const unsigned char*)msg + 4,
                      (size_t)(inner_length - 4));
-        g_ServerMgr->m_SectorConnection->SendResponse(
-            inner_opcode, (unsigned char *) msg + 4, inner_length - 4,
-            header->packet_sequence);
+        g_ServerMgr->m_SectorConnection->SendResponse(inner_opcode, (unsigned char*)msg + 4,
+                                                      inner_length - 4, header->packet_sequence);
         break;
     }
 }
@@ -760,9 +758,9 @@ void UDPClient::SendClientDataFile(char *msg, EnbUdpHeader *header)
 // ---------------------------------------------------------------------------
 // Packet-sequence reassembly internals -- same sentinels as Win32.
 // ---------------------------------------------------------------------------
-#define PACKET_BLANK         ((char *) 0)
-#define PACKET_DONE          ((char *) -1)
-#define PACKET_RE_REQUESTED  ((char *) -2)
+#define PACKET_BLANK ((char*)0)
+#define PACKET_DONE ((char*)-1)
+#define PACKET_RE_REQUESTED ((char*)-2)
 
 // Minimum ms between timer-driven 0x2017 retries (PumpPacketResend). The
 // arrival-driven path is not paced -- it fires at most once per hole.
@@ -777,15 +775,13 @@ void UDPClient::SendClientDataFile(char *msg, EnbUdpHeader *header)
 // server misparsed; the shared int32_t struct pins the wire width on both
 // proxy build targets.
 // ---------------------------------------------------------------------------
-void UDPClient::RequestResend(unsigned long packet_start, long packet_count)
-{
+void UDPClient::RequestResend(unsigned long packet_start, long packet_count) {
     ReSendRequest resend;
-    resend.packet_start = (int32_t) packet_start;
-    resend.packet_count = (int32_t) packet_count;
+    resend.packet_start = (int32_t)packet_start;
+    resend.packet_count = (int32_t)packet_count;
     if (g_ServerMgr && g_ServerMgr->m_UDPConnection) {
-        g_ServerMgr->m_UDPConnection->ForwardClientOpcode(
-            ENB_OPCODE_2017_RESEND_PACKET_SEQUENCE,
-            sizeof(ReSendRequest), (char *) &resend);
+        g_ServerMgr->m_UDPConnection->ForwardClientOpcode(ENB_OPCODE_2017_RESEND_PACKET_SEQUENCE,
+                                                          sizeof(ReSendRequest), (char*)&resend);
     }
     m_PacketResendTimer = GetNet7TickCount();
 }
@@ -799,8 +795,7 @@ void UDPClient::RequestResend(unsigned long packet_start, long packet_count)
 // burst is the FINAL traffic on the connection, so a lost tail packet
 // meant no retry ever fired and the client sat on the load screen forever.
 // ---------------------------------------------------------------------------
-void UDPClient::PumpPacketResend()
-{
+void UDPClient::PumpPacketResend() {
     // The timer pump exists ONLY to recover a lost tail of the post-login
     // world-load burst (the 0x003A sector-entry data is the final traffic on
     // the connection, so the arrival-driven path never re-fires). It must
@@ -824,11 +819,11 @@ void UDPClient::PumpPacketResend()
     // Pending recovery exists only when a sequence NEWER than the head has
     // arrived; a missing head with nothing beyond it is just an idle stream.
     unsigned long newest = m_Packets.rbegin()->first;
-    if (newest <= (unsigned long) m_CurrentPacketNum) {
+    if (newest <= (unsigned long)m_CurrentPacketNum) {
         return;
     }
 
-    char *head = m_Packets[m_CurrentPacketNum];
+    char* head = m_Packets[m_CurrentPacketNum];
     if (head != PACKET_BLANK && head != PACKET_RE_REQUESTED) {
         // A ready packet is parked at the head (left by a skip-pesky /
         // early-return path) with no further arrivals to re-drive the
@@ -846,7 +841,7 @@ void UDPClient::PumpPacketResend()
     if (m_PacketTimeout > 10) {
         // Same give-up rule as the arrival path: skip the pesky packet.
         LogVMessage("UDPClient(Linux): skipping pesky packet %ld (timer)\n",
-                    (long) m_CurrentPacketNum);
+                    (long)m_CurrentPacketNum);
         m_CurrentPacketNum++;
         m_PacketTimeout = 0;
         DrainReadyPackets(false);
@@ -856,16 +851,14 @@ void UDPClient::PumpPacketResend()
     // Re-request the whole contiguous hole up to the next stored sequence;
     // the server resends what its ring still holds and answers header-only
     // blanks for what it evicted, so every slot gets unstuck either way.
-    PacketList::iterator next =
-        m_Packets.upper_bound((unsigned long) m_CurrentPacketNum);
-    long count = (next != m_Packets.end())
-        ? (long) (next->first - (unsigned long) m_CurrentPacketNum)
-        : 1;
+    PacketList::iterator next = m_Packets.upper_bound((unsigned long)m_CurrentPacketNum);
+    long count =
+        (next != m_Packets.end()) ? (long)(next->first - (unsigned long)m_CurrentPacketNum) : 1;
     LogVMessage("UDPClient(Linux): >> re-request resend of %ld x%ld (timer)\n",
-                (long) m_CurrentPacketNum, count);
+                (long)m_CurrentPacketNum, count);
     m_Packets[m_CurrentPacketNum] = PACKET_RE_REQUESTED;
     m_PacketDropThisSession++;
-    RequestResend((unsigned long) m_CurrentPacketNum, count);
+    RequestResend((unsigned long)m_CurrentPacketNum, count);
 }
 
 // ---------------------------------------------------------------------------
@@ -877,15 +870,14 @@ void UDPClient::PumpPacketResend()
 // preserved structurally -- Net7.h defines check_memory() as a Linux
 // no-op so the sites still annotate intent.
 // ---------------------------------------------------------------------------
-void UDPClient::SendPacketSequence(char *msg, EnbUdpHeader *header, bool continuation)
-{
+void UDPClient::SendPacketSequence(char* msg, EnbUdpHeader* header, bool continuation) {
     check_memory();
     if (header->packet_sequence == 0) {
         LogVMessage("UDPClient(Linux): packet header num reset\n");
-        m_CurrentPacketNum     = 0;
+        m_CurrentPacketNum = 0;
         m_Packets.clear();
         m_PacketDropThisSession = 0;
-        m_PacketTimer          = 100;
+        m_PacketTimer = 100;
     }
 
     if (!m_ConnectionActive) {
@@ -893,36 +885,35 @@ void UDPClient::SendPacketSequence(char *msg, EnbUdpHeader *header, bool continu
         return;
     }
 
-    LogVMessage("UDPClient(Linux): incoming seq %ld expecting %ld\n",
-                (long) header->packet_sequence, (long) m_CurrentPacketNum);
+    LogVMessage("UDPClient(Linux): incoming seq %ld expecting %ld\n", (long)header->packet_sequence,
+                (long)m_CurrentPacketNum);
 
     // Store this packet. Replace any earlier non-DONE / non-REREQ slot to
     // accept retransmits of the same sequence number.
     if (m_Packets[header->packet_sequence] == PACKET_BLANK) {
-        char *packet = new char[header->size];
+        char* packet = new char[header->size];
         memcpy(packet, msg, header->size);
         m_Packets[header->packet_sequence] = packet;
     } else {
         if (m_Packets[header->packet_sequence] == PACKET_DONE) {
             LogVMessage("UDPClient(Linux): seq %ld already processed [%ld]\n",
-                        (long) header->packet_sequence, (long) m_CurrentPacketNum);
+                        (long)header->packet_sequence, (long)m_CurrentPacketNum);
         } else {
             LogVMessage("UDPClient(Linux): seq %ld was re-requested [%ld]\n",
-                        (long) header->packet_sequence, (long) m_CurrentPacketNum);
+                        (long)header->packet_sequence, (long)m_CurrentPacketNum);
         }
-        char *message = m_Packets[header->packet_sequence];
-        if (message != PACKET_BLANK && message != PACKET_DONE &&
-            message != PACKET_RE_REQUESTED) {
+        char* message = m_Packets[header->packet_sequence];
+        if (message != PACKET_BLANK && message != PACKET_DONE && message != PACKET_RE_REQUESTED) {
             delete[] message;
         }
-        char *packet = new char[header->size];
+        char* packet = new char[header->size];
         memcpy(packet, msg, header->size);
         m_Packets[header->packet_sequence] = packet;
     }
 
     if (header->packet_sequence > (m_CurrentPacketNum + 30)) {
         LogVMessage("UDPClient(Linux): drop seq %ld (out of range)\n",
-                    (long) header->packet_sequence);
+                    (long)header->packet_sequence);
         return;
     }
 
@@ -934,16 +925,17 @@ void UDPClient::SendPacketSequence(char *msg, EnbUdpHeader *header, bool continu
                 m_CurrentPacketNum++;
                 m_PacketTimeout = 0;
                 LogVMessage("UDPClient(Linux): skipping pesky packet %ld\n",
-                            (long) m_CurrentPacketNum - 1);
+                            (long)m_CurrentPacketNum - 1);
                 return;
             }
 
             LogVMessage("UDPClient(Linux): >> request resend of packet %ld\n",
-                        (long) m_CurrentPacketNum);
+                        (long)m_CurrentPacketNum);
             m_Packets[m_CurrentPacketNum] = PACKET_RE_REQUESTED;
-            RequestResend((unsigned long) m_CurrentPacketNum, 1);
+            RequestResend((unsigned long)m_CurrentPacketNum, 1);
             m_PacketDropThisSession++;
-            if (m_PacketDropThisSession > 40)  m_PacketTimer = 500;
+            if (m_PacketDropThisSession > 40)
+                m_PacketTimer = 500;
             if (m_PacketDropThisSession > 500) {
                 LogMessage("UDPClient(Linux): excessive packet loss this session.\n");
                 m_PacketTimer = 2000;
@@ -954,7 +946,7 @@ void UDPClient::SendPacketSequence(char *msg, EnbUdpHeader *header, bool continu
                 m_CurrentPacketNum++;
                 m_PacketTimeout = 0;
                 LogVMessage("UDPClient(Linux): skipping pesky packet %ld\n",
-                            (long) m_CurrentPacketNum - 1);
+                            (long)m_CurrentPacketNum - 1);
                 return;
             }
         }
@@ -973,8 +965,7 @@ void UDPClient::SendPacketSequence(char *msg, EnbUdpHeader *header, bool continu
 // 0x201A-ness, matching the Win32 call-level convention; timer-driven
 // calls pass false.
 // ---------------------------------------------------------------------------
-void UDPClient::DrainReadyPackets(bool continuation)
-{
+void UDPClient::DrainReadyPackets(bool continuation) {
     long header_size = 512;
 
     if (g_Packet_Opt_requested) {
@@ -982,11 +973,9 @@ void UDPClient::DrainReadyPackets(bool continuation)
     }
     while (m_Packets[m_CurrentPacketNum] != PACKET_BLANK &&
            m_Packets[m_CurrentPacketNum] != PACKET_DONE &&
-           m_Packets[m_CurrentPacketNum] != PACKET_RE_REQUESTED)
-    {
-        char *message = m_Packets[m_CurrentPacketNum];
-        LogVMessage("UDPClient(Linux): processing packet %ld\n",
-                    (long) m_CurrentPacketNum);
+           m_Packets[m_CurrentPacketNum] != PACKET_RE_REQUESTED) {
+        char* message = m_Packets[m_CurrentPacketNum];
+        LogVMessage("UDPClient(Linux): processing packet %ld\n", (long)m_CurrentPacketNum);
         bool packet_pass = true;
 
         if (m_CurrentPacketNum == 16) {
@@ -994,8 +983,8 @@ void UDPClient::DrainReadyPackets(bool continuation)
             usleep(1000);
         }
 
-        EnbUdpHeader *stored_hdr = (EnbUdpHeader *) message;
-        if (stored_hdr->size <= (short) sizeof(EnbUdpHeader)) {
+        EnbUdpHeader* stored_hdr = (EnbUdpHeader*)message;
+        if (stored_hdr->size <= (short)sizeof(EnbUdpHeader)) {
             // Header-only blank: the server's answer to a 0x2017 NACK for a
             // packet already evicted from its resend ring. There is no
             // payload to walk -- inspecting the first inner opcode would
@@ -1005,23 +994,21 @@ void UDPClient::DrainReadyPackets(bool continuation)
             // abandon the partial reassembly rather than feed it the next
             // unrelated packets.
             LogVMessage("UDPClient(Linux): blank fill for evicted packet %ld\n",
-                        (long) m_CurrentPacketNum);
+                        (long)m_CurrentPacketNum);
             if (m_SplitPacketLength != 0) {
                 LogMessage("UDPClient(Linux): blank fill mid-split; abandoning split reassembly\n");
                 m_SplitPacketLength = 0;
             }
         } else if (m_SplitPacketLength == 0) {
             // Inspect the first inner opcode to detect a split packet.
-            char *ptr = message + sizeof(EnbUdpHeader);
-            unsigned short length = *((unsigned short *) &ptr[0]);
+            char* ptr = message + sizeof(EnbUdpHeader);
+            unsigned short length = *((unsigned short*)&ptr[0]);
             if (length > header_size && length < 20000) {
                 m_SplitPacketLength = length - header_size;
-                memcpy(m_SplitPacketBuffer, message,
-                       header_size + sizeof(EnbUdpHeader));
-                m_SplitPacketptr   = m_SplitPacketBuffer +
-                                     header_size + sizeof(EnbUdpHeader);
+                memcpy(m_SplitPacketBuffer, message, header_size + sizeof(EnbUdpHeader));
+                m_SplitPacketptr = m_SplitPacketBuffer + header_size + sizeof(EnbUdpHeader);
                 LogVMessage("UDPClient(Linux): split packet start total=0x%x remaining=%ld\n",
-                            (unsigned) length, (long) m_SplitPacketLength);
+                            (unsigned)length, (long)m_SplitPacketLength);
                 m_SplitPacketStart = m_CurrentPacketNum;
             } else {
                 if (continuation) {
@@ -1033,13 +1020,13 @@ void UDPClient::DrainReadyPackets(bool continuation)
                 }
             }
         } else {
-            EnbUdpHeader *hdr = (EnbUdpHeader *) message;
+            EnbUdpHeader* hdr = (EnbUdpHeader*)message;
             size_t chunk_bytes = hdr->size - sizeof(EnbUdpHeader);
             memcpy(m_SplitPacketptr, message + sizeof(EnbUdpHeader), chunk_bytes);
-            m_SplitPacketptr   += chunk_bytes;
-            m_SplitPacketLength -= (long) chunk_bytes;
-            LogVMessage("UDPClient(Linux): split chunk %zu, remaining=%ld\n",
-                        chunk_bytes, (long) m_SplitPacketLength);
+            m_SplitPacketptr += chunk_bytes;
+            m_SplitPacketLength -= (long)chunk_bytes;
+            LogVMessage("UDPClient(Linux): split chunk %zu, remaining=%ld\n", chunk_bytes,
+                        (long)m_SplitPacketLength);
 
             if (m_SplitPacketLength <= 0) {
                 // Patch the reassembled buffer's EnbUdpHeader.size to the
@@ -1059,35 +1046,31 @@ void UDPClient::DrainReadyPackets(bool continuation)
                 // data IS in the buffer, just unaccounted for. Stamping
                 // the correct size here is cleaner than removing the
                 // bound check.
-                EnbUdpHeader *split_hdr = (EnbUdpHeader *) m_SplitPacketBuffer;
+                EnbUdpHeader* split_hdr = (EnbUdpHeader*)m_SplitPacketBuffer;
                 split_hdr->size = (short)(m_SplitPacketptr - m_SplitPacketBuffer);
-                packet_pass = SendClientPacketSequence((char *) m_SplitPacketBuffer);
+                packet_pass = SendClientPacketSequence((char*)m_SplitPacketBuffer);
                 if (m_SplitPacketLength < 0) {
                     LogVMessage("UDPClient(Linux): split packet underflow %ld\n",
-                                (long) m_SplitPacketLength);
+                                (long)m_SplitPacketLength);
                 }
                 m_SplitPacketLength = 0;
 
                 if (!packet_pass) {
                     for (unsigned long i = m_SplitPacketStart;
-                         i <= (unsigned long) m_CurrentPacketNum; i++)
-                    {
-                        if (m_Packets[i] != PACKET_BLANK &&
-                            m_Packets[i] != PACKET_DONE &&
-                            m_Packets[i] != PACKET_RE_REQUESTED)
-                        {
+                         i <= (unsigned long)m_CurrentPacketNum; i++) {
+                        if (m_Packets[i] != PACKET_BLANK && m_Packets[i] != PACKET_DONE &&
+                            m_Packets[i] != PACKET_RE_REQUESTED) {
                             delete[] m_Packets[i];
                         }
                         m_Packets[i] = PACKET_RE_REQUESTED;
                     }
                     LogVMessage("UDPClient(Linux): >> request resend %lu..%ld\n",
-                                m_SplitPacketStart, (long) m_CurrentPacketNum);
+                                m_SplitPacketStart, (long)m_CurrentPacketNum);
                     // Count is INCLUSIVE of the current (final, failed)
                     // chunk: the old `current - start` left the last chunk
                     // un-requested. Harmless while the server ignored the
                     // count field; wrong now that it honours it.
-                    long resend_count = m_CurrentPacketNum
-                                        - (long) m_SplitPacketStart + 1;
+                    long resend_count = m_CurrentPacketNum - (long)m_SplitPacketStart + 1;
                     m_CurrentPacketNum = m_SplitPacketStart;
                     RequestResend(m_SplitPacketStart, resend_count);
                     return;
@@ -1111,12 +1094,9 @@ void UDPClient::DrainReadyPackets(bool continuation)
     // older can never be referenced again. Without this the map grew one
     // PACKET_DONE entry per reliable datagram for the life of the session.
     while (!m_Packets.empty() &&
-           m_Packets.begin()->first + 64 < (unsigned long) m_CurrentPacketNum)
-    {
-        char *old = m_Packets.begin()->second;
-        if (old != PACKET_BLANK && old != PACKET_DONE &&
-            old != PACKET_RE_REQUESTED)
-        {
+           m_Packets.begin()->first + 64 < (unsigned long)m_CurrentPacketNum) {
+        char* old = m_Packets.begin()->second;
+        if (old != PACKET_BLANK && old != PACKET_DONE && old != PACKET_RE_REQUESTED) {
             delete[] old;
         }
         m_Packets.erase(m_Packets.begin());
@@ -1125,10 +1105,9 @@ void UDPClient::DrainReadyPackets(bool continuation)
     check_memory();
 }
 
-void UDPClient::SendLoginPacketSequence(char *msg, EnbUdpHeader *header)
-{
+void UDPClient::SendLoginPacketSequence(char* msg, EnbUdpHeader* header) {
     LogVMessage("UDPClient(Linux): received login packet sequence %ld\n",
-                (long) header->packet_sequence);
+                (long)header->packet_sequence);
     SendPacketSequence(msg, header);
 }
 
@@ -1152,14 +1131,12 @@ void UDPClient::SendLoginPacketSequence(char *msg, EnbUdpHeader *header)
 // Everything else returns false and is forwarded subject to the 1..0xFE gate
 // in SendClientPacketSequence.
 // ---------------------------------------------------------------------------
-bool UDPClient::HandleCustomOpcode(short opcode, char *ptr, u8 *tcp_packet,
-                                   short &tcp_index, short length)
-{
-    (void) tcp_packet;
-    (void) tcp_index;
+bool UDPClient::HandleCustomOpcode(short opcode, char* ptr, u8* tcp_packet, short& tcp_index,
+                                   short length) {
+    (void)tcp_packet;
+    (void)tcp_index;
 
-    switch (opcode)
-    {
+    switch (opcode) {
     case ENB_OPCODE_001B_AUX_DATA:
         // Aux-data frames carry a variable-length payload describing other
         // ships / mobs / hulks in range. A frame whose framed length (the
@@ -1175,7 +1152,8 @@ bool UDPClient::HandleCustomOpcode(short opcode, char *ptr, u8 *tcp_packet,
         // verbatim -- the proxy does NOT rewrite aux payloads.
         if (length < 8) {
             LogMessage("UDPClient(Linux): dropping undersized AUX_DATA frame "
-                       "(length 0x%x < 8)\n", (unsigned) length);
+                       "(length 0x%x < 8)\n",
+                       (unsigned)length);
             return true;
         }
         return false;
@@ -1277,8 +1255,9 @@ bool UDPClient::HandleCustomOpcode(short opcode, char *ptr, u8 *tcp_packet,
         // 0x20xx opcode is NOT an option -- it fails the 1..0xFE gate and
         // stalls the sequence. The fix is to fabricate, not to forward.
         // See plans/27 §3a for the full reconstructed spec.
-        LogVMessage("UDPClient(Linux): fabrication opcode 0x%04x NOT YET fabricated -- dropped (parity gap)\n",
-                    (unsigned short) opcode);
+        LogVMessage("UDPClient(Linux): fabrication opcode 0x%04x NOT YET fabricated -- dropped "
+                    "(parity gap)\n",
+                    (unsigned short)opcode);
         return true;
 
     // Gate-cache / proxy-control opcodes in the 0x2025..0x202e band. These
@@ -1296,13 +1275,13 @@ bool UDPClient::HandleCustomOpcode(short opcode, char *ptr, u8 *tcp_packet,
     // logged as "bad opcode", and STALL the entire packet sequence (the
     // same failure mode the launcher-side group above documents). Consume
     // and drop:
-    case 0x2025:   // proxy-control (reference: consume, no client output)
-    case 0x202a:   // proxy-control (reference: consume, no client output)
-    case 0x202b:   // proxy-control no-op (reference: consume, no client output)
-    case 0x202d:   // force gate caching   (no-op while our cache is disabled)
-    case 0x202e:   // enable gate caching  (no-op while our cache is disabled)
+    case 0x2025: // proxy-control (reference: consume, no client output)
+    case 0x202a: // proxy-control (reference: consume, no client output)
+    case 0x202b: // proxy-control no-op (reference: consume, no client output)
+    case 0x202d: // force gate caching   (no-op while our cache is disabled)
+    case 0x202e: // enable gate caching  (no-op while our cache is disabled)
         LogVMessage("UDPClient(Linux): proxy-control opcode 0x%04x -- silent drop\n",
-                    (unsigned short) opcode);
+                    (unsigned short)opcode);
         return true;
 
     default:
@@ -1321,23 +1300,23 @@ bool UDPClient::HandleCustomOpcode(short opcode, char *ptr, u8 *tcp_packet,
 // own TCP frame via Connection::SendResponse. That is slightly more
 // expensive on the wire but functionally equivalent.
 // ---------------------------------------------------------------------------
-bool UDPClient::SendClientPacketSequence(char *msg)
-{
-    EnbUdpHeader *header = (EnbUdpHeader *) msg;
+bool UDPClient::SendClientPacketSequence(char* msg) {
+    EnbUdpHeader* header = (EnbUdpHeader*)msg;
     short bytes = (short)(header->size - sizeof(EnbUdpHeader));
-    long  index = 0;
+    long index = 0;
     short tcp_index = 0;
-    unsigned char *tcp_packet = m_QueueBuffer;
-    char *ptr = msg + sizeof(EnbUdpHeader);
+    unsigned char* tcp_packet = m_QueueBuffer;
+    char* ptr = msg + sizeof(EnbUdpHeader);
     bool terminate = false;
 
-    if (!g_ServerMgr || !g_ServerMgr->m_SectorConnection) return false;
+    if (!g_ServerMgr || !g_ServerMgr->m_SectorConnection)
+        return false;
 
     while (index < bytes && !terminate && !g_ShuttingDown) {
-        short length = *((short *) &ptr[0]);
-        short opcode = *((short *) &ptr[2]);
+        short length = *((short*)&ptr[0]);
+        short opcode = *((short*)&ptr[2]);
         LogVMessage("UDPClient(Linux): --> inner opcode 0x%04x length 0x%x\n",
-                    (unsigned short) opcode, (unsigned) length);
+                    (unsigned short)opcode, (unsigned)length);
 
         if (length > (bytes - index)) {
             // Opcode length exceeds remaining packet bytes -- match Win32:
@@ -1345,19 +1324,18 @@ bool UDPClient::SendClientPacketSequence(char *msg)
             // as a soft error; we still return true so the packet is marked
             // DONE and the sequence advances.
             LogMessage("UDPClient(Linux): opcode 0x%04x length 0x%x exceeds packet (rem 0x%x)\n",
-                       (unsigned short) opcode, (unsigned) length,
-                       (unsigned)(bytes - index));
+                       (unsigned short)opcode, (unsigned)length, (unsigned)(bytes - index));
             break;
         }
         if (length < 0) {
             LogMessage("UDPClient(Linux): malformed inner opcode in packet seq %ld\n",
-                       (long) header->packet_sequence);
+                       (long)header->packet_sequence);
             break;
         }
 
         if (!HandleCustomOpcode(opcode, ptr + 4, tcp_packet, tcp_index, length)) {
             LogVMessage("UDPClient(Linux): <SERVER->CLIENT UDP> ----> 0x%04x [0x%x]\n",
-                        (unsigned short) opcode, (unsigned) length);
+                        (unsigned short)opcode, (unsigned)length);
             // Game-opcode gate. The real protocol only ever puts opcodes in
             // 0x01..0xFE on this forward path; the highest game opcode in the
             // catalog is 0x00DD and nothing is defined in 0xFF..0xFFE. Clean-
@@ -1370,33 +1348,30 @@ bool UDPClient::SendClientPacketSequence(char *msg)
             // client and crash it. Tighten to 1..0xFE; control opcodes (>=
             // 0x1000) are already consumed by HandleCustomOpcode above and
             // never reach this gate.
-            if (opcode > 0x0000 && (unsigned short) opcode <= 0x00FE) {
+            if (opcode > 0x0000 && (unsigned short)opcode <= 0x00FE) {
                 IncommingOpcodePreProcessing(opcode, ptr + 4, length - 4);
-                if (should_drop_s2c((unsigned short) opcode)) {
+                if (should_drop_s2c((unsigned short)opcode)) {
                     LogVMessage("UDPClient(Linux): bisection: DROP inner 0x%04x [0x%x]\n",
-                                (unsigned short) opcode, (unsigned) length);
+                                (unsigned short)opcode, (unsigned)length);
                 } else {
                     std::vector<unsigned char> sub;
-                    bool subbed = replay_substitute_s2c(
-                        (unsigned short) opcode,
-                        (const unsigned char *) ptr + 4, (size_t)(length - 4),
-                        sub);
-                    unsigned char *out_buf = subbed
-                        ? sub.data() : (unsigned char *) ptr + 4;
-                    size_t         out_len = subbed
-                        ? sub.size() : (size_t)(length - 4);
-                    dump_s2c_hex("inner", (unsigned short) opcode, out_buf, out_len);
-                    g_ServerMgr->m_SectorConnection->SendResponse(
-                        opcode, out_buf, (short) out_len, header->packet_sequence);
+                    bool subbed =
+                        replay_substitute_s2c((unsigned short)opcode, (const unsigned char*)ptr + 4,
+                                              (size_t)(length - 4), sub);
+                    unsigned char* out_buf = subbed ? sub.data() : (unsigned char*)ptr + 4;
+                    size_t out_len = subbed ? sub.size() : (size_t)(length - 4);
+                    dump_s2c_hex("inner", (unsigned short)opcode, out_buf, out_len);
+                    g_ServerMgr->m_SectorConnection->SendResponse(opcode, out_buf, (short)out_len,
+                                                                  header->packet_sequence);
                 }
             } else {
                 LogMessage("UDPClient(Linux): bad opcode through to proxy: 0x%04x len 0x%x\n",
-                           (unsigned short) opcode, (unsigned) length);
+                           (unsigned short)opcode, (unsigned)length);
                 terminate = true;
             }
         }
 
-        ptr   += length;
+        ptr += length;
         index += length;
     }
 
@@ -1409,14 +1384,13 @@ bool UDPClient::SendClientPacketSequence(char *msg)
 // advances its login state machine. Mirrors Win32
 // UDPProxyToClient.cpp:693-704.
 // ---------------------------------------------------------------------------
-void UDPClient::HandleStageConfirm(char *ch_msg, u8 *tcp_packet, short &tcp_index)
-{
-    (void) tcp_packet;
-    (void) tcp_index;
+void UDPClient::HandleStageConfirm(char* ch_msg, u8* tcp_packet, short& tcp_index) {
+    (void)tcp_packet;
+    (void)tcp_index;
 
-    int            index = 0;
-    unsigned char *msg   = (unsigned char *) ch_msg;
-    long           stage_id = ExtractLong(msg, index);
+    int index = 0;
+    unsigned char* msg = (unsigned char*)ch_msg;
+    long stage_id = ExtractLong(msg, index);
 
     LogVMessage("UDPClient(Linux): confirm login stage %ld\n", stage_id);
 
@@ -1427,10 +1401,9 @@ void UDPClient::HandleStageConfirm(char *ch_msg, u8 *tcp_packet, short &tcp_inde
     // bytes. Same long-vs-int32 wire-size class as the server's
     // SendLoginStageConfirm / HandleLoginAckReturn fixes.
     if (g_ServerMgr && g_ServerMgr->m_UDPConnection) {
-        int32_t stage_wire = (int32_t) stage_id;
-        g_ServerMgr->m_UDPConnection->ForwardClientOpcode(
-            ENB_OPCODE_2021_LOGIN_STAGE_ACK_C_S, sizeof(stage_wire),
-            (char *) &stage_wire);
+        int32_t stage_wire = (int32_t)stage_id;
+        g_ServerMgr->m_UDPConnection->ForwardClientOpcode(ENB_OPCODE_2021_LOGIN_STAGE_ACK_C_S,
+                                                          sizeof(stage_wire), (char*)&stage_wire);
     }
 }
 
@@ -1473,20 +1446,20 @@ void UDPClient::HandleStageConfirm(char *ch_msg, u8 *tcp_packet, short &tcp_inde
 // only "Prospect ability activated." text + skill AUX is NOT yet fabricated
 // (needs reliable local-avatar GameID resolution -- plans/27 §3a open item).
 // ---------------------------------------------------------------------------
-void UDPClient::StartProspecting(char *ch_msg, u8 *tcp_packet, short &tcp_index)
-{
-    (void) tcp_packet;
-    (void) tcp_index;
+void UDPClient::StartProspecting(char* ch_msg, u8* tcp_packet, short& tcp_index) {
+    (void)tcp_packet;
+    (void)tcp_index;
 
-    if (!g_ServerMgr || !g_ServerMgr->m_SectorConnection) return;
+    if (!g_ServerMgr || !g_ServerMgr->m_SectorConnection)
+        return;
 
-    unsigned char *msg = (unsigned char *) ch_msg;
+    unsigned char* msg = (unsigned char*)ch_msg;
     int in = 0;
-    long     prospector_gid = ExtractLong(msg, in);
-    long     asteroid_gid   = ExtractLong(msg, in);
-    long     effect_uid     = ExtractLong(msg, in);
-    uint32_t start_tick     = (uint32_t) ExtractLong(msg, in);
-    uint32_t drain_ms       = (uint32_t) ExtractLong(msg, in);
+    long prospector_gid = ExtractLong(msg, in);
+    long asteroid_gid = ExtractLong(msg, in);
+    long effect_uid = ExtractLong(msg, in);
+    uint32_t start_tick = (uint32_t)ExtractLong(msg, in);
+    uint32_t drain_ms = (uint32_t)ExtractLong(msg, in);
 
     // 0x0b OBJECT_TO_OBJECT_EFFECT body. Field order/layout mirrors
     // Object::SendObjectToObjectEffectRL: Bitmask(u16), GameID(int32),
@@ -1494,28 +1467,28 @@ void UDPClient::StartProspecting(char *ch_msg, u8 *tcp_packet, short &tcp_index)
     // then the bit-gated fields EffectID(0x01), TimeStamp(0x02), Duration(0x04).
     unsigned char body[64];
     int idx = 0;
-    AddData(body, (short) 0x0007, idx);           // Bitmask: EffectID|TimeStamp|Duration
-    AddData(body, (int32_t) prospector_gid, idx); // GameID  (beam source)
-    AddData(body, (int32_t) asteroid_gid, idx);   // TargetID (beam target)
-    AddData(body, (short) 0x00BF, idx);           // EffectDescID: prospect/mining beam
-    AddData(body, (char) 0, idx);                 // Message NULL -> one 0 byte
-    AddData(body, (int32_t) effect_uid, idx);     // 0x01 EffectID
-    AddData(body, (uint32_t) start_tick, idx);    // 0x02 TimeStamp
+    AddData(body, (short)0x0007, idx);           // Bitmask: EffectID|TimeStamp|Duration
+    AddData(body, (int32_t)prospector_gid, idx); // GameID  (beam source)
+    AddData(body, (int32_t)asteroid_gid, idx);   // TargetID (beam target)
+    AddData(body, (short)0x00BF, idx);           // EffectDescID: prospect/mining beam
+    AddData(body, (char)0, idx);                 // Message NULL -> one 0 byte
+    AddData(body, (int32_t)effect_uid, idx);     // 0x01 EffectID
+    AddData(body, (uint32_t)start_tick, idx);    // 0x02 TimeStamp
     // 0x04 Duration (ms): the client reads this field SIGNED, so a value
     // > 32767 wraps negative and the beam does NOT render. The server's
     // authoritative emitter Object::SendObjectToObjectEffectRL caps it at 32000
     // for exactly this reason (server/src/ObjectClass.cpp:884-885). A full ore
     // stack mines for well over 32.7s, so without the cap the beam would vanish
     // mid-mine. Mirror the server cap so a long mine still shows the beam.
-    short duration = (drain_ms > 32000) ? (short) 32000 : (short) drain_ms;
+    short duration = (drain_ms > 32000) ? (short)32000 : (short)drain_ms;
     AddData(body, duration, idx);
 
-    g_ServerMgr->m_SectorConnection->SendResponse(
-        ENB_OPCODE_000B_OBJECT_TO_OBJECT_EFFECT, body, (short) idx);
+    g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_000B_OBJECT_TO_OBJECT_EFFECT, body,
+                                                  (short)idx);
 
     LogVMessage("UDPClient(Linux): fabricated prospect beam 0x0b "
                 "src=%ld tgt=%ld fx=%ld dur=%ums\n",
-                prospector_gid, asteroid_gid, effect_uid, (unsigned) drain_ms);
+                prospector_gid, asteroid_gid, effect_uid, (unsigned)drain_ms);
 }
 
 // ---------------------------------------------------------------------------
@@ -1548,68 +1521,68 @@ void UDPClient::StartProspecting(char *ch_msg, u8 *tcp_packet, short &tcp_index)
 //                                 SendAuxNameSignature)
 //   0x99 NAVIGATION          (Player::SendNavigation, :1140) iff HAS_NAV set
 // ---------------------------------------------------------------------------
-void UDPClient::CreateObject(char *ch_msg, u8 *tcp_packet, short &tcp_index)
-{
-    (void) tcp_packet;
-    (void) tcp_index;
+void UDPClient::CreateObject(char* ch_msg, u8* tcp_packet, short& tcp_index) {
+    (void)tcp_packet;
+    (void)tcp_index;
 
-    if (!g_ServerMgr || !g_ServerMgr->m_SectorConnection) return;
+    if (!g_ServerMgr || !g_ServerMgr->m_SectorConnection)
+        return;
 
-    const u8 HAS_NAV_BIT     = 0x10;
-    const u8 IS_NAV_BIT      = 0x20;
-    const u8 IS_HUGE_BIT     = 0x40;
+    const u8 HAS_NAV_BIT = 0x10;
+    const u8 IS_NAV_BIT = 0x20;
+    const u8 IS_HUGE_BIT = 0x40;
     const u8 HAS_VISITED_BIT = 0x80;
 
-    unsigned char *msg = (unsigned char *) ch_msg;
+    unsigned char* msg = (unsigned char*)ch_msg;
     int in = 0;
-    long  game_id     = ExtractLong(msg, in);   // @0
-    u8    create_type = ExtractU8(msg, in);     // @4
-    short base_asset  = ExtractShort(msg, in);  // @5
-    float scale       = ExtractFloat(msg, in);  // @7
-    float hsv0        = ExtractFloat(msg, in);  // @11
-    float hsv1        = ExtractFloat(msg, in);  // @15
-    float hsv2        = ExtractFloat(msg, in);  // @19
-    u8    reaction    = ExtractU8(msg, in);     // @23
-    u8    pos_type    = ExtractU8(msg, in);     // @24
-    float px          = ExtractFloat(msg, in);  // @25
-    float py          = ExtractFloat(msg, in);  // @29
-    float pz          = ExtractFloat(msg, in);  // @33
-    float o0          = ExtractFloat(msg, in);  // @37
-    float o1          = ExtractFloat(msg, in);  // @41
-    float o2          = ExtractFloat(msg, in);  // @45
-    float o3          = ExtractFloat(msg, in);  // @49
-    float signature   = ExtractFloat(msg, in);  // @53
-    u8    sig_flags   = ExtractU8(msg, in);     // @57
-    char  name[256];
-    ExtractDataLS(msg, name, in);               // @58
-    (void) pos_type;  // static objects are constant-position (see 0x40 below)
+    long game_id = ExtractLong(msg, in);      // @0
+    u8 create_type = ExtractU8(msg, in);      // @4
+    short base_asset = ExtractShort(msg, in); // @5
+    float scale = ExtractFloat(msg, in);      // @7
+    float hsv0 = ExtractFloat(msg, in);       // @11
+    float hsv1 = ExtractFloat(msg, in);       // @15
+    float hsv2 = ExtractFloat(msg, in);       // @19
+    u8 reaction = ExtractU8(msg, in);         // @23
+    u8 pos_type = ExtractU8(msg, in);         // @24
+    float px = ExtractFloat(msg, in);         // @25
+    float py = ExtractFloat(msg, in);         // @29
+    float pz = ExtractFloat(msg, in);         // @33
+    float o0 = ExtractFloat(msg, in);         // @37
+    float o1 = ExtractFloat(msg, in);         // @41
+    float o2 = ExtractFloat(msg, in);         // @45
+    float o3 = ExtractFloat(msg, in);         // @49
+    float signature = ExtractFloat(msg, in);  // @53
+    u8 sig_flags = ExtractU8(msg, in);        // @57
+    char name[256];
+    ExtractDataLS(msg, name, in); // @58
+    (void)pos_type;               // static objects are constant-position (see 0x40 below)
 
     unsigned char body[256];
     int idx;
 
     // 0x04 CREATE (23 bytes): GameID, Scale, BaseAsset, Type, HSV[3].
     idx = 0;
-    AddData(body, (int32_t) game_id, idx);
+    AddData(body, (int32_t)game_id, idx);
     AddData(body, scale, idx);
     AddData(body, base_asset, idx);
-    AddData(body, (char) create_type, idx);
+    AddData(body, (char)create_type, idx);
     AddData(body, hsv0, idx);
     AddData(body, hsv1, idx);
     AddData(body, hsv2, idx);
-    g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_0004_CREATE, body, (short) idx);
+    g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_0004_CREATE, body, (short)idx);
 
     // 0x89 RELATIONSHIP (9 bytes): ObjectID is byte-swapped on the wire (the
     // server does ntohl(ObjectID); AddDataFlip4 reproduces it exactly), then
     // Reaction (i32), IsAttacking (char).
     idx = 0;
     AddDataFlip4(body, game_id, idx);
-    AddData(body, (int32_t) reaction, idx);
-    AddData(body, (char) 0, idx);
-    g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_0089_RELATIONSHIP, body, (short) idx);
+    AddData(body, (int32_t)reaction, idx);
+    AddData(body, (char)0, idx);
+    g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_0089_RELATIONSHIP, body, (short)idx);
 
     // 0x40 CONSTANT_POSITIONAL_UPDATE (32 bytes): GameID, Position[3], Orient[4].
     idx = 0;
-    AddData(body, (int32_t) game_id, idx);
+    AddData(body, (int32_t)game_id, idx);
     AddData(body, px, idx);
     AddData(body, py, idx);
     AddData(body, pz, idx);
@@ -1617,59 +1590,58 @@ void UDPClient::CreateObject(char *ch_msg, u8 *tcp_packet, short &tcp_index)
     AddData(body, o1, idx);
     AddData(body, o2, idx);
     AddData(body, o3, idx);
-    g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_0040_CONSTANT_POSITIONAL_UPDATE, body, (short) idx);
+    g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_0040_CONSTANT_POSITIONAL_UPDATE, body,
+                                                  (short)idx);
 
     // 0x1b AUX name -- format chosen by CreateType (StaticMap::SendAuxDataPacket).
     idx = 0;
-    if (create_type == 37)
-    {
+    if (create_type == 37) {
         // SendAuxNameSignature (:2144): [GameID][innerLen=len+9][0x01][0x72]
         // [strLen=len][name][nav u8][sig f32]. Nav objects keep their name and
         // nav=1; non-nav deco gets placeholder "d" / nav=0. Sig clamps >= 3000.
         char nav = (sig_flags & IS_NAV_BIT) ? 1 : 0;
-        if (!nav) { name[0] = 'd'; name[1] = '\0'; }
-        int   len = (int) strlen(name);
+        if (!nav) {
+            name[0] = 'd';
+            name[1] = '\0';
+        }
+        int len = (int)strlen(name);
         float sig = (signature < 3000.0f) ? 3000.0f : signature;
-        AddData(body, (int32_t) game_id, idx);
-        AddData(body, (short) (len + 9), idx);
-        AddData(body, (char) 0x01, idx);
-        AddData(body, (char) 0x72, idx);
-        AddData(body, (short) len, idx);
+        AddData(body, (int32_t)game_id, idx);
+        AddData(body, (short)(len + 9), idx);
+        AddData(body, (char)0x01, idx);
+        AddData(body, (char)0x72, idx);
+        AddData(body, (short)len, idx);
         AddDataS(body, name, idx);
         AddData(body, nav, idx);
         AddData(body, sig, idx);
-        g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_001B_AUX_DATA, body, (short) idx);
-    }
-    else if (create_type == 3 || create_type == 4 || create_type == 11 || create_type == 12)
-    {
+        g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_001B_AUX_DATA, body, (short)idx);
+    } else if (create_type == 3 || create_type == 4 || create_type == 11 || create_type == 12) {
         // SendSimpleAuxName / SendResourceName (:2120 / :1956, identical layout):
         // [GameID][innerLen=nameLen+4][0x1201][strLen=nameLen][name].
-        int name_len = (int) strlen(name);
-        AddData(body, (int32_t) game_id, idx);
-        AddData(body, (short) (name_len + 4), idx);
-        AddData(body, (short) 0x1201, idx);
-        AddData(body, (short) name_len, idx);
+        int name_len = (int)strlen(name);
+        AddData(body, (int32_t)game_id, idx);
+        AddData(body, (short)(name_len + 4), idx);
+        AddData(body, (short)0x1201, idx);
+        AddData(body, (short)name_len, idx);
         AddDataS(body, name, idx);
-        g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_001B_AUX_DATA, body, (short) idx);
+        g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_001B_AUX_DATA, body, (short)idx);
     }
     // CreateType 40/41 (and any other): no aux name (matches the server switch).
 
     // 0x99 NAVIGATION (14 bytes) iff the server flagged HAS_NAV:
     // GameID, Signature+5000, PlayerHasVisited, NavType, IsHuge.
-    if (sig_flags & HAS_NAV_BIT)
-    {
+    if (sig_flags & HAS_NAV_BIT) {
         idx = 0;
-        AddData(body, (int32_t) game_id, idx);
+        AddData(body, (int32_t)game_id, idx);
         AddData(body, signature + 5000.0f, idx);
-        AddData(body, (char) ((sig_flags & HAS_VISITED_BIT) ? 1 : 0), idx);
-        AddData(body, (int32_t) (sig_flags & 0x0F), idx);
-        AddData(body, (char) ((sig_flags & IS_HUGE_BIT) ? 1 : 0), idx);
-        g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_0099_NAVIGATION, body, (short) idx);
+        AddData(body, (char)((sig_flags & HAS_VISITED_BIT) ? 1 : 0), idx);
+        AddData(body, (int32_t)(sig_flags & 0x0F), idx);
+        AddData(body, (char)((sig_flags & IS_HUGE_BIT) ? 1 : 0), idx);
+        g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_0099_NAVIGATION, body, (short)idx);
     }
 
-    LogVMessage("UDPClient(Linux): expanded 0x2018 static object gid=%ld type=%u '%s'%s\n",
-                game_id, (unsigned) create_type, name,
-                (sig_flags & HAS_NAV_BIT) ? " +nav" : "");
+    LogVMessage("UDPClient(Linux): expanded 0x2018 static object gid=%ld type=%u '%s'%s\n", game_id,
+                (unsigned)create_type, name, (sig_flags & HAS_NAV_BIT) ? " +nav" : "");
 }
 
 // ---------------------------------------------------------------------------
@@ -1691,48 +1663,48 @@ void UDPClient::CreateObject(char *ch_msg, u8 *tcp_packet, short &tcp_index)
 //   0x40 CONSTANT_POSITIONAL_UPDATE
 //   0x1b AUX name -- SendAuxNameResource format (:2178)
 // ---------------------------------------------------------------------------
-void UDPClient::CreateResource(char *ch_msg, u8 *tcp_packet, short &tcp_index)
-{
-    (void) tcp_packet;
-    (void) tcp_index;
+void UDPClient::CreateResource(char* ch_msg, u8* tcp_packet, short& tcp_index) {
+    (void)tcp_packet;
+    (void)tcp_index;
 
-    if (!g_ServerMgr || !g_ServerMgr->m_SectorConnection) return;
+    if (!g_ServerMgr || !g_ServerMgr->m_SectorConnection)
+        return;
 
-    unsigned char *msg = (unsigned char *) ch_msg;
+    unsigned char* msg = (unsigned char*)ch_msg;
     int in = 0;
-    long  game_id    = ExtractLong(msg, in);   // @0
-    short base_asset = ExtractShort(msg, in);  // @4
-    float scale      = ExtractFloat(msg, in);  // @6
-    float hsv0       = ExtractFloat(msg, in);  // @10
-    float hsv1       = ExtractFloat(msg, in);  // @14
-    float px         = ExtractFloat(msg, in);  // @18
-    float py         = ExtractFloat(msg, in);  // @22
-    float pz         = ExtractFloat(msg, in);  // @26
-    float o0         = ExtractFloat(msg, in);  // @30
-    float o1         = ExtractFloat(msg, in);  // @34
-    float o2         = ExtractFloat(msg, in);  // @38
-    float o3         = ExtractFloat(msg, in);  // @42
-    char  name[256];
-    ExtractDataLS(msg, name, in);              // @46
-    int   name_len = (int) strlen(name);
+    long game_id = ExtractLong(msg, in);      // @0
+    short base_asset = ExtractShort(msg, in); // @4
+    float scale = ExtractFloat(msg, in);      // @6
+    float hsv0 = ExtractFloat(msg, in);       // @10
+    float hsv1 = ExtractFloat(msg, in);       // @14
+    float px = ExtractFloat(msg, in);         // @18
+    float py = ExtractFloat(msg, in);         // @22
+    float pz = ExtractFloat(msg, in);         // @26
+    float o0 = ExtractFloat(msg, in);         // @30
+    float o1 = ExtractFloat(msg, in);         // @34
+    float o2 = ExtractFloat(msg, in);         // @38
+    float o3 = ExtractFloat(msg, in);         // @42
+    char name[256];
+    ExtractDataLS(msg, name, in); // @46
+    int name_len = (int)strlen(name);
 
     unsigned char body[256];
     int idx;
 
     // 0x04 CREATE: GameID, Scale, BaseAsset, Type=38, HSV0, HSV1, HSV2=0.
     idx = 0;
-    AddData(body, (int32_t) game_id, idx);
+    AddData(body, (int32_t)game_id, idx);
     AddData(body, scale, idx);
     AddData(body, base_asset, idx);
-    AddData(body, (char) 38, idx);
+    AddData(body, (char)38, idx);
     AddData(body, hsv0, idx);
     AddData(body, hsv1, idx);
     AddData(body, 0.0f, idx);
-    g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_0004_CREATE, body, (short) idx);
+    g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_0004_CREATE, body, (short)idx);
 
     // 0x40 CONSTANT_POSITIONAL_UPDATE: GameID, Position[3], Orient[4].
     idx = 0;
-    AddData(body, (int32_t) game_id, idx);
+    AddData(body, (int32_t)game_id, idx);
     AddData(body, px, idx);
     AddData(body, py, idx);
     AddData(body, pz, idx);
@@ -1740,19 +1712,20 @@ void UDPClient::CreateResource(char *ch_msg, u8 *tcp_packet, short &tcp_index)
     AddData(body, o1, idx);
     AddData(body, o2, idx);
     AddData(body, o3, idx);
-    g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_0040_CONSTANT_POSITIONAL_UPDATE, body, (short) idx);
+    g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_0040_CONSTANT_POSITIONAL_UPDATE, body,
+                                                  (short)idx);
 
     // 0x1b AUX name -- SendAuxNameResource (:2178):
     // [GameID][innerLen=nameLen+5][0x01][0x16][0x04][strLen=nameLen][name].
     idx = 0;
-    AddData(body, (int32_t) game_id, idx);
-    AddData(body, (short) (name_len + 5), idx);
-    AddData(body, (char) 0x01, idx);
-    AddData(body, (char) 0x16, idx);
-    AddData(body, (char) 0x04, idx);
-    AddData(body, (short) name_len, idx);
+    AddData(body, (int32_t)game_id, idx);
+    AddData(body, (short)(name_len + 5), idx);
+    AddData(body, (char)0x01, idx);
+    AddData(body, (char)0x16, idx);
+    AddData(body, (char)0x04, idx);
+    AddData(body, (short)name_len, idx);
     AddDataS(body, name, idx);
-    g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_001B_AUX_DATA, body, (short) idx);
+    g_ServerMgr->m_SectorConnection->SendResponse(ENB_OPCODE_001B_AUX_DATA, body, (short)idx);
 
     LogVMessage("UDPClient(Linux): expanded 0x2019 resource gid=%ld '%s'\n", game_id, name);
 }
@@ -1762,8 +1735,7 @@ void UDPClient::CreateResource(char *ch_msg, u8 *tcp_packet, short &tcp_index)
 // this from a periodic timer that we don't have on Linux yet; the method
 // is provided so any future caller links cleanly.
 // ---------------------------------------------------------------------------
-void UDPClient::SendCommsAlive()
-{
+void UDPClient::SendCommsAlive() {
     SendResponse(m_ClientPort, ENB_OPCODE_3005_PLAYER_COMMS_ALIVE, NULL, 0);
 }
 
@@ -1772,12 +1744,12 @@ void UDPClient::SendCommsAlive()
 // SERVER_HANDOFF. Stash the handoff payload so a subsequent reconnect
 // has the target sector info. Mirrors Win32 UDPClient.cpp:462-466.
 // ---------------------------------------------------------------------------
-void UDPClient::RecordLastHandoff(char *msg, short bytes)
-{
+void UDPClient::RecordLastHandoff(char* msg, short bytes) {
     memset(&m_Server_handoff, 0, sizeof(m_Server_handoff));
     if (bytes > 0 && msg) {
-        size_t n = (size_t) bytes;
-        if (n > sizeof(m_Server_handoff)) n = sizeof(m_Server_handoff);
+        size_t n = (size_t)bytes;
+        if (n > sizeof(m_Server_handoff))
+            n = sizeof(m_Server_handoff);
         memcpy(&m_Server_handoff, msg, n);
     }
 }
@@ -1789,7 +1761,6 @@ void UDPClient::RecordLastHandoff(char *msg, short bytes)
 // and lives until the client drops, the server forces a disconnect, or
 // the recv thread fails. No-op.
 // ---------------------------------------------------------------------------
-void UDPClient::KillTCPConnection()
-{
+void UDPClient::KillTCPConnection() {
     // intentional no-op on Linux
 }

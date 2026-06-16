@@ -8,23 +8,23 @@
 
 class ServerManager;
 
-class TcpListener
-{
+class TcpListener {
 public:
-    TcpListener(unsigned long ip_address, unsigned short port, ServerManager &server_mgr, int server_type);
+    TcpListener(unsigned long ip_address, unsigned short port, ServerManager& server_mgr,
+                int server_type);
     virtual ~TcpListener();
 
 public:
     void RunThread();
-	void Shutdown();
+    void Shutdown();
 
 private:
     unsigned long m_IpAddress;
     uint16_t m_TcpPort;
-	ServerManager &m_ServerMgr;
-	int		m_ServerType;
-    SOCKET  m_TcpListenerSocket;
-	bool	m_TcpListenerThreadRunning;
+    ServerManager& m_ServerMgr;
+    int m_ServerType;
+    SOCKET m_TcpListenerSocket;
+    bool m_TcpListenerThreadRunning;
     pthread_t m_Thread;
 };
 

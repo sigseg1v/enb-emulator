@@ -18,13 +18,12 @@
 #include <cstdint>
 #include <ctime>
 
-inline std::uint32_t Net7TickMs()
-{
+inline std::uint32_t Net7TickMs() {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    return static_cast<std::uint32_t>(
-        (static_cast<std::uint64_t>(ts.tv_sec) * 1000ull
-         + static_cast<std::uint64_t>(ts.tv_nsec) / 1000000ull) & 0xFFFFFFFFu);
+    return static_cast<std::uint32_t>((static_cast<std::uint64_t>(ts.tv_sec) * 1000ull +
+                                       static_cast<std::uint64_t>(ts.tv_nsec) / 1000000ull) &
+                                      0xFFFFFFFFu);
 }
 
 #endif // NET7_TICKS_H

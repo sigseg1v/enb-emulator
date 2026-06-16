@@ -28,8 +28,7 @@
 // while the .cpp tries to use CRITICAL_SECTION (or vice versa).
 #include <pthread.h>
 
-class Mutex
-{
+class Mutex {
 public:
     Mutex();
     virtual ~Mutex();
