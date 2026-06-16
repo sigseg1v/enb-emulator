@@ -27,4 +27,21 @@
     -->
     <DefaultItemExcludes>$(DefaultItemExcludes);Libs/**;**/*.old;**/Backup*/**</DefaultItemExcludes>
   </PropertyGroup>
+
+  <!--
+    Phase AT: StyleCop.Analyzers enforces formatting/style via `dotnet format`.
+    Severities live in the repo-root .editorconfig (whole categories at
+    `suggestion` during the AT-1/AT-2 transition); stylecop.json holds the
+    indentation + ordering + documentation settings. PrivateAssets=all so the
+    analyzer never flows to consumers as a package dependency. These projects do
+    NOT set TreatWarningsAsErrors, so SA suggestions/warnings cannot break the
+    build.
+  -->
+  <ItemGroup>
+    <PackageReference Include="StyleCop.Analyzers" Version="1.2.0-beta.556">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
+    </PackageReference>
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)../stylecop.json" Link="stylecop.json" />
+  </ItemGroup>
 </Project>

@@ -10,3 +10,90 @@ root = true
 # whole files (which re-triggers the charset guess we're trying to stop).
 [*]
 charset = utf-8
+indent_style = space
+indent_size = 4
+
+# ---------------------------------------------------------------------------
+# Phase AT -- repo-wide formatting rules. 4-space indent everywhere it can
+# apply (Go is exempt: gofmt emits tabs and is non-configurable). These rules
+# are read by `dotnet format`, clang-format-adjacent tooling, and IDEs.
+# `end_of_line` stays UNPINNED on purpose (see the charset note above): the
+# inherited C++/C# sources are CRLF and forcing either flavour rewrites whole
+# files and re-triggers the © mojibake.
+# ---------------------------------------------------------------------------
+
+[*.{cs,csx}]
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{c,cc,cxx,cpp,h,hh,hpp,hxx}]
+indent_size = 4
+
+[*.{ts,tsx,js,jsx,mjs,cjs,vue,css,scss,html}]
+indent_size = 4
+
+[*.{json,json5,jsonc,yml,yaml,xml,csproj,props,targets,slnx,axaml}]
+indent_size = 2
+
+[*.go]
+indent_style = tab
+
+[*.{md,markdown}]
+trim_trailing_whitespace = false
+
+# ---------------------------------------------------------------------------
+# C# language-style conventions (Phase AT). Kept at `suggestion` so they guide
+# `dotnet format` and the IDE without failing the TreatWarningsAsErrors builds
+# (cli-client, integration tests, capture-extract) before AT-2 cleans the tree.
+# ---------------------------------------------------------------------------
+[*.cs]
+# this. qualification -- off; the codebase does not prefix.
+dotnet_style_qualification_for_field = false:suggestion
+dotnet_style_qualification_for_property = false:suggestion
+dotnet_style_qualification_for_method = false:suggestion
+dotnet_style_qualification_for_event = false:suggestion
+# language keywords over BCL type names (int vs Int32).
+dotnet_style_predefined_type_for_locals_parameters_members = true:suggestion
+dotnet_style_predefined_type_for_member_access = true:suggestion
+# var preferences -- leave to author.
+csharp_style_var_for_built_in_types = false:silent
+csharp_style_var_when_type_is_apparent = true:suggestion
+# modern C# niceties.
+csharp_style_namespace_declarations = file_scoped:suggestion
+csharp_prefer_braces = true:suggestion
+csharp_using_directive_placement = outside_namespace:silent
+dotnet_sort_system_directives_first = true
+csharp_new_line_before_open_brace = all
+# new-line / spacing handled by formatter defaults (Allman braces, 4-space).
+
+# ---------------------------------------------------------------------------
+# StyleCop.Analyzers (SA*) severities. Whole categories held at `suggestion`
+# for the AT-1/AT-2 transition (TreatWarningsAsErrors projects must stay
+# green); AT-3/AT-4 escalate the satisfied rules to `warning` so CI's
+# --verify-no-changes enforces them. Documentation rules + a handful of
+# opinionated rules that fight this codebase's conventions are turned OFF.
+# ---------------------------------------------------------------------------
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.SpacingRules.severity = suggestion
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.ReadabilityRules.severity = suggestion
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.OrderingRules.severity = suggestion
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.NamingRules.severity = suggestion
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.MaintainabilityRules.severity = suggestion
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.LayoutRules.severity = suggestion
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.DocumentationRules.severity = none
+
+# Opinionated rules that conflict with this codebase's established style -- OFF.
+dotnet_diagnostic.SA0001.severity = none   # XmlCommentAnalysisDisabled (doc rules are off by design)
+dotnet_diagnostic.SA1101.severity = none   # PrefixLocalCallsWithThis
+dotnet_diagnostic.SA1200.severity = none   # UsingDirectivesMustBePlacedInsideNamespace
+dotnet_diagnostic.SA1309.severity = none   # FieldNamesMustNotBeginWithUnderscore
+dotnet_diagnostic.SA1413.severity = none   # UseTrailingCommaInMultiLineInitializers
+dotnet_diagnostic.SA1124.severity = none   # DoNotUseRegions
+dotnet_diagnostic.SA1402.severity = none   # FileMayOnlyContainASingleType
+dotnet_diagnostic.SA1633.severity = none   # FileMustHaveHeader (license headers are policy-managed)
+dotnet_diagnostic.SA1600.severity = none   # ElementsMustBeDocumented
+dotnet_diagnostic.SA1601.severity = none   # PartialElementsMustBeDocumented
+dotnet_diagnostic.SA1602.severity = none   # EnumerationItemsMustBeDocumented
+
+# server/src is C++ only (no .cs/.csproj), so analyzers never reach it; no
+# extra exclusion needed here.
