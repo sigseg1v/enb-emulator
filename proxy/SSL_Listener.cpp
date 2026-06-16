@@ -17,7 +17,7 @@ void* RunSslListenerThread(void* arg) {
 
 // Constructor
 SSL_Listener::SSL_Listener(unsigned long ip_address, unsigned short port, ServerManager& server_mgr)
-    : m_IpAddress(ip_address), m_TcpPort(port), m_ServerMgr(server_mgr) {
+    : m_TcpPort(port), m_IpAddress(ip_address), m_ServerMgr(server_mgr) {
     // Thread is not running (yet)
     m_SslListenerThreadRunning = false;
 
@@ -96,7 +96,7 @@ void SSL_Listener::RunThread() {
         s = accept(m_ListenerSocket, (sockaddr*)&from, &from_length);
         if (s != INVALID_SOCKET) {
             //LogMessage("Accepted SSL connection on port %d\n", m_TcpPort);
-            unsigned char* ip = (unsigned char*)&from.sin_addr;
+            //unsigned char* ip = (unsigned char*)&from.sin_addr;
             //LogMessage("Accepted SSL connection from %d.%d.%d.%d\n", ip[0], ip[1], ip[2], ip[3]);
             m_Mutex.Lock();
 
@@ -111,6 +111,7 @@ void SSL_Listener::RunThread() {
 
             // Add the SSL connection to the connection list
             //m_ServerMgr.m_ConnectionMgr.AddSslConnection(ssl_connection);
+            (void)ssl_connection; // tracking call above is disabled; keep ctor side effects
 
             m_Mutex.Unlock();
         } else {

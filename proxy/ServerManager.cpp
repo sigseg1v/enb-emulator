@@ -11,9 +11,8 @@
 // Constructor
 ServerManager::ServerManager(bool is_master_server, unsigned long ip_address, short port,
                              short max_sectors, bool standalone, unsigned long internal_ip_address)
-    : m_IsMasterServer(is_master_server), m_IpAddress(ip_address),
-      m_IpAddressInternal(internal_ip_address), m_Port(port), m_MaxSectors(max_sectors),
-      m_IsStandaloneServer(standalone) {
+    : m_IsMasterServer(is_master_server), m_IsStandaloneServer(standalone), m_Port(port),
+      m_MaxSectors(max_sectors), m_IpAddress(ip_address), m_IpAddressInternal(internal_ip_address) {
     m_LogFileTimer = 0;
     m_LogFile = NULL;
     m_ChatFileTimer = 0;

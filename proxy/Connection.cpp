@@ -695,7 +695,7 @@ namespace {
 bool RecvAll(int sock, unsigned char* buf, int n) {
     int got = 0;
     while (got < n) {
-        int r = (int)recv(sock, buf + got, n - got, 0);
+        int r = (int)recv(sock, (char*)(buf + got), n - got, 0);
         if (r <= 0)
             return false;
         got += r;
@@ -706,7 +706,7 @@ bool RecvAll(int sock, unsigned char* buf, int n) {
 bool SendAll(int sock, const unsigned char* buf, int n) {
     int sent = 0;
     while (sent < n) {
-        int r = (int)send(sock, buf + sent, n - sent, MSG_NOSIGNAL);
+        int r = (int)send(sock, (const char*)(buf + sent), n - sent, MSG_NOSIGNAL);
         if (r <= 0)
             return false;
         sent += r;
@@ -722,7 +722,7 @@ bool SendAll(int sock, const unsigned char* buf, int n) {
 int RecvCount(int sock, unsigned char* buf, int n) {
     int got = 0;
     while (got < n) {
-        int r = (int)recv(sock, buf + got, n - got, 0);
+        int r = (int)recv(sock, (char*)(buf + got), n - got, 0);
         if (r <= 0)
             break;
         got += r;

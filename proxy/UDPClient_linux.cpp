@@ -702,8 +702,8 @@ void UDPClient::RawSendToServer(const unsigned char* buffer, int bufferLen, long
     dst.sin_addr.s_addr = (in_addr_t)ip;
     dst.sin_port = htons(port);
 
-    ssize_t sent =
-        ::sendto(m_Listen_Socket, buffer, bufferLen, 0, (struct sockaddr*)&dst, sizeof(dst));
+    ssize_t sent = ::sendto(m_Listen_Socket, (const char*)buffer, bufferLen, 0,
+                            (struct sockaddr*)&dst, sizeof(dst));
     if (sent != bufferLen) {
         LogMessage("UDPClient(Linux): DTLS raw sendto port %d failed: %zd/%d (%s)\n", (int)port,
                    sent, bufferLen, strerror(errno));

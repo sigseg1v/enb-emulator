@@ -188,9 +188,11 @@ bool SectorServerManager::LoadSectorServers() {
                     char* port = strtok(NULL, ",");
                     char* max_sectors = strtok(NULL, ",");
                     char* username = strtok(NULL, ",");
-                    char* toon = strtok(NULL, ",");
-                    char* email = strtok(NULL, ",");
-                    char* description = strtok(NULL, ",");
+                    // remaining CSV fields (toon, email, description) are parsed
+                    // past but unused; keep the strtok calls for tokenizer advancement
+                    strtok(NULL, ",");
+                    strtok(NULL, ",");
+                    strtok(NULL, ",");
                     if (ip_address && port && max_sectors && username) {
                         // Create a new entry to add to the linked list
                         SectorServer* server = new SectorServer;

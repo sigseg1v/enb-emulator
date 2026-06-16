@@ -100,11 +100,39 @@ Lay down the config files and wire the analyzers. NO reformat yet; near-no-op.
       / `// clang-format on` (the documented escape hatch) with a note on why.
       `go vet` deferred to AT-4 (this job is format-only, not vet).
 
-### AT-4 — Compiler / analyzer warning cleanup (no behaviour change) [not started]
-- [ ] C# build warnings across in-scope projects -> 0 (or justified suppress).
-- [ ] C++ `-Wall -Wextra` warnings in proxy/common/launcher/freya C++ -> 0
-      where fixable without behaviour change (server/src excluded).
-- [ ] Go `go vet` clean.
+### AT-4 — Compiler / analyzer warning cleanup (no behaviour change) [DONE 2026-06-16]
+- [x] C#: clean rebuild of `tools/FreyaTools.slnx` + the 3 TWAE projects =
+      **0 warnings / 0 errors** already (StyleCop runs at `suggestion`, adds no
+      warnings). No code change needed.
+- [x] Go: `go vet ./...` clean across all 3 modules (net7go, freya/online/server,
+      freya/status-notifier). No change needed.
+- [x] C++ proxy (`net7proxy` native + `FreyaProxy.exe` MinGW): **0 warnings /
+      0 errors** under `-Wall -Wextra`. Did the real cleanup instead of blanket
+      suppression:
+      - Measured what each `-Wno-*` actually hid: **6 suppressed zero warnings**
+        (`-Wno-unused-parameter`, `-but-set-variable`, `-sign-compare`,
+        `-deprecated-declarations`, `-address-of-packed-member`, `-pointer-arith`)
+        -- removed as dead config.
+      - Fixed the real ones in source: 2 `-Wreorder` (ServerManager, SSL_Listener
+        ctor init lists reordered to match declaration order -- all scalar/ref
+        params, no inter-member deps, behaviour-identical) and 5 `-Wunused-variable`
+        (SSL_Listener `ip`/`ssl_connection`, SectorServerManager strtok results --
+        kept side-effecting calls, dropped the unused names). Dropped `-Wno-reorder`
+        + `-Wno-unused-variable`.
+      - Fixed 4 MinGW-only `-fpermissive` `unsigned char* -> char*` conversions on
+        Winsock `recv`/`send`/`sendto` (Connection.cpp x3, UDPClient_linux.cpp x1)
+        with casts that are no-ops on the Linux `void*` signatures.
+      - **Only 2 suppressions remain**, documented inline in proxy/CMakeLists.txt:
+        `-Wno-write-strings` (~174 inherited `char* = "literal"` sites) and
+        `-Wno-unused-function` (~26 inherited dead statics) -- both pervasive
+        inherited-code idioms whose fix would be large behaviour-risky churn.
+- [x] C++ gtest harness (`freya/tests/server`): builds 0 warnings; 46/46 ctest
+      pass (DB-tests skip w/o DB). Its 2 narrow per-target suppressions guard
+      `server/src` includes (explicitly out of scope), left as-is.
+- [ ] **Not validated this environment:** the Win32-only `freya/client-injection`
+      DLLs (FreyaInject / FreyaPosFeed / enbmod) and `launcher/` -- formatted in
+      AT-2, but their MinGW DLL build path isn't exercised here. Warning sweep on
+      those deferred (no Net-7 server dependency; client-side WINE artifacts).
 
 ### AT-5 — God-class audit + DI modularization (MANAGED CODE ONLY) [not started]
 - [ ] Enumerate every C# class > 1200 lines (in-scope trees).
