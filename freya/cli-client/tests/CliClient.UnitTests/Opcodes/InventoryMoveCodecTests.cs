@@ -75,6 +75,36 @@ public sealed class InventoryMoveCodecTests
     }
 
     [Fact]
+    public void Encode_BuyViaButton_VendorStockToCargo_ToInv4_ToSlot0()
+    {
+        // The vendor window's "Buy" / "Buy Stack" BUTTON does not move the item
+        // to a concrete cargo slot the way a drag-and-drop does (dg #12 above,
+        // ToInv=1/ToSlot=31). Instead it reports the destination as the vendor's
+        // own inventory type and slot 0: FromInv=4, ToInv=4, ToSlot=0, with Num
+        // being the chosen quantity (1 for "Buy", the stack size for "Buy Stack").
+        // The server's vendor-source branch (case 4) used to honour the purchase
+        // only when ToInv==1, so the buttons silently did nothing and only
+        // drag-and-drop bought stock. The buy resolves the cargo slot itself via
+        // CargoAddItem and never indexes ToSlot, so ToSlot=0 here is inert.
+        //   40 03 99 2A 00 00 00 04 00 00 00 00 00 00 00 04 00 00 00 00 00 00 00 01
+        var msg = new InventoryMoveMessage(
+            PlayerGameId, InventoryContainer.Vendor, 0,
+            InventoryContainer.Vendor, 0, 1);
+
+        byte[] wire = new InventoryMoveCodec().EncodeOutbound(msg);
+
+        Assert.Equal(new byte[]
+        {
+            0x40, 0x03, 0x99, 0x2A,
+            0x00, 0x00, 0x00, 0x04,   // FromInv = 4 (vendor stock)
+            0x00, 0x00, 0x00, 0x00,   // FromSlot = 0
+            0x00, 0x00, 0x00, 0x04,   // ToInv = 4 (vendor self-type -- the Buy button quirk)
+            0x00, 0x00, 0x00, 0x00,   // ToSlot = 0 (inert; CargoAddItem picks the slot)
+            0x00, 0x00, 0x00, 0x01,   // Num = 1 ("Buy"; "Buy Stack" sends the stack size)
+        }, wire);
+    }
+
+    [Fact]
     public void Encode_CargoRearrange24to28_MatchesCapture_dg25()
     {
         // VendorInvEco dg #25 body: cargo slot 24 -> cargo slot 28.
