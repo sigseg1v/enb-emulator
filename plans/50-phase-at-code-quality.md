@@ -168,10 +168,42 @@ Honest bottom line: there was no untestable monolith to break up with DI here.
 The codebase was already well-separated; AT-5's value was pulling the last pure
 helpers out of the UI shell and putting them under test.
 
-### AT-6 — Final audit [not started]
-- [ ] Maintainability / security / correctness review of all AT changes.
-- [ ] Full test suite green (`just test`); game still functions (CV entry if any
-      wire-adjacent code moved -- formatting alone is not a wire change).
+### AT-6 -- Final audit [DONE 2026-06-16]
+Maintainability / security / correctness review of all AT changes (the AT range
+is d6abc730^..HEAD; the wider branch carries unrelated pre-AT work).
+
+- **Correctness.** Phase AT touched 503 files, overwhelmingly pure whitespace
+  reformat from CLI tools (dotnet format whitespace, clang-format -i, prettier,
+  gofmt) -- formatters that cannot change semantics. The substantive
+  (non-whitespace) edits are exactly three: proxy/ warning cleanup (AT-4),
+  LaunchFreya helper extraction (AT-5), Vector3.cs LF normalize (AT-6). All
+  verified GREEN on CI runs 27616529321 (AT-4) and 27617088473 (AT-5): every
+  build job (cmake-build 22.04/24.04, dotnet-build, cli-unit-test) AND all four
+  cli-integration shards AND the live-proxy-handshake job passed -- the
+  integration suite drives the live docker stack, so the proxy warning-cleanup
+  edits are runtime-proven, not just compile-proven. Game still functions.
+- **Encoding audit caught one real defect.** dotnet format correctly re-encoded
+  the single UTF-16 file (tools/w3d-parser/Utilities/Vector3.cs) to UTF-8 per the
+  pinned `.editorconfig charset=utf-8`, but left it with MIXED line endings
+  (1027 CRLF + 527 LF). end_of_line is unpinned so fmt-check did not flag it.
+  Fixed in commit 689f9d18 (normalized to pure LF, the tools/*.cs convention);
+  content verified byte-identical-modulo-indentation against origin/main.
+- **Security.** No security-relevant surface in the AT edits. The proxy cleanup
+  removed dead -Wno-* suppressions and added no-op `(char*)` socket casts +
+  ctor-init-order/unused-var fixes -- zero behaviour change, no auth/crypto/SQL
+  path touched. The extracted LaunchFreya helpers are pure string/filesystem
+  logic with no new I/O surface. No new SQL (string-concat rule N/A). No secrets,
+  no IPs, no out-of-repo paths introduced.
+- **Maintainability.** Formatting is now CLI-enforced and CI-gated (AT-3
+  format-check job), so style drift breaks the build going forward. StyleCop runs
+  at `suggestion` (guidance without failing TWAE). God-class audit (AT-5) found
+  no DI-splittable monolith; extracted the last pure helpers out of the one real
+  code-behind and put them under test (+28 tests).
+- No wire-adjacent behaviour changed, so NO plans/29 CV entry is required
+  (formatting + warning-only cleanup is not a wire change; the proxy edits are
+  no-op casts / init-order, validated by the live integration suite).
+- `just fmt-check` green locally and on CI; `dotnet test tools/LaunchFreya.Tests`
+  120/120; managed builds 0 warnings / 0 errors.
 
 ## Notes / log
 - (AT-1) starting 2026-06-16.
