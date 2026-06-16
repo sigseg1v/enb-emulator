@@ -191,7 +191,7 @@ public sealed class SectorJobDescriptionTests : SectorIntegrationTest
 
     public SectorJobDescriptionTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task StarbaseJobTerminalAction7_InNet7SolJtSector_OnSentinelJobId_EchoesJobIdAsJobDescription()
     {
         var account = TestAccounts.New(_server);

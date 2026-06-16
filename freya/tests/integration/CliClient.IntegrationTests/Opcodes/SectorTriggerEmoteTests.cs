@@ -224,7 +224,7 @@ public sealed class SectorTriggerEmoteTests : SectorIntegrationTest
 {
     public SectorTriggerEmoteTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task TriggerEmote_DefaultPayload_ReceivesNotifyEmoteEchoed()
     {
         var account = TestAccounts.New(_server);

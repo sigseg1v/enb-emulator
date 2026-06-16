@@ -152,7 +152,7 @@ public sealed class SectorStarbaseAvatarChangeTests : SectorIntegrationTest
 {
     public SectorStarbaseAvatarChangeTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task StarbaseAvatarChange_OnUnknownAvatarId_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

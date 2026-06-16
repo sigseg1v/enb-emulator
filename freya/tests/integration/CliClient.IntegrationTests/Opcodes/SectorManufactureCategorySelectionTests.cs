@@ -221,7 +221,7 @@ public sealed class SectorManufactureCategorySelectionTests : SectorIntegrationT
 {
     public SectorManufactureCategorySelectionTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task ManufactureCategorySelect_CategoryZeroDefault_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

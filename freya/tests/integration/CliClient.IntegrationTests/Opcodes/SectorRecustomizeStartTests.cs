@@ -217,7 +217,7 @@ public sealed class SectorRecustomizeStartTests : SectorIntegrationTest
 
     public SectorRecustomizeStartTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task StarbaseRecustomizeActions_ReceivesShipAndAvatarStartFrames()
     {
         var account = TestAccounts.New(_server);

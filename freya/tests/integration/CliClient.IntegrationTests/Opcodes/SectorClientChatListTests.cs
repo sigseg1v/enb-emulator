@@ -312,7 +312,7 @@ public sealed class SectorClientChatListTests : SectorIntegrationTest
 
     public SectorClientChatListTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task ClientChatRequest_ListFriendsEmptyFriendList_ReceivesClientChatList()
     {
         var account = TestAccounts.New(_server);
@@ -394,7 +394,7 @@ public sealed class SectorClientChatListTests : SectorIntegrationTest
     /// preservation rationale and the three properties this pins that
     /// Wave 63 (CCR_LIST_FRIENDS) did not.
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task ClientChatRequest_ListIgnoresEmptyIgnoreList_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);

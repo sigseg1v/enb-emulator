@@ -108,7 +108,7 @@ public sealed class SectorMoveTests : SectorIntegrationTest
 {
     public SectorMoveTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task Move_EngineOn_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

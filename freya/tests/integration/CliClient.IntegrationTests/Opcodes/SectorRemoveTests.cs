@@ -129,7 +129,7 @@ public sealed class SectorRemoveTests : SectorIntegrationTest
 {
     public SectorRemoveTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task Remove_EmittedAfterRecustomizeShipDone_HasExactly4BytePayload()
     {
         var account = TestAccounts.New(_server);

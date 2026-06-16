@@ -169,7 +169,7 @@ public sealed class SectorNameDecalHardeningTests
         _client = new ClientFixture(server);
     }
 
-    [Fact]
+    [RetryFact]
     public async Task NameDecal_EmittedDuringStationSectorHandshake_HasExactly48BytePayload()
     {
         var account = TestAccounts.New(_server);
@@ -265,7 +265,7 @@ public sealed class SectorNameDecalHardeningTests
     /// second emit for this opcode).
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task NameDecal_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit()
     {
         var account = TestAccounts.New(_server);

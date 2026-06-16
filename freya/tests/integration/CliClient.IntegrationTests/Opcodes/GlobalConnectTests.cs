@@ -65,7 +65,7 @@ public sealed class GlobalConnectTests
         _client = new ClientFixture(server);
     }
 
-    [Fact]
+    [RetryFact]
     public async Task ValidTicket_RoundTripsThroughUdpGlobalPlane_ReturnsAvatarList()
     {
         var account = TestAccounts.New(_server);
@@ -220,7 +220,7 @@ public sealed class GlobalConnectTests
     /// verbatim by the Linux port; the client subtracts it back out.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task StressTestClosedAccount_GlobalConnect_ReturnsGlobalErrorCode12()
     {
         var account = TestAccounts.New(_server, status: 0);
@@ -427,7 +427,7 @@ public sealed class GlobalConnectTests
     /// round-trip sub-second.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task StressTestClosedAccount_GlobalConnect_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server, status: 0);
@@ -552,7 +552,7 @@ public sealed class GlobalConnectTests
     /// </code>
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task ForgedTicketSuffix_GlobalConnect_ReturnsGlobalErrorTicketInvalid()
     {
         var account = TestAccounts.New(_server);

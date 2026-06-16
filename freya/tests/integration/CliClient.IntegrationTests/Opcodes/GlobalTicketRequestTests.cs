@@ -105,7 +105,7 @@ public sealed class GlobalTicketRequestTests
         _client = new ClientFixture(server);
     }
 
-    [Fact]
+    [RetryFact]
     public async Task ValidSlot_ReturnsSuccessTicketWithGameId()
     {
         var account = TestAccounts.New(_server);

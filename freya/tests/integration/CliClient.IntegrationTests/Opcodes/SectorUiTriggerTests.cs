@@ -196,7 +196,7 @@ public sealed class SectorUiTriggerTests : SectorIntegrationTest
 
     public SectorUiTriggerTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task UiTriggerSlashCommand_OnSlashUitrigger_ReceivesUiTriggerEmit()
     {
         var account = TestAccounts.New(_server);

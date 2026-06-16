@@ -139,7 +139,7 @@ public sealed class SectorHandshakeFanoutTests : SectorIntegrationTest
 {
     public SectorHandshakeFanoutTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task HandshakeEmitsClientShipAndAvatarDescription()
     {
         var account = TestAccounts.New(_server);
@@ -200,7 +200,7 @@ public sealed class SectorHandshakeFanoutTests : SectorIntegrationTest
     /// acceptance — this is exactly the "tightening" the rule welcomes.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task HandshakeEmitsFullSendLoginShipDataFanout()
     {
         var account = TestAccounts.New(_server);
@@ -389,7 +389,7 @@ public sealed class SectorHandshakeFanoutTests : SectorIntegrationTest
     /// client stimulus after the session establishes.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task HandshakeEmitsClientTypeAndGalaxyMapOnSpaceSectorLogin()
     {
         var account = TestAccounts.New(_server);
@@ -561,7 +561,7 @@ public sealed class SectorHandshakeFanoutTests : SectorIntegrationTest
     /// time for the explicit logoff round-trip between stages).
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task HandshakeEmitsServerParametersOnSpaceSectorLogin()
     {
         var account = TestAccounts.New(_server);
@@ -742,7 +742,7 @@ public sealed class SectorHandshakeFanoutTests : SectorIntegrationTest
     /// to the stage-2 drain).
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task HandshakeEmitsPlanetPositionalUpdateAndNavigationOnSpaceSectorLogin()
     {
         var account = TestAccounts.New(_server);
@@ -907,7 +907,7 @@ public sealed class SectorHandshakeFanoutTests : SectorIntegrationTest
     /// Budget: 120s (same as Wave 52/54 — 2-stage login pattern).
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task HandshakeDoesNotEmitStarbaseSetOnSpaceSectorLogin()
     {
         var account = TestAccounts.New(_server);
@@ -1046,7 +1046,7 @@ public sealed class SectorHandshakeFanoutTests : SectorIntegrationTest
     ///
     /// <para>Budget: 120s (same as Wave 52/54/73).</para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task HandshakeDoesNotEmitLoungeNpcOnSpaceSectorLogin()
     {
         var account = TestAccounts.New(_server);

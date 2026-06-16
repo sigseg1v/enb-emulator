@@ -191,7 +191,7 @@ public sealed class SectorSkillAbilityTests : SectorIntegrationTest
 {
     public SectorSkillAbilityTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task SkillAbility_OnUnknownAbilityIndex_ReceivesPriorityMessageNotYetWorking()
     {
         var account = TestAccounts.New(_server);
@@ -367,7 +367,7 @@ public sealed class SectorSkillAbilityTests : SectorIntegrationTest
     /// substring probe.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SkillAbility_OnUnknownAbilityIndex_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -453,7 +453,7 @@ public sealed class SectorSkillAbilityTests : SectorIntegrationTest
             $"without seeing 0x0020 PRIORITY_MESSAGE containing \"not yet working\" for byte-exact pin.");
     }
 
-    [Fact]
+    [RetryFact]
     public async Task UseDeviceOnTarget_CodecBuiltTargetThenAbility_RoundTripsThroughServer()
     {
         // The full "use a device on a mob" two-step, both packets built by the

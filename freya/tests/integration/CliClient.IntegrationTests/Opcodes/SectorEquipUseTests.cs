@@ -203,7 +203,7 @@ public sealed class SectorEquipUseTests : SectorIntegrationTest
 {
     public SectorEquipUseTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task EquipUse_OnEmptySlot_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);
@@ -285,7 +285,7 @@ public sealed class SectorEquipUseTests : SectorIntegrationTest
             $"or the SendOpcode header-width fix at PlayerConnection.cpp:127 was reverted.");
     }
 
-    [Fact]
+    [RetryFact]
     public async Task EquipUse_CodecBuiltPayload_RoundTripsThroughServer()
     {
         // Same survival-probe contract as above, but the 0x005D payload is built

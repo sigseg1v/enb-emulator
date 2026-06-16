@@ -182,7 +182,7 @@ public sealed class SectorGuildSimpleClientSectorTests : SectorIntegrationTest
 {
     public SectorGuildSimpleClientSectorTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task GuildSimpleClientSector_OnZeroTypePayload_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

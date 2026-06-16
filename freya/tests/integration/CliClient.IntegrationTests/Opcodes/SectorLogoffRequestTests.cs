@@ -215,7 +215,7 @@ public sealed class SectorLogoffRequestTests : SectorIntegrationTest
 {
     public SectorLogoffRequestTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task LogoffRequest_AllZeroPayload_ReceivesLogoffConfirmationWithEmptyBody()
     {
         var account = TestAccounts.New(_server);

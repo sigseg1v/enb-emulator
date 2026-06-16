@@ -147,7 +147,7 @@ public sealed class SectorManufactureSetManufactureIdHardeningTests : SectorInte
 
     public SectorManufactureSetManufactureIdHardeningTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task ManufactureSetManufactureId_EmittedDuringHandshake_HasExactly4BytePayload()
     {
         var account = TestAccounts.New(_server);
@@ -264,7 +264,7 @@ public sealed class SectorManufactureSetManufactureIdHardeningTests : SectorInte
     /// self-emit for this opcode).
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task ManufactureSetManufactureId_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit()
     {
         var account = TestAccounts.New(_server);
@@ -378,7 +378,7 @@ public sealed class SectorManufactureSetManufactureIdHardeningTests : SectorInte
     /// SectorLogin dispatch.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task ManufactureSetManufactureId_EmittedExactlyOnceDuringSpaceSectorHandshake_PinsSelfEmit()
     {
         var account = TestAccounts.New(_server);

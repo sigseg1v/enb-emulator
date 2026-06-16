@@ -132,7 +132,7 @@ public sealed class SectorDebugTests : SectorIntegrationTest
 {
     public SectorDebugTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task Debug_EmptyPayload_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

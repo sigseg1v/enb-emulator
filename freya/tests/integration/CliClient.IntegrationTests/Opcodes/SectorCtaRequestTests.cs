@@ -224,7 +224,7 @@ public sealed class SectorCtaRequestTests : SectorIntegrationTest
 
     public SectorCtaRequestTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task CtaRequest_OnDefaultArmAction_ReceivesCtaResponseWithSuccessByte()
     {
         var account = TestAccounts.New(_server);

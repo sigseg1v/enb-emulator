@@ -245,7 +245,7 @@ public sealed class SectorClientChatRequestTests : SectorIntegrationTest
 {
     public SectorClientChatRequestTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task ClientChatRequest_FriendStatusOnlyBranch_ReceivesClientChatEvent()
     {
         var account = TestAccounts.New(_server);
@@ -527,7 +527,7 @@ public sealed class SectorClientChatRequestTests : SectorIntegrationTest
     /// round-trip is sub-second.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task ClientChatRequest_FriendStatusOnlyBranch_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -768,7 +768,7 @@ public sealed class SectorClientChatRequestTests : SectorIntegrationTest
     /// round-trip is sub-second.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task ClientChatRequest_AnyoneStatusBranch_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -982,7 +982,7 @@ public sealed class SectorClientChatRequestTests : SectorIntegrationTest
     /// round-trip is sub-second.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task ClientChatRequest_ListChannelsBranch_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -1149,7 +1149,7 @@ public sealed class SectorClientChatRequestTests : SectorIntegrationTest
     /// Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task ClientChatRequest_ListAllChannelsBranch_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);

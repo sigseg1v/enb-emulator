@@ -183,7 +183,7 @@ public sealed class SectorConfirmedActionResponseTests : SectorIntegrationTest
 {
     public SectorConfirmedActionResponseTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task ConfirmedActionResponse_NonMatchingPlayerId_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

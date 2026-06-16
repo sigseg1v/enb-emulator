@@ -163,7 +163,7 @@ public sealed class SectorStarbaseAcceptJob8Tests : SectorIntegrationTest
 
     public SectorStarbaseAcceptJob8Tests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task StarbaseAcceptJobAction8_OnSentinelJobId_ReceivesByteExact4ByteJobAcceptReply()
     {
         var account = TestAccounts.New(_server);

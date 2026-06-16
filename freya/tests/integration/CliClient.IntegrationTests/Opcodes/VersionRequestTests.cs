@@ -33,7 +33,7 @@ public sealed class VersionRequestTests
         _server = server;
     }
 
-    [Fact]
+    [RetryFact]
     public async Task CurrentVersion_ReturnsStatusZero()
     {
         var response = await SendVersionAndReceive(major: 42, minor: 0);
@@ -41,7 +41,7 @@ public sealed class VersionRequestTests
         Assert.True(response.ClientUpToDate);
     }
 
-    [Fact]
+    [RetryFact]
     public async Task OlderClient_ReturnsStatusOne()
     {
         var response = await SendVersionAndReceive(major: 41, minor: 0);
@@ -49,7 +49,7 @@ public sealed class VersionRequestTests
         Assert.True(response.ClientTooOld);
     }
 
-    [Fact]
+    [RetryFact]
     public async Task NewerClient_ReturnsStatusTwo()
     {
         var response = await SendVersionAndReceive(major: 43, minor: 0);

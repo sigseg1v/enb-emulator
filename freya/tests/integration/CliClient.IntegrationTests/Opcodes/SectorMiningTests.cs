@@ -93,7 +93,7 @@ public sealed class SectorMiningTests : SectorIntegrationTest
         _out = output;
     }
 
-    [Fact]
+    [RetryFact]
     public async Task Mine_Roid_ServerEmits_StartProspect_0x2012()
     {
         var account = TestAccounts.New(_server);

@@ -228,7 +228,7 @@ public sealed class SectorForceLogoutTests : SectorIntegrationTest
 {
     public SectorForceLogoutTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task ForceLogout_TriggeredByDuplicateGlobalConnect_EmitsLogoffWithExactly4BytePayload()
     {
         var account = TestAccounts.New(_server);

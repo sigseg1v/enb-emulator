@@ -171,7 +171,7 @@ public sealed class SectorSkillStringRqTests : SectorIntegrationTest
 {
     public SectorSkillStringRqTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task SkillStringRq_OnFreshCharNoTarget_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

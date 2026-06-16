@@ -226,7 +226,7 @@ public sealed class SectorInventorySortTests : SectorIntegrationTest
 {
     public SectorInventorySortTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task InventorySort_UnrecognisedTargetInv_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

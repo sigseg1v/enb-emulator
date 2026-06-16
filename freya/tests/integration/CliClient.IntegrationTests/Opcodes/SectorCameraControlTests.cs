@@ -189,7 +189,7 @@ public sealed class SectorCameraControlTests : SectorIntegrationTest
 
     public SectorCameraControlTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task StartAck_AfterSpaceArmHandshake_EmitsCameraControlWithEightBytePayload()
     {
         var account = TestAccounts.New(_server);

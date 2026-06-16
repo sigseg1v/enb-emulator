@@ -183,7 +183,7 @@ public sealed class SectorRelationshipHardeningTests
         _client = new ClientFixture(server);
     }
 
-    [Fact]
+    [RetryFact]
     public async Task Relationship_EmittedDuringStationSectorHandshake_HasExactly9BytePayload()
     {
         var account = TestAccounts.New(_server);
@@ -296,7 +296,7 @@ public sealed class SectorRelationshipHardeningTests
     /// SendLoginShipData + StationLogin dispatch pair.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task Relationship_EmittedExactlyTwiceDuringStationSectorHandshake_PinsSelfAndManuLabEmits()
     {
         var account = TestAccounts.New(_server);

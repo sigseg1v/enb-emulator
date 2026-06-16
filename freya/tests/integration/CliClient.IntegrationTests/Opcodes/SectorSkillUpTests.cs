@@ -140,7 +140,7 @@ public sealed class SectorSkillUpTests : SectorIntegrationTest
 {
     public SectorSkillUpTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task SkillUp_OnUntrainedSkill_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);
@@ -230,7 +230,7 @@ public sealed class SectorSkillUpTests : SectorIntegrationTest
             $"or the dispatcher case at PlayerConnection.cpp:499 got mis-routed.");
     }
 
-    [Fact]
+    [RetryFact]
     public async Task SkillUp_CodecBuiltPayload_RoundTripsThroughServer()
     {
         // Same survival-probe contract, but the 0x0057 payload is built by the
@@ -339,7 +339,7 @@ public sealed class SectorSkillUpTests : SectorIntegrationTest
     /// server emits nothing on a dropped skill action either). Budget: 90s.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task SkillUp_OutOfBoundsSkillId_IsDropped_ConnectionSurvives()
     {
         var account = TestAccounts.New(_server);

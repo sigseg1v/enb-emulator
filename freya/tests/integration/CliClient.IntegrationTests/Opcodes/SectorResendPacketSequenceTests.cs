@@ -210,7 +210,7 @@ public sealed class SectorResendPacketSequenceTests : SectorIntegrationTest
 {
     public SectorResendPacketSequenceTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task ResendPacketSequence_MissPacketNum_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

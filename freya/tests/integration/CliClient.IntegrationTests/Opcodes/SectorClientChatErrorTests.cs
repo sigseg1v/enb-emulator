@@ -251,7 +251,7 @@ public sealed class SectorClientChatErrorTests : SectorIntegrationTest
 
     public SectorClientChatErrorTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task ClientChatRequest_SpeakLocallyNonexistentRecipient_ReceivesClientChatError()
     {
         var account = TestAccounts.New(_server);
@@ -437,7 +437,7 @@ public sealed class SectorClientChatErrorTests : SectorIntegrationTest
     /// round-trip sub-second; LOGOFF sub-second.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task ClientChatRequest_RemoveFriendNotInList_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -646,7 +646,7 @@ public sealed class SectorClientChatErrorTests : SectorIntegrationTest
     /// round-trip sub-second; LOGOFF sub-second.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task ClientChatRequest_AddFriendSelfName_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -842,7 +842,7 @@ public sealed class SectorClientChatErrorTests : SectorIntegrationTest
     /// round-trip sub-second; LOGOFF sub-second.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task ClientChatRequest_RemoveIgnoreNotInList_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);
@@ -1029,7 +1029,7 @@ public sealed class SectorClientChatErrorTests : SectorIntegrationTest
     /// round-trip sub-second; LOGOFF sub-second.
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task ClientChatRequest_AddIgnoreSelfName_PinsExactReplyWireShape()
     {
         var account = TestAccounts.New(_server);

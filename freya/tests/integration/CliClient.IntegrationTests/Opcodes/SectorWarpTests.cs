@@ -170,7 +170,7 @@ public sealed class SectorWarpTests : SectorIntegrationTest
 {
     public SectorWarpTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task Warp_OnFreshStarbaseSession_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

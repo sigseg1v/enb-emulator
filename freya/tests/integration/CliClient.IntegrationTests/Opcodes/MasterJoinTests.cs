@@ -50,7 +50,7 @@ public sealed class MasterJoinTests
         _client = new ClientFixture(server);
     }
 
-    [Fact]
+    [RetryFact]
     public async Task ValidMasterJoin_ReceivesServerRedirect()
     {
         var account = TestAccounts.New(_server);

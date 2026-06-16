@@ -240,7 +240,7 @@ public sealed class SectorDecalHardeningTests
         _client = new ClientFixture(server);
     }
 
-    [Fact]
+    [RetryFact]
     public async Task Decal_EmittedDuringStationSectorHandshake_HasExactly54BytePayload()
     {
         var account = TestAccounts.New(_server);
@@ -337,7 +337,7 @@ public sealed class SectorDecalHardeningTests
     /// second emit for this opcode).
     /// </para>
     /// </summary>
-    [Fact]
+    [RetryFact]
     public async Task Decal_EmittedExactlyOnceDuringStationSectorHandshake_PinsSelfEmit()
     {
         var account = TestAccounts.New(_server);

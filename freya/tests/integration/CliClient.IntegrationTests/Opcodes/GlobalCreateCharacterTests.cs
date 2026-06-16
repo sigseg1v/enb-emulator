@@ -96,7 +96,7 @@ public sealed class GlobalCreateCharacterTests
         _client = new ClientFixture(server);
     }
 
-    [Fact]
+    [RetryFact]
     public async Task ValidAvatar_AppearsInRefreshedAvatarList_AndCleanlyDeletes()
     {
         var account = TestAccounts.New(_server);

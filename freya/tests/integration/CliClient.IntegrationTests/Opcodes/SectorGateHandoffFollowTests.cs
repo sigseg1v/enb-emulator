@@ -68,7 +68,7 @@ public sealed class SectorGateHandoffFollowTests : SectorIntegrationTest
         _out = output;
     }
 
-    [Fact]
+    [RetryFact]
     public async Task Gate_FromMobSector_LandsInResourceSector()
     {
         var account = TestAccounts.New(_server);

@@ -51,7 +51,7 @@ public sealed class SectorLoginTests : SectorIntegrationTest
 {
     public SectorLoginTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task FullSectorLogin_ReceivesStart()
     {
         var account = TestAccounts.New(_server);

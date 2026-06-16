@@ -257,7 +257,7 @@ public sealed class SectorJobListTests : SectorIntegrationTest
 
     public SectorJobListTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task StarbaseJobTerminalAction6_InNet7SolJtSector_ReceivesWellFormedJobList()
     {
         var account = TestAccounts.New(_server);

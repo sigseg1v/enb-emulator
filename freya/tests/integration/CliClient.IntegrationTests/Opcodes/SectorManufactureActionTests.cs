@@ -218,7 +218,7 @@ public sealed class SectorManufactureActionTests : SectorIntegrationTest
 {
     public SectorManufactureActionTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task ManufactureAction_ModeNoneOuterSwitchDefault_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);

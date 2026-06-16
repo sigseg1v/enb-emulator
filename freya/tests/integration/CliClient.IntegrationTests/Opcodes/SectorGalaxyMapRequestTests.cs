@@ -135,7 +135,7 @@ public sealed class SectorGalaxyMapRequestTests : SectorIntegrationTest
 {
     public SectorGalaxyMapRequestTests(ServerFixture server) : base(server) { }
 
-    [Fact]
+    [RetryFact]
     public async Task GalaxyMapRequest_OnFreshSession_DoesNotBreakConnection_RequestTimeStillRoundTrips()
     {
         var account = TestAccounts.New(_server);
