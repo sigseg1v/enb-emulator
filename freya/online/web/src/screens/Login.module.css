@@ -4,68 +4,213 @@
    Global classes used in the markup (field*, btn*, hud-*, disp, mono, srv*)
    stay plain strings -- they live in base.css / app.css. */
 
-.login { position: relative; height: 100vh; width: 100vw; overflow: hidden; display: flex; flex-direction: column;
-  background: radial-gradient(120% 90% at 70% 12%, oklch(0.20 0.04 250), var(--bg-void) 55%); }
+.login {
+    position: relative;
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    background: radial-gradient(120% 90% at 70% 12%, oklch(0.2 0.04 250), var(--bg-void) 55%);
+}
 
-.sky { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
-.sky__stars { position: absolute; top: 0; left: 0; width: 1px; height: 1px; border-radius: 50%; background: transparent; }
-.sky__stars--lg { filter: blur(0.4px); opacity: 0.6; }
+.sky {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+.sky__stars {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 1px;
+    height: 1px;
+    border-radius: 50%;
+    background: transparent;
+}
+.sky__stars--lg {
+    filter: blur(0.4px);
+    opacity: 0.6;
+}
 .sky__neb {
-  position: absolute; inset: -10%;
-  background:
-    radial-gradient(50% 40% at 78% 18%, oklch(0.55 0.10 250 / 0.22), transparent 70%),
-    radial-gradient(45% 50% at 18% 88%, oklch(0.55 0.12 40 / 0.20), transparent 70%);
+    position: absolute;
+    inset: -10%;
+    background:
+        radial-gradient(50% 40% at 78% 18%, oklch(0.55 0.1 250 / 0.22), transparent 70%),
+        radial-gradient(45% 50% at 18% 88%, oklch(0.55 0.12 40 / 0.2), transparent 70%);
 }
 .sky__planet {
-  position: absolute; right: -160px; bottom: -360px; width: 760px; height: 760px; border-radius: 50%;
-  background:
-    radial-gradient(circle at 38% 32%, oklch(0.62 0.10 235) 0%, oklch(0.34 0.08 250) 42%, oklch(0.16 0.05 255) 72%, oklch(0.10 0.03 255) 100%);
-  box-shadow: inset -40px -30px 120px oklch(0 0 0 / 0.7);
+    position: absolute;
+    right: -160px;
+    bottom: -360px;
+    width: 760px;
+    height: 760px;
+    border-radius: 50%;
+    background: radial-gradient(
+        circle at 38% 32%,
+        oklch(0.62 0.1 235) 0%,
+        oklch(0.34 0.08 250) 42%,
+        oklch(0.16 0.05 255) 72%,
+        oklch(0.1 0.03 255) 100%
+    );
+    box-shadow: inset -40px -30px 120px oklch(0 0 0 / 0.7);
 }
 .sky__rim {
-  position: absolute; right: -160px; bottom: -360px; width: 760px; height: 760px; border-radius: 50%;
-  box-shadow: inset 70px 60px 60px -60px oklch(0.85 0.14 55 / 0.85);
+    position: absolute;
+    right: -160px;
+    bottom: -360px;
+    width: 760px;
+    height: 760px;
+    border-radius: 50%;
+    box-shadow: inset 70px 60px 60px -60px oklch(0.85 0.14 55 / 0.85);
 }
 
-.login__topbar { position: relative; z-index: 3; display: flex; justify-content: space-between; align-items: center;
-  padding: 20px 32px; border-bottom: 1px solid var(--line); backdrop-filter: blur(2px); }
+.login__topbar {
+    position: relative;
+    z-index: 3;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--line);
+    backdrop-filter: blur(2px);
+}
 
-.login__center { position: relative; z-index: 3; flex: 1; display: grid;
-  grid-template-columns: 1.1fr 0.9fr; align-items: center; gap: 48px;
-  max-width: 1180px; width: 100%; margin: 0 auto; padding: 0 48px; }
+.login__center {
+    position: relative;
+    z-index: 3;
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1.1fr 0.9fr;
+    align-items: center;
+    gap: 48px;
+    max-width: 1180px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 0 48px;
+}
 
-.login__hero { max-width: 560px; }
-.login__tag { font-family: var(--font-mono); letter-spacing: 0.18em; text-transform: uppercase;
-  font-size: 13px; color: var(--accent); margin: 22px 0 0; }
-.login__rule { height: 1px; width: 120px; margin: 22px 0; background: linear-gradient(90deg, var(--accent), transparent); }
-.login__blurb { font-size: 15px; line-height: 1.6; color: var(--text-dim); white-space: nowrap; }
+.login__hero {
+    max-width: 560px;
+}
+.login__tag {
+    font-family: var(--font-mono);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    font-size: 13px;
+    color: var(--accent);
+    margin: 22px 0 0;
+}
+.login__rule {
+    height: 1px;
+    width: 120px;
+    margin: 22px 0;
+    background: linear-gradient(90deg, var(--accent), transparent);
+}
+.login__blurb {
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--text-dim);
+    white-space: nowrap;
+}
 
-.login__card { width: 100%; max-width: 380px; justify-self: end; padding: 26px 26px 22px;
-  box-shadow: var(--shadow-panel), 0 0 0 1px oklch(0 0 0 / 0.3); }
-.login__cardhead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-.login__cardtitle { font-size: 13px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--text); }
+.login__card {
+    width: 100%;
+    max-width: 380px;
+    justify-self: end;
+    padding: 26px 26px 22px;
+    box-shadow:
+        var(--shadow-panel),
+        0 0 0 1px oklch(0 0 0 / 0.3);
+}
+.login__cardhead {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+.login__cardtitle {
+    font-size: 13px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text);
+}
 
-.login__submit { width: 100%; margin-top: 6px; padding: 13px; font-size: 13px; }
-.login__err { color: var(--danger); font-size: 11.5px; margin-bottom: 12px; }
-.login__foot { text-align: center; font-size: 10px; letter-spacing: 0.1em; color: var(--text-faint); margin-top: 14px; text-transform: uppercase; }
-.login__legal { position: relative; z-index: 3; text-align: center; padding: 14px 16px 18px; font-size: 10px; color: var(--text-faint); letter-spacing: 0.04em; line-height: 1.7; max-width: 760px; margin: 0 auto; }
+.login__submit {
+    width: 100%;
+    margin-top: 6px;
+    padding: 13px;
+    font-size: 13px;
+}
+.login__err {
+    color: var(--danger);
+    font-size: 11.5px;
+    margin-bottom: 12px;
+}
+.login__foot {
+    text-align: center;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    color: var(--text-faint);
+    margin-top: 14px;
+    text-transform: uppercase;
+}
+.login__legal {
+    position: relative;
+    z-index: 3;
+    text-align: center;
+    padding: 14px 16px 18px;
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.04em;
+    line-height: 1.7;
+    max-width: 760px;
+    margin: 0 auto;
+}
 
 /* ===== responsive (see breakpoints.css) ===== */
 /* md (768px): drop the two-column hero/card split to a single stacked column,
    hero above the card, and let the card go full-width. The login view manages
    its own height (100vh flex column) so it scrolls internally if cramped. */
 @media (max-width: 48rem) {
-  .login { overflow-y: auto; }
-  .login__topbar { padding: 14px 18px; }
-  .login__center { grid-template-columns: 1fr; gap: 30px; padding: 28px 22px; align-content: start; }
-  .login__hero { max-width: none; }
-  .login__blurb { white-space: normal; }
-  .login__card { max-width: none; justify-self: stretch; }
+    .login {
+        overflow-y: auto;
+    }
+    .login__topbar {
+        padding: 14px 18px;
+    }
+    .login__center {
+        grid-template-columns: 1fr;
+        gap: 30px;
+        padding: 28px 22px;
+        align-content: start;
+    }
+    .login__hero {
+        max-width: none;
+    }
+    .login__blurb {
+        white-space: normal;
+    }
+    .login__card {
+        max-width: none;
+        justify-self: stretch;
+    }
 }
 
 @media (max-width: 30rem) {
-  .login__topbar { padding: 12px 14px; }
-  .login__center { padding: 22px 14px; gap: 24px; }
-  .login__tag { font-size: 12px; letter-spacing: 0.14em; }
-  .login__card { padding: 20px 18px 18px; }
+    .login__topbar {
+        padding: 12px 14px;
+    }
+    .login__center {
+        padding: 22px 14px;
+        gap: 24px;
+    }
+    .login__tag {
+        font-size: 12px;
+        letter-spacing: 0.14em;
+    }
+    .login__card {
+        padding: 20px 18px 18px;
+    }
 }

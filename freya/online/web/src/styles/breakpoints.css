@@ -25,8 +25,8 @@
    The :root vars are exported for JS/container-query/calc() use; the @media
    literals are what the stylesheets actually key off. Keep them in lockstep. */
 :root {
-  --bp-sm: 30rem;
-  --bp-md: 48rem;
-  --bp-lg: 64rem;
-  --bp-xl: 80rem;
+    --bp-sm: 30rem;
+    --bp-md: 48rem;
+    --bp-lg: 64rem;
+    --bp-xl: 80rem;
 }
