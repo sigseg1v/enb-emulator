@@ -134,10 +134,39 @@ Lay down the config files and wire the analyzers. NO reformat yet; near-no-op.
       AT-2, but their MinGW DLL build path isn't exercised here. Warning sweep on
       those deferred (no Net-7 server dependency; client-side WINE artifacts).
 
-### AT-5 — God-class audit + DI modularization (MANAGED CODE ONLY) [not started]
-- [ ] Enumerate every C# class > 1200 lines (in-scope trees).
-- [ ] For each: split into cohesive collaborators wired via constructor DI;
-      preserve behaviour; add/keep tests. (C++ god-classes explicitly deferred.)
+### AT-5 — God-class audit + DI modularization (MANAGED CODE ONLY) [DONE 2026-06-16]
+Enumerated every in-scope C# file > 1200 lines (excl bin/obj/Designer/Migrations).
+Only FIVE, and the 1200-line heuristic is mostly false positives here -- applied
+judgment rather than mechanically force-splitting:
+
+- **`SectorChatTests.cs` (28260), `RetailRecordDecodeTests.cs` (3313),
+  `SectorClientChatRequestTests.cs` (1217)** -- xUnit `[Fact]` collections +
+  byte-fixture data, NOT god-classes. "Split via DI" does not apply to test
+  fact-collections. Left as-is. (Honest follow-up, NOT done here: the 28K
+  SectorChatTests is worth partitioning into per-feature files for *navigability*
+  -- that is a mechanical file-split, not a DI refactor, and out of AT-5 scope.)
+- **`Vector3.cs` (1554)** -- a single cohesive `struct Vector3` math primitive,
+  **781 of 1554 lines are XML-doc comments** (~770 LOC of operator/method
+  overloads). A value-type math struct cannot be meaningfully DI-split; it is
+  single-responsibility already. Left as-is.
+- **`MainWindow.axaml.cs` (1255 -> 1173)** -- the one genuine production
+  god-class (Avalonia code-behind, 48 methods). Its heavy business logic was
+  ALREADY extracted upstream into tested classes (Launcher, Updater, UpdateLogic,
+  ModStore, AuthLoginPatcher); the remainder is irreducible UI event-handler glue
+  plus a handful of pure helpers. Extracted the pure, UI-free helpers into two
+  testable classes and delegated:
+  - `HostResolver` (NormalizeHost, WebsiteUrlFor) -- pure string logic.
+  - `LauncherLogFiles` (ReadLogFile, ExistingFile, NewestLogFile, FindClientLog)
+    -- filesystem helpers.
+  Added 28 unit tests (HostResolverTests + LauncherLogFilesTests); LaunchFreya.Tests
+  now 120/120 (was 92). These helpers had ZERO coverage while private in the
+  window; the real win is testability, not the line-count drop. Stateless statics
+  (not constructor-DI) is the correct shape for pure functions -- forcing DI
+  ceremony on them would be cargo-culting. Build 0/0.
+
+Honest bottom line: there was no untestable monolith to break up with DI here.
+The codebase was already well-separated; AT-5's value was pulling the last pure
+helpers out of the UI shell and putting them under test.
 
 ### AT-6 — Final audit [not started]
 - [ ] Maintainability / security / correctness review of all AT changes.
