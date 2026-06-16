@@ -1536,27 +1536,36 @@ format & byte order", Trap 2).
 
 ### [ ] CV-27 -- Vendor "Buy" / "Buy Stack" buttons actually purchase (not just drag-and-drop)
 
-- **What changed**: `server/src/PlayerConnection.cpp` -- the vendor-source branch
-  of `HandleInventoryMove` (case 4) now treats a purchase as valid when
-  `ToInv == 1` OR `ToInv == 4` (was `ToInv == 1` only). Drag-and-drop from the
-  vendor window reports the destination as cargo (`ToInv=1`, concrete `ToSlot`),
-  but the in-window "Buy" / "Buy Stack" buttons report it as the vendor's own
-  type (`ToInv=4`, `ToSlot=0`). The server only honoured `ToInv==1`, so the
-  buttons silently did nothing and only drag-and-drop worked (reported live:
-  "can only drag and drop ammo"). The buy resolves the cargo slot via
-  `CargoAddItem` and never indexes `ToSlot`, so accepting `ToInv==4` runs the
-  same purchase path with no slot-indexing risk.
-- **Primary source**: behavioural analysis of the retail client's vendor Buy
-  buttons (they emit `0x0027` with `FromInv=4, ToInv=4, ToSlot=0, Num=`quantity).
-  The captured drag-and-drop buy (VendorInvEco dg #12: `FromInv=4, ToInv=1,
-  ToSlot=31`) confirms the drag path's `ToInv=1`.
-- **CLI parse + test**: `InventoryMoveCodecTests.Encode_BuyViaButton_*` pins the
-  exact 24-byte Buy-button frame (`ToInv=4, ToSlot=0`); the drag path stays
-  pinned by `Encode_BuyIntoCargoSlot31_MatchesCapture_dg12`.
-- **What to look for (real client)**: at a vendor, select an item (e.g. ammo),
-  click "Buy" (buys 1) and "Buy Stack" (buys the chosen quantity). The item must
-  land in cargo and credits must be deducted -- without dragging. Confirm the
-  quantity slider's amount is what gets bought, and that insufficient-credits /
-  full-cargo still refuse cleanly.
+- **Root cause (corrected)**: the real culprit was NOT the `ToInv` value (an
+  earlier hypothesis that the buttons send `ToInv==4` was wrong -- see below).
+  It was the AJ-3 InvMove slot bounds check in `HandleInventoryMove`. The retail
+  client's Buy / Buy Stack buttons have no drop target, so they emit `0x0027`
+  with `FromInv=4, ToInv=1, ToSlot=-1` (cargo, auto-select). AJ-3 added a
+  `ToSlot==-1` auto-select whitelist for `1->3`, `3->1`, `14->1` but omitted the
+  vendor-buy `4->1`, so every Buy / Buy Stack frame was rejected before reaching
+  the switch -- no purchase, no credit change, no message. (A drag-buy drops onto
+  a concrete cargo slot, e.g. `ToSlot=31`, which passed the bounds check, so
+  drag-and-drop kept working -- exactly the reported symptom.)
+- **What changed**: `server/src/PlayerConnection.cpp` -- added
+  `(InvMo.FromInv == 4 && InvMo.ToInv == 1)` to the `auto_select_dest` whitelist
+  so the `ToSlot==-1` vendor buy reaches case 4. case 4 resolves the cargo slot
+  via `CargoAddItem` and never indexes `ToSlot`, so no slot-indexing risk. Also
+  added a NULL guard on the vendor item lookup (`GetItem` could return NULL for
+  an empty/unknown vendor slot and was dereferenced via `myItem->Category()`).
+  The `ToInv == 1 || ToInv == 4` accept in case 4 is retained defensively.
+- **Primary source**: real Win32 client capture on the proxy<->server leg of a
+  "Buy Stack" of PL-X1 Impact Round (200): `0x0027` body
+  `40 00 00 0B  00 00 00 04  00 00 00 07  00 00 00 01  FF FF FF FF  00 00 00 C8`
+  i.e. `FromInv=4, FromSlot=7, ToInv=1, ToSlot=-1, Num=200`. The captured drag
+  buy (VendorInvEco dg #12: `FromInv=4, ToInv=1, ToSlot=31`) confirms the drag
+  path uses a concrete slot.
+- **CLI parse + test**:
+  `InventoryMoveCodecTests.Encode_BuyStackButton_VendorStockToCargo_AutoSlot_Num200`
+  pins the captured button frame (`ToInv=1, ToSlot=-1, Num=200`); the drag path
+  stays pinned by `Encode_BuyIntoCargoSlot31_MatchesCapture_dg12`.
+- **What to look for (real client)**: at a vendor, select an item, click "Buy"
+  (buys 1) and "Buy Stack" (buys the chosen quantity) WITHOUT dragging. The item
+  must land in cargo and credits must be deducted by `each-price x quantity`.
+  Confirm insufficient-credits / full-cargo still refuse cleanly.
 - **Setup**: `just rebuild server` then `just play-local`. A character at a
   vendor with credits and free cargo space.

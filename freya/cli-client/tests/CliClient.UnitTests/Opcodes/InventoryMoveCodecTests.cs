@@ -77,15 +77,14 @@ public sealed class InventoryMoveCodecTests
     [Fact]
     public void Encode_BuyViaButton_VendorStockToCargo_ToInv4_ToSlot0()
     {
-        // The vendor window's "Buy" / "Buy Stack" BUTTON does not move the item
-        // to a concrete cargo slot the way a drag-and-drop does (dg #12 above,
-        // ToInv=1/ToSlot=31). Instead it reports the destination as the vendor's
-        // own inventory type and slot 0: FromInv=4, ToInv=4, ToSlot=0, with Num
-        // being the chosen quantity (1 for "Buy", the stack size for "Buy Stack").
-        // The server's vendor-source branch (case 4) used to honour the purchase
-        // only when ToInv==1, so the buttons silently did nothing and only
-        // drag-and-drop bought stock. The buy resolves the cargo slot itself via
-        // CargoAddItem and never indexes ToSlot, so ToSlot=0 here is inert.
+        // Speculative FromInv=4 -> ToInv=4 / ToSlot=0 button encoding. NOTE: a
+        // later real-client capture of the "Buy Stack" button showed it actually
+        // sends ToInv=1 / ToSlot=-1 (see
+        // Encode_BuyStackButton_VendorStockToCargo_AutoSlot_Num200), NOT ToInv=4.
+        // This case is retained only to pin that the server also tolerates a
+        // ToInv=4 variant if some client build emits it; it is not backed by a
+        // capture. The buy resolves the cargo slot itself via CargoAddItem and
+        // never indexes ToSlot, so ToSlot=0 here is inert.
         //   40 03 99 2A 00 00 00 04 00 00 00 00 00 00 00 04 00 00 00 00 00 00 00 01
         var msg = new InventoryMoveMessage(
             PlayerGameId, InventoryContainer.Vendor, 0,
@@ -101,6 +100,35 @@ public sealed class InventoryMoveCodecTests
             0x00, 0x00, 0x00, 0x04,   // ToInv = 4 (vendor self-type -- the Buy button quirk)
             0x00, 0x00, 0x00, 0x00,   // ToSlot = 0 (inert; CargoAddItem picks the slot)
             0x00, 0x00, 0x00, 0x01,   // Num = 1 ("Buy"; "Buy Stack" sends the stack size)
+        }, wire);
+    }
+
+    [Fact]
+    public void Encode_BuyStackButton_VendorStockToCargo_AutoSlot_Num200()
+    {
+        // The vendor window's "Buy Stack" BUTTON, captured from the real Win32
+        // client on the proxy<->server leg: it has no drop target, so unlike a
+        // drag (which reports the concrete cargo slot dropped onto -- see
+        // Encode_BuyIntoCargoSlot31_MatchesCapture_dg12) it reports cargo with
+        // the auto-select sentinel ToSlot = -1. This is the frame that exposed
+        // the regression where the server's AJ-3 InvMove bounds check rejected
+        // FromInv=4 -> ToInv=1 with ToSlot=-1 (not on the auto-select
+        // whitelist), so every Buy / Buy Stack silently did nothing.
+        //   40 00 00 0B 00 00 00 04 00 00 00 07 00 00 00 01 FF FF FF FF 00 00 00 C8
+        var msg = new InventoryMoveMessage(
+            0x4000000B, InventoryContainer.Vendor, 7,
+            InventoryContainer.Cargo, -1, 200);
+
+        byte[] wire = new InventoryMoveCodec().EncodeOutbound(msg);
+
+        Assert.Equal(new byte[]
+        {
+            0x40, 0x00, 0x00, 0x0B,   // GameID (BE)
+            0x00, 0x00, 0x00, 0x04,   // FromInv = 4 (vendor stock)
+            0x00, 0x00, 0x00, 0x07,   // FromSlot = 7
+            0x00, 0x00, 0x00, 0x01,   // ToInv = 1 (cargo)
+            0xFF, 0xFF, 0xFF, 0xFF,   // ToSlot = -1 (auto-select; button has no drop target)
+            0x00, 0x00, 0x00, 0xC8,   // Num = 200 (full stack)
         }, wire);
     }
 
