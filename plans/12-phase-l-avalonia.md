@@ -1308,6 +1308,24 @@ deleted dir (verified: no ProjectReference/HintPath crossed the
 boundary). The "keep both UIs in parallel" decision below is now
 satisfied -- Avalonia is the sole UI.
 
+### `-avalonia` suffix dropped -- they ARE the tools now (2026-06-16)
+
+With the WinForms originals gone, the `-avalonia` qualifier was noise, so
+the suffix was stripped everywhere: directory names
+(`tools/<name>-avalonia/` -> `tools/<name>/`), csproj filenames
+(`XxxAvalonia.csproj` -> `Xxx.csproj`, incl. the two nested smoke
+projects), `<AssemblyName>`/`<RootNamespace>`, every C# `namespace`/`using`,
+every XAML `x:Class`/`clr-namespace`/`assembly=` ref, the `app.manifest`
+assembly identities, the launcher's editor-dir list + inter-tool
+`dotnet run --project ../<name>/` spawns, the settings filename, and all
+`FreyaTools.slnx` / justfile / docs references. Safe because the launcher
+resolves editors by directory + `dotnet run` (never by exe/assembly name)
+and nothing in deploy/login/patcher ships these dev-tool binaries.
+Verified: `dotnet build tools/FreyaTools.slnx` + both nested smoke
+projects at 0/0; headless `--smoke` passes for effect-editor,
+faction-editor, toolslauncher, talktreeeditor (XAML wiring + shared
+`commontools` lib resolve at runtime).
+
 ## Decisions
 
 - **Keep both UIs in parallel** during migration. The WinForms targets stay in the build until Avalonia ports reach parity. Don't break working code chasing a not-yet-working port.

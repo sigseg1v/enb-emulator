@@ -128,14 +128,14 @@ The C# editors live in `tools/`. Every user-facing editor is ported to
 required. The fastest way to discover them:
 
 ```
-just launch                 # central GUI launcher (toolslauncher-avalonia)
+just launch                 # central GUI launcher (toolslauncher)
 just launch-mob-editor      # or jump straight to one
 just launch-sector-editor
 just --list                 # shows every launch-* recipe
 ```
 
 The original WinForms projects have been removed; the Avalonia ports are
-the only versions. `tools/item-editor-avalonia/` is the Item Editor port
+the only versions. `tools/item-editor/` is the Item Editor port
 (the upstream WinForms project had no csproj and was never built).
 
 Per-tool documentation is in `07-tools-toolchain.md`; the

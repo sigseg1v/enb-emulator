@@ -2,13 +2,13 @@
 
 The `tools/` directory holds the C# editor suite for the content database
 plus a few legacy C++ utilities. All user-facing C# editors are
-**Avalonia 11 / .NET 10** ports (`tools/<name>-avalonia/`) that run
+**Avalonia 11 / .NET 10** ports (`tools/<name>/`) that run
 **natively on Linux** (no WINE). The original WinForms projects have been
 removed. The central solution is `tools/FreyaTools.slnx` (SDK-style XML
 solution); each port also has its own `.csproj` and can be launched directly.
 
 Every user-facing editor has an Avalonia port, including the Item Editor
-(`tools/item-editor-avalonia/`). See `tools/README.md` for the
+(`tools/item-editor/`). See `tools/README.md` for the
 user-facing quickstart and the launch recipes.
 
 ## Quickstart
@@ -22,7 +22,7 @@ just init                    # boots Postgres 16 + applies the schema
 Then either launch the central GUI launcher:
 
 ```sh
-just launch                  # toolslauncher-avalonia
+just launch                  # toolslauncher
 ```
 
 Or jump straight to a specific editor:
@@ -43,7 +43,7 @@ just launch-toolspatcher     # patcher for the editor binaries
 ```
 
 `just --list` prints every recipe. Each recipe runs
-`dotnet run --project tools/<name>-avalonia/`.
+`dotnet run --project tools/<name>/`.
 
 Editors that hit the DB pop a Login dialog on startup; default dev creds
 match the docker-compose stack: host `localhost`, port `5434`, user `net7`,
@@ -57,7 +57,7 @@ password `net7`, database `net7` (or `net7_user` for the accounts schema).
 
 ## Per-tool reference
 
-### `commontools-avalonia/` -- CommonTools (shared library)
+### `commontools/` -- CommonTools (shared library)
 
 Type: library.
 Purpose: shared DB connection, login dialog, enumerations, common widgets,
@@ -72,14 +72,14 @@ Purpose: dumps the chunk-type tree of a Westwood 3D (`.w3d`) file to text,
 for offline asset inspection.
 Status: legacy C++ utility; not in `FreyaTools.slnx`. Windows-only.
 
-### `dataimport-avalonia/` -- DataImport
+### `dataimport/` -- DataImport
 
 Type: Avalonia.
 Purpose: bulk content imports into the database -- assets, skills, item
 references. Reuses CommonTools' login dialog.
 Launch: `just launch-dataimport`.
 
-### `effect-editor-avalonia/` -- Effect Editor
+### `effect-editor/` -- Effect Editor
 
 Type: Avalonia.
 Purpose: edit the `effects`, `item_effect_base`, `item_effect_container`,
@@ -95,20 +95,20 @@ SkillParser. The current `Main` runs `new SkillParser()` and exits;
 other parsers are commented out.
 Status: console tool, no Avalonia port needed; runs as-is on `dotnet`.
 
-### `enbpatcher-avalonia/` -- EnBPatcher
+### `enbpatcher/` -- EnBPatcher
 
 Type: Avalonia.
 Purpose: client-side patcher utility -- generates and applies CRC32 patches
 to the client binary.
 Launch: `just launch-enbpatcher`.
 
-### `faction-editor-avalonia/` -- Faction Editor
+### `faction-editor/` -- Faction Editor
 
 Type: Avalonia.
 Purpose: edit `factions`, `faction_matrix`, `manufacturers`.
 Launch: `just launch-faction-editor`.
 
-### `item-editor-avalonia/` -- Item Editor
+### `item-editor/` -- Item Editor
 
 Type: Avalonia.
 Purpose: edit `item_base` and all `item_*` subtype tables (ammo, beam,
@@ -143,32 +143,32 @@ the Freya updater delivers only the launcher + proxy, never game data.
 The Linux path (`client/linux-installer/`) is unrelated and still uses the
 upstream WINE installer, which remains the EnB client-data delivery there.
 
-### `missioneditor-avalonia/` -- Mission Editor
+### `missioneditor/` -- Mission Editor
 
 Type: Avalonia.
 Purpose: edit `missions.mission_XML`. Renders the mission tree
 (`Nodes`, `TalkNode.cs`, `Replies.cs`) and serialises back to XML.
 Launch: `just launch-mission-editor`.
 
-### `mob-editor-avalonia/` -- Mob Editor
+### `mob-editor/` -- Mob Editor
 
 Type: Avalonia.
 Purpose: edit `mob_base`, `mob_items`, `mob_spawn_group`. Per-mob
 property sheets, GUI, SQL split into folders.
 Launch: `just launch-mob-editor`.
 
-### `sector-editor-avalonia/` -- Sector Editor
+### `sector-editor/` -- Sector Editor
 
 Type: Avalonia.
 Purpose: edit `systems`, `sectors`, `sector_objects` and subtype tables.
 Three top-level windows (`SystemWindow`, `SectorWindow`, `UniverseWindow`)
 plus a sidebar tree (`TreeWindow`). The original Piccolo.NET dependency
-was replaced by `tools/sector-editor-avalonia/PiccoloShim/` -- a shim
+was replaced by `tools/sector-editor/PiccoloShim/` -- a shim
 that maps the small Piccolo subset the editor used onto Avalonia primitives,
 so we don't carry a Windows-only third-party graphics library.
 Launch: `just launch-sector-editor`.
 
-### `station-tools-avalonia/` -- Station Tools
+### `station-tools/` -- Station Tools
 
 Type: Avalonia.
 Purpose: edit `starbases`, `starbase_rooms`, `starbase_npcs`,
@@ -177,25 +177,25 @@ Purpose: edit `starbases`, `starbase_rooms`, `starbase_npcs`,
 an item browse dialog.
 Launch: `just launch-station-tools`.
 
-### `talktreeeditor-avalonia/` -- TalkTree Editor
+### `talktreeeditor/` -- TalkTree Editor
 
 Type: Avalonia.
 Purpose: edit and preview NPC dialogue trees in the XML format stored in
 `starbase_npcs.talk_tree_handle`.
 Launch: `just launch-talktree-editor`.
 
-### `toolslauncher-avalonia/` -- Tools Launcher
+### `toolslauncher/` -- Tools Launcher
 
 Type: Avalonia.
 Purpose: a launcher menu for the other editors. The central entry point
 exposed by `just launch`.
 Launch: `just launch`.
 
-### `toolspatcher-avalonia/` -- Tools Patcher
+### `toolspatcher/` -- Tools Patcher
 
 Type: Avalonia.
 Purpose: in-place patcher for the editor binaries. CRC32-checks each
-binary, downloads the replacement, swaps. Counterpart to `enbpatcher-avalonia/`
+binary, downloads the replacement, swaps. Counterpart to `enbpatcher/`
 but for the toolchain itself.
 Launch: `just launch-toolspatcher`.
 
@@ -243,7 +243,7 @@ it":
    table `table_changes` records what changed, by whom, when, with full
    before/after payloads.
 3. **Validation**: some editors run client-side validation (e.g.
-   `item-editor-avalonia/Database/DataValidation.cs`) before writing.
+   `item-editor/Database/DataValidation.cs`) before writing.
 4. **Database**: data lives in Postgres. The runtime schema is
    `db/postgres/schema.sql`; the `db/mysql/` dumps are the historical
    source the schema was converted from. World content (the `net7`
@@ -271,21 +271,21 @@ modern dotnet SDK; historical Phase D status lives in `tools/BUILD_STATUS.md`.
 
 | Tool | Linux runtime |
 |---|:-:|
-| commontools-avalonia (shared lib) | n/a |
-| dataimport-avalonia | Yes |
-| effect-editor-avalonia | Yes |
+| commontools (shared lib) | n/a |
+| dataimport | Yes |
+| effect-editor | Yes |
 | enb-ini-parser (console) | Yes |
-| enbpatcher-avalonia | Yes |
-| faction-editor-avalonia | Yes |
-| item-editor-avalonia | Yes |
+| enbpatcher | Yes |
+| faction-editor | Yes |
+| item-editor | Yes |
 | LaunchFreya | Yes |
-| missioneditor-avalonia | Yes |
-| mob-editor-avalonia | Yes |
-| sector-editor-avalonia | Yes |
-| station-tools-avalonia | Yes |
-| talktreeeditor-avalonia | Yes |
-| toolslauncher-avalonia | Yes |
-| toolspatcher-avalonia | Yes |
+| missioneditor | Yes |
+| mob-editor | Yes |
+| sector-editor | Yes |
+| station-tools | Yes |
+| talktreeeditor | Yes |
+| toolslauncher | Yes |
+| toolspatcher | Yes |
 | chunktypes (legacy C++) | No |
 | udpdump (legacy C++) | No |
 | unmix (legacy C++) | No |

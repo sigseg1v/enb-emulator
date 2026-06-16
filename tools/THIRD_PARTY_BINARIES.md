@@ -2,7 +2,7 @@
 
 The original WinForms editor projects under `tools/<name>/` shipped
 vendored third-party DLLs. Those projects have been removed; the Avalonia
-ports (`tools/<name>-avalonia/`) replaced them with NuGet packages or
+ports (`tools/<name>/`) replaced them with NuGet packages or
 dropped the dependency. This file is kept as a historical record of what
 was vendored and why.
 
@@ -11,7 +11,7 @@ was vendored and why.
 | `MySql.Data.dll` | station-tools, effect-editor, commontools | MySQL ADO.NET provider (Oracle; GPL-licensed) | `Npgsql` (PostgreSQL, MIT) via NuGet |
 | `log4net.dll` | commontools | log4net 1.x | `Microsoft.Extensions.Logging` via NuGet |
 | `SandDock.dll` | commontools | Divelements docking control suite (legacy WinForms) | Dropped (Avalonia has built-in docking primitives) |
-| `UMD.HCIL.Piccolo.dll`, `UMD.HCIL.PiccoloX.dll` | sector-editor, commontools | Piccolo.NET 2D graphics scene-graph (CIL port of Piccolo Java) | Replaced by `tools/sector-editor-avalonia/PiccoloShim/` -- a shim against Avalonia primitives |
+| `UMD.HCIL.Piccolo.dll`, `UMD.HCIL.PiccoloX.dll` | sector-editor, commontools | Piccolo.NET 2D graphics scene-graph (CIL port of Piccolo Java) | Replaced by `tools/sector-editor/PiccoloShim/` -- a shim against Avalonia primitives |
 | `Meebey.SmartIrc4net.dll` | commontools | IRC client library | Dropped |
 | `WeifenLuo.WinFormsUI.Docking.dll` | (various) | DockPanel Suite | Dropped |
 

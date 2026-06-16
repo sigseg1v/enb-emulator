@@ -1,8 +1,8 @@
 # tools/ build status
 
-All user-facing editors are **Phase L Avalonia ports** (`tools/<name>-avalonia/`,
+All user-facing editors are **Phase L Avalonia ports** (`tools/<name>/`,
 `net10.0`). They run natively on Linux. Tracked in
-`plans/12-phase-l-avalonia.md`. Status table in `tools/README.md`.
+`plans/12-phase-l.md`. Status table in `tools/README.md`.
 
 The original WinForms projects (`tools/<name>/`, `net10.0-windows`) have
 been removed. This file is kept as a historical record of the Phase D
@@ -33,4 +33,4 @@ Run `dotnet build <project>` from the repo root, or
 | `tools/w3d-parser/W3d Parser.csproj` | built | 0 |
 
 `tools/itemeditor/` had no `.csproj` in the upstream snapshot, so it was
-in neither matrix. Phase L ported the item editor as `tools/item-editor-avalonia/`.
+in neither matrix. Phase L ported the item editor as `tools/item-editor/`.

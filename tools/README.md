@@ -40,7 +40,7 @@ just launch-toolspatcher      # patcher for the editors themselves
 ```
 
 `just --list` shows them all. Each recipe just runs
-`dotnet run --project tools/<name>-avalonia/`. First run rebuilds on
+`dotnet run --project tools/<name>/`. First run rebuilds on
 demand; subsequent runs start in a few seconds.
 
 Editors that talk to MySQL pop a Login dialog on startup. For the dev
@@ -57,24 +57,24 @@ stack the defaults are:
 ## Editor status (Phase L — complete)
 
 Phase L closed with 13 editor ports landed; per-tool status:
-`plans/12-phase-l-avalonia.md`. Current state:
+`plans/12-phase-l.md`. Current state:
 
 | Tool                  | Talks to DB? | Notes |
 |---|:-:|---|
-| `commontools-avalonia`     | n/a | Login dialog + DB layer used by the others |
-| `dataimport-avalonia`      | ✅ | Bulk-load game data |
-| `effect-editor-avalonia`   | ✅ | Particle / stat effects |
-| `enbpatcher-avalonia`      |    | Client binary patcher |
-| `faction-editor-avalonia`  | ✅ | NPC faction matrix |
+| `commontools`     | n/a | Login dialog + DB layer used by the others |
+| `dataimport`      | ✅ | Bulk-load game data |
+| `effect-editor`   | ✅ | Particle / stat effects |
+| `enbpatcher`      |    | Client binary patcher |
+| `faction-editor`  | ✅ | NPC faction matrix |
 | `LaunchFreya`              |    | Game client launcher |
-| `missioneditor-avalonia`   | ✅ | Mission / quest authoring |
-| `mob-editor-avalonia`      | ✅ | Mob (NPC) data |
-| `sector-editor-avalonia`   | ✅ | Sector / map authoring (Piccolo-on-Avalonia canvas) |
-| `station-tools-avalonia`   | ✅ | Station / vendor / NPC authoring |
-| `talktreeeditor-avalonia`  |    | NPC dialog trees (XML in/out) |
-| `toolslauncher-avalonia`   |    | The central GUI launcher |
-| `toolspatcher-avalonia`    |    | Patcher for the tools themselves |
-| `item-editor-avalonia`     | ✅ | Item editor (the upstream WinForms project had no csproj) |
+| `missioneditor`   | ✅ | Mission / quest authoring |
+| `mob-editor`      | ✅ | Mob (NPC) data |
+| `sector-editor`   | ✅ | Sector / map authoring (Piccolo-on-Avalonia canvas) |
+| `station-tools`   | ✅ | Station / vendor / NPC authoring |
+| `talktreeeditor`  |    | NPC dialog trees (XML in/out) |
+| `toolslauncher`   |    | The central GUI launcher |
+| `toolspatcher`    |    | Patcher for the tools themselves |
+| `item-editor`     | ✅ | Item editor (the upstream WinForms project had no csproj) |
 | `chunktypes`               |    | 2010-era C++ utility (`.dsp`) -- not in scope |
 | `udpdump`                  |    | 2010-era C++ utility (`.dsp`) -- not in scope |
 | `unmix`                    |    | 2010-era C++ utility (`.dsp`) -- not in scope |
@@ -84,8 +84,8 @@ Phase L closed with 13 editor ports landed; per-tool status:
 ## Building everything (without running)
 
 ```sh
-# Build all Avalonia ports (any *-avalonia project picks up the rest via solution refs).
-dotnet build tools/toolslauncher-avalonia/
+# Build all Avalonia ports (any * project picks up the rest via solution refs).
+dotnet build tools/toolslauncher/
 ```
 
 Or build the full solution:
@@ -99,4 +99,4 @@ dotnet build tools/FreyaTools.slnx
 See `tools/THIRD_PARTY_BINARIES.md` for notes on third-party DLLs from
 the original WinForms projects. The Piccolo.NET dependency was replaced in
 the Avalonia sector editor by a shim under
-`tools/sector-editor-avalonia/PiccoloShim/`.
+`tools/sector-editor/PiccoloShim/`.

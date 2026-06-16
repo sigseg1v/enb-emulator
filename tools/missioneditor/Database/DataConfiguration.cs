@@ -1,0 +1,235 @@
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Threading.Tasks;
+using Avalonia.Controls;
+using CommonTools;
+using CommonTools.Database;
+using CommonTools.Gui;
+
+namespace MissionEditor.Database
+{
+    // Ported from tools/missioneditor/Database/DataConfiguration.cs.
+    // search() is async to match Avalonia's ShowDialog<T>(Window).
+    public class DataConfiguration
+    {
+        public enum DataType { faction, item, mob, sector_object, npc, sector, skill, mission };
+        private Net7.Tables m_table;
+        private Enum m_id;
+        private Enum[] m_description;
+
+        private static Dictionary<DataConfiguration.DataType, DataConfiguration> m_DataConfigurations;
+
+        public static void init()
+        {
+            if (m_DataConfigurations != null) return;
+            m_DataConfigurations = new Dictionary<DataConfiguration.DataType, DataConfiguration>();
+            m_DataConfigurations.Add(DataConfiguration.DataType.faction,
+                                     new DataConfiguration(Net7.Tables.factions,
+                                                           Net7.Table_factions._faction_id,
+                                                           new Enum[] { Net7.Table_factions._name }));
+            m_DataConfigurations.Add(DataConfiguration.DataType.item,
+                                     new DataConfiguration(Net7.Tables.item_base,
+                                                           Net7.Table_item_base._id,
+                                                           new Enum[] { Net7.Table_item_base._name }));
+            m_DataConfigurations.Add(DataConfiguration.DataType.mob,
+                                     new DataConfiguration(Net7.Tables.mob_base,
+                                                           Net7.Table_mob_base._mob_id,
+                                                           new Enum[] { Net7.Table_mob_base._name }));
+            m_DataConfigurations.Add(DataConfiguration.DataType.sector_object,
+                                     new DataConfiguration(Net7.Tables.sector_objects,
+                                                           Net7.Table_sector_objects._sector_object_id,
+                                                           new Enum[] { Net7.Table_sector_objects._name }));
+            m_DataConfigurations.Add(DataConfiguration.DataType.npc,
+                                     new DataConfiguration(Net7.Tables.starbase_npcs,
+                                                           Net7.Table_starbase_npcs._npc_Id,
+                                                           new Enum[] { Net7.Table_starbase_npcs._first_name, Net7.Table_starbase_npcs._last_name }));
+            m_DataConfigurations.Add(DataConfiguration.DataType.sector,
+                                     new DataConfiguration(Net7.Tables.sectors,
+                                                           Net7.Table_sectors._sector_id,
+                                                           new Enum[] { Net7.Table_sectors._name }));
+            m_DataConfigurations.Add(DataConfiguration.DataType.skill,
+                                     new DataConfiguration(Net7.Tables.skills,
+                                                           Net7.Table_skills._skill_id,
+                                                           new Enum[] { Net7.Table_skills._name }));
+            m_DataConfigurations.Add(DataConfiguration.DataType.mission,
+                                     new DataConfiguration(Net7.Tables.missions,
+                                                           Net7.Table_missions._mission_id,
+                                                           new Enum[] { Net7.Table_missions._mission_name }));
+        }
+
+        public static Boolean isValid(DataConfiguration.DataType dataType, String code)
+        {
+            DataConfiguration dataConfiguration;
+            if (m_DataConfigurations.TryGetValue(dataType, out dataConfiguration))
+                return dataConfiguration.isValid(code);
+            throw (new Exception("Unable to convert '" + dataType.ToString() + "' into a DataConfiguration.DataType"));
+        }
+
+        class DataValidation
+        {
+            public DataConfiguration dataConfiguration;
+            public String code;
+            public String errorMessage;
+            public DataValidation(DataConfiguration dataConfiguration, String code, String errorMessage)
+            {
+                this.dataConfiguration = dataConfiguration;
+                this.code = code;
+                this.errorMessage = errorMessage;
+            }
+        }
+        static List<DataValidation> listDataValidations = new List<DataValidation>();
+
+        public static void addValidation(DataConfiguration.DataType dataType, String code)
+        {
+            DataConfiguration dataConfiguration;
+            if (m_DataConfigurations.TryGetValue(dataType, out dataConfiguration))
+            {
+                String errorMessage = "The " + dataType.ToString() + " code '" + code + "' does not exist";
+                listDataValidations.Add(new DataValidation(dataConfiguration, code, errorMessage));
+            }
+            else
+            {
+                throw (new Exception("Unable to convert '" + dataType.ToString() + "' into a DataConfiguration.DataType"));
+            }
+        }
+
+        public static void addValidation(String errorMessage)
+        {
+            listDataValidations.Add(new DataValidation(null, null, errorMessage));
+        }
+
+        public static Boolean validate(out String errorMessage)
+        {
+            errorMessage = "";
+            String query = "";
+            int queryCount = 0;
+            List<String> parameters = new List<string>();
+            List<String> values = new List<string>();
+            List<DataValidation> dbDataValidations = new List<DataValidation>();
+            String parameter;
+
+            foreach (DataValidation dataValidation in listDataValidations)
+            {
+                if ((dataValidation.dataConfiguration == null && dataValidation.code == null))
+                {
+                    errorMessage = dataValidation.errorMessage;
+                    break;
+                }
+
+                parameter = dataValidation.dataConfiguration.m_id.ToString() + queryCount.ToString();
+                String idCol = ColumnData.GetQuotedName(dataValidation.dataConfiguration.m_id);
+                String table = dataValidation.dataConfiguration.m_table.ToString();
+                // Table/column are schema identifiers (enum-derived), not user
+                // values; the only value -- the referenced code -- is bound as @parameter.
+                if (query.Length != 0) query += " UNION ";
+                query += "SELECT " + queryCount + ", " + idCol
+                       + " FROM " + table + " WHERE " + idCol + " = @" + parameter;
+                parameters.Add(parameter);
+                values.Add(dataValidation.code);
+                dbDataValidations.Add(dataValidation);
+                queryCount++;
+            }
+
+            if (errorMessage.Length == 0 && query.Length != 0)
+            {
+                DataTable dataTable = DB.Instance.executeQuery(query, parameters.ToArray(), values.ToArray());
+
+                // Each sub-SELECT tags its row with its validation index in
+                // column 0, but the rows come back through a UNION -- which
+                // guarantees NO row order and may dedup. The old code matched
+                // positionally (Rows[i][0] == i), so any out-of-order or missing
+                // row misaligned every check and reported the WRONG entity as
+                // missing (e.g. "npc 41 does not exist" when 41 exists but some
+                // other referenced code did not, or when 41 was referenced
+                // twice). Match by membership instead: a validation passed iff a
+                // row tagged with its index came back.
+                var presentIndices = new HashSet<string>();
+                foreach (DataRow row in dataTable.Rows)
+                    presentIndices.Add(row[0].ToString());
+
+                for (int validation = 0; validation < dbDataValidations.Count; validation++)
+                {
+                    if (!presentIndices.Contains(validation.ToString()))
+                    {
+                        errorMessage = dbDataValidations[validation].errorMessage;
+                        break;
+                    }
+                }
+            }
+            listDataValidations.Clear();
+            return errorMessage.Length == 0;
+        }
+
+        public static async Task<String> search(DataType dataType, Window owner)
+        {
+            DataConfiguration dataConfiguration;
+            if (!m_DataConfigurations.TryGetValue(dataType, out dataConfiguration))
+                throw (new Exception("Unable to convert '" + dataType.ToString() + "' into a DataConfiguration.DataType"));
+
+            // A fresh dialog per search: an Avalonia Window cannot be re-shown
+            // once closed ("Cannot re-show a closed window"), so caching one
+            // static instance threw on the second search.
+            var dlgSearch = new DlgSearch();
+            dlgSearch.configure(dataConfiguration.m_table);
+            await dlgSearch.ShowDialog(owner);
+            return dlgSearch.getSelectedId();
+        }
+
+        public static String getDescription(DataType dataType, String id)
+        {
+            DataConfiguration dataConfiguration;
+            if (m_DataConfigurations.TryGetValue(dataType, out dataConfiguration))
+            {
+                // Description columns and the id column are schema identifiers
+                // (enum-derived), not user values; the id is bound as @id.
+                String columns = "";
+                foreach (Enum field in dataConfiguration.m_description)
+                {
+                    if (columns.Length != 0) columns += ", ";
+                    columns += ColumnData.GetQuotedName(field);
+                }
+
+                String query = "SELECT " + columns
+                             + " FROM " + dataConfiguration.m_table.ToString()
+                             + " WHERE " + ColumnData.GetQuotedName(dataConfiguration.m_id) + " = @id";
+                DataTable dataTable;
+                try
+                {
+                    dataTable = DB.Instance.executeQuery(query, new String[] { "id" }, new String[] { id });
+                }
+                catch
+                {
+                    return id;
+                }
+                String description = "";
+                if (dataTable.Rows.Count == 1)
+                {
+                    foreach (DataColumn column in dataTable.Columns)
+                    {
+                        if (description.Length != 0) description += " ";
+                        description += dataTable.Rows[0][column].ToString();
+                    }
+                }
+                return description + " (" + id + ")";
+            }
+            else
+            {
+                throw (new Exception("Unable to convert '" + dataType.ToString() + "' into a DataConfiguration.DataType"));
+            }
+        }
+
+        public DataConfiguration(Net7.Tables table, Enum id, Enum[] description)
+        {
+            m_table = table;
+            m_id = id;
+            m_description = description;
+        }
+
+        public Boolean isValid(String code)
+        {
+            DataTable dataTable = DB.Instance.select(new Enum[] { m_id }, m_table, m_id, code);
+            return dataTable.Rows.Count != 0;
+        }
+    }
+}

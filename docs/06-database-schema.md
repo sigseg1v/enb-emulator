@@ -38,7 +38,7 @@ at the end.
   effective in-game value is `column * (quality / 100.0)`.
 - "Editor" cross-references the C# tool under `tools/` that primarily edits
   the table. "(none)" means it is read-only seed data with no dedicated
-  editor. Editor paths name the Avalonia port (`tools/<name>-avalonia/`),
+  editor. Editor paths name the Avalonia port (`tools/<name>/`),
   which runs natively on Linux (see `tools/README.md` and the
   cross-reference table in `docs/07-tools-toolchain.md`). The original
   WinForms projects have been removed.
@@ -57,7 +57,7 @@ Star systems. The galaxy is a list of systems.
 - Key columns: `name`, `galaxy_x/y/z` (position in galaxy view),
   `color_r/g/b` (rendering tint), `notes`.
 - Referenced by: `sectors.system_id`.
-- Editor: Sector Editor (`tools/sector-editor-avalonia/`).
+- Editor: Sector Editor (`tools/sector-editor/`).
 
 ### `sectors`
 
@@ -242,7 +242,7 @@ and per-mob shield/damage/range modifiers.
   `faction_id`, `base_asset_id`, `altruism`, `aggressiveness`, `ai`,
   `h/s/v/scale`, `skill0..skill9`, `skillchance`, `skillcooldown`,
   `shield_modifier`, `damage_modifier`, `range_modifier`.
-- Editor: Mob Editor (`tools/mob-editor-avalonia/`).
+- Editor: Mob Editor (`tools/mob-editor/`).
 
 ### `mob_items`
 
@@ -334,7 +334,7 @@ Template row for every item. Categories are referenced numerically into
   `price`, `man_cost*` (manufacture cost fields), pricing modifiers,
   `quality_mod`.
 - Referenced by: every `item_*` subtype table.
-- Editor: Item Editor (`tools/item-editor-avalonia/`).
+- Editor: Item Editor (`tools/item-editor/`).
 
 ### `item_categories`, `item_subcategories`, `item_type`
 
@@ -514,7 +514,7 @@ sound file.
   `next_link_id`, `base_asset_id` (FK to `assets.base_id` by
   convention), `sound_fx_file`.
 - Referenced by: `item_base.effect_id` (with explicit FK constraint).
-- Editor: Effect Editor (`tools/effect-editor-avalonia/`).
+- Editor: Effect Editor (`tools/effect-editor/`).
 
 ### `item_effect_base`
 
@@ -641,7 +641,7 @@ Faction definitions.
 - Referenced by: `manufacturers.faction_id`, `mob_base.faction_id`
   (implicit), `sector_objects_stargates.faction_id`,
   `starbase_npcs.faction_id`, `starbases.faction_id`.
-- Editor: Faction Editor (`tools/faction-editor-avalonia/`).
+- Editor: Faction Editor (`tools/faction-editor/`).
 
 ### `faction_matrix`
 
@@ -679,7 +679,7 @@ Starbase definitions.
   `welcome_message`, `target_sector_object`, `faction_id` (FK ->
   `factions.faction_id`), `starbase_sector_id`, `challenge_rating`.
 - Referenced by: `starbase_rooms.starbase_id`.
-- Editor: Station Tools (`tools/station-tools-avalonia/`) + Sector Editor for
+- Editor: Station Tools (`tools/station-tools/`) + Sector Editor for
   placement.
 
 ### `starbase_rooms`
@@ -778,7 +778,7 @@ Missions are stored as XML blobs.
 - cols: 6
 - Key columns: `mission_XML` (text), `mission_name`, `mission_key`,
   `mission_type`, `mission_minSecurityLevel`.
-- Editor: Mission Editor (`tools/missioneditor-avalonia/`).
+- Editor: Mission Editor (`tools/missioneditor/`).
 
 The mission XML structure includes branches, replies, and rewards;
 parsed by the Mission Editor and reauthored on save.
@@ -931,15 +931,15 @@ Guild flow: `guilds` -> `guild_ranks` -> `guild_members`.
 
 | Editor | Primary tables it edits |
 |---|---|
-| Sector Editor (`tools/sector-editor-avalonia/`) | `systems`, `sectors`, `sector_objects` and all `sector_objects_*` subtype tables, `sector_nav_points`, `sector_allocation`, `base_ore_list` |
-| Mob Editor (`tools/mob-editor-avalonia/`) | `mob_base`, `mob_items`, `mob_spawn_group`, plus references to `sector_objects_mob` |
-| Item Editor (`tools/item-editor-avalonia/`) | `item_base`, all `item_*` subtype tables (`item_ammo`, `item_beam`, `item_engine`, `item_shield`, `item_reactor`, `item_device`, `item_missile`, `item_projectile`, `item_manufacture`, `item_other_req`, `item_refine`, `item_effects`) |
-| Effect Editor (`tools/effect-editor-avalonia/`) | `effects`, `item_effect_base`, `item_effect_container`, `item_effect_stats`, `buffs` |
-| Faction Editor (`tools/faction-editor-avalonia/`) | `factions`, `faction_matrix`, `manufacturers` |
-| Station Tools (`tools/station-tools-avalonia/`) | `starbases`, `starbase_rooms`, `starbase_npcs`, `starbase_npc_avatar_templates`, `starbase_terminals`, `starbase_vendors`, `starbase_vender_groups`, `starbase_vender_inventory` |
-| TalkTree Editor (`tools/talktreeeditor-avalonia/`) | NPC `talk_tree_handle` XML, stored inside `starbase_npcs.talk_tree_handle` |
-| Mission Editor (`tools/missioneditor-avalonia/`) | `missions` |
-| Data Import (`tools/dataimport-avalonia/`) | Bulk seed loads -- `assets`, `skills`, `skill_levels`, `skill_abilities`, ammunition/category lookups |
+| Sector Editor (`tools/sector-editor/`) | `systems`, `sectors`, `sector_objects` and all `sector_objects_*` subtype tables, `sector_nav_points`, `sector_allocation`, `base_ore_list` |
+| Mob Editor (`tools/mob-editor/`) | `mob_base`, `mob_items`, `mob_spawn_group`, plus references to `sector_objects_mob` |
+| Item Editor (`tools/item-editor/`) | `item_base`, all `item_*` subtype tables (`item_ammo`, `item_beam`, `item_engine`, `item_shield`, `item_reactor`, `item_device`, `item_missile`, `item_projectile`, `item_manufacture`, `item_other_req`, `item_refine`, `item_effects`) |
+| Effect Editor (`tools/effect-editor/`) | `effects`, `item_effect_base`, `item_effect_container`, `item_effect_stats`, `buffs` |
+| Faction Editor (`tools/faction-editor/`) | `factions`, `faction_matrix`, `manufacturers` |
+| Station Tools (`tools/station-tools/`) | `starbases`, `starbase_rooms`, `starbase_npcs`, `starbase_npc_avatar_templates`, `starbase_terminals`, `starbase_vendors`, `starbase_vender_groups`, `starbase_vender_inventory` |
+| TalkTree Editor (`tools/talktreeeditor/`) | NPC `talk_tree_handle` XML, stored inside `starbase_npcs.talk_tree_handle` |
+| Mission Editor (`tools/missioneditor/`) | `missions` |
+| Data Import (`tools/dataimport/`) | Bulk seed loads -- `assets`, `skills`, `skill_levels`, `skill_abilities`, ammunition/category lookups |
 | EnB Ini Parser (`tools/enb-ini-parser/`) | Imports `BaseAsset`, `effects`, `buffs`, `skill_abilities` from extracted client `.ini` files |
 
 ## Postgres schema notes

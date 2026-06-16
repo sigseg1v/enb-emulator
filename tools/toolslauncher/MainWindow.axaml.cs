@@ -1,0 +1,116 @@
+using System;
+using System.Collections.Generic;
+using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Interactivity;
+
+namespace ToolsLauncher
+{
+    // Avalonia port of tools/toolslauncher/GUI/ToolsLauncher.cs. The
+    // original was a 250×345 launch-pad with 6 large editor buttons + a
+    // Launch Net7 button + a Check For Updates button + tray icon + FTP
+    // menu + IRC messenger menu.
+    //
+    // What this port drops vs. the original:
+    //
+    //  - **IRC messenger** (IRCMessenger.cs / PrivateMessage.cs /
+    //    Login.cs / Meebey.SmartIrc4Net) — pointed at
+    //    eservices.dyndns.org:6667 channel #test. dyndns.org's free
+    //    service shut down in 2014; the channel name "#test" is a smell
+    //    that this was a placeholder. Dead.
+    //
+    //  - **FTP browser** (FtpWindow.cs using System.Windows.Forms.Web
+    //    Browser) — hardcoded credentials for net-7.org FTP, which is
+    //    dead. Avalonia has no WebBrowser control anyway.
+    //
+    //  - **Updater** (Updateing/Updater.cs + FormUpdate.cs +
+    //    ExeUpdater.exe resource) — pointed at toolspatch.net-7.org,
+    //    which is the sibling of the dead patch.net-7.org we already
+    //    dropped from LaunchFreya (Tier 5). Same vintage,
+    //    same fate.
+    //
+    //  - **System tray icon** — Avalonia has TrayIcon support but it
+    //    requires a libnotify-style daemon on Linux and is finicky in
+    //    headless mode (smoke would have to special-case it). Skipped
+    //    for the first port; can be added by setting `TrayIcon.Icons`
+    //    in App.OnFrameworkInitializationCompleted.
+    //
+    // What this port adds:
+    //
+    //  - Editor buttons spawn the Avalonia sibling projects via
+    //    `dotnet run --project ../<name>/` (EditorLauncher.cs)
+    //    instead of launching Windows .exe files in the working dir.
+    //  - Settings persisted as JSON in
+    //    %APPDATA%/FreyaTools/toolslauncher.json instead of
+    //    the WinForms user.config file.
+    public partial class MainWindow : Window
+    {
+        readonly Settings _settings = Settings.Load();
+
+        // (display name, avalonia project name, "(not yet ported)" stub).
+        // Phase AC.5 (2026-06-03): item-editor flipped to Ported=true -- the
+        // last editor is now ported onto the fixed Npgsql/net7 base.
+        readonly List<(string Label, string Project, bool Ported)> _editors = new()
+        {
+            ("Effect Editor",   "effect-editor",       true),
+            ("Faction Editor",  "faction-editor",      true),
+            ("Item Editor",     "item-editor",         true),
+            ("Mission Editor",  "missioneditor",       true),
+            ("Mob Editor",      "mob-editor",          true),
+            ("Sector Editor",   "sector-editor",       true),
+            ("Station Tools",   "station-tools",       true),
+            ("Talk Tree",       "talktreeeditor",      true),
+        };
+
+        public MainWindow()
+        {
+            InitializeComponent();
+
+            foreach (var (label, project, ported) in _editors)
+            {
+                var btn = new Button
+                {
+                    Content             = ported ? label : label + "  (not yet ported)",
+                    Tag                 = project,
+                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch,
+                    IsEnabled           = ported,
+                };
+                btn.Click += OnEditorButton;
+                c_EditorStack.Children.Add(btn);
+            }
+        }
+
+        void OnEditorButton(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button btn || btn.Tag is not string project) return;
+            var (ok, detail) = EditorLauncher.Launch(project, _settings);
+            c_Status.Text = ok ? $"started {project}" : $"failed: {detail}";
+        }
+
+        void OnLaunchNet7(object sender, RoutedEventArgs e)
+        {
+            var (ok, detail) = EditorLauncher.LaunchNet7(_settings);
+            c_Status.Text = ok ? $"started launchnet7 ({detail})" : $"failed: {detail}";
+        }
+
+        void OnLaunchNet7Cli(object sender, RoutedEventArgs e)
+        {
+            var (ok, detail) = EditorLauncher.LaunchNet7Cli(_settings);
+            c_Status.Text = ok ? $"started CLI ({detail})" : $"failed: {detail}";
+        }
+
+        async void OnSettings(object sender, RoutedEventArgs e)
+        {
+            var dlg = new SettingsWindow(_settings);
+            await dlg.ShowDialog(this);
+        }
+
+        void OnQuit(object sender, RoutedEventArgs e)
+        {
+            if (Avalonia.Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+                desktop.Shutdown();
+            else
+                Close();
+        }
+    }
+}

@@ -84,7 +84,7 @@ type, only DB rows.
 
 ### Tool
 
-Use **MobEditor** -- `tools/mob-editor-avalonia/`
+Use **MobEditor** -- `tools/mob-editor/`
 (launch via `just launch-mob-editor`). Fills out the rows above through a UI.
 The `mob_base.ai` column holds an AI script reference;
 `skill0..skill9` reference `PlayerSkills.h` ability IDs.
@@ -118,7 +118,7 @@ Also data-driven. Two layers: define the sector, populate it.
 
 ### Tool
 
-**SectorEditor** -- `tools/sector-editor-avalonia/`
+**SectorEditor** -- `tools/sector-editor/`
 (launch via `just launch-sector-editor`). Does the visual layout and
 writes all of the above. Hand-editing the SQL is possible but tedious --
 coords matter and the editor at least gives you a visual sanity check.
@@ -143,7 +143,7 @@ startup. Per-sector reload at runtime via the GM
 ## Other extensions
 
 - **New C# tool** -- see `docs/07-tools-toolchain.md` and
-  `tools/README.md`. Drop into `tools/<kebab-name>-avalonia/`
+  `tools/README.md`. Drop into `tools/<kebab-name>/`
   with an SDK-style csproj targeting `net10.0` + Avalonia 11;
   add a `just launch-<name>` recipe to the root `justfile`.
 - **New cross-process header** -- `common/include/net7/` (opcodes,

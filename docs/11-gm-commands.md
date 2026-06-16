@@ -110,7 +110,7 @@ the syntax pattern. Replace angle-bracketed names with concrete values.
 - `//adduser` is the same command referenced in
   `09-running-locally.md` for creating a dev account.
 - Item IDs for `/createitem` correspond to `item_base.id`. The Item
-  Editor (`tools/item-editor-avalonia/`) is the easiest way to look
+  Editor (`tools/item-editor/`) is the easiest way to look
   them up.
 - This document covers the commands present in
   `reference/gm-commands-original.txt`. Additional commands exist in the

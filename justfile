@@ -278,12 +278,12 @@ stop-docker-proxy:
 # exported ENB_DB_* vars (localhost:5434 / net7 / net7 -- the dev stack;
 # `just init` first), so you just click Login: no typing. Phase N moved
 # the content DB to Postgres `net7` (was MySQL on 3307). Tools that don't
-# talk to the DB (toolslauncher-avalonia, LaunchFreya, enbpatcher-avalonia,
-# toolspatcher-avalonia, w3d-parser, talktreeeditor-avalonia) skip the login dialog.
+# talk to the DB (toolslauncher, LaunchFreya, enbpatcher,
+# toolspatcher, w3d-parser, talktreeeditor) skip the login dialog.
 
 # Central launcher GUI — button per editor; spawns Avalonia projects.
 launch:
-    dotnet run --project tools/toolslauncher-avalonia
+    dotnet run --project tools/toolslauncher
 
 # Game client launcher (Freya).
 launch-net7:
@@ -291,15 +291,15 @@ launch-net7:
 
 # Effect / particle / stat editor (DB).
 launch-effect-editor:
-    dotnet run --project tools/effect-editor-avalonia
+    dotnet run --project tools/effect-editor
 
 # NPC faction relationships editor (DB).
 launch-faction-editor:
-    dotnet run --project tools/faction-editor-avalonia
+    dotnet run --project tools/faction-editor
 
 # item_base data editor (DB).
 launch-item-editor:
-    dotnet run --project tools/item-editor-avalonia
+    dotnet run --project tools/item-editor
 
 # Headless GUI end-to-end smoke for the item editor: launches MainWindow under
 # Avalonia's headless platform, selects a row, edits the detail panel, clicks
@@ -307,39 +307,39 @@ launch-item-editor:
 # Regression guard for the parameter-binding write-path fix. Needs the stack up
 # (`just dev`); skips cleanly if net7 is unreachable.
 verify-item-editor:
-    dotnet run --project tools/item-editor-avalonia/test
+    dotnet run --project tools/item-editor/test
 
 # Mission / quest authoring (DB).
 launch-mission-editor:
-    dotnet run --project tools/missioneditor-avalonia
+    dotnet run --project tools/missioneditor
 
 # Mob (NPC) data editor (DB).
 launch-mob-editor:
-    dotnet run --project tools/mob-editor-avalonia
+    dotnet run --project tools/mob-editor
 
 # Sector / map authoring (DB, Piccolo-on-Avalonia canvas).
 launch-sector-editor:
-    dotnet run --project tools/sector-editor-avalonia
+    dotnet run --project tools/sector-editor
 
 # Station / vendor / NPC editor (DB).
 launch-station-tools:
-    dotnet run --project tools/station-tools-avalonia
+    dotnet run --project tools/station-tools
 
 # NPC dialog tree editor (XML in/out, no DB).
 launch-talktree-editor:
-    dotnet run --project tools/talktreeeditor-avalonia
+    dotnet run --project tools/talktreeeditor
 
 # Bulk import of game data into the DB.
 launch-dataimport:
-    dotnet run --project tools/dataimport-avalonia
+    dotnet run --project tools/dataimport
 
 # Client patcher.
 launch-enbpatcher:
-    dotnet run --project tools/enbpatcher-avalonia
+    dotnet run --project tools/enbpatcher
 
 # Patches the tools themselves.
 launch-toolspatcher:
-    dotnet run --project tools/toolspatcher-avalonia
+    dotnet run --project tools/toolspatcher
 
 # Build the gtest harness (Phase G).
 build-tests:

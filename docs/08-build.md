@@ -110,7 +110,7 @@ dotnet build tools/FreyaTools.slnx
 Run the central Avalonia launcher (recommended entry point):
 
 ```sh
-just launch                   # tools/toolslauncher-avalonia
+just launch                   # tools/toolslauncher
 ```
 
 Or jump directly to an editor -- every Avalonia port has a `just launch-*`
@@ -141,9 +141,9 @@ download from `https://dotnet.microsoft.com/download/dotnet/10.0`.
 
 ### Runtime
 
-The Avalonia editors (`tools/<name>-avalonia/`) run on Linux, macOS, and
+The Avalonia editors (`tools/<name>/`) run on Linux, macOS, and
 Windows with only the .NET 10 runtime installed. Every user-facing editor,
-including the Item Editor (`tools/item-editor-avalonia/`), is an Avalonia
+including the Item Editor (`tools/item-editor/`), is an Avalonia
 build. The original WinForms projects have been removed.
 
 ## Linux client (game client, not server)

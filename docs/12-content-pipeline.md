@@ -10,7 +10,7 @@ the running server.
 | C# editor      | -------->  |  Postgres  | --------------> | C++ server   |
 | (Avalonia,     |           |  (net7     |   (per-Manager  | (managers in |
 |  tools/*       |           |   content  |    Load* call)  |  global mem) |
-|  -avalonia)    |           |   DB)      |                 |              |
+|  )    |           |   DB)      |                 |              |
 +----------------+           +------------+                 +--------------+
 ```
 
@@ -28,21 +28,21 @@ have been removed.
 
 | Editor | Avalonia path | Primary tables |
 |---|---|---|
-| Sector | `tools/sector-editor-avalonia/` | `sectors`, `systems`, `sector_objects`, `factions` |
-| Mob | `tools/mob-editor-avalonia/` | `mob_base`, `mob_items`, `mob_type`, `mob_spawn_group` |
-| Item | `tools/item-editor-avalonia/` | `item_base` (+ category sub-tables) |
-| Mission | `tools/missioneditor-avalonia/` | `missions` (mission XML lives in a column) |
-| Faction | `tools/faction-editor-avalonia/` | `factions`, `faction_matrix` |
-| Effect | `tools/effect-editor-avalonia/` | `item_effect_base`, `item_effects`, `item_effect_stats`, `item_effect_container`, `buffs` |
-| TalkTree | `tools/talktreeeditor-avalonia/` | mission dialogue trees (XML-based; minimal direct SQL) |
-| Station | `tools/station-tools-avalonia/` | `starbases`, `starbase_vender_groups`, `starbase_vender_inventory`, `sector_objects_starbases` |
+| Sector | `tools/sector-editor/` | `sectors`, `systems`, `sector_objects`, `factions` |
+| Mob | `tools/mob-editor/` | `mob_base`, `mob_items`, `mob_type`, `mob_spawn_group` |
+| Item | `tools/item-editor/` | `item_base` (+ category sub-tables) |
+| Mission | `tools/missioneditor/` | `missions` (mission XML lives in a column) |
+| Faction | `tools/faction-editor/` | `factions`, `faction_matrix` |
+| Effect | `tools/effect-editor/` | `item_effect_base`, `item_effects`, `item_effect_stats`, `item_effect_container`, `buffs` |
+| TalkTree | `tools/talktreeeditor/` | mission dialogue trees (XML-based; minimal direct SQL) |
+| Station | `tools/station-tools/` | `starbases`, `starbase_vender_groups`, `starbase_vender_inventory`, `sector_objects_starbases` |
 
 Per-table source of truth is the live `net7` schema
 (`db/postgres/schema.sql`; the historical `db/mysql/net7.sql` dump is
 where it was converted from). Editor table refs for reference:
-`tools/sector-editor-avalonia/Sql/SectorsSql.cs`,
-`tools/mob-editor-avalonia/Sql/MobsSQL.cs`,
-`tools/item-editor-avalonia/Database/TableIO.cs`.
+`tools/sector-editor/Sql/SectorsSql.cs`,
+`tools/mob-editor/Sql/MobsSQL.cs`,
+`tools/item-editor/Database/TableIO.cs`.
 
 ## 2. Schema, by content type
 
