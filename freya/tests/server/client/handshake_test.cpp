@@ -29,14 +29,15 @@ std::filesystem::path CaptureFile(const char* name) {
 
 const enbtest::Packet& FindPacket(const std::vector<enbtest::Packet>& packets, int sequence) {
     for (const auto& p : packets) {
-        if (p.sequence == sequence) return p;
+        if (p.sequence == sequence)
+            return p;
     }
     ADD_FAILURE() << "packet #" << sequence << " not found";
     static enbtest::Packet empty;
     return empty;
 }
 
-}  // namespace
+} // namespace
 
 // ---------------------------------------------------------------------------
 // Capture parser
@@ -53,7 +54,7 @@ TEST(CaptureParser, ExtractsHandshakeFromCanonicalCapture) {
     EXPECT_EQ(syn1.direction, enbtest::Direction::kClientToServer);
     EXPECT_EQ(syn1.peer_port, 3801);
     ASSERT_EQ(syn1.bytes.size(), 4u);
-    EXPECT_EQ(syn1.bytes[0], 0x00);  // SYN1 opcode
+    EXPECT_EQ(syn1.bytes[0], 0x00); // SYN1 opcode
     EXPECT_EQ(syn1.bytes[1], 0x14);
     EXPECT_EQ(syn1.bytes[2], 0x25);
     EXPECT_EQ(syn1.bytes[3], 0x46);
@@ -62,17 +63,17 @@ TEST(CaptureParser, ExtractsHandshakeFromCanonicalCapture) {
     EXPECT_EQ(ack1.declared_length, 86);
     EXPECT_EQ(ack1.direction, enbtest::Direction::kServerToClient);
     ASSERT_EQ(ack1.bytes.size(), 86u);
-    EXPECT_EQ(ack1.bytes[0], 0x01);  // ACK1 opcode
+    EXPECT_EQ(ack1.bytes[0], 0x01); // ACK1 opcode
 
     const auto& syn2 = FindPacket(packets, 218);
     EXPECT_EQ(syn2.declared_length, 84);
     ASSERT_EQ(syn2.bytes.size(), 84u);
-    EXPECT_EQ(syn2.bytes[0], 0x02);  // SYN2 opcode
+    EXPECT_EQ(syn2.bytes[0], 0x02); // SYN2 opcode
 
     const auto& ack2 = FindPacket(packets, 219);
     EXPECT_EQ(ack2.declared_length, 12);
     ASSERT_EQ(ack2.bytes.size(), 12u);
-    EXPECT_EQ(ack2.bytes[0], 0x03);  // ACK2 opcode
+    EXPECT_EQ(ack2.bytes[0], 0x03); // ACK2 opcode
 }
 
 // ---------------------------------------------------------------------------
@@ -107,8 +108,7 @@ TEST(WestwoodRsa, ModulusMatchesCapturedAck1) {
     rsa.GetModulusBytes(modulus);
 
     for (int i = 0; i < westwood::kRsaBlockSize; ++i) {
-        EXPECT_EQ(modulus[i], ack1.bytes[17 + i])
-            << "modulus byte " << i << " mismatch";
+        EXPECT_EQ(modulus[i], ack1.bytes[17 + i]) << "modulus byte " << i << " mismatch";
     }
 
     EXPECT_EQ(ack1.bytes[81], 0x00);
@@ -116,7 +116,7 @@ TEST(WestwoodRsa, ModulusMatchesCapturedAck1) {
     EXPECT_EQ(ack1.bytes[83], 0x00);
     EXPECT_EQ(ack1.bytes[84], 0x01);
     EXPECT_EQ(ack1.bytes[85], rsa.GetPublicExponentByte());
-    EXPECT_EQ(ack1.bytes[85], 0x23);  // 35 decimal
+    EXPECT_EQ(ack1.bytes[85], 0x23); // 35 decimal
 }
 
 TEST(WestwoodRsa, EncryptDecryptRoundTrip) {
@@ -191,8 +191,7 @@ TEST(WestwoodRc4, IsItsOwnInverse) {
     const unsigned char key[8] = {
         0x26, 0x52, 0x9D, 0x2B, 0x54, 0x30, 0xB9, 0x00,
     };
-    const unsigned char plaintext[] =
-        "the quick brown fox jumps over the lazy dog";
+    const unsigned char plaintext[] = "the quick brown fox jumps over the lazy dog";
     const long len = static_cast<long>(sizeof(plaintext) - 1);
 
     unsigned char buf[sizeof(plaintext) - 1];
@@ -203,15 +202,13 @@ TEST(WestwoodRc4, IsItsOwnInverse) {
         enc.PrepareKey(key, sizeof(key));
         enc.Crypt(buf, len);
     }
-    EXPECT_NE(std::memcmp(buf, plaintext, len), 0)
-        << "ciphertext should differ from plaintext";
+    EXPECT_NE(std::memcmp(buf, plaintext, len), 0) << "ciphertext should differ from plaintext";
     {
         westwood::Rc4 dec;
         dec.PrepareKey(key, sizeof(key));
         dec.Crypt(buf, len);
     }
-    EXPECT_EQ(std::memcmp(buf, plaintext, len), 0)
-        << "round-trip RC4 should restore plaintext";
+    EXPECT_EQ(std::memcmp(buf, plaintext, len), 0) << "round-trip RC4 should restore plaintext";
 }
 
 TEST(WestwoodRc4, MatchesRfc6229TestVector) {

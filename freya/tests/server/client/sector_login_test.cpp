@@ -44,8 +44,7 @@ TEST(SectorLogin, LiveLoginOpcodeAccepted) {
     enbtest::HandshakeResult result;
     std::string err;
     ASSERT_TRUE(enbtest::RunNet7Handshake(client, rsa,
-                                          /*rng_seed=*/0xABCD1234CAFEBABEull,
-                                          result, &err))
+                                          /*rng_seed=*/0xABCD1234CAFEBABEull, result, &err))
         << err;
 
     westwood::Rc4 tx;

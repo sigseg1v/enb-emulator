@@ -17,8 +17,10 @@ bool IsHexChar(char c) {
 }
 
 int HexNibble(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return 10 + (c - 'a');
     return 10 + (c - 'A');
 }
 
@@ -29,20 +31,25 @@ std::vector<unsigned char> ExtractHexBytes(const std::string& line) {
     std::vector<unsigned char> out;
     size_t i = 0;
     while (i < line.size()) {
-        while (i < line.size() && std::isspace(static_cast<unsigned char>(line[i]))) ++i;
-        if (i + 1 >= line.size()) break;
-        if (!IsHexChar(line[i]) || !IsHexChar(line[i + 1])) break;
+        while (i < line.size() && std::isspace(static_cast<unsigned char>(line[i])))
+            ++i;
+        if (i + 1 >= line.size())
+            break;
+        if (!IsHexChar(line[i]) || !IsHexChar(line[i + 1]))
+            break;
         // Next character after the pair must be whitespace or end-of-line,
         // otherwise it's actually the start of a longer word like "RC4".
-        if (i + 2 < line.size() && !std::isspace(static_cast<unsigned char>(line[i + 2]))) break;
-        unsigned char byte = static_cast<unsigned char>((HexNibble(line[i]) << 4) | HexNibble(line[i + 1]));
+        if (i + 2 < line.size() && !std::isspace(static_cast<unsigned char>(line[i + 2])))
+            break;
+        unsigned char byte =
+            static_cast<unsigned char>((HexNibble(line[i]) << 4) | HexNibble(line[i + 1]));
         out.push_back(byte);
         i += 2;
     }
     return out;
 }
 
-}  // namespace
+} // namespace
 
 std::vector<Packet> ParseCapture(const std::string& text) {
     // Header regex tolerates variable whitespace.
@@ -67,16 +74,16 @@ std::vector<Packet> ParseCapture(const std::string& text) {
 
     while (std::getline(in, line)) {
         // Strip trailing CR (capture files have mixed line endings).
-        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
 
         std::smatch m;
         if (std::regex_match(line, m, header_re)) {
             flush();
             current.sequence = std::stoi(m[1]);
             current.declared_length = std::stoi(m[2]);
-            current.direction = (m[3] == "Client->Server")
-                                    ? Direction::kClientToServer
-                                    : Direction::kServerToClient;
+            current.direction = (m[3] == "Client->Server") ? Direction::kClientToServer
+                                                           : Direction::kServerToClient;
             current.peer_ip = m[4];
             current.peer_port = static_cast<uint16_t>(std::stoi(m[5]));
             in_packet = true;
@@ -84,8 +91,10 @@ std::vector<Packet> ParseCapture(const std::string& text) {
         }
 
         // Skip dashed separators and section markers.
-        if (line.find("---") != std::string::npos) continue;
-        if (!in_packet) continue;
+        if (line.find("---") != std::string::npos)
+            continue;
+        if (!in_packet)
+            continue;
 
         auto bytes = ExtractHexBytes(line);
         if (!bytes.empty()) {
@@ -99,7 +108,8 @@ std::vector<Packet> ParseCapture(const std::string& text) {
             if (current.declared_length <= 0) {
                 room = bytes.size();
             }
-            if (room < bytes.size()) bytes.resize(room);
+            if (room < bytes.size())
+                bytes.resize(room);
             if (!bytes.empty()) {
                 current.bytes.insert(current.bytes.end(), bytes.begin(), bytes.end());
             }
@@ -111,10 +121,11 @@ std::vector<Packet> ParseCapture(const std::string& text) {
 
 std::vector<Packet> ParseCaptureFile(const std::string& path) {
     std::ifstream f(path);
-    if (!f) throw std::runtime_error("ParseCaptureFile: cannot open " + path);
+    if (!f)
+        throw std::runtime_error("ParseCaptureFile: cannot open " + path);
     std::ostringstream buf;
     buf << f.rdbuf();
     return ParseCapture(buf.str());
 }
 
-}  // namespace enbtest
+} // namespace enbtest

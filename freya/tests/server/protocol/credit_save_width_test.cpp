@@ -25,13 +25,11 @@
 namespace {
 
 // Mirror of the SaveManager::HandleCreditChange read.
-uint64_t ReadCreditsLikeConsumer(const unsigned char *data)
-{
-    return *((const uint64_t *) &data[0]);
+uint64_t ReadCreditsLikeConsumer(const unsigned char* data) {
+    return *((const uint64_t*)&data[0]);
 }
 
-TEST(CreditSaveWidth, AddData64WritesEightLittleEndianBytesAndAdvancesEight)
-{
+TEST(CreditSaveWidth, AddData64WritesEightLittleEndianBytesAndAdvancesEight) {
     unsigned char data[32];
     std::memset(data, 0xAA, sizeof(data)); // poison: catch any unwritten byte
     int index = 0;
@@ -51,8 +49,7 @@ TEST(CreditSaveWidth, AddData64WritesEightLittleEndianBytesAndAdvancesEight)
     EXPECT_EQ(data[7], 0x11);
 }
 
-TEST(CreditSaveWidth, ProducerConsumerRoundTripsHighDword)
-{
+TEST(CreditSaveWidth, ProducerConsumerRoundTripsHighDword) {
     // ~270 billion: the exact symptom magnitude the player reported. The high
     // dword (0x3E) MUST survive, which only the 8-byte path guarantees.
     const uint64_t credits = 270000000000ULL; // 0x0000003EE0AA1700
@@ -61,15 +58,14 @@ TEST(CreditSaveWidth, ProducerConsumerRoundTripsHighDword)
     std::memset(data, 0xAA, sizeof(data));
     int index = 0;
 
-    AddData64(data, credits, index); // producer (SaveCreditLevel)
+    AddData64(data, credits, index);                    // producer (SaveCreditLevel)
     const uint64_t got = ReadCreditsLikeConsumer(data); // consumer
 
     EXPECT_EQ(got, credits);
     EXPECT_EQ(index, 8);
 }
 
-TEST(CreditSaveWidth, OldFourByteUnsignedLongPathLosesHighDword)
-{
+TEST(CreditSaveWidth, OldFourByteUnsignedLongPathLosesHighDword) {
     // Documents the bug: the AddData<unsigned long> specialization writes only
     // 4 bytes, so an 8-byte read sees uninitialized poison in the high dword.
     unsigned char data[32];

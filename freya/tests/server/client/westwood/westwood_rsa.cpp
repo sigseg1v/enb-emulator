@@ -14,12 +14,18 @@
 namespace westwood {
 
 namespace {
-constexpr const char* kP = "90336306034988608177990369937674942312598126945629080039358980696516831956279";
-constexpr const char* kQ = "114965715011442463284112195027084055446504070890856867618584335022146211064213";
-constexpr const char* kN = "10385578014804950221065190195736491193847541479389728420426514083771326945639729736695791225573893793119489336012297845146104637691941242485732839277543427";
-constexpr const char* kD = "10088847214381951643320470475858305731166183151407164751271470824235003318621252307969752086088076499395823874814123350292603347408732347765156628342107995";
+constexpr const char* kP =
+    "90336306034988608177990369937674942312598126945629080039358980696516831956279";
+constexpr const char* kQ =
+    "114965715011442463284112195027084055446504070890856867618584335022146211064213";
+constexpr const char* kN =
+    "1038557801480495022106519019573649119384754147938972842042651408377132694563972973669579122557"
+    "3893793119489336012297845146104637691941242485732839277543427";
+constexpr const char* kD =
+    "1008884721438195164332047047585830573116618315140716475127147082423500331862125230796975208608"
+    "8076499395823874814123350292603347408732347765156628342107995";
 constexpr const char* kE = "35";
-}  // namespace
+} // namespace
 
 Rsa::Rsa() {
     p_ = BN_new();
@@ -47,7 +53,8 @@ Rsa::~Rsa() {
 void Rsa::GetModulusBytes(unsigned char out[kRsaBlockSize]) const {
     std::memset(out, 0, kRsaBlockSize);
     int n = BN_num_bytes(N_);
-    if (n > kRsaBlockSize) n = kRsaBlockSize;
+    if (n > kRsaBlockSize)
+        n = kRsaBlockSize;
     BN_bn2bin(N_, out + (kRsaBlockSize - n));
 }
 
@@ -61,7 +68,8 @@ unsigned char Rsa::GetPublicExponentByte() const {
 
 bool Rsa::EncryptBlock(const unsigned char* in, unsigned int length,
                        unsigned char out[kRsaBlockSize]) const {
-    if (!in || length == 0 || length > kRsaBlockSize) return false;
+    if (!in || length == 0 || length > kRsaBlockSize)
+        return false;
 
     unsigned char buf[kRsaBlockSize];
     std::memset(buf, 0, kRsaBlockSize);
@@ -74,7 +82,8 @@ bool Rsa::EncryptBlock(const unsigned char* in, unsigned int length,
 
     std::memset(out, 0, kRsaBlockSize);
     int n = BN_num_bytes(C);
-    if (n > kRsaBlockSize) n = kRsaBlockSize;
+    if (n > kRsaBlockSize)
+        n = kRsaBlockSize;
     BN_bn2bin(C, out + (kRsaBlockSize - n));
 
     BN_free(M);
@@ -103,4 +112,4 @@ bool Rsa::DecryptBlock(const unsigned char in[kRsaBlockSize],
     return true;
 }
 
-}  // namespace westwood
+} // namespace westwood

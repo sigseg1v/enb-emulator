@@ -7,12 +7,13 @@
 #include <cstdarg>
 #include <cstdio>
 
-void LogMessage(const char * /*fmt*/, ...) {
+void LogMessage(const char* /*fmt*/, ...) {
     // Test harness: swallow.
 }
 
-void LogSQLMsg(char *fmt, ...) {
-    if (!fmt) return;
+void LogSQLMsg(char* fmt, ...) {
+    if (!fmt)
+        return;
     va_list ap;
     va_start(ap, fmt);
     std::vprintf(fmt, ap);

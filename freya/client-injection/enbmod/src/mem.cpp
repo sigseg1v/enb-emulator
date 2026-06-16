@@ -1,6 +1,7 @@
 #include "mem.h"
 
-namespace enb { namespace mem {
+namespace enb {
+namespace mem {
 
 thread_local void* g_guard_jmp[16];
 thread_local volatile int g_guard_on = 0;
@@ -17,9 +18,11 @@ static LONG CALLBACK guard_veh(EXCEPTION_POINTERS* ep) {
 
 void install_guard() {
     static bool done = false;
-    if (done) return;
+    if (done)
+        return;
     done = true;
     AddVectoredExceptionHandler(1 /*first*/, guard_veh);
 }
 
-}} // namespace enb::mem
+} // namespace mem
+} // namespace enb

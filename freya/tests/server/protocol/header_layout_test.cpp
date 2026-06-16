@@ -31,7 +31,7 @@ TEST(WireFormat, EnbTcpHeaderFieldOrder) {
     h.size = 0x0102;
     h.opcode = 0x0304;
 
-    const uint8_t *raw = reinterpret_cast<const uint8_t *>(&h);
+    const uint8_t* raw = reinterpret_cast<const uint8_t*>(&h);
     // On a little-endian host the bytes go [0x02, 0x01, 0x04, 0x03].
     EXPECT_EQ(raw[0], 0x02);
     EXPECT_EQ(raw[1], 0x01);

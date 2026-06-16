@@ -34,8 +34,12 @@ public:
     int RecvSome(void* buffer, int length, int timeout_ms = 5000);
 
     void Close();
-    bool IsOpen() const { return fd_ >= 0; }
-    const std::string& last_error() const { return last_error_; }
+    bool IsOpen() const {
+        return fd_ >= 0;
+    }
+    const std::string& last_error() const {
+        return last_error_;
+    }
 
 private:
     bool SetRecvTimeout(int timeout_ms);
@@ -44,4 +48,4 @@ private:
     std::string last_error_;
 };
 
-}  // namespace enbtest
+} // namespace enbtest

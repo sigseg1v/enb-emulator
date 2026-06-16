@@ -28,14 +28,14 @@
 namespace {
 
 constexpr int kWireHeaderSize = 4;
-constexpr uint16_t kOpcodeVersionRequest  = 0x0000;
+constexpr uint16_t kOpcodeVersionRequest = 0x0000;
 constexpr uint16_t kOpcodeVersionResponse = 0x0001;
 
 // VersionRequest is two big-endian longs (Major, Minor). The Linux handler
 // reads them via ntohl, so we send 42/0 in network byte order to get status=0.
 constexpr int kVersionPayloadSize = 8;
 
-}  // namespace
+} // namespace
 
 TEST(VersionRequest, LiveVersionRequestReturnsStatusOK) {
     const char* host = std::getenv("NET7_TEST_PROXY_HOST");
@@ -52,8 +52,7 @@ TEST(VersionRequest, LiveVersionRequestReturnsStatusOK) {
     enbtest::HandshakeResult result;
     std::string err;
     ASSERT_TRUE(enbtest::RunNet7Handshake(client, rsa,
-                                          /*rng_seed=*/0xABCD1234CAFEBABEull,
-                                          result, &err))
+                                          /*rng_seed=*/0xABCD1234CAFEBABEull, result, &err))
         << err;
 
     westwood::Rc4 tx;
@@ -100,7 +99,6 @@ TEST(VersionRequest, LiveVersionRequestReturnsStatusOK) {
     // we sent was accepted as current.
     int32_t status;
     std::memcpy(&status, &rsp_payload[0], 4);
-    EXPECT_EQ(status, 0)
-        << "VersionRequest 42.0 should have returned status=0 (OK); got " << status
-        << ", payload_len=" << payload_len;
+    EXPECT_EQ(status, 0) << "VersionRequest 42.0 should have returned status=0 (OK); got " << status
+                         << ", payload_len=" << payload_len;
 }

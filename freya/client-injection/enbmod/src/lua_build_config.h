@@ -29,8 +29,11 @@
 #define ENBMOD_LUA_BUILD_CONFIG_H
 
 typedef void* enbmod_lua_jmpbuf[5];
-#define luai_jmpbuf      enbmod_lua_jmpbuf
-#define LUAI_THROW(L,c)  __builtin_longjmp((c)->b, 1)
-#define LUAI_TRY(L,c,a)  if (__builtin_setjmp((c)->b) == 0) { a }
+#define luai_jmpbuf enbmod_lua_jmpbuf
+#define LUAI_THROW(L, c) __builtin_longjmp((c)->b, 1)
+#define LUAI_TRY(L, c, a)                                                                          \
+    if (__builtin_setjmp((c)->b) == 0) {                                                           \
+        a                                                                                          \
+    }
 
 #endif // ENBMOD_LUA_BUILD_CONFIG_H

@@ -13,13 +13,14 @@
 
 #include <cstdint>
 
-namespace enb { namespace actions {
+namespace enb {
+namespace actions {
 
 // ---- input synthesis ----
-void* game_hwnd();                       // best-effort top-level window of this process (HWND)
-bool  post_key(int vk, bool down);       // PostMessage WM_KEYDOWN/UP to the game window
-bool  tap_key(int vk);                   // down + up
-bool  post_char(unsigned codepoint);     // WM_CHAR (for chat input, etc.)
+void* game_hwnd();                  // best-effort top-level window of this process (HWND)
+bool post_key(int vk, bool down);   // PostMessage WM_KEYDOWN/UP to the game window
+bool tap_key(int vk);               // down + up
+bool post_char(unsigned codepoint); // WM_CHAR (for chat input, etc.)
 
 // ---- generic member-function call ----
 // Calls fn as __thiscall: ECX = thisptr, args pushed right-to-left. Robust to cleanup-convention
@@ -28,4 +29,5 @@ uint32_t call_thiscall(uintptr_t fn, uintptr_t thisptr, const uint32_t* args, in
 // Same but no `this` (plain cdecl/stdcall free function).
 uint32_t call_cdecl(uintptr_t fn, const uint32_t* args, int argc);
 
-}} // namespace enb::actions
+} // namespace actions
+} // namespace enb

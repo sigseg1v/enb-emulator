@@ -11,7 +11,7 @@
 
 namespace westwood {
 
-inline constexpr int kRsaBlockSize = 64;  // bytes
+inline constexpr int kRsaBlockSize = 64; // bytes
 
 class Rsa {
 public:
@@ -46,4 +46,4 @@ private:
     BN_CTX* ctx_;
 };
 
-}  // namespace westwood
+} // namespace westwood

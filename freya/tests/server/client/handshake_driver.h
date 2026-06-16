@@ -59,8 +59,8 @@ struct HandshakeResult {
     uint16_t session_id = 0;
     uint16_t cord_port = 0;
     std::array<unsigned char, 8> rc4_key{};
-    westwood::Rc4 rx_cipher;  // decrypts subsequent server -> client traffic
-    westwood::Rc4 tx_cipher;  // encrypts subsequent client -> server traffic
+    westwood::Rc4 rx_cipher; // decrypts subsequent server -> client traffic
+    westwood::Rc4 tx_cipher; // encrypts subsequent client -> server traffic
 };
 
 // Performs the full 4-step Westwood-envelope handshake (matches the
@@ -70,9 +70,8 @@ struct HandshakeResult {
 //
 // Note: the Net-7 emulator does **not** speak this envelope on TCP 3801 —
 // see RunNet7Handshake() below for the live-server variant.
-bool RunClientHandshake(TcpClient& client, const westwood::Rsa& rsa,
-                        uint16_t session_id, uint64_t rng_seed,
-                        HandshakeResult& out, std::string* err = nullptr);
+bool RunClientHandshake(TcpClient& client, const westwood::Rsa& rsa, uint16_t session_id,
+                        uint64_t rng_seed, HandshakeResult& out, std::string* err = nullptr);
 
 // Performs the Net-7 raw RSA exchange as implemented in
 // server/src/Connection.cpp:150 (DoKeyExchange) and the corresponding
@@ -94,8 +93,7 @@ bool RunClientHandshake(TcpClient& client, const westwood::Rsa& rsa,
 //
 // After this, both sides have an RC4 session keyed identically and are
 // ready for the EnB TCP framed opcode stream.
-bool RunNet7Handshake(TcpClient& client, const westwood::Rsa& rsa,
-                      uint64_t rng_seed, HandshakeResult& out,
-                      std::string* err = nullptr);
+bool RunNet7Handshake(TcpClient& client, const westwood::Rsa& rsa, uint64_t rng_seed,
+                      HandshakeResult& out, std::string* err = nullptr);
 
-}  // namespace enbtest
+} // namespace enbtest
