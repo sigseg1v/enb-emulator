@@ -57,22 +57,48 @@ Lay down the config files and wire the analyzers. NO reformat yet; near-no-op.
 - [x] Verify: `dotnet build tools/FreyaTools.slnx` 0/0; cli-client builds;
       gofmt clean on net7go; no source reformat in this commit.
 
-### AT-2 — Apply formatters via CLI (one commit per language) [not started]
-- [ ] C#: `dotnet format tools/FreyaTools.slnx` (whitespace + style +
-      analyzers) then the cli-client solution. Build + smoke + unit tests green.
-- [ ] C++: `clang-format -i` over in-scope dirs (proxy, common, launcher,
-      client, freya C++, tools C++ EXCL vendored). Server gtest + proxy build
-      green; mojibake check clean.
-- [ ] TS/Vue/CSS: `npm run format` + `eslint --fix` in `freya/online/web`.
-      vitest green.
-- [ ] Go: `gofmt -w` + `goimports` over all modules; `go vet ./...`,
-      `go test ./...` green per module.
+### AT-2 — Apply formatters via CLI (one commit per language) [DONE 2026-06-16]
+- [x] C#: `dotnet format whitespace --folder` over tools/ + freya/cli-client +
+      freya/tests/integration + tools/capture-extract (353 files). 4-space, cast
+      spacing, final newlines, block reflow, 109 BOM strips, UTF-16->UTF-8.
+      StyleCop also wired into the 3 TWAE projects (suggestion-severity, build
+      stays green). Build 0/0; CliClient.UnitTests 830/830; LaunchFreya 92/92;
+      mojibake CLEAN. Commit 03e57b2e.
+      **ENV NOTE:** the semantic `dotnet format` path (StyleCop autofix +
+      using-sort) needs the out-of-process MSBuild **BuildHost**, which times
+      out (named-pipe connect) in THIS sandbox. Worked around with `--folder`
+      mode (editorconfig-only, no MSBuild). The semantic autofixes are deferred
+      to CI/AT-3/AT-4 where the BuildHost works; SA rules guide at `suggestion`
+      meanwhile. This is an environment limitation, not a config bug.
+- [x] C++: `clang-format -i` over 108 in-scope files in two commits -- ours
+      (freya/ + tools/, 66 files, e3fa38d1) then inherited (proxy/ common/
+      launcher/, 42 files, a7f1616f). Vendored excluded (xml-exporter/mysql,
+      xmlParser, minhook). proxy builds native cmake; gtest 46/46; 8 Latin-1 ©
+      bytes byte-identical; mojibake CLEAN.
+- [x] TS/Vue/CSS: prettier --write (tabWidth 4) + eslint --fix + stylelint
+      --fix in freya/online/web. tsc clean, vitest 23/23. Commit 50aeb45f.
+- [x] Go: already gofmt-clean across all 3 modules (net7go, freya/online,
+      freya/status-notifier) -- no-op. goimports not separately run (gofmt
+      satisfied; go vet deferred to AT-4).
 
-### AT-3 — CI enforcement (format:check gates) [not started]
-- [ ] Add verify steps to `.github/workflows/build.yml`:
-      `dotnet format --verify-no-changes`, `clang-format --dry-run -Werror`,
-      `prettier --check` + `eslint`, `gofmt -l` (fail if non-empty) + `go vet`.
-- [ ] A `just fmt` + `just fmt-check` recipe pair mirroring CI locally.
+### AT-3 — CI enforcement (format:check gates) [DONE 2026-06-16]
+- [x] `just fmt` (apply) + `just fmt-check` (verify, the CI gate) recipe pair in
+      `justfile`, single source of truth for all four languages. `fmt-check`
+      runs: per-tree `dotnet format whitespace --folder --verify-no-changes`
+      (folder mode, no MSBuild BuildHost), `clang-format --dry-run --Werror` over
+      the in-scope C++ list, `gofmt -l` (fails if non-empty), prettier `format:check`
+      + stylelint, and `check_no_mojibake.sh`. Verified locally EXIT=0.
+- [x] `format-check` job added to `.github/workflows/build.yml` (installs dotnet
+      10 / Go 1.22 / Node 20 / `just` + `clang-format-18`, `npm ci` for web, then
+      `just fmt-check`). Mirrors CI exactly via the same recipe.
+- [x] **Closed two AT-2 gaps surfaced by `fmt-check`:** `enbmod/src/game.h` was
+      under-formatted (a standalone continuation-comment line indented 4 instead
+      of 0) -- `clang-format -i` fixed it stably. `ClientEngineOffsets.h` has
+      `#define FREYA_FEED_*` macros whose long trailing comments overflow
+      ColumnLimit; clang-format **oscillates** the comment-gap spacing and can
+      never reach a fixed point, so the block is wrapped in `// clang-format off`
+      / `// clang-format on` (the documented escape hatch) with a note on why.
+      `go vet` deferred to AT-4 (this job is format-only, not vet).
 
 ### AT-4 — Compiler / analyzer warning cleanup (no behaviour change) [not started]
 - [ ] C# build warnings across in-scope projects -> 0 (or justified suppress).

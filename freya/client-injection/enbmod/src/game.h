@@ -33,7 +33,7 @@ constexpr uintptr_t VitalsBars =
     0x005dbfc0; // vitals bar CONSTRUCTOR (builds reactor/shield/hull) -- NOT a hide target
 constexpr uintptr_t VitalsPaint =
     0x005dcae0; // vitals per-frame PAINT (hull/shield/reactor). Pure paint, gated on each
-    // gadget's visible flag; entry is a clean ret-patch target (player-card replaces it)
+// gadget's visible flag; entry is a clean ret-patch target (player-card replaces it)
 
 // ---- levels / xp (combat / trade / explore) ----
 constexpr uintptr_t LevelText = 0x00548d60; // "Combat/Trade/Explore ... Level:%d"

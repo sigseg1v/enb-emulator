@@ -36,6 +36,11 @@
 #define _FREYA_CLIENT_ENGINE_OFFSETS_H_
 
 // ---- bisection switches -----------------------------------------------------
+// clang-format off
+//   These #defines carry long trailing comments that overflow ColumnLimit;
+//   clang-format cannot reach a fixed point on the macro-continuation spacing
+//   (it oscillates the gap before the trailing comment) and would fail
+//   --dry-run --Werror forever. Frozen in their hand-aligned form.
 #define FREYA_FEED_MASTER_ENABLE 1 // 0 = inject DLL but patch nothing / read inert
 #define FREYA_FEED_PATCH_GPS_ON 1  // capture the transform ptr (own-page trampoline + JMP hijack)
 #define FREYA_FEED_SEND_ON                                                                         \
@@ -50,6 +55,7 @@
 #define FREYA_FEED_PATCH_GAMEID_ON 0   // site 5: capture GameID (needed for the send gate)
 #define FREYA_FEED_PATCH_REDIRECT_ON 0 // site 4: reset ptr on sector change (multi-sector)
 #define FREYA_FEED_PATCH_LAG_ON 0      // site 3: cosmetic movement smoothing (optional)
+// clang-format on
 // -----------------------------------------------------------------------------
 
 namespace {

@@ -1300,18 +1300,32 @@ push:
     docker push  {{IMAGE_REGISTRY}}/net7go:{{IMAGE_TAG}}
     docker push  {{IMAGE_REGISTRY}}/freya-online:{{IMAGE_TAG}}
 
-# ---- lint ----
+# ---- formatting (Phase AT) ----
 
-# Lint: clang-format (new code only) + shellcheck. dotnet format is not
-# run here because it does not yet understand the .slnx solution format
-# we adopted in Phase D — re-enable when that lands upstream.
-lint:
-    -clang-format --dry-run --Werror tests/**/*.cpp server/compat/*.h 2>/dev/null
-    shellcheck client/linux-installer/install-enb-linux.sh
+# In-scope C++ for clang-format: everything except the frozen server/src,
+# vendored third_party / minhook / xml-exporter deps, and archive.
+CPP_FILES := "git ls-files '*.cpp' '*.cc' '*.cxx' '*.c' '*.h' '*.hpp' '*.hh' | grep -vE '^server/|/third_party/|^vendor/|^archive/|/minhook/|xml-exporter/mysql/|xml-exporter/xmlParser/'"
+# In-scope Go: all tracked .go (no vendored Go in tree).
+GO_FILES := "git ls-files '*.go'"
+# C# trees we format (server/src has no C#; capture-extract lives under tools/).
+CS_TREES := "tools freya/cli-client freya/tests/integration"
 
-# Apply clang-format in place to new code we own.
-format:
-    -clang-format -i tests/**/*.cpp server/compat/*.h
+# Apply all formatters in place (C#, C++, web, Go). Mirrors what CI verifies.
+# dotnet format runs in --folder mode (editorconfig-driven, no MSBuild
+# BuildHost) so it works in sandboxes where the out-of-process host can't start.
+fmt:
+    for t in {{CS_TREES}}; do dotnet format whitespace "$t" --folder --include-generated=false; done
+    {{CPP_FILES}} | xargs clang-format -i
+    gofmt -w $({{GO_FILES}})
+    cd freya/online/web && npm run -s format && npx stylelint "src/**/*.css" --fix
+
+# Verify formatting without writing (the CI gate). Non-zero exit on any drift.
+fmt-check:
+    for t in {{CS_TREES}}; do dotnet format whitespace "$t" --folder --include-generated=false --verify-no-changes; done
+    {{CPP_FILES}} | xargs clang-format --dry-run --Werror
+    @test -z "$(gofmt -l $({{GO_FILES}}))" || { echo "gofmt: files need formatting:"; gofmt -l $({{GO_FILES}}); exit 1; }
+    cd freya/online/web && npm run -s format:check && npx stylelint "src/**/*.css"
+    bash tools/check_no_mojibake.sh
 
 # ---- housekeeping ----
 
