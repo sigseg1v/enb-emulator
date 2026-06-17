@@ -37,12 +37,12 @@ namespace N7.CliClient.IntegrationTests.Verification;
 /// below performs a SECOND login to drive <c>StationLogin</c> -- create +
 /// first-login at home space 1015, cleanly LOGOFF, then reconnect and
 /// LOGIN to station 10151. Both invariants asserted here -- no 0x00A5
-/// emit to self, and 0x007F payload LE-decode with MANU_TAG|PLAYER_TAG
-/// bits set -- are properties of the <c>SectorManager::StationLogin</c>
-/// code path itself, not of any specific station; they hold for both
-/// 10151 and 45151. The retail capture's bytes are the primary-source
-/// proof that the real Win32 client expects this shape from the
-/// StationLogin path.
+/// emit to self, and the 0x007F payload BIG-endian-decoding to a
+/// MANU_TAG|PLAYER_TAG-bearing host ManuID -- are properties of the
+/// <c>SectorManager::StationLogin</c> code path itself, not of any
+/// specific station; they hold for both 10151 and 45151. The retail
+/// capture's bytes are the primary-source proof that the real Win32
+/// client expects this shape from the StationLogin path.
 /// </para>
 ///
 /// <para>
@@ -158,35 +158,51 @@ public sealed class DockHandshakeRetailParityTests
     }
 
     /// <summary>
-    /// Wave 112 regression pin. The 0x007F MANUFACTURE_SET_MANUFACTURE_ID
-    /// frame emitted by <c>SectorManager::StationLogin</c>
-    /// (<c>server/src/SectorManager.cpp:483</c>) must put the player's
-    /// ManuID on the wire as little-endian host-order bytes -- the
-    /// payload's LE-int32 decode must have both <c>MANU_TAG</c>
-    /// (bit 31) and <c>PLAYER_TAG</c> (bit 30) set.
+    /// Wave 112 regression pin (corrected: the 0x007F field is
+    /// byte-reversed on the wire, read BIG-endian). The
+    /// 0x007F MANUFACTURE_SET_MANUFACTURE_ID frame emitted by
+    /// <c>SectorManager::StationLogin</c>
+    /// (<c>server/src/SectorManager.cpp:563</c>) carries the player's
+    /// ManuID on the wire as the NETWORK-order (byte-reversed) encoding
+    /// of the host ManuID -- unlike every other GameID, which is host
+    /// little-endian. A BIG-endian int32 decode of the payload therefore
+    /// recovers the host ManuID, which by construction
+    /// (<c>ManuID() = GameID() | MANU_TAG</c>, GameID carries PLAYER_TAG)
+    /// has both <c>MANU_TAG</c> (bit 31) and <c>PLAYER_TAG</c> (bit 30)
+    /// set. This is the robust invariant; a little-endian decode would
+    /// instead yield <c>byteswap(ManuID)</c>, whose tag bits land on the
+    /// avatar-index LOW byte and are only coincidentally set.
     ///
     /// <para>
-    /// Backstory. The line was previously
-    /// <c>player->SetManufactureID(ntohl(ManuID))</c>. On x86 ntohl is
-    /// a byteswap; SetManufactureID then memcpys the swapped int's raw
-    /// bytes onto the wire. The net effect was that the wire bytes
-    /// were the BIG-endian encoding of ManuID -- so when the client
-    /// LE-decoded them, the top byte (which should carry the
-    /// MANU_TAG|PLAYER_TAG bits 11000000) ended up as the LOW byte of
-    /// ManuID (avatar-id LSB), invalidating the manu-id and stripping
-    /// the tag bits the client uses to recognise it as a manu-lab
-    /// anchor.
+    /// Backstory (the regression this pins, and the misconception that
+    /// caused it). The emitter must byte-swap before send
+    /// (<c>Player::SetManufactureID</c> does <c>htonl(mfg_id)</c>).
+    /// Commit 730ba649 REMOVED that swap on the belief that it was a
+    /// CLAUDE.md Trap-1 byteswap-of-host-data bug, sending the manu-id
+    /// host little-endian like other GameIDs. That broke the analyze
+    /// terminal: the client BE-reads 0x007F to key its manufacture
+    /// session against the manu-lab object (created under its host GameID,
+    /// read LE), so a host-LE 0x007F resolved to byteswap(ManuID), the
+    /// lookup missed, the session pointer stayed NULL, and the analyze
+    /// window faulted dereferencing it on open. Restored in the emitter
+    /// (commit 5c49d467); see plans/29 CV-29.
     /// </para>
     ///
     /// <para>
-    /// Primary source citation (CLAUDE.md server-integrity rule).
-    /// Retail capture_1.txt 0x7F frame at line 3769, payload bytes
-    /// <c>06 EE 13 F7</c>. LE-int32 decode = 0xF713EE06; the top byte
-    /// 0xF7 = 11110111 has both bit 31 (MANU_TAG) and bit 30
-    /// (PLAYER_TAG) set, plus avatar-id high bits. Conversely a
-    /// BE-int32 decode = 0x06EE13F7 has neither tag bit set, which is
-    /// not a valid manu-id. The capture proves the wire is LE
-    /// host-order; the ntohl was a classic CLAUDE.md Trap 1.
+    /// Primary source citation (CLAUDE.md server-integrity rule). The
+    /// retail capture carries the SAME manufacturing-lab GameID two ways
+    /// in one stream: the lab's 0x04 CREATE, 0x1B AuxData ("Manufacturing
+    /// Lab"), and 0x40 positional-update carry it host-LE as bytes
+    /// <c>F7 13 EE 06</c>, while the 0x89 Relationship and the 0x7F
+    /// SetManufactureID carry it REVERSED as <c>06 EE 13 F7</c>. The
+    /// CREATE is what the client keys the object by; for the 0x7F lookup
+    /// to hit that object the client must BE-read it. BE-decode of
+    /// <c>06 EE 13 F7</c> = 0x06EE13F7 = the host int the CREATE
+    /// established -- the match the analyze window needs. (The retail
+    /// capture's specific manu-lab id happens not to carry the high tag
+    /// bits; our server's ManuID does, by the GameID|MANU_TAG
+    /// construction above -- the load-bearing fact is the CREATE-vs-0x7F
+    /// byte reversal, not the absolute tag bits.)
     /// </para>
     ///
     /// <para>
@@ -209,7 +225,7 @@ public sealed class DockHandshakeRetailParityTests
     /// </para>
     /// </summary>
     [Fact]
-    public async Task StationHandshake_ManufactureSetManufactureIdPayload_DecodesLittleEndianWithTagBits()
+    public async Task StationHandshake_ManufactureSetManufactureIdPayload_DecodesBigEndianToTaggedManuId()
     {
         var account = TestAccounts.New(_server);
         const int slot = 0;
@@ -228,10 +244,10 @@ public sealed class DockHandshakeRetailParityTests
 
         // Two-stage: create + first-login at home space 1015, LOGOFF, then
         // reconnect and LOGIN to station 10151 so StationLogin runs. The
-        // station-arm manu-lab anchor at SectorManager.cpp:483 emits the
-        // nonzero SetManufactureID(ntohl(ManuID)); the space-arm zero anchor
-        // (SectorLogin) does NOT fire on the station path, so the nonzero
-        // filter targets the manu-lab emit specifically.
+        // station-arm manu-lab anchor at SectorManager.cpp:563 emits the
+        // nonzero SetManufactureID(ManuID) (the byte-swap is in the emitter);
+        // the space-arm zero anchor (SectorLogin) does NOT fire on the station
+        // path, so the nonzero filter targets the manu-lab emit specifically.
         await using var session = await EstablishAtStationAsync(
             login.Ticket!, account.Username, slot, homeSpaceSectorId, stationSectorId,
             firstName: "MfgEndian", shipName: "MfgEndianShip", cts.Token);
@@ -244,15 +260,21 @@ public sealed class DockHandshakeRetailParityTests
                 .ToList();
 
             Assert.NotEmpty(mfgPayloads);
+            // The field is byte-reversed on the wire, so a nonzero manu-lab
+            // anchor is nonzero under any decode; filter on length + nonzero.
             var manuLabPayload = mfgPayloads.FirstOrDefault(
-                p => p.Length == 4 && BinaryPrimitives.ReadUInt32LittleEndian(p) != 0);
+                p => p.Length == 4 && BinaryPrimitives.ReadUInt32BigEndian(p) != 0);
             Assert.NotNull(manuLabPayload);
 
-            uint manuId = BinaryPrimitives.ReadUInt32LittleEndian(manuLabPayload!);
+            // BE-decode recovers the host ManuID (= GameID | MANU_TAG), which
+            // carries both tag bits by construction -- the robust invariant
+            // proving the emitter byte-swapped (a host-LE 0x007F would BE-decode
+            // to byteswap(ManuID) and fail this).
+            uint manuId = BinaryPrimitives.ReadUInt32BigEndian(manuLabPayload!);
             Assert.True((manuId & TagMask) == TagMask,
-                $"0x007F manu-lab payload LE-int32 = 0x{manuId:X8}; expected MANU_TAG|PLAYER_TAG (top 2 bits) set. " +
+                $"0x007F manu-lab payload BE-int32 = 0x{manuId:X8}; expected MANU_TAG|PLAYER_TAG (top 2 bits) set. " +
                 $"Wire bytes: {BitConverter.ToString(manuLabPayload!)}. " +
-                $"Retail reference: capture_1.txt line 3769 payload 06 EE 13 F7 -> 0xF713EE06.");
+                $"Retail reference: capture_1.txt line 3769 payload 06 EE 13 F7 -> BE 0x06EE13F7 (matches the manu-lab 0x04 CREATE GameID, host-LE F7 13 EE 06).");
         }
         finally
         {
