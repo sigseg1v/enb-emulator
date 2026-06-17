@@ -1449,7 +1449,11 @@ format & byte order", Trap 2).
 - **Setup**: `just play-local` (rebuilds the proxy image; the data dir mount is in
   docker-compose). Distinct from PB-16 (website map colors) and PB-13 (nav/explore).
 
-## CV-MANU -- Analyze/Dismantle no longer hangs the manufacturing UI (PB-14)
+## [x] CV-MANU -- Analyze/Dismantle no longer hangs the manufacturing UI (PB-14)
+
+> **Confirmed by project owner (2026-06-17):** analyze, dismantle, and
+> manufacture all work end-to-end on the real client -- the terminals open,
+> return results, and the UI does not hang.
 
 - **What changed**: `server/src/PlayerManufacturing.cpp` -- `Player::ManufactureTimedReturn`
   no longer early-returns out of the dismantle/analyze callback when zero components
@@ -1611,7 +1615,8 @@ format & byte order", Trap 2).
 
 > **Confirmed by project owner (2026-06-17):** with the 0x007F byte-swap fix
 > applied, docking a manufacturing terminal and clicking Analyze opens the
-> window and no longer crashes the client.
+> window and no longer crashes the client. Dismantle and Manufacture work
+> end-to-end too (same `0x007F` session-key path).
 
 
 - **What changed**: `server/src/PlayerConnection.cpp` (`Player::SetManufactureID`)
