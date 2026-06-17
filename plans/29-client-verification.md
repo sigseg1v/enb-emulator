@@ -1449,7 +1449,11 @@ format & byte order", Trap 2).
 - **Setup**: `just play-local` (rebuilds the proxy image; the data dir mount is in
   docker-compose). Distinct from PB-16 (website map colors) and PB-13 (nav/explore).
 
-## CV-MANU -- Analyze/Dismantle no longer hangs the manufacturing UI (PB-14)
+## [x] CV-MANU -- Analyze/Dismantle no longer hangs the manufacturing UI (PB-14)
+
+> **Confirmed by project owner (2026-06-17):** analyze, dismantle, and
+> manufacture all work end-to-end on the real client -- the terminals open,
+> return results, and the UI does not hang.
 
 - **What changed**: `server/src/PlayerManufacturing.cpp` -- `Player::ManufactureTimedReturn`
   no longer early-returns out of the dismantle/analyze callback when zero components
@@ -1536,27 +1540,116 @@ format & byte order", Trap 2).
 
 ### [ ] CV-27 -- Vendor "Buy" / "Buy Stack" buttons actually purchase (not just drag-and-drop)
 
-- **What changed**: `server/src/PlayerConnection.cpp` -- the vendor-source branch
-  of `HandleInventoryMove` (case 4) now treats a purchase as valid when
-  `ToInv == 1` OR `ToInv == 4` (was `ToInv == 1` only). Drag-and-drop from the
-  vendor window reports the destination as cargo (`ToInv=1`, concrete `ToSlot`),
-  but the in-window "Buy" / "Buy Stack" buttons report it as the vendor's own
-  type (`ToInv=4`, `ToSlot=0`). The server only honoured `ToInv==1`, so the
-  buttons silently did nothing and only drag-and-drop worked (reported live:
-  "can only drag and drop ammo"). The buy resolves the cargo slot via
-  `CargoAddItem` and never indexes `ToSlot`, so accepting `ToInv==4` runs the
-  same purchase path with no slot-indexing risk.
-- **Primary source**: behavioural analysis of the retail client's vendor Buy
-  buttons (they emit `0x0027` with `FromInv=4, ToInv=4, ToSlot=0, Num=`quantity).
-  The captured drag-and-drop buy (VendorInvEco dg #12: `FromInv=4, ToInv=1,
-  ToSlot=31`) confirms the drag path's `ToInv=1`.
-- **CLI parse + test**: `InventoryMoveCodecTests.Encode_BuyViaButton_*` pins the
-  exact 24-byte Buy-button frame (`ToInv=4, ToSlot=0`); the drag path stays
-  pinned by `Encode_BuyIntoCargoSlot31_MatchesCapture_dg12`.
-- **What to look for (real client)**: at a vendor, select an item (e.g. ammo),
-  click "Buy" (buys 1) and "Buy Stack" (buys the chosen quantity). The item must
-  land in cargo and credits must be deducted -- without dragging. Confirm the
-  quantity slider's amount is what gets bought, and that insufficient-credits /
-  full-cargo still refuse cleanly.
+- **Root cause (corrected)**: the real culprit was NOT the `ToInv` value (an
+  earlier hypothesis that the buttons send `ToInv==4` was wrong -- see below).
+  It was the AJ-3 InvMove slot bounds check in `HandleInventoryMove`. The retail
+  client's Buy / Buy Stack buttons have no drop target, so they emit `0x0027`
+  with `FromInv=4, ToInv=1, ToSlot=-1` (cargo, auto-select). AJ-3 added a
+  `ToSlot==-1` auto-select whitelist for `1->3`, `3->1`, `14->1` but omitted the
+  vendor-buy `4->1`, so every Buy / Buy Stack frame was rejected before reaching
+  the switch -- no purchase, no credit change, no message. (A drag-buy drops onto
+  a concrete cargo slot, e.g. `ToSlot=31`, which passed the bounds check, so
+  drag-and-drop kept working -- exactly the reported symptom.)
+- **What changed**: `server/src/PlayerConnection.cpp` -- added
+  `(InvMo.FromInv == 4 && InvMo.ToInv == 1)` to the `auto_select_dest` whitelist
+  so the `ToSlot==-1` vendor buy reaches case 4. case 4 resolves the cargo slot
+  via `CargoAddItem` and never indexes `ToSlot`, so no slot-indexing risk. Also
+  added a NULL guard on the vendor item lookup (`GetItem` could return NULL for
+  an empty/unknown vendor slot and was dereferenced via `myItem->Category()`).
+  The `ToInv == 1 || ToInv == 4` accept in case 4 is retained defensively.
+- **Primary source**: real Win32 client capture on the proxy<->server leg of a
+  "Buy Stack" of PL-X1 Impact Round (200): `0x0027` body
+  `40 00 00 0B  00 00 00 04  00 00 00 07  00 00 00 01  FF FF FF FF  00 00 00 C8`
+  i.e. `FromInv=4, FromSlot=7, ToInv=1, ToSlot=-1, Num=200`. The captured drag
+  buy (VendorInvEco dg #12: `FromInv=4, ToInv=1, ToSlot=31`) confirms the drag
+  path uses a concrete slot.
+- **CLI parse + test**:
+  `InventoryMoveCodecTests.Encode_BuyStackButton_VendorStockToCargo_AutoSlot_Num200`
+  pins the captured button frame (`ToInv=1, ToSlot=-1, Num=200`); the drag path
+  stays pinned by `Encode_BuyIntoCargoSlot31_MatchesCapture_dg12`.
+- **What to look for (real client)**: at a vendor, select an item, click "Buy"
+  (buys 1) and "Buy Stack" (buys the chosen quantity) WITHOUT dragging. The item
+  must land in cargo and credits must be deducted by `each-price x quantity`.
+  Confirm insufficient-credits / full-cargo still refuse cleanly.
 - **Setup**: `just rebuild server` then `just play-local`. A character at a
   vendor with credits and free cargo space.
+
+---
+
+### [ ] CV-28 -- ManufacturingIndex (0x001B) "Items" category list matches retail (FIDELITY only)
+
+- **What changed**: `server/src/AuxClasses/AuxManufacturingIndex.cpp`
+  (`InitializeCategories`) -- deleted the hardcoded fourth "Items" category
+  "Consumables" -> sub-category "Consumable X" (CategoryID 13 / SubCategoryID
+  130). The retail "Items" primary category stops at "Core" (Weapons / Systems /
+  Core); it has no fourth child. The extra category was emitted in every
+  `0x001B` AUX_DATA ManufacturingIndex reply as an extra present-bit in the
+  "Items" category-list flag plus an extra subtree.
+- **NOT the analyze crash fix.** This was first pursued as the crash cause, but
+  a captured post-fix run confirmed our `0x001B` index AND the analyze-mode
+  `0x001B` delta were already byte-identical to live with this fix applied, yet
+  the client STILL crashed on Analyze. The actual crash cause is the 0x007F
+  byte-order bug -- see **CV-29**. This entry stays as a pure fidelity fix.
+- **Why a CV is needed**: changes server wire bytes (the 0x001B aux now has one
+  fewer category). The CLI proves the format; only the real Win32 client proves
+  it renders.
+- **Primary source**: a `0x001B` ManufacturingIndex reply captured on the
+  proxy<->server leg from the live reference server (correct: 3 "Items"
+  categories) diffed byte-for-byte against our pre-fix server output (4
+  categories). The only divergence is the extra "Consumables" category: the
+  "Items" category-list flag byte (retail 0x76 vs ours 0xf6, the fourth-slot
+  present bit) and the spliced "Consumables"/"Consumable X" subtree. Removing it
+  makes our reply byte-identical to the retail capture (modulo GameID).
+- **CLI parse + test**:
+  `freya/cli-client/tests/CliClient.UnitTests/Opcodes/AuxManufacturingIndexWalkTests.cs`
+  -- `OnlyDivergence_IsTheConsumablesCategory` pins that the sole difference is
+  the fourth category, and `Fix_RemovesConsumables_YieldsRetailBytes` proves
+  excising it + clearing the present-bit reproduces the retail body exactly.
+- **What to look for (real client)**: dock at a starbase with a manufacturing
+  terminal and open the manufacture index -- the "Items" primary category lists
+  Weapons / Systems / Core with no spurious "Consumables" leaf.
+- **Setup**: `just rebuild server` then `just play-local`. A character docked at
+  a manufacturing terminal.
+
+### [x] CV-29 -- Analyze at a manufacturing terminal no longer crashes the client
+
+> **Confirmed by project owner (2026-06-17):** with the 0x007F byte-swap fix
+> applied, docking a manufacturing terminal and clicking Analyze opens the
+> window and no longer crashes the client. Dismantle and Manufacture work
+> end-to-end too (same `0x007F` session-key path).
+
+
+- **What changed**: `server/src/PlayerConnection.cpp` (`Player::SetManufactureID`)
+  -- the `0x007F` MANUFACTURE_SET_MANUFACTURE_ID field is now byte-swapped
+  (`htonl`) before send. It is the ONE GameID on the wire that is byte-reversed
+  (network order) relative to every other GameID (which go host little-endian).
+  A previously committed change (`730ba649`) removed the swap on the mistaken
+  belief the field was host-LE; this restores it. The `SectorManager` call sites
+  stay host-order (the swap lives in the emitter).
+- **Why this is the crash cause**: the client reads `0x007F` BIG-ENDIAN to key
+  the manufacture-session lookup, then matches it against the manu-lab object
+  which is stored under its CREATE GameID (read little-endian). With the field
+  emitted host-LE, the client's BE read produces the byte-reversed id, the
+  lookup misses, the analyze window's session pointer stays NULL, and the open
+  path faults dereferencing it. (Live crashed-client confirmed the NULL session
+  pointer.) MANUFACTURE mode does not take this lookup path, which is why only
+  Analyze (and by the same path Dismantle / Refine) crashed.
+- **Primary source**: `archive/replay/capture_1.txt`, a direct cleartext
+  client<->server capture. The manu-lab anchor appears as the same GameID two
+  ways in one stream: the lab object CREATE and its AuxData carry it host-LE
+  (`F7 13 EE 06`, lines 4604/4626), while the `0x007F` payload carries it
+  byte-reversed (`06 EE 13 F7`, line 3769). `htonl(host GameID)` reproduces the
+  retail `0x007F` bytes exactly. Our own pre-fix capture emits `0x007F` =
+  `27 00 00 C0` (same order as our CREATE `27 00 00 C0`) -- i.e. NOT reversed,
+  the divergence from retail.
+- **CLI parse + test**:
+  `freya/cli-client/tests/CliClient.UnitTests/Opcodes/ManufactureSetManufactureIdRecordTests.cs`
+  -- `Decode_ReadsFieldBigEndian_RecoveringHostGameId` pins that the field reads
+  big-endian to recover the host GameID the CREATE/AuxData carry. The record
+  (`ManufactureSetManufactureIdRecord`) reads `0x007F` big-endian to match.
+- **What to look for (real client)**: dock at a starbase with a manufacturing
+  terminal, load an analyzable item, and click **Analyze**. The terminal must
+  open and return a result -- it must NOT crash. Confirm Dismantle / Refine too
+  (same lookup path). MANUFACTURE mode already worked before the fix.
+- **Setup**: `just rebuild server` then `just play-local`. A character docked at
+  a manufacturing terminal with an analyzable item in cargo.

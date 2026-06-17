@@ -11,11 +11,13 @@
 # maxed skills (see gen_equip_sql.py).
 #
 # Characters are named <username><suffix>, e.g. for username "Griever":
-#   Grievertw  Terran  Warrior  (TW)
+#   Grieverte  Terran  Enforcer (TE)
 #   Grieverje  Jenquai Explorer (JE)
-#   Grieverjd  Jenquai Warrior  (JW, "Defender")
+#   Grieverjd  Jenquai Defender (JD)
 #   Grievertt  Terran  Trader   (TT)
-#   Grieverts  Terran  Explorer (TE, "Scout")
+#   Grieverts  Terran  Scout    (TS)
+#
+# Valid class codes (race x profession): TE TT TS / JD JS JE / PW PP PS.
 #
 # Why this is not a pure-SQL seed: a character is only flyable once the SERVER
 # has run ReInitializeSavedData() -- that is what lays down the starting gear
@@ -47,8 +49,10 @@ cd "$REPO_ROOT"
 UNIT="seed-$(printf '%s' "$USER" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')"
 export STACK_NETWORK="${COMPOSE_PROJECT_NAME:-enb-emulator}_default"
 
-# suffix:CLASS_CODE  -- create order == character slot order
-ROSTER=( "tw:TW" "je:JE" "jd:JW" "tt:TT" "ts:TE" )
+# suffix:CLASS_CODE  -- create order == character slot order.
+# Codes must be valid (TE TT TS / JD JS JE / PW PP PS); the suffix mirrors the
+# code so the character name and the class sent to the server agree.
+ROSTER=( "te:TE" "je:JE" "jd:JD" "tt:TT" "ts:TS" )
 
 PSQL_USER=(docker compose exec -T -e PGPASSWORD=net7 postgres psql -U net7 -d net7_user -v ON_ERROR_STOP=1)
 

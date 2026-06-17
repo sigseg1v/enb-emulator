@@ -506,17 +506,20 @@ void AuxManufacturingIndex::InitializeCategories()
 		sizeof(InitData.PrimaryCategory[0].Categories.Category[2].SubCategories.SubCategory[2].Name)-1] = '\0';
     InitData.PrimaryCategory[0].Categories.Category[2].SubCategories.SubCategory[2].SubCategoryID = 122;
 
-    strcpy_s(InitData.PrimaryCategory[0].Categories.Category[3].Name, 
-		sizeof(InitData.PrimaryCategory[0].Categories.Category[3].Name), "Consumables");
-	InitData.PrimaryCategory[0].Categories.Category[3].Name[ 
-		sizeof(InitData.PrimaryCategory[0].Categories.Category[3].Name)-1] = '\0';
-    InitData.PrimaryCategory[0].Categories.Category[3].CategoryID = 13;
-
-    strcpy_s(InitData.PrimaryCategory[0].Categories.Category[3].SubCategories.SubCategory[0].Name,
-		sizeof(InitData.PrimaryCategory[0].Categories.Category[3].SubCategories.SubCategory[0].Name), "Consumable X");
-	InitData.PrimaryCategory[0].Categories.Category[3].SubCategories.SubCategory[0].Name[
-		sizeof(InitData.PrimaryCategory[0].Categories.Category[3].SubCategories.SubCategory[0].Name)-1] = '\0';
-    InitData.PrimaryCategory[0].Categories.Category[3].SubCategories.SubCategory[0].SubCategoryID = 130;
+    // NOTE: the retail "Items" primary category stops at "Core"
+    // (Category[0..2] = Weapons / Systems / Core); it has no fourth child. A
+    // previously hardcoded "Consumables" -> "Consumable X" placeholder here
+    // (CategoryID 13 / SubCategoryID 130) made the manufacturing index aux (0x1B)
+    // diverge from the live Somerled capture by one extra Category (an extra
+    // present-bit in the "Items" category-list flag plus the extra subtree).
+    // Removing it makes our 0x1B manufacturing-index aux byte-identical to the
+    // live capture (modulo GameID). This is a FIDELITY fix only: a captured
+    // post-fix run confirms the index AND the analyze-mode 0x1B delta are now
+    // byte-identical to live, yet the client still crashed on Analyze -- so the
+    // crash root cause is NOT this category. The actual cause was the 0x007F
+    // MANUFACTURE_SET_MANUFACTURE_ID byte order (the client keys the manufacture
+    // session off it big-endian); fixed in Player::SetManufactureID
+    // (PlayerConnection.cpp) -- see plans/29 CV-29.
 
     strcpy_s(InitData.PrimaryCategory[1].Name, sizeof(InitData.PrimaryCategory[1].Name), "Components");
 	InitData.PrimaryCategory[1].Name[sizeof(InitData.PrimaryCategory[1].Name)-1] = '\0';

@@ -1861,19 +1861,28 @@ public sealed class RetailRecordDecodeTests
     }
 
     // ── ManufactureSetManufactureId 0x7F ─────────────────────────────────────
-    // A bare LE int32. For the manu-lab anchor the value is GameID|MANU_TAG|
-    // PLAYER_TAG, so the LE int32 has bits 31 and 30 set (top byte >= 0xC0). A BE
-    // read would strip the tag bits -- the byte-order pin.
+    // The 0x7F mfg-id is the ONE GameID on the wire that is byte-reversed
+    // (network order) vs every other GameID, which go host-LE. The client reads
+    // it big-endian to key its manufacture-session lookup against the manu-lab
+    // object, which is stored under its 0x0004 CREATE GameID (read LE). So the
+    // BE read of 0x7F must equal the LE read of the lab's CREATE GameID. In the
+    // capture the lab CREATE GameID is 0x06EE13F7 (wire `F7 13 EE 06`); the 0x7F
+    // payload is its byte-reverse (wire `06 EE 13 F7`), so a BE read recovers
+    // 0x06EE13F7 -- match. An LE read would give 0xF713EE06, which never equals
+    // the lab object id and is exactly the bug that crashed the analyze terminal
+    // (server emitted host-LE, client BE-read the reversed id, lookup missed,
+    // session pointer NULL). See plans/29 CV-29.
 
     [Fact]
-    public void ManufactureSet_ManuLab_DecodesTaggedIdLittleEndian()
+    public void ManufactureSet_ManuLab_DecodesIdBigEndian()
     {
         string d = Dump("manufactureset_manulab_tagged");
 
-        // LE 0xF713EE06: top byte 0xF7 has MANU_TAG (bit31) | PLAYER_TAG (bit30).
-        // A BE read would give 0x06EE13F7 with no tag bits -- an invalid manu-id.
-        Assert.Contains("ManufactureID     = 0xF713EE06", d);
-        Assert.DoesNotContain("0x06EE13F7", d);
+        // BE 0x06EE13F7 == the manu-lab CREATE GameID (read LE). An LE read of
+        // the 0x7F field would give the byte-reversed 0xF713EE06, which matches
+        // no object -- the byte-order pin.
+        Assert.Contains("ManufactureID     = 0x06EE13F7", d);
+        Assert.DoesNotContain("0xF713EE06", d);
         Assert.DoesNotContain("(NB)", d);
         Assert.DoesNotContain("truncated", d);
     }

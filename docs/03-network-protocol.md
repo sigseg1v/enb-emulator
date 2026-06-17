@@ -210,6 +210,51 @@ The resend handler walks the buffer and re-sends the missing sequences.
 This is a custom protocol on top of UDP, not a standard like RUDP. The
 sequence space is `long`. Wraparound has not been observed.
 
+### 2.5. Byte order (endianness) -- the default, and the exceptions
+
+The protocol predates portable serialization: almost every packet is a
+packed C struct `memcpy`'d verbatim onto the socket. Retail server,
+retail client, and the proxy are all x86 **little-endian**, so the
+on-wire bytes of a numeric field are its **little-endian host
+representation**. That is the default for *every* numeric field --
+sector ids, avatar ids, slot numbers, and GameIDs all go host-LE.
+
+Two classes of field deviate, and both have shipped real client
+crashes:
+
+1. **Genuinely network-order fields.** A field whose source value came
+   from `inet_addr`/`s_addr` is already network byte order and stays
+   that way (the `ServerRedirect` IP slot is the canonical example).
+   These are rare and always trace back to a socket API.
+
+2. **Idiosyncratically byte-reversed fields.** A handful of fields are
+   emitted byte-reversed (`htonl(host_value)`) even though they are not
+   addresses and every field around them is host-LE. **Opcode `0x007F`
+   MANUFACTURE_SET_MANUFACTURE_ID is the documented case:** its mfg-id
+   is `htonl` of the manu-lab's host GameID. The same GameID appears
+   host-LE in that object's `0x0004` CREATE and `0x001B` AUX_DATA, so
+   the two encodings are byte-for-byte mirrors. The client reads
+   `0x007F` big-endian and matches it against objects keyed by their
+   LE-read CREATE GameID; emitting `0x007F` host-LE makes the lookup
+   miss, leaving the analyze terminal's session pointer NULL so it
+   faults on open (MANUFACTURE mode skips the lookup and survives). The
+   emitter is `Player::SetManufactureID`, which byte-swaps before send.
+
+**How to determine a field's byte order from a capture (the method that
+found `0x007F`).** Do **not** read a single field's bytes in isolation
+and reason from the decoded value -- that is how the `0x007F` regression
+was introduced (someone saw the LE decode had plausible tag bits and
+concluded host-LE, ignoring the same id one frame over). Instead: when
+the id in the suspect packet also appears in another opcode in the same
+capture (a CREATE, an AuxData, a relationship), **diff the two
+byte-for-byte**. If they are equal, the field is host-LE like everything
+else; if they are exact reverses, the field is byteswapped and the
+emitter must `htonl` to match. This cross-reference is decisive because
+the object pool and the lookup key must agree, so the capture always
+contains both encodings of the same id when a byte-reversed field is in
+play. (See also CLAUDE.md "Wire format & byte order", Trap 3, and
+`plans/29` CV-29.)
+
 ---
 
 ## 3. Encryption

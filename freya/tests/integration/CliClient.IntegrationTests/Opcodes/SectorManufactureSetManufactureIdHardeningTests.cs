@@ -69,7 +69,7 @@ namespace N7.CliClient.IntegrationTests.Opcodes;
 /// <c>player->SetManufactureID(0)</c> on space-sector login, and
 /// <c>SectorManager::StationLogin</c>
 /// (<c>server/src/SectorManager.cpp:475</c>) calls
-/// <c>player->SetManufactureID(ntohl(ManuID))</c> on station login —
+/// <c>player->SetManufactureID(ManuID)</c> on station login --
 /// either way SetManufactureID emits exactly one 0x007F frame per
 /// sector login. The Luna Station handshake (sector 10151) goes
 /// through StationLogin; the test asserts every captured 0x007F frame
@@ -167,7 +167,7 @@ public sealed class SectorManufactureSetManufactureIdHardeningTests : SectorInte
 
         // Pull every 0x007F frame captured during the handshake drain.
         // StationLogin (sector_id > 9999, our 10151 path) calls
-        // SetManufactureID(ntohl(ManuID)) exactly once per login, so
+        // SetManufactureID(ManuID) exactly once per login, so
         // we expect at least one frame; assert all are 4-byte.
         var mfgFrames = session.HandshakeFrames
             .Where(f => f.Opcode == OpcodeId.Known.ManufactureSetManufactureId.Value)
@@ -186,14 +186,14 @@ public sealed class SectorManufactureSetManufactureIdHardeningTests : SectorInte
     /// MANUFACTURE_SET_MANUFACTURE_ID exactly once — from
     /// <c>SectorManager::StationLogin</c> at
     /// <c>server/src/SectorManager.cpp:475</c>
-    /// (<c>player-&gt;SetManufactureID(ntohl(ManuID))</c> for the
+    /// (<c>player-&gt;SetManufactureID(ManuID)</c> for the
     /// manufacture-lab anchor).
     ///
     /// <para>
     /// Three known call sites — <c>SectorManager::SectorLogin</c> at
     /// SectorManager.cpp:345 (space-arm, <c>SetManufactureID(0)</c>),
     /// <c>SectorManager::StationLogin</c> at SectorManager.cpp:475
-    /// (station-arm, <c>SetManufactureID(ntohl(ManuID))</c>), and
+    /// (station-arm, <c>SetManufactureID(ManuID)</c>), and
     /// <c>SectorManager::LaunchIntoSpace</c> at SectorManager.cpp:538
     /// (station-to-space transition, <c>SetManufactureID(0)</c>). For a
     /// station-only handshake landing on sector 10151
@@ -327,7 +327,7 @@ public sealed class SectorManufactureSetManufactureIdHardeningTests : SectorInte
     ///
     /// <para>
     /// Structurally distinct from Wave 105. Wave 105 lands on sector
-    /// 10151 (StationLogin path) and pins the <c>SetManufactureID(ntohl(ManuID))</c>
+    /// 10151 (StationLogin path) and pins the <c>SetManufactureID(ManuID)</c>
     /// manu-lab-anchor emit. Wave 106 lands on sector 1015 (SectorLogin
     /// path) and pins the <c>SetManufactureID(0)</c> space-arm anchor
     /// emit. Both branches of the HandleSectorLogin dispatch are now

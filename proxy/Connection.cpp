@@ -15,6 +15,8 @@
 #include <net7/Opcodes.h>
 #include "UDPClient.h"
 //#include "PlayerClass.h"
+#include <cstdlib> // getenv (PROXY_S2C_HEXDUMP diagnostic)
+#include <cstdio>  // snprintf (PROXY_S2C_HEXDUMP diagnostic)
 
 extern bool g_ShuttingDown;
 
@@ -798,6 +800,49 @@ void Connection::TerminateConnection() {
 // across SendAll so the encrypted bytes leave the socket as a
 // contiguous frame -- interleaving partial sends from two threads would
 // produce a frame the client cannot decrypt.
+// Diagnostic (PROXY_S2C_HEXDUMP=1): dump the cleartext client-facing frame at
+// the single send chokepoint, BEFORE RC4. Rows are offset-prefixed so they
+// reassemble even if interleaved in the log. Unlike the per-opcode dump_s2c_hex
+// hook in UDPProxyToClient_linux.cpp, this fires for EVERY frame the client
+// receives -- including the proxy-FABRICATED opcodes (CreateObject / galaxy map
+// / prospecting) that are emitted straight through SendResponse and never pass
+// SendClientPacketSequence. Client leg only; the server leg is already cleartext
+// UDP. This is read-only instrumentation -- it never alters the bytes sent.
+static bool s2c_txdump_enabled() {
+    static bool init = false, on = false;
+    if (!init) {
+        init = true;
+        const char* v = getenv("PROXY_S2C_HEXDUMP");
+        on = (v && v[0] == '1');
+        if (on)
+            LogMessage("Connection: PROXY_S2C_HEXDUMP=1 -- dumping every cleartext "
+                       "client-facing frame at the send chokepoint (tag HEX(tx))\n");
+    }
+    return on;
+}
+static void dump_client_tx(unsigned short opcode, const unsigned char* frame, size_t total) {
+    // frame = [len:u16][opcode:u16][payload]; total = whole on-wire frame length.
+    LogMessage("HEX(tx) op=0x%04x len=0x%04zx (%zu on wire)\n", opcode, total, total);
+    char line[128];
+    char ascii[17];
+    for (size_t off = 0; off < total; off += 16) {
+        size_t n = (total - off > 16) ? 16 : (total - off);
+        int pos = 0;
+        for (size_t i = 0; i < 16; i++) {
+            if (i < n) {
+                pos += snprintf(line + pos, sizeof(line) - pos, "%02X ", frame[off + i]);
+                unsigned char c = frame[off + i];
+                ascii[i] = (c >= 0x20 && c < 0x7F) ? (char)c : '.';
+            } else {
+                pos += snprintf(line + pos, sizeof(line) - pos, "   ");
+                ascii[i] = ' ';
+            }
+        }
+        ascii[16] = '\0';
+        LogMessage("HEX(tx) %04zx  %s %s\n", off, line, ascii);
+    }
+}
+
 void Connection::SendResponse(short opcode, unsigned char* data, size_t length,
                               long /*sequence_num*/) {
     if (m_Socket == INVALID_SOCKET || !m_ConnectionActive)
@@ -819,6 +864,8 @@ void Connection::SendResponse(short opcode, unsigned char* data, size_t length,
 
     if (m_ServerType != CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY &&
         m_ServerType != CONNECTION_TYPE_GLOBAL_PROXY_TO_SERVER) {
+        if (s2c_txdump_enabled())
+            dump_client_tx((unsigned short)opcode, m_SendBuffer, total);
         m_CryptOut.RC4(m_SendBuffer, (int)total);
     }
 

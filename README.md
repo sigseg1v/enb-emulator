@@ -163,6 +163,55 @@ sudo nsenter -t <PID> -n tcpdump -i any -nn -s0 -w network-capture.pcap
 
 Dumping the proxy is a good idea as it's unencrypted. You can convert to hex with hexdump -C
 
+**Dumping the cleartext proxy->client frames (what the client actually decodes):**
+
+The `nsenter`/tcpdump capture above gets the proxy<->server UDP leg, which is NOT
+what the client sees (the proxy re-frames, consumes, and fabricates -- see the
+callout below). To capture the exact ordered byte stream the client receives,
+set `PROXY_S2C_HEXDUMP=1` when launching: the proxy dumps every client-facing
+frame at its send chokepoint, BEFORE RC4 encryption, so both passthrough AND
+proxy-fabricated opcodes are logged in send order.
+
+```bash
+# launch with the client-facing dump on (works with play-local or play-cli):
+PROXY_S2C_HEXDUMP=1 just play-local
+# ... drive the scenario in the client, then pull the proxy log:
+docker compose logs --no-color proxy > s2c.log      # all client-bound frames, tagged HEX(tx)
+```
+
+Each frame is logged as `HEX(tx) op=0x.... len=....` followed by offset-prefixed
+hex rows, so the stream reassembles even if log lines interleave. This is the
+DECRYPTED client leg as our proxy emits it.
+
+**Decrypting a Windows net7proxy capture (the encrypted client<->proxy leg):**
+
+The live dump above only works for our own proxy. To get the same DECRYPTED
+client leg from a retail net7proxy session, capture it on Windows with
+`proxy/scripts/Start-WindowsEnbProxyCapture.ps1` (it records both legs, including
+the encrypted client<->proxy TCP) and then decrypt the capture offline. This
+works because the Westwood RSA keypair is fixed and committed
+(`proxy/WestwoodCrypto/WestwoodRSA.cs`), so the per-session RC4 key is recoverable
+straight out of the captured handshake:
+
+```bash
+# on Windows: capture a retail session
+.\proxy\scripts\Start-WindowsEnbProxyCapture.ps1
+#   -> writes .\captures\<scenario>-...-<pid>-<timestamp>.pcapng
+
+# anywhere with python3: decrypt + histogram the client-leg opcodes
+python3 proxy/scripts/decrypt-client-leg.py captures/<scenario>-...-.pcapng
+#   --proxy-port N   pin the proxy game port (otherwise auto-detected)
+#   --max-ops K      how many top opcodes to print per connection
+```
+
+It auto-detects the proxy game port, RSA-decrypts each connection's client key
+block, derives the reversed 8-byte RC4 key, RC4-decrypts the proxy->client
+stream, walks the `[len:u16][op:u16][payload]` sub-packets, and prints a per-
+connection and aggregate opcode histogram. The aggregate is directly comparable
+to our `PROXY_S2C_HEXDUMP=1` log above -- same leg, same direction -- so retail
+vs our proxy can be diffed opcode-for-opcode (which is exactly how the
+client-facing emission counts get checked).
+
 > **FreyaProxy is not a dumb relay.** It is an active protocol participant:
 > on the server->client leg it strips the UDP outer header, consumes a
 > whole band of control opcodes the client never sees (galaxy-map cache,
@@ -208,6 +257,16 @@ printf 'replay /tmp/foo.bin\nquit\n' | \
 The pcap must be a standard LE pcap (hexdump -C or wireshark export).
 Only the UDP flows from server to client are extracted; RC4-encrypted
 auth traffic and launcher opcodes are automatically skipped.
+
+**Debugging client-only crashes**
+
+Run the client with these options:
+
+```bash
+WINEDEBUG=+seh,+tid WINEPREFIX=/home/sigsegv/.wine-enb just play-local 2>&1 | tee /tmp/client-crash.log
+```
+
+then, reproduce the crash and inspect the stack or the stuck binary, plus the logs produced.
 
 ### Testing with multiple players
 

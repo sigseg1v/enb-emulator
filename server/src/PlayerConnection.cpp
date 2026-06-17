@@ -2591,13 +2591,18 @@ void Player::HandleInventoryMove(unsigned char *data)
 
 	// ToSlot == -1 is the auto-select sentinel, valid only for the branches
 	// that resolve it before indexing: cargo->vault (1->3), vault->cargo
-	// (3->1) and manu-override->cargo (14->1). Every other branch indexes the
-	// destination slot directly, so -1 (and any other out-of-range value) is
-	// rejected there.
+	// (3->1), vendor-buy->cargo (4->1) and manu-override->cargo (14->1). The
+	// vendor buy (FromInv == 4, ToInv == 1) places the purchased stock via
+	// CargoAddItem, which auto-selects a free cargo slot and never indexes
+	// ToSlot -- the retail client sends ToSlot == -1 for both the drag gesture
+	// and the in-window Buy / Buy Stack buttons, so omitting it here rejected
+	// every vendor purchase. Every other branch indexes the destination slot
+	// directly, so -1 (and any other out-of-range value) is rejected there.
 	bool auto_select_dest =
 		(InvMo.ToSlot == -1) &&
 		((InvMo.FromInv == 1 && InvMo.ToInv == 3) ||
 		 (InvMo.FromInv == 3 && InvMo.ToInv == 1) ||
+		 (InvMo.FromInv == 4 && InvMo.ToInv == 1) ||
 		 (InvMo.FromInv == 14 && InvMo.ToInv == 1));
 
 	long dst_slots = InventorySlotCount(InvMo.ToInv, true);
@@ -3158,15 +3163,16 @@ void Player::HandleInventoryMove(unsigned char *data)
 		Source = *PlayerIndex()->VendorInv.Item[InvMo.FromSlot].GetData();
 		m_Mutex.Unlock();
 
-		// A purchase from the vendor (FromInv == 4). The drag-and-drop gesture
-		// reports the destination as cargo (ToInv == 1, ToSlot == -1 auto), but
-		// the in-window "Buy" / "Buy Stack" buttons report the destination as the
-		// vendor's own inventory type (ToInv == 4, ToSlot == 0). Both are the same
-		// operation -- buy the stock into the cargo hold -- so accept either. The
-		// buy below resolves the destination via CargoAddItem and never indexes
-		// ToSlot, so honouring ToInv == 4 adds no slot-indexing risk. Previously
-		// only ToInv == 1 was honoured, so the Buy buttons silently did nothing
-		// and only drag-and-drop worked.
+		// A purchase from the vendor (FromInv == 4). The retail client reports
+		// the destination as cargo with auto-select (ToInv == 1, ToSlot == -1)
+		// for both the drag-and-drop gesture and the in-window "Buy" / "Buy
+		// Stack" buttons (confirmed by capture). ToInv == 4 is also accepted
+		// defensively in case a client variant reports the vendor's own
+		// inventory type. The buy below resolves the destination via
+		// CargoAddItem and never indexes ToSlot, so neither value carries a
+		// slot-indexing risk. (The ToSlot == -1 sentinel is whitelisted for
+		// 4 -> 1 in the bounds check above; without that entry every vendor
+		// purchase was rejected before reaching this switch.)
 		if (InvMo.ToInv == 1 || InvMo.ToInv == 4)	//buy item
 		{
 			ItemBase * myItem = g_ItemBaseMgr->GetItem(Source.ItemTemplateID);
@@ -3184,6 +3190,15 @@ void Player::HandleInventoryMove(unsigned char *data)
 			}
 
 			if (Source.Price <= 0)
+			{
+				SendVaMessageC(17,"Vendor will not sell this trade item.");
+				break;
+			}
+
+			// Source.ItemTemplateID came from the vendor slot; if the slot was
+			// empty (-1) or the template is unknown, GetItem returns NULL.
+			// Bail rather than dereference it below.
+			if (!myItem)
 			{
 				SendVaMessageC(17,"Vendor will not sell this trade item.");
 				break;
@@ -10384,10 +10399,21 @@ void Player::HandleRecustomizeAvatarDone(unsigned char *data)
 
 void Player::SetManufactureID(int32_t mfg_id)
 {
-	// Wire mfg_id field is canonical 4-byte int32. Storing it as
-	// `long` would emit 8 bytes on LP64 platforms via sizeof(mfg_id)
-	// below, diverging from the retail Win32 wire shape (LP32 long).
-	SendOpcode(ENB_OPCODE_007F_MANUFACTURE_SET_MANUFACTURE_ID, (unsigned char *) &mfg_id, sizeof(mfg_id));
+	// The 0x007F field is the ONE GameID on the wire that is byte-reversed
+	// relative to every other GameID (those go host little-endian). The
+	// retail server emits the network-order encoding of the host GameID, so
+	// byte-swap here. capture_1 carries the manufacture-lab anchor as the
+	// same GameID two ways in one stream: the lab CREATE and its AuxData
+	// carry it host-LE (`F7 13 EE 06`, line 4604/4626), while the 0x007F
+	// payload carries it reversed (`06 EE 13 F7`, line 3769) -- a byte-for-
+	// byte mirror, so htonl(host GameID) reproduces the retail wire bytes
+	// exactly. The client resolves the manufacture session by this id; an
+	// unswapped (host-LE) field leaves the analyze terminal's session NULL
+	// and it faults dereferencing it on open. Field is a canonical 4-byte
+	// int32 -- send sizeof(int32_t), not sizeof(long), to avoid LP64 width
+	// drift away from the retail LP32 wire shape.
+	uint32_t wire = htonl((uint32_t) mfg_id);
+	SendOpcode(ENB_OPCODE_007F_MANUFACTURE_SET_MANUFACTURE_ID, (unsigned char *) &wire, sizeof(wire));
 }
 
 /*

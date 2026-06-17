@@ -506,6 +506,24 @@ void UDPClient::DispatchServerDatagram(int received) {
         SendPacketSequence((char*)m_RecvBuffer, header, true);
         break;
 
+    // MVAS (position-feed) server->client control band. These are
+    // proxy<->server control opcodes -- they have NO client-facing
+    // meaning and the reference proxy CONSUMES them (e.g. 0x1007
+    // MVAS_TOGGLE_SEND_FREQ_S_C just stores the requested update
+    // frequency in a proxy global; 0x1001/0x1009/0x100B are login/
+    // pre-start handshake markers). They must NOT fall through to the
+    // direct-passthrough default below: doing so re-emits a >0xFE opcode
+    // onto the proxy<->client TCP socket, which the real client never
+    // sees and treats as a bad opcode. (0x100A MVAS_TERMINATE is handled
+    // on the reassembled-bundle path in HandleCustomOpcode.) Consume.
+    case ENB_OPCODE_1001_MVAS_LOGIN_S_C:
+    case ENB_OPCODE_1007_MVAS_TOGGLE_SEND_FREQ_S_C:
+    case ENB_OPCODE_1009_MVAS_BAD_LOGIN_S_C:
+    case ENB_OPCODE_100B_MVAS_PRE_START_S_C:
+        LogVMessage("UDPClient(Linux): consume MVAS control 0x%04x [%d bytes]\n",
+                    (unsigned short)opcode, (int)(header->size - sizeof(EnbUdpHeader)));
+        break;
+
     default:
         // Anything else from the server on the master plane is treated
         // as a direct opcode passthrough: strip the EnbUdpHeader and
