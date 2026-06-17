@@ -1367,6 +1367,35 @@ format & byte order", Trap 2).
 - **Setup**: `just play-local` with `UseClientMods=true`. Rebuild the DLL first
   (`just build-enbmod`); the Lua objects must be recompiled with the new
   `-include` (a stale `build/lua/ldo.o` would keep the old libc-jmp behaviour).
+- **UPDATE 2026-06-17**: this longjmp fix was real but was NOT what crashed the
+  live `/run return 1 + 1` repro -- that was the ChatSend calling-convention bug
+  (CV-AS-CHATSEND below). The crash happened BEFORE the Lua error path ever ran.
+  Both fixes are now in; verify `/run` against the combined build.
+
+## CV-AS-CHATSEND -- /run (and any chat command hook) no longer corrupts the stack
+
+- **What was wrong**: the enbmod chat send-line hook (`hk_ChatSend`, target
+  `game::addr::ChatSend`) was declared as a typed `__cdecl` C function. The
+  client calls that member as `__thiscall` (`this` in ECX, **callee** pops the
+  4-byte arg -- `ret 4`). A `__cdecl` detour returns `ret 0`, so every chat send
+  left ESP 4 bytes high. The next pointer the real ChatSend loaded from the stack
+  (`mov 0x14(%esp),%ecx`) came back as an adjacent slot's small integer (`0x10`),
+  and `mov -0x1(%ecx),%al` faulted reading `0x0F`. First fault `eip=0074b083`,
+  `c0000005`, in the real ChatSend body -- a stack-misalignment crash, not heap.
+- **Fix (commit 853d0e33)**: `hk_ChatSend` is now a NAKED `__thiscall`
+  trampoline (the same pattern as the AuxData/RpgLevels capture hooks):
+  `pushal` / push the original `[esp+4]` line arg / `call notify_chat_send` /
+  on swallow `popal; mov $1,eax; ret $4` / on pass-through `popal; jmp
+  *real_ChatSend_tramp`. Both paths now balance the stack and preserve ECX.
+  Verified in the emitted DLL: swallow path emits `mov $1,eax ; ret $0x4`.
+- **Why UNVERIFIED here**: needs the real Win32 client under Wine; the headless
+  Lua tests never exercise the client's ChatSend.
+- **What to look for (real client)**: in space, type `/run return 1 + 1` -> no
+  crash, `enbmod.log` shows `[run] 2`. Any normal chat line (no leading command)
+  still sends to other players. Repeated chat sends do not destabilise the client.
+- **Setup**: `just play-local` with `UseClientMods=true` -- it rebuilds
+  enbmod.dll and the launcher redeploys it into the wine prefix. (The DLL that
+  crashed, prefix copy stamped 08:22, predated this fix.)
 
 ## CV-AS-RPGLVL -- discipline levels read off the RPG manager (not the ship entity)
 
