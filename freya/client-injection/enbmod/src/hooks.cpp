@@ -92,22 +92,50 @@ static BOOL WINAPI hk_GetMessageA(LPMSG m, HWND h, UINT min, UINT max) {
     return r;
 }
 
-// ---- chat send-line interception (cdecl) ------------------------------------
-// game::addr::ChatSend takes the raw typed chat line as its only argument, by
-// cdecl (caller-cleaned `ret`, no `ret 4`), so a plain typed C detour forwards
-// it correctly -- no naked trampoline needed. We give the Lua layer first refusal
-// on the line via g_on_chat_send; if it returns true the line is consumed (we
-// return without calling the real function, so no chat packet is ever built).
-typedef int(__cdecl* ChatSend_t)(const char*);
-static ChatSend_t real_ChatSend = nullptr;
-
-static int __cdecl hk_ChatSend(const char* line) {
-    // g_on_chat_send only inspects text + enqueues (no Lua, no throw). On true we
-    // swallow: skip the real send and report "handled" (1). The original return
-    // value is a success flag the caller does not act on for typed input.
+// ---- chat send-line interception (__thiscall) -------------------------------
+// game::addr::ChatSend is a C++ member function, NOT cdecl: `this` in ECX, the
+// raw typed chat line as the one stack arg, callee-cleaned (`ret 4`, verified by
+// disassembly -- the prologue does `mov %ecx,%ebx` and the function ends in
+// `c2 04 00`). A plain `__cdecl` detour is WRONG twice over: it ends in `ret 0`,
+// leaking 4 stack bytes on every chat send until ESP climbs into a bad return
+// slot and the client jumps onto its own stack (the "/run" crash); and on the
+// pass-through it re-enters the trampoline without ECX = the caller's `this`, so
+// the original runs against a garbage object. So this is a NAKED trampoline,
+// exactly like hk_Skill/hk_Chat: observe via a cdecl notify, then either swallow
+// (`ret 4`) or tail-`jmp` into MinHook's trampoline with ECX + stack untouched.
+//
+// We give the Lua layer first refusal on the line via g_on_chat_send (called
+// from notify_chat_send); if it returns true the line is consumed -- we return
+// 1 and never call the real function, so no chat packet is ever built.
+extern "C" {
+void* real_ChatSend_tramp = nullptr;
+// g_on_chat_send only inspects text + enqueues under a mutex (no Lua, no throw).
+// Returns 1 to swallow the line, 0 to forward it to the real send.
+int notify_chat_send(const char* line) {
     if (g_on_chat_send && line && g_on_chat_send(line))
         return 1;
-    return real_ChatSend(line);
+    return 0;
+}
+}
+// At naked entry: [esp]=return addr, [esp+4]=line, ECX=this. After `pushal`
+// (0x20 bytes) the line arg sits at 0x24(%esp). notify_chat_send is cdecl(line).
+// On swallow we restore regs, set eax=1 (a success flag the caller ignores for
+// typed input) and `ret 4` to clean the one stack arg the client pushed; on
+// pass-through we restore regs and tail-jmp the trampoline with ECX + stack
+// exactly as the game left them, so the original does its own `ret 4`.
+extern "C" __attribute__((naked)) void hk_ChatSend() {
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl 0x24(%esp)\n\t" // line (original [esp+4])
+                         "call _notify_chat_send\n\t"
+                         "addl $4, %esp\n\t"
+                         "testl %eax, %eax\n\t"
+                         "jnz 1f\n\t"
+                         "popal\n\t"
+                         "jmp *_real_ChatSend_tramp\n\t"
+                         "1:\n\t"
+                         "popal\n\t"
+                         "movl $1, %eax\n\t"
+                         "ret $4\n\t");
 }
 
 // ---- game __thiscall event hooks --------------------------------------------
@@ -302,7 +330,7 @@ bool enable_event_hooks() {
         logf("hook ChatChannel failed");
         ok = false;
     }
-    if (MH_CreateHook((void*)game::addr::ChatSend, (void*)&hk_ChatSend, (void**)&real_ChatSend) !=
+    if (MH_CreateHook((void*)game::addr::ChatSend, (void*)&hk_ChatSend, &real_ChatSend_tramp) !=
         MH_OK) {
         logf("hook ChatSend failed");
         ok = false;
