@@ -10399,10 +10399,21 @@ void Player::HandleRecustomizeAvatarDone(unsigned char *data)
 
 void Player::SetManufactureID(int32_t mfg_id)
 {
-	// Wire mfg_id field is canonical 4-byte int32. Storing it as
-	// `long` would emit 8 bytes on LP64 platforms via sizeof(mfg_id)
-	// below, diverging from the retail Win32 wire shape (LP32 long).
-	SendOpcode(ENB_OPCODE_007F_MANUFACTURE_SET_MANUFACTURE_ID, (unsigned char *) &mfg_id, sizeof(mfg_id));
+	// The 0x007F field is the ONE GameID on the wire that is byte-reversed
+	// relative to every other GameID (those go host little-endian). The
+	// retail server emits the network-order encoding of the host GameID, so
+	// byte-swap here. capture_1 carries the manufacture-lab anchor as the
+	// same GameID two ways in one stream: the lab CREATE and its AuxData
+	// carry it host-LE (`F7 13 EE 06`, line 4604/4626), while the 0x007F
+	// payload carries it reversed (`06 EE 13 F7`, line 3769) -- a byte-for-
+	// byte mirror, so htonl(host GameID) reproduces the retail wire bytes
+	// exactly. The client resolves the manufacture session by this id; an
+	// unswapped (host-LE) field leaves the analyze terminal's session NULL
+	// and it faults dereferencing it on open. Field is a canonical 4-byte
+	// int32 -- send sizeof(int32_t), not sizeof(long), to avoid LP64 width
+	// drift away from the retail LP32 wire shape.
+	uint32_t wire = htonl((uint32_t) mfg_id);
+	SendOpcode(ENB_OPCODE_007F_MANUFACTURE_SET_MANUFACTURE_ID, (unsigned char *) &wire, sizeof(wire));
 }
 
 /*

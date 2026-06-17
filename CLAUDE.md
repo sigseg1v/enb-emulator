@@ -354,6 +354,39 @@ under `play-cli`). Do NOT remove the default `docker compose build`
 step from `play-local` / `play-cli` -- it is the stale-image guard;
 gate extra disruption behind `ENB_NOREBUILD` instead.
 
+### Trap 3: a field that genuinely IS byte-reversed among host-order fields
+
+Trap 1 is "don't byteswap host data." Trap 3 is its inverse and just as
+real: a *small number* of wire fields are legitimately **byte-reversed**
+(network order) even though every field around them is host-order LE.
+Removing the swap because "all the other GameIDs are host-LE" silently
+breaks them. The canonical example is **opcode `0x007F`
+MANUFACTURE_SET_MANUFACTURE_ID**: its mfg-id field is the network-order
+encoding of the host GameID, while the very same GameID in the object's
+`0x0004` CREATE and `0x001B` AUX_DATA is host-LE. The client reads
+`0x007F` big-endian to key its manufacture-session lookup and matches it
+against objects stored under their LE-read CREATE GameID. Emit `0x007F`
+host-LE and the client's BE read yields the byte-reversed id, the lookup
+misses, the session pointer stays NULL, and the **analyze terminal
+faults dereferencing it on open** (MANUFACTURE mode does not take that
+lookup, so it survives -- the asymmetry is the tell). Fix:
+`Player::SetManufactureID` byte-swaps (`htonl`) before send.
+
+**How we found it, and the diagnostic that generalises.** A single
+capture frame contained the same manu-lab GameID twice: host-LE in the
+CREATE (`F7 13 EE 06`) and byte-reversed in `0x007F` (`06 EE 13 F7`).
+That side-by-side mirror in ONE capture is the proof -- you do not need
+to guess a field's byte order in isolation. **When a packet carries an
+id that also appears in another opcode in the same capture, diff the two
+byte-for-byte; if they are reverses of each other, the field is
+byteswapped on the wire and the emitter must match.** Reading a single
+field's bytes in isolation (e.g. "this LE-decodes to a value with the
+tag bits set, so it must be host-LE") is exactly how the regression was
+introduced -- it ignored that the *same id* was carried the other way
+one frame over. Always cross-reference the id against its CREATE/AuxData
+in the same stream before deciding byte order. See
+`docs/03-network-protocol.md` section 2.5 and `plans/29` CV-29.
+
 ### Process when adding or changing a packet emitter
 
 1. **Find a real capture** of the same packet in

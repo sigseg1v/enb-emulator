@@ -557,16 +557,9 @@ void SectorManager::StationLogin(Player *player)
     player->ManuIndex()->SetGameID(ManuID);
     player->ManuIndex()->TerminalReset(0);
     
-    // ntohl on x86 is a byteswap. ManuID is already host-order
-    // (`GameID() | MANU_TAG`, both high bits set), and
-    // SetManufactureID memcpys the 4 raw bytes onto the wire. The
-    // ntohl was sending BE-of-ManuID, stripping the MANU_TAG/PLAYER_TAG
-    // top bits from the LE-decoded value the client reads back. Retail
-    // capture_1.txt frame at line 3769 (0x7F payload `06 EE 13 F7`)
-    // decodes as LE int32 0xF713EE06 -- top byte 0xF7 has MANU_TAG
-    // (0x80) | PLAYER_TAG (0x40) set, proving the wire is LE host-order.
-    // Same class of fix as the ServerRedirect ntohl trap in
-    // proxy/ClientToMasterServer.cpp.
+    // Pass ManuID in host order. The 0x007F field is byte-reversed on the
+    // wire (network order) unlike other GameIDs -- that swap lives in the
+    // emitter (Player::SetManufactureID), so call sites stay host-order.
     player->SetManufactureID(ManuID);
 	player->SetInSpace(false);
     

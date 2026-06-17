@@ -606,7 +606,7 @@ payload-bytes: 6
 hex: 5f b0 00 00 01 00
 
 [manufactureset_manulab_tagged]
-provenance: ManufactureSetManufactureId 0x7F -- the manufacturing-lab anchor, payload 06 EE 13 F7 (capture_1.rar, Packet #351, Length=8). LE int32 0xF713EE06: top byte 0xF7 has MANU_TAG (bit31) and PLAYER_TAG (bit30) set. A BE read would give 0x06EE13F7 with no tag bits -- an invalid manu-id; this is the byte-order pin for the SectorManager StationLogin ntohl-trap fix.
+provenance: ManufactureSetManufactureId 0x7F -- the manufacturing-lab anchor, payload 06 EE 13 F7 (capture_1.rar, Packet #351, Length=8). This field is byte-reversed (network order) vs every other GameID, which go host-LE. The same lab GameID appears host-LE in its 0x0004 CREATE (wire F7 13 EE 06 -> LE 0x06EE13F7); the 0x7F payload is its byte-reverse (wire 06 EE 13 F7), so a BE read recovers 0x06EE13F7 and matches the lab object. An LE read would give 0x06EE13F7's byte-swap 0xF713EE06, which matches no object -- this is the byte-order pin (the analyze-terminal crash fix, plans/29 CV-29).
 opcode: 0x7F
 payload-bytes: 4
 hex: 06 ee 13 f7
