@@ -11,7 +11,11 @@
 }
 .vxfer__cols {
     display: grid;
-    grid-template-columns: 1fr auto 1fr;
+    /* The middle column is firmly capped (minmax max is a hard ceiling) so a long
+       selected-item name can NEVER widen it and squeeze the two 1fr vault columns
+       -- that squeeze is what dropped icon-grid tracks and made the icons reflow
+       under the cursor. The name wraps inside the fixed width instead. */
+    grid-template-columns: 1fr minmax(180px, 220px) 1fr;
     gap: 16px;
     align-items: start;
 }
@@ -24,7 +28,12 @@
     align-items: center;
     justify-content: center;
     gap: 10px;
-    min-width: 180px;
+    min-width: 0;
+    max-width: 220px;
+    /* Long names / single long tokens wrap within the capped column rather than
+       forcing it wider. */
+    overflow-wrap: anywhere;
+    text-align: center;
     padding: 24px 8px;
     align-self: center;
 }

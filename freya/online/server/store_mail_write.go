@@ -241,10 +241,18 @@ func (s *Store) lootAttachmentTx(ctx context.Context, tx pgx.Tx, accountID int64
 		// SaveVaultChange). Setting only trade_stack leaves stack_level=0, which
 		// the loader forces to 1 (PlayerSaves.cpp:561) -- so a stack of 20 would
 		// show as 1 in the vault. Write both equal, mirroring the game.
+		// freeVaultSlot may hand back a slot that still has a stale item_id = 0
+		// row (an emptied-but-not-deleted slot, see the note there), so UPSERT --
+		// a plain INSERT would collide on the (avatar_id, inventory_slot) PK.
 		_, err = tx.Exec(ctx, `
 			INSERT INTO avatar_vault_items
 			  (avatar_id, item_id, inventory_slot, stack_level, trade_stack, quality, cost, builder_name, structure)
-			VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8)`,
+			VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8)
+			ON CONFLICT (avatar_id, inventory_slot) DO UPDATE SET
+			  item_id = EXCLUDED.item_id, stack_level = EXCLUDED.stack_level,
+			  trade_stack = EXCLUDED.trade_stack, quality = EXCLUDED.quality,
+			  cost = EXCLUDED.cost, builder_name = EXCLUDED.builder_name,
+			  structure = EXCLUDED.structure`,
 			lootAvatar, a.itemID, slot, stack, a.quality, e.cost, e.builder, e.structure)
 		if err != nil {
 			return err
@@ -259,8 +267,18 @@ func (s *Store) lootAttachmentTx(ctx context.Context, tx pgx.Tx, accountID int64
 
 // freeVaultSlot finds the lowest unused vault slot for an avatar.
 func freeVaultSlot(ctx context.Context, tx pgx.Tx, avatarID int64) (int, error) {
+	// Only rows that actually hold an item occupy a slot. The C++ server empties
+	// a vault slot by UPDATEing its row to item_id = 0 (Player::SaveVaultChange ->
+	// SaveManager UPDATE), never deleting it, so a heavily-used vault accumulates
+	// stale item_id = 0 (or NULL) rows. The website's vault VIEW already ignores
+	// those (resolveItems(0) fails -> the slot is dropped in accountVaultStorage),
+	// so counting them here as occupied is what made a half-full vault report
+	// "full" -- the view showed 56/96 while this saw all 96 slots "used". Match the
+	// view: a slot is free unless it carries a real (non-zero, non-NULL) item.
 	rows, err := tx.Query(ctx,
-		`SELECT inventory_slot FROM avatar_vault_items WHERE avatar_id = $1 ORDER BY inventory_slot`, avatarID)
+		`SELECT inventory_slot FROM avatar_vault_items
+		  WHERE avatar_id = $1 AND item_id IS NOT NULL AND item_id <> 0
+		  ORDER BY inventory_slot`, avatarID)
 	if err != nil {
 		return 0, err
 	}

@@ -97,10 +97,18 @@ func lockVaultSlot(ctx context.Context, tx pgx.Tx, avatarID int64, slot, wantIte
 // writing stack_level and trade_stack equal so the game loader reports the
 // correct StackCount (PlayerSaves.cpp SaveVaultChange writes them equal too).
 func insertVaultItem(ctx context.Context, tx pgx.Tx, avatarID int64, slot int, vi vaultInstance) error {
+	// UPSERT: freeVaultSlot can return a slot that still carries a stale
+	// item_id = 0 row (emptied but not deleted by the C++ save path), which a
+	// plain INSERT would collide with on the (avatar_id, inventory_slot) PK.
 	_, err := tx.Exec(ctx, `
 		INSERT INTO avatar_vault_items
 		  (avatar_id, item_id, inventory_slot, stack_level, trade_stack, quality, cost, builder_name, structure)
-		VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8)`,
+		VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8)
+		ON CONFLICT (avatar_id, inventory_slot) DO UPDATE SET
+		  item_id = EXCLUDED.item_id, stack_level = EXCLUDED.stack_level,
+		  trade_stack = EXCLUDED.trade_stack, quality = EXCLUDED.quality,
+		  cost = EXCLUDED.cost, builder_name = EXCLUDED.builder_name,
+		  structure = EXCLUDED.structure`,
 		avatarID, vi.itemID, slot, vi.stack, vi.quality, vi.cost, vi.builder, vi.structure)
 	return err
 }
