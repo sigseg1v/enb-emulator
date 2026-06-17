@@ -15,8 +15,8 @@
 #include <net7/Opcodes.h>
 #include "UDPClient.h"
 //#include "PlayerClass.h"
-#include <cstdlib>  // getenv (PROXY_S2C_HEXDUMP diagnostic)
-#include <cstdio>   // snprintf (PROXY_S2C_HEXDUMP diagnostic)
+#include <cstdlib> // getenv (PROXY_S2C_HEXDUMP diagnostic)
+#include <cstdio>  // snprintf (PROXY_S2C_HEXDUMP diagnostic)
 
 extern bool g_ShuttingDown;
 

@@ -521,8 +521,7 @@ void UDPClient::DispatchServerDatagram(int received) {
     case ENB_OPCODE_1009_MVAS_BAD_LOGIN_S_C:
     case ENB_OPCODE_100B_MVAS_PRE_START_S_C:
         LogVMessage("UDPClient(Linux): consume MVAS control 0x%04x [%d bytes]\n",
-                    (unsigned short)opcode,
-                    (int)(header->size - sizeof(EnbUdpHeader)));
+                    (unsigned short)opcode, (int)(header->size - sizeof(EnbUdpHeader)));
         break;
 
     default:
