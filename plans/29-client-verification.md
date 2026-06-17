@@ -1682,3 +1682,24 @@ format & byte order", Trap 2).
   (same lookup path). MANUFACTURE mode already worked before the fix.
 - **Setup**: `just rebuild server` then `just play-local`. A character docked at
   a manufacturing terminal with an analyzable item in cargo.
+
+### [ ] CV-PB19 -- "Build Ammunition" skill appears + trains on a Progen Sentinel (PB-19)
+
+- **What changed**: `server/data/Skills.xml` gained the `<Skill ID="59"
+  Name="Build Ammunition" Category="Trade" Type="Passive">` block (Sentinel +
+  Scout, Max=7, Quest=1, LearnLvl=30). Primary source: client `cskill_t.ini`
+  `[All Skills]` `59=Build Ammunition` (the skill-id enumeration the server's
+  Skills.xml indexes into) and the Build_Ammunition wiki page (classes, rank,
+  level-30 quest unlock). The skill list is wire-visible -- the server sends the
+  skill table to the client, so this is a content add the real client renders.
+- **SCOPE / honesty**: this is the skill DEFINITION only. The unlock mission
+  "Bite The Bullet", the ammo recipes the skill gates, and the ammo economy are
+  NOT implemented (separate work, tied to PB-26).
+- **What to look for (real client)**: on a Progen Sentinel (or Terran Scout),
+  "Build Ammunition" now appears in the Trade skill list, max rank 7, and does
+  NOT error in the skill window. It is gated behind the level-30 quest (so it
+  may show as locked/untrainable until that mission exists -- which is expected,
+  not a regression). Confirm the skill table still loads cleanly for OTHER
+  classes (no parse error introduced).
+- **Setup**: `just rebuild server` then `just play-local`. A Progen Sentinel
+  character; open the skills window.
