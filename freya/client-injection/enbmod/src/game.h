@@ -185,16 +185,35 @@ constexpr int exists_flag = 0x60; // gadget + 0x60 -> nonzero when the bar is li
 constexpr int fill_frac = 0x68;   // gadget + 0x68 -> 0..1 xp fill fraction
 } // namespace xp
 
-// Cockpit child-gadget layout. Each controller (captured live, see addr::Cockpit*)
-// stores its child gadget pointers at fixed int-slots; clearing each child's
-// engine visible flag (child + visible_flag) hides it. Build-constant offsets read
-// out of the two constructors; only the controller pointer varies per run.
+// GadgetClass: the engine's base UI-widget class. Every HUD widget (vitals bars,
+// xp bars, cockpit throttle/warp/speed, action buttons) derives from it. The slot
+// at vtable byte +0x40 is a candidate visibility setter (__thiscall(this, BOOL)).
+// EMPIRICAL RESULT (live, 2026-06-18): dispatching it on the captured cockpit /
+// vitals / xp HUD controllers had NO visible effect -- those gadgets keep
+// painting regardless. The mechanism that DOES hide them is per-instance paint-
+// slot suppression: give one instance its own vtable copy whose per-frame paint
+// slot is a bare `ret` (lua_api enb.vt_profile to find the slot, enb.vt_hide_paint
+// to suppress it, enb.vt_unhide to restore). The per-frame paint slot is class-
+// specific, not universal: the cockpit panel controller paints via vtable slot 24,
+// while the vitals and xp controllers paint via slot 4 (all pop 0). Keep this
+// constant for gadget classes that may yet honour a visibility setter.
+namespace gadget {
+constexpr int vt_set_visible = 0x40; // vtable byte offset of the candidate visibility setter
+} // namespace gadget
+
+// Cockpit child-gadget layout. The controller captured at addr::CockpitThrottle
+// stores its child gadget pointers at fixed int-slots; the children span
+// 0x2b..0x38 (0x2c is a sub-object, 0x36 unused -- both skipped safely because the
+// per-gadget guard rejects a non-gadget vtable). NOTE: the controller captured
+// under the "throttle" label actually parents the in-space VITALS bars (its child
+// at slot 0x34 is the vitals controller); the round throttle/warp dial + action
+// buttons live under a separate controller that is NOT yet captured
+// (addr::CockpitCommands's ctor hook does not fire -- enb.cockpit_ctrl() returns 0
+// for it). Revisit the address/label mapping before relying on these ranges.
 namespace cockpit {
-constexpr int visible_flag = 0x60; // gadget + 0x60 -> engine "is painted" byte (clear to hide)
-// throttle/warp cluster controller: WARP/THROTTLE/REVERSE/LEFT/RIGHT.
-constexpr int throttle_first = 0x2d; // first child int-slot (inclusive)
-constexpr int throttle_last = 0x31;  // last child int-slot (inclusive)
-// "UI COMMANDS" action buttons controller: two adjacent groups.
+constexpr int throttle_first = 0x2b; // first child int-slot (inclusive)
+constexpr int throttle_last = 0x38;  // last child int-slot (inclusive)
+// "UI COMMANDS" action buttons controller (addr::CockpitCommands), same scheme.
 constexpr int command_first = 0x2b; // first child int-slot (inclusive)
 constexpr int command_last = 0x33;  // last child int-slot (inclusive)
 } // namespace cockpit

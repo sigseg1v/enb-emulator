@@ -349,6 +349,27 @@ static int l_cursor(lua_State* L) {
 // (addr, pop) pair confirmed against the real client (see the plans/29 CV
 // entries). Nothing calls this unless a script explicitly opts in -- the HUD
 // ships with native-widget suppression OFF. Returns true on success.
+// Saved-byte registry so a patch_ret can be reverted live (enb.unpatch) without
+// a relaunch -- essential when probing candidate paint functions.
+static const int kPatchMax = 32;
+struct PatchEnt {
+    uintptr_t addr;
+    unsigned char orig[3];
+    int n;
+};
+static PatchEnt g_patch[kPatchMax];
+static int g_patch_n = 0;
+
+static bool write_code(uintptr_t addr, const unsigned char* bytes, int n) {
+    DWORD old = 0;
+    if (!VirtualProtect((void*)addr, (SIZE_T)n, PAGE_EXECUTE_READWRITE, &old))
+        return false;
+    memcpy((void*)addr, bytes, (size_t)n);
+    VirtualProtect((void*)addr, (SIZE_T)n, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), (void*)addr, (SIZE_T)n);
+    return true;
+}
+
 static int l_patch_ret(lua_State* L) {
     uintptr_t addr = (uintptr_t)luaL_checkinteger(L, 1);
     int pop = (int)luaL_optinteger(L, 2, 0);
@@ -368,17 +389,49 @@ static int l_patch_ret(lua_State* L) {
         bytes[2] = (unsigned char)((pop >> 8) & 0xFF);
         n = 3;
     }
-    DWORD old = 0;
-    if (!VirtualProtect((void*)addr, (SIZE_T)n, PAGE_EXECUTE_READWRITE, &old)) {
+    // save originals first (so enb.unpatch can restore) unless already saved
+    if (g_patch_n < kPatchMax && mem::readable((void*)addr, n)) {
+        bool seen = false;
+        for (int i = 0; i < g_patch_n; ++i)
+            if (g_patch[i].addr == addr)
+                seen = true;
+        if (!seen) {
+            g_patch[g_patch_n].addr = addr;
+            g_patch[g_patch_n].n = n;
+            memcpy(g_patch[g_patch_n].orig, (void*)addr, (size_t)n);
+            ++g_patch_n;
+        }
+    }
+    if (!write_code(addr, bytes, n)) {
         logf("patch_ret: VirtualProtect failed @ %p", (void*)addr);
         lua_pushboolean(L, 0);
         return 1;
     }
-    memcpy((void*)addr, bytes, (size_t)n);
-    VirtualProtect((void*)addr, (SIZE_T)n, old, &old);
-    FlushInstructionCache(GetCurrentProcess(), (void*)addr, (SIZE_T)n);
     logf("patch_ret: %p -> ret %d", (void*)addr, pop);
     lua_pushboolean(L, 1);
+    return 1;
+}
+
+// enb.unpatch([addr]) -> int. Restore original bytes for one patched addr, or
+// ALL of them if addr omitted. Returns how many were restored.
+static int l_unpatch(lua_State* L) {
+    uintptr_t want = (uintptr_t)luaL_optinteger(L, 1, 0);
+    int n = 0;
+    for (int i = 0; i < g_patch_n; ++i) {
+        if (want && g_patch[i].addr != want)
+            continue;
+        if (g_patch[i].addr && write_code(g_patch[i].addr, g_patch[i].orig, g_patch[i].n)) {
+            g_patch[i].addr = 0;
+            ++n;
+        }
+    }
+    // compact
+    int w = 0;
+    for (int i = 0; i < g_patch_n; ++i)
+        if (g_patch[i].addr)
+            g_patch[w++] = g_patch[i];
+    g_patch_n = w;
+    lua_pushinteger(L, n);
     return 1;
 }
 
@@ -704,37 +757,64 @@ static int l_xp_ctrl(lua_State* L) {
     return 1;
 }
 
-// Clear the engine visible flag (gadget + cockpit::visible_flag) on every child
-// gadget of one captured cockpit controller, over the inclusive int-slot range
-// [first, last]. Each step is fully guarded (mem::ptr / mem::write skip anything
-// not committed), so a wrong controller or slot can only no-op, never fault.
-// Returns how many gadgets it actually cleared (were visible and got zeroed).
+// Call GadgetClass::SetVisible(visible) on one gadget via its vtable (slot at byte
+// game::gadget::vt_set_visible, __thiscall(this, BOOL)). This is the engine's own
+// hide/show: it flips the visible bit AND releases the rendered child (gadget+0x20)
+// / focus refs. Poking the bit by hand leaves the rendered child live and corrupts
+// layout, so we always go through the method. Fully pointer-guarded before the
+// indirect call: a bad gadget/vtable/fn pointer is a no-op (returns false), never a
+// fault. Returns true if the call was dispatched.
+static bool gadget_set_visible(uintptr_t g, unsigned visible) {
+    if (!g || !mem::readable((void*)g, 4))
+        return false;
+    uintptr_t vt = mem::ptr(g);
+    if (!vt || !mem::readable((void*)(vt + game::gadget::vt_set_visible), 4))
+        return false;
+    uintptr_t fn = mem::ptr(vt + game::gadget::vt_set_visible);
+    if (!fn || !mem::readable((void*)fn, 1))
+        return false;
+    uint32_t arg = visible ? 1u : 0u;
+    actions::call_thiscall(fn, g, &arg, 1);
+    return true;
+}
+
+// enb.gadget_set_visible(gadget_ptr, visible) -> bool. Generic primitive: call the
+// engine SetVisible on any GadgetClass-derived widget pointer. Used for live probing
+// and by the cockpit hide below. Returns false (no-op) if the pointer isn't a valid
+// gadget (unreadable vtable / SetVisible slot).
+static int l_gadget_set_visible(lua_State* L) {
+    uintptr_t g = (uintptr_t)luaL_checkinteger(L, 1);
+    unsigned vis = lua_toboolean(L, 2) ? 1u : 0u;
+    lua_pushboolean(L, gadget_set_visible(g, vis));
+    return 1;
+}
+
+// SetVisible(0) every child gadget of one captured cockpit controller over the
+// inclusive int-slot range [first, last]. Each step is fully guarded, so a wrong
+// controller or a non-gadget slot can only no-op, never fault. Returns how many
+// gadgets the call was dispatched on.
 static int hide_cockpit_ctrl(uintptr_t ctrl, int first, int last) {
     if (!ctrl)
         return 0;
-    int cleared = 0;
+    int hidden = 0;
     for (int slot = first; slot <= last; ++slot) {
         uintptr_t slot_addr = ctrl + (uintptr_t)slot * 4; // int-slot -> byte offset
         if (!mem::readable((void*)slot_addr, 4))
             continue;
         uintptr_t g = mem::ptr(slot_addr);
-        if (!g || !mem::readable((void*)(g + game::cockpit::visible_flag), 1))
-            continue;
-        if (mem::u8(g + game::cockpit::visible_flag) == 0)
-            continue; // already hidden
-        if (mem::write<uint8_t>(g + game::cockpit::visible_flag, 0))
-            ++cleared;
+        if (gadget_set_visible(g, 0))
+            ++hidden;
     }
-    return cleared;
+    return hidden;
 }
 
 // enb.hide_cockpit() -> int. Hide the stock bottom-center cockpit widgets (the
 // throttle/warp cluster and the "UI COMMANDS" action buttons) that the Freya
-// overlay replaces, by clearing each child gadget's engine visible flag on the
-// two captured cockpit controllers. Returns the number of gadgets cleared THIS
-// call (0 until the constructors have run -- i.e. until in space). Reversible:
-// it writes no game code, and the engine repaints a gadget the moment we stop
-// clearing it, so disabling the hide-ui mod restores the stock cockpit.
+// overlay replaces, by calling the engine SetVisible(0) on each child gadget of
+// the two captured cockpit controllers. Returns the number of gadgets the call was
+// dispatched on THIS call (0 until the constructors have run -- i.e. until in
+// space). The game re-shows a gadget when its state changes, so the hide-ui mod
+// calls this every frame; once a gadget is hidden the call is an idempotent no-op.
 static int l_hide_cockpit(lua_State* L) {
     int n = 0;
     n += hide_cockpit_ctrl(hooks::cockpit_throttle_ctrl(), game::cockpit::throttle_first,
@@ -752,6 +832,194 @@ static int l_cockpit_ctrl(lua_State* L) {
     lua_pushinteger(L, (lua_Integer)hooks::cockpit_throttle_ctrl());
     lua_pushinteger(L, (lua_Integer)hooks::cockpit_cmd_ctrl());
     return 2;
+}
+
+// ---- vtable call profiler (read-only) ------------------------------------
+// Find a gadget's per-frame paint slot empirically. Static RE did not converge
+// (the bar class's render slots are not in the symbol set), so we observe it
+// live: copy the instance's vtable, replace every slot with a 12-byte stub that
+// bumps a per-slot counter and then jumps to the ORIGINAL function with every
+// register untouched (so it is __thiscall-transparent), and repoint the instance
+// at the copy. The slot whose counter climbs ~once per frame is the paint. Fully
+// reversible (enb.vt_restore) and non-destructive -- the stubs only count and
+// forward, they never change behaviour. CV-AS-HIDE-COCKPIT.
+static const int kVtSlots = 64;
+static uint32_t g_vt_counts[kVtSlots];
+static uintptr_t g_vt_orig[kVtSlots];
+static uintptr_t g_vt_copy[kVtSlots]; // replacement vtable handed to the gadget
+static uint8_t* g_vt_stubs = nullptr;  // kVtSlots * 12 bytes, RWX
+static uintptr_t g_vt_target = 0;      // instrumented gadget instance
+static uintptr_t g_vt_saved = 0;       // its original vtable pointer
+
+static bool vt_profile_install(uintptr_t g) {
+    if (g_vt_target)
+        return false; // already profiling one instance; restore first
+    if (!g || !mem::readable((void*)g, 4))
+        return false;
+    uintptr_t vt = mem::ptr(g);
+    if (!vt || !mem::readable((void*)vt, kVtSlots * 4))
+        return false;
+    if (!g_vt_stubs) {
+        g_vt_stubs = (uint8_t*)VirtualAlloc(nullptr, kVtSlots * 12, MEM_COMMIT | MEM_RESERVE,
+                                            PAGE_EXECUTE_READWRITE);
+        if (!g_vt_stubs)
+            return false;
+    }
+    for (int i = 0; i < kVtSlots; ++i) {
+        g_vt_counts[i] = 0;
+        g_vt_orig[i] = mem::ptr(vt + (uintptr_t)i * 4);
+        uint8_t* s = g_vt_stubs + i * 12;
+        s[0] = 0xFF; // inc dword [&g_vt_counts[i]]
+        s[1] = 0x05;
+        *(uint32_t*)(s + 2) = (uint32_t)(uintptr_t)&g_vt_counts[i];
+        s[6] = 0xFF; // jmp dword [&g_vt_orig[i]]
+        s[7] = 0x25;
+        *(uint32_t*)(s + 8) = (uint32_t)(uintptr_t)&g_vt_orig[i];
+        g_vt_copy[i] = (uintptr_t)s;
+    }
+    g_vt_saved = vt;
+    g_vt_target = g;
+    *(uintptr_t*)g = (uintptr_t)g_vt_copy; // repoint the instance at the copy
+    return true;
+}
+
+// enb.vt_profile(gadget_ptr) -> bool. Start profiling one gadget instance.
+static int l_vt_profile(lua_State* L) {
+    uintptr_t g = (uintptr_t)luaL_checkinteger(L, 1);
+    lua_pushboolean(L, vt_profile_install(g));
+    return 1;
+}
+
+// enb.vt_restore() -> bool. Put the instrumented instance's original vtable back.
+static int l_vt_restore(lua_State* L) {
+    bool ok = false;
+    if (g_vt_target && mem::readable((void*)g_vt_target, 4)) {
+        *(uintptr_t*)g_vt_target = g_vt_saved;
+        ok = true;
+    }
+    g_vt_target = 0;
+    g_vt_saved = 0;
+    lua_pushboolean(L, ok);
+    return 1;
+}
+
+// enb.vt_dump() -> table of "slot=N count=M fn=0xADDR" strings for every slot
+// that fired since enb.vt_profile (sorted by count, highest first). The top
+// entry that tracks frame count is the paint.
+static int l_vt_dump(lua_State* L) {
+    // simple selection ordering by count, descending
+    int order[kVtSlots];
+    int n = 0;
+    for (int i = 0; i < kVtSlots; ++i)
+        if (g_vt_counts[i])
+            order[n++] = i;
+    for (int a = 0; a < n; ++a)
+        for (int b = a + 1; b < n; ++b)
+            if (g_vt_counts[order[b]] > g_vt_counts[order[a]]) {
+                int t = order[a];
+                order[a] = order[b];
+                order[b] = t;
+            }
+    lua_newtable(L);
+    for (int k = 0; k < n; ++k) {
+        int i = order[k];
+        char buf[96];
+        snprintf(buf, sizeof(buf), "slot=%d count=%u fn=0x%08X", i, g_vt_counts[i],
+                 (unsigned)g_vt_orig[i]);
+        lua_pushstring(L, buf);
+        lua_rawseti(L, -2, k + 1);
+    }
+    return 1;
+}
+
+// ---- per-instance paint suppression --------------------------------------
+// Non-destructive hide: give ONE gadget instance its own copy of its vtable in
+// which a single slot (its per-frame paint, found via the profiler above) is a
+// bare `ret` that cleans up the right number of stack-arg bytes, then repoint the
+// instance at the copy. Only that instance stops painting -- no global function
+// patch, no SetVisible side-effects, so gadget state and the engine
+// mouse-focus/target globals are untouched and input keeps working. Reversible
+// via enb.vt_unhide(). CV-AS-HIDE-COCKPIT.
+static const int kHideMax = 32;
+struct HideEnt {
+    uintptr_t gadget;
+    uintptr_t orig_vptr;
+};
+static HideEnt g_hide[kHideMax];
+static uintptr_t g_hide_vt[kHideMax][kVtSlots]; // per-instance vtable copies (data)
+static int g_hide_n = 0;
+static uint8_t* g_ret_pool = nullptr; // ret-stub pool, 4 bytes/slot, RWX
+static int g_ret_n = 0;
+
+static uintptr_t make_ret_stub(unsigned pop) {
+    if (!g_ret_pool) {
+        g_ret_pool = (uint8_t*)VirtualAlloc(nullptr, kHideMax * 4, MEM_COMMIT | MEM_RESERVE,
+                                            PAGE_EXECUTE_READWRITE);
+        if (!g_ret_pool)
+            return 0;
+    }
+    if (g_ret_n >= kHideMax)
+        return 0;
+    uint8_t* s = g_ret_pool + g_ret_n * 4;
+    ++g_ret_n;
+    if (pop == 0) {
+        s[0] = 0xC3; // ret
+    } else {
+        s[0] = 0xC2; // ret imm16
+        *(uint16_t*)(s + 1) = (uint16_t)pop;
+    }
+    return (uintptr_t)s;
+}
+
+static bool vt_hide_paint(uintptr_t g, int slot, unsigned pop) {
+    if (g_hide_n >= kHideMax)
+        return false;
+    if (!g || !mem::readable((void*)g, 4))
+        return false;
+    if (slot < 0 || slot >= kVtSlots)
+        return false;
+    uintptr_t vt = mem::ptr(g);
+    if (!vt || !mem::readable((void*)vt, kVtSlots * 4))
+        return false;
+    uintptr_t stub = make_ret_stub(pop);
+    if (!stub)
+        return false;
+    uintptr_t* copy = g_hide_vt[g_hide_n];
+    for (int i = 0; i < kVtSlots; ++i)
+        copy[i] = mem::ptr(vt + (uintptr_t)i * 4);
+    copy[slot] = stub;
+    g_hide[g_hide_n].gadget = g;
+    g_hide[g_hide_n].orig_vptr = vt;
+    ++g_hide_n;
+    *(uintptr_t*)g = (uintptr_t)copy; // repoint instance at the suppressed copy
+    return true;
+}
+
+// enb.vt_hide_paint(gadget_ptr, slot, pop) -> bool. Suppress one slot's draw on
+// one instance. pop = stack-arg bytes the slot's calling convention cleans up
+// (0 for __thiscall(this)/__fastcall(this); 8 for __thiscall(this,a,b); etc.).
+static int l_vt_hide_paint(lua_State* L) {
+    uintptr_t g = (uintptr_t)luaL_checkinteger(L, 1);
+    int slot = (int)luaL_checkinteger(L, 2);
+    unsigned pop = (unsigned)luaL_optinteger(L, 3, 0);
+    lua_pushboolean(L, vt_hide_paint(g, slot, pop));
+    return 1;
+}
+
+// enb.vt_unhide() -> int. Restore every instance hidden via vt_hide_paint to its
+// original vtable. Returns how many were restored.
+static int l_vt_unhide(lua_State* L) {
+    int n = 0;
+    for (int i = 0; i < g_hide_n; ++i) {
+        if (g_hide[i].gadget && mem::readable((void*)g_hide[i].gadget, 4)) {
+            *(uintptr_t*)g_hide[i].gadget = g_hide[i].orig_vptr;
+            ++n;
+        }
+    }
+    g_hide_n = 0;
+    g_ret_n = 0;
+    lua_pushinteger(L, n);
+    return 1;
 }
 
 // enb.reset_callbacks() -- drop every registered on_tick/on_skill/on_chat/on_input
@@ -1024,6 +1292,7 @@ void open(lua_State* L) {
                                    {"state", l_state},
                                    {"cursor", l_cursor},
                                    {"patch_ret", l_patch_ret},
+                                   {"unpatch", l_unpatch},
                                    {"on_tick", l_on_tick},
                                    {"on_skill", l_on_skill},
                                    {"on_chat", l_on_chat},
@@ -1043,6 +1312,12 @@ void open(lua_State* L) {
                                    {"xp_ctrl", l_xp_ctrl},
                                    {"hide_cockpit", l_hide_cockpit},
                                    {"cockpit_ctrl", l_cockpit_ctrl},
+                                   {"gadget_set_visible", l_gadget_set_visible},
+                                   {"vt_profile", l_vt_profile},
+                                   {"vt_dump", l_vt_dump},
+                                   {"vt_restore", l_vt_restore},
+                                   {"vt_hide_paint", l_vt_hide_paint},
+                                   {"vt_unhide", l_vt_unhide},
                                    {"reset_callbacks", l_reset_callbacks},
                                    {"tap", l_tap},
                                    {"key", l_key},
