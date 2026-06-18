@@ -2,67 +2,62 @@
 -- Part of the Earth & Beyond emulator preservation project -- Freya (MIT).
 -- License: LICENSES/Freya
 --
--- native_hud_hide.lua -- hide the stock in-space stat/XP widgets that the Freya
--- glass cards replace. Loaded as a mod entrypoint by the mod loader; disabling
--- the "hide-ui" mod in the launcher removes this file from the staged
--- scripts, so nothing here runs and the original bars come back.
+-- native_hud_hide.lua -- hides the stock in-space self-status vitals bars (the
+-- red energy / blue shield / green hull fills in the JEFIVE panel) so they do
+-- not bleed through the translucent Freya glass overlay that replaces them.
 --
--- The glass cards are translucent, so the native in-space stat bars / xp bars
--- show THROUGH them unless we suppress the routine that draws each.
--- enb.patch_ret(addr [, pop]) overwrites a function entry with a `ret` so it
--- returns immediately (pop = callee stack-cleanup bytes: 0 for caller-clean, the
--- exact arg-byte count for stdcall/thiscall -- a wrong pop corrupts the stack).
+-- MECHANISM (foreground fills):
+--   The vitals controller (enb.vitals_ctrl()) holds three bar gadgets:
+--       +0x1c energy, +0x20 shield, +0x24 hull.
+--   Each bar gadget has two fill-mesh children at +0x64 and +0x6c. Each child's
+--   +0x8 is a stretch-quad render object (vtable 0xb10f24) whose first embedded
+--   quad has a scale field at +0x10 (the visible foreground fill) and a second
+--   embedded quad at +0x40 (scale +0x50) which is a background ANIMATION layer.
 --
--- We patch each widget's per-frame PAINT routine -- a small function that, for
--- each child bar, checks the gadget's visible flag and calls the gadget paint
--- primitive, then returns void. It touches no game state, so an early `ret`
--- hides the widget cleanly. The CONSTRUCTOR / value-updater entries are NOT safe
--- (they build or mutate the gadget objects; ret-patching them leaves
--- uninitialised pointers / frozen state and crashes), so we never patch those:
+--   The per-frame fill sizer writes ONLY the quad edges (+0x14/+0x18) from the
+--   current fraction; it never touches +0x10. So writing +0x10 = 0 collapses the
+--   foreground fill permanently WITHOUT altering the stored fraction (+0x68) the
+--   value/percentage text reads, and WITHOUT disturbing the Freya HUD (which
+--   reads the controller, not these meshes). We deliberately do NOT touch +0x50:
+--   zeroing it only mangles the background animation, it does not remove it.
 --
---   enb.addr.VitalsPaint -- vitals PAINT (hull/shield/reactor). __fastcall(ECX),
---                           no stack args -> pop 0. Player-card replaces it.
---   enb.addr.XpPaint     -- xp PAINT (combat/trade/explore). __fastcall(ECX),
---                           no stack args -> pop 0. Disc card replaces it.
---   (enb.addr.VitalsBars / EnergyBar / XpBars / SkillButton are the ctor/updater
---    entries -- do NOT patch_ret those.)
---
--- CAVEAT: the paint addresses are pinned by behavioural analysis, but "an early
--- ret hides the widget without side effects" is only fully provable on the real
--- client. If the client crashes on load, disable this mod (CV-AS-HIDE-VITALS /
--- -XP in plans/29-client-verification.md track the confirmation).
---
--- DEFER UNTIL IN SPACE. The widgets these routines paint only exist in space, so
--- patching at mod-load (which happens at the front-end / login screen, where the
--- bars are not even visible) serves no purpose there. We gate the patch behind
--- the in-space heartbeat and apply it exactly once, the first frame we see space.
--- patch_ret has no restore, so this is one-way for the session; a reload re-runs
--- this file and (if already in space) re-applies the same byte, which is
--- idempotent.
+-- STILL OPEN: the static background troughs are NOT 0xb10f24 quads (a recursive
+-- sweep of every reachable quad does not hit them) -- they are drawn by another
+-- render class still being identified. Until then this mod hides the foregrounds
+-- only. CV-AS-HIDE-COCKPIT.
 
-local applied = false
-enb.on_tick(function()
-    if not (enb.inspace and enb.inspace()) then return end
+local GAUGE_OFFS = { 0x1c, 0x20, 0x24 }   -- energy, shield, hull bar gadgets
+local FILL_OFFS  = { 0x64, 0x6c }         -- the two fill-mesh children per bar
+local QUAD_VT    = 0xb10f24               -- stretch-quad render class
+local FG_SCALE   = 0x10                   -- foreground quad scale (0 == hidden)
+local MESH_SUB   = 0x08                   -- child -> stretch-quad render object
 
-    -- One-shot: the vitals/xp PAINT routines are pure, so an early ret hides them
-    -- for good (CV-AS-HIDE-VITALS / -XP). Done once the first frame we see space.
-    if not applied then
-        enb.patch_ret(enb.addr.VitalsPaint)
-        enb.patch_ret(enb.addr.XpPaint)
-        applied = true
-        enb.log("hide-ui: in space -> patched native vitals/xp paint")
+local mem = enb.mem
+
+-- Re-applied every tick: the bar gadgets are recreated on sector/dock changes,
+-- so a one-shot write would not survive. Guarded + idempotent: only writes a
+-- mesh whose vtable matches and whose scale is not already zero.
+local function hide_foregrounds()
+    local vc = (enb.vitals_ctrl and enb.vitals_ctrl()) or 0
+    if vc == 0 or not mem.readable(vc) then return end
+    for _, goff in ipairs(GAUGE_OFFS) do
+        local g = mem.u32(vc + goff)
+        if g ~= 0 and mem.readable(g) then
+            for _, coff in ipairs(FILL_OFFS) do
+                local child = mem.u32(g + coff)
+                if child ~= 0 and mem.readable(child) then
+                    local mesh = mem.u32(child + MESH_SUB)
+                    if mesh ~= 0 and mem.readable(mesh)
+                       and mem.u32(mesh) == QUAD_VT
+                       and mem.f32(mesh + FG_SCALE) ~= 0.0 then
+                        mem.write_f32(mesh + FG_SCALE, 0.0)
+                    end
+                end
+            end
+        end
     end
+end
 
-    -- Per-tick: the bottom-center cockpit widgets (throttle/up-down/warp cluster
-    -- and the "UI COMMANDS" action buttons) have NO pure-paint entry to ret-patch,
-    -- and the game re-shows the throttle gadgets whenever throttle/warp state
-    -- changes -- so we re-clear their engine visible flag every frame. The Freya
-    -- overlay draws the replacement controls. enb.hide_cockpit is fully guarded and
-    -- runs no game code; it returns 0 until the cockpit controllers are captured
-    -- (their constructors run on entering space). CV-AS-HIDE-COCKPIT.
-    if enb.hide_cockpit then enb.hide_cockpit() end
-end)
+enb.on_tick(hide_foregrounds)
 
--- The skill buttons have NO standalone pure-paint entry (render is fused with
--- state mutation), so there is no clean ret-patch for them; hiding them needs a
--- runtime per-gadget visible-flag write, still deferred (CV-AS-HIDE-SKILL).
+return { hide_foregrounds = hide_foregrounds }
