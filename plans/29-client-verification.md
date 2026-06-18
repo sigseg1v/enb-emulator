@@ -1308,7 +1308,55 @@ format & byte order", Trap 2).
   apply automatically at startup. If the client crashes on load, comment the two
   `patch_ret` lines in init.lua and re-launch to bisect.
 
-### [ ] CV-AS-HIDE-COCKPIT -- bottom-center throttle/warp + action buttons suppressed
+### [x] CV-AS-HIDE-COCKPIT -- all native bottom 2D cockpit chrome suppressed (SOLVED)
+
+- **SOLVED (live, screenshot-verified, 2026-06-18) -- the draw-gate flag clear.**
+  This supersedes EVERYTHING below it in this entry, including the "DEFINITIVE
+  NEGATIVE" note (which was wrong: it concluded the dial/buttons could not be
+  hidden because it was poking per-instance paint vtable slots, which are NOT on
+  the actual draw path). The native chrome IS hideable, cleanly and reversibly.
+  - **The whole in-space 2D HUD is ONE interface-scene object** (vtable
+    `0x00aff1f4`), reachable at `enb.cockpit_ctrl() + 0x44`. It owns one intrusive,
+    circular doubly-linked list of 2D widget render objects -- the list the
+    per-frame draw pass walks. List layout: begin = `*(scene+0x40)`; the loop stops
+    when the node pointer equals the sentinel `scene+0x3c`; `node next = *(node+0x04)`;
+    `node+0x0c` points 0x10 bytes INTO the child object, so child base =
+    `*(node+0x0c) - 0x10`.
+  - **The draw gate:** each leaf draws only when `(*(uint*)(leaf+0x18) & 0x700) == 0x700`.
+    Clearing ANY one of bits 0x100/0x200/0x400 makes the draw pass SKIP that widget.
+    We clear bit **0x400**. This touches no vtable and no value field, runs no game
+    code, and is fully reversible (re-raise the bit and it repaints). This is why
+    SetVisible (the +0x2c bit), the +0x60 flag, mesh scale-zeroing, and per-instance
+    paint-slot `vt_hide_paint` all had NO visual effect -- none of them is the bit
+    the draw pass actually reads.
+  - **Scope.** The same widget list also holds the chat window (a different leaf
+    class, `0x00afbf28`) and a band of inactive leaves (`0x00b111a4`). We clear the
+    hide bit ONLY on leaves of class `0x00b1327c` -- the native cockpit chrome. The
+    3D cockpit border is a separate PIP scene list (scene+0x58 / +0x70) and is
+    untouched. Chat and the 3D border survive; all native bottom chrome disappears.
+  - **Side effect (disclosed):** class `0x00b1327c` ALSO covers the top menu bar
+    (Chat/Group/Options/Help/Emote) and the top-right buttons, so those go too. If
+    the menu bar must come back, scope has to tighten by screen position (per-class
+    relative float fields -- fragile), not by class.
+  - **Implementation:** `freya/client-injection/enbmod/scripts/mods/hide-ui/native_hud_hide.lua`
+    re-applies the clear every tick (`enb.on_tick`) because the widgets are rebuilt
+    on sector/dock changes and value updaters re-raise the flag. Every pointer is
+    range- + readable-checked and the walk is iteration-bounded (MAX_NODES=256);
+    worst case it no-ops and the native UI shows. Screenshot-verified on the real
+    WINE client: bottom HUD = bare 3D border + chat only.
+- **What to look for (real client, owner confirm):** in space, all native bottom
+  chrome (the 3 black status text bars bottom-left, the 6 circular action buttons,
+  the ^/v + `<<Warp` cluster, the green reactor / red hull / blue shield bars, and
+  the bottom-right scanner + its 2 bars) is gone; the 3D cockpit border and the
+  chat window remain; flight/throttle/warp still WORK (widgets are hidden, not
+  destroyed); no crash on load/zone/undock/dock. The top menu bar + top-right
+  buttons also vanish (known side effect above).
+- **Setup:** `just play-local` with `UseClientMods=true`, hide-ui mod enabled.
+
+---
+
+**SUPERSEDED HISTORY (kept for the record -- all conclusions below are WRONG or
+moot; the SOLVED block above is the truth):**
 
 - **UPDATE (live session, 2026-06-18) -- `vt_hide_paint` PROVEN, supersedes the
   "promising-but-unvalidated" note below; commit e46793a1**:

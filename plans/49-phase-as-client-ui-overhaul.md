@@ -116,63 +116,44 @@ per-vertex gradient quads + rounded corners from triangle fans, not PNGs.
   ~165px wide, y~935-975, ~20px apart). Anchor from `enb.screen()` bottom
   instead of hardcoded 1280x768-era constants.
 
-### AS-6 Tier B: true native-widget hide  `[~]`  (vitals+xp ON by default 2026-06-13; skill open)
+### AS-6 Tier B: true native-widget hide  `[x]`  (SOLVED 2026-06-18 -- flag-gate the draw pass)
 
-- `[x]` Suppression primitive: `enb.patch_ret(addr [,pop])` (lua_api.cpp
-  `l_patch_ret`) overwrites a function entry with `ret` (0xC3, or 0xC2 imm16
-  for callee-cleanup) under VirtualProtect + FlushInstructionCache. Refuses
-  addrs below the image base; logs each patch. Mock records calls headless.
-- `[x]` Paint targets pinned by behavioural analysis (2026-06-13): the hide
-  target is each widget's per-frame PAINT routine, not the constructor/updater.
-  `enb.addr.VitalsPaint` 0x005dcae0 and `enb.addr.XpPaint` 0x0058cf60 are both
-  `void __fastcall(ECX)`, pop 0, pure paint (each just checks the per-gadget
-  visible flag at +0x60 and calls the gadget paint primitive), so an early ret
-  hides them clean. The earlier candidates were WRONG: VitalsBars 0x005dbfc0 /
-  XpBars 0x0058c450 are constructors, EnergyBar 0x005dc4a0 is the value-updater,
-  SkillButton 0x00662dc0 is the skill constructor -- ret-patching any of those
-  leaves uninitialised pointers / frozen state and crashes. game.h + the init.lua
-  HIDE block now name the paint entries; the ctor/updater addrs are kept and
-  labelled "NOT a hide target".
-- `[!]` Skill buttons have NO standalone pure-paint entry (render is fused with
-  state mutation); hiding them needs a runtime per-gadget visible-flag write
-  (clear gadget+0x60 once the live pointer is known), not a static patch. Open.
-- `[x]` Vitals + xp hides turned **ON by default** (owner-directed 2026-06-13):
-  init.lua's HIDE block now runs `enb.patch_ret(VitalsPaint)` +
-  `enb.patch_ret(XpPaint)` at startup. init_spec asserts both paint entries are
-  ret-patched (pop 0) and that the ctor/updater addrs are NOT.
-- `[!]` ON ahead of real-client confirmation: "an early ret hides the widget
-  without breaking gameplay" is still real-client-only. **CV-AS-HIDE-VITALS /
-  -XP** in plans/29 remain open; if the client crashes on load, comment the two
-  patch_ret lines. **CV-AS-HIDE-SKILL** stays open (no clean paint entry; needs
-  the runtime visible-flag path).
+- `[x]` **Working solution (screenshot-verified live, 2026-06-18).** The whole
+  in-space 2D HUD is ONE interface-scene object (vt 0x00aff1f4), reachable as
+  `cockpit_ctrl()+0x44`. It owns an intrusive circular widget list at scene+0x40
+  (sentinel = scene+0x3c; node next +0x04; node+0x0c points 0x10 INTO the child,
+  so child = that ptr - 0x10). The per-frame draw pass walks that list and draws
+  each leaf only when its visibility predicate `(flags & 0x700) == 0x700` passes,
+  reading a flags dword at leaf+0x18. **Clearing bit 0x400 of leaf+0x18 makes the
+  draw pass skip that widget** -- no vtable edit, no value-field write, no crash.
+  The `hide-ui` mod (`native_hud_hide.lua`) re-applies this every tick (widgets
+  rebuild on sector/dock change) on leaves of class 0x00b1327c only, which is the
+  native chrome: cockpit bars/dial/throttle/warp, the action + skill buttons, the
+  reactor bars, the scanner, AND the top button/menu bar. The chat window (a
+  different leaf class, 0x00afbf28) and the 3D cockpit border mesh (a separate PIP
+  scene list) are untouched. Result: bottom HUD is bare 3D border + chat only.
+- `[x]` **Why every earlier approach was a visual no-op** (all disproven live
+  2026-06-18, kept here so we never retry them):
+  - `patch_ret(VitalsPaint 0x005dcae0)` / `patch_ret(XpPaint 0x0058cf60)`: changed
+    nothing on screen. These are not the draw path for these widgets.
+  - `SetVisible` / the gadget +0x2c "visible" bit / the +0x60 flag: the draw pass
+    reads leaf+0x18 `& 0x700`, NOT those, so writing them does nothing visible.
+  - `vt_hide_paint` repointing a controller's or a container's slot-0x24: the
+    controllers/containers are NOT on the draw path; only the scene's leaf list is.
+    (The earlier "vitals hide works" claim was a MISREAD -- the bars that vanished
+    were the Freya overlay PlayerCard going blank after slot-4, the value-UPDATER
+    0x5DC4A0, corrupted the vitals data it reads. vt_hide_paint the mechanism is
+    fine and still in lua_api.cpp as an RE tool; it just cannot reach these leaves.)
+- `[x]` Mesh scale-zero (the old `hide-ui` vitals-fill suppression): confirmed live
+  to be running (scales read 0.0) yet zero visual effect -- those quads are not the
+  visible bars. Removed in the rewrite (dead code).
+- `[~]` Real-client confirmation: I verified this on the actual Win32 client under
+  WINE via screenshots, so the visual result is real. CV-AS-HIDE-COCKPIT in
+  plans/29 updated to record the working mechanism; owner should confirm the menu
+  bar + scanner removal is desired scope (it removes the top menu bar too; scope
+  can be tightened to bottom-only by screen position if wanted).
 - Note: the earlier "Tier A cover panel" approach is GONE -- the design is
-  translucent glass, so an opaque cover would defeat the look. Suppression
-  (patch_ret) is the only path to a clean result, and it is gated on CV.
-- `[x]` Live RE toolkit for finding/killing per-frame paint (commit e46793a1,
-  2026-06-18): `enb.vt_profile(g)`/`enb.vt_dump()`/`enb.vt_restore()` (copy an
-  instance vtable into counting stubs, report the ~1-call-per-frame paint slot,
-  reversible) and `enb.vt_hide_paint(g,slot,pop)`/`enb.vt_unhide()` (give ONE
-  instance a private vtable copy whose paint slot is a bare `ret <pop>`; restores
-  all). Plus `enb.unpatch([addr])` to revert `enb.patch_ret` writes live, and
-  `enb.gadget_set_visible(g,bool)` (generic +0x40 dispatch). The copy-per-instance
-  design fixes the 06-17 shared-vtable profiler wedge (no recurrence).
-- `[x]` Empirical findings (live, recorded in game.h + CV-AS-HIDE-COCKPIT):
-  SetVisible(+0x40) is INEFFECTIVE on the HUD controllers. `vt_hide_paint` works
-  ONLY for custom immediate-mode controllers the engine calls through the live
-  instance vtable each frame -- proven on the VITALS controller (runtime vt
-  0x00AF5D70, paint slot 4, pop 0): hiding it cleanly removes the hull/shield/
-  energy bars, reversibly (screenshot-verified 2026-06-18).
-- `[!]` Round throttle/warp dial + action-button row CANNOT be hidden by
-  `vt_hide_paint` (definitive negative, 2026-06-18). The dial owner IS captured
-  (`enb.cockpit_ctrl()` = 0x3B66B10, ctor 0x0057DD20, vt 0x00AF0CFC) and owns the
-  UI_CPIT_* dial gadgets, the UI_CPIT_*_BUT action buttons, and the UI_POWER
-  vitals gadgets. But repointing the owner's paint slot (24 -> 0x581670) OR every
-  leaf gadget's per-frame slot (12/24/43; e.g. WARP vt 0x00AFBB58 slot 24 ->
-  base-class 0x00407496) changed NOTHING on screen: standard framework gadgets are
-  drawn by the gadget render PASS, not via the per-instance vtable slot the
-  technique repoints. Path forward needs deeper RE (hook the render pass + gate on
-  a flag it reads, or scale-zero each gadget mesh). CV-AS-HIDE-COCKPIT stays open;
-  the dial/buttons remain visible and the Freya glass overlay coexists with them.
+  translucent glass, so an opaque cover would defeat the look.
 
 ### AS-7 Build + docs  `[x]`
 
@@ -249,7 +230,7 @@ screenshots commit and push".
 | AS-3 calibration | partial -- scaffolding done (`scripts/autocalib.lua` find/probe/save, `scripts/.gitignore` for `calib_data.lua`, init.lua loads it via pcall). Live offset VALUES still need owner in-game session |
 | AS-4 freya_ui.lua | done -- `scripts/freya_ui.lua`: cover panel + swallow, 12-button action bar (1..9 0 - =) with click->`enb.tap`/keypress-lit, 3 stacked stat bars (gray until AS-3) |
 | AS-5 xp_overlay fix | done -- `scripts/xp_overlay.lua` rewritten: labels right-aligned LEFT of each bar, screen-bottom-anchored via `enb.screen()` |
-| AS-6 Tier B hide | shipped as the `native-hud-hide` mod, ENABLED by default -- `enb.patch_ret` on the pinned pure-paint targets (VitalsPaint 0x005dcae0 / XpPaint 0x0058cf60); disable via launcher Configure Mods if the client crashes. Correctness gated on CV-AS-HIDE-VITALS/-XP/-SKILL (real-client-only) |
+| AS-6 Tier B hide | **SOLVED 2026-06-18.** `hide-ui` mod clears bit 0x400 of each chrome leaf's flags dword (leaf+0x18) every tick, so the in-space HUD draw pass skips it. Removes all native cockpit chrome (bars/dial/throttle/warp/buttons/scanner) + top menu bar; keeps chat + the 3D border. Screenshot-verified on the real WINE client. Replaces the disproven patch_ret/vt_hide_paint/mesh-scale approaches (all visual no-ops). See CV-AS-HIDE-COCKPIT |
 | AS-7 build+docs | done -- `make clean && make` clean (zero -Wall -Wextra warnings); README API table + AS section updated |
 | AS-8 headless test suite | done -- 43 tests green + 5 rendered screenshot scenarios (incl. station); `make test` |
 | AS-9 design port | done -- freya_hud/freya_ui/xp_overlay ported to the `Earth & Beyond HUD.html` glass design; state-gated (space/station/login); cursor-on-top; specs + screenshots rewritten. Real-client checks: CV-AS-STATE/-CURSOR/-HIDE-* |
