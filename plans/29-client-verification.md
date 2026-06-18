@@ -1316,33 +1316,48 @@ format & byte order", Trap 2).
     +0x60 is an "Exists/has-buffer" flag set once at construction; clearing it can
     trip an `_Exists` assertion and disables update logic broadly, not just paint.
     Abandoned.
-  - **The clean hide is GadgetClass::SetVisible (vtable+0x40), with an allowlist.**
-    `enb.gadget_set_visible(g, false)` dispatches `*(vtable+0x40)` -- but a
-    controller int-slot may hold a NON-gadget sub-object whose vtable+0x40 is a
-    different virtual (getter / list-walk / **destructor** / render-state helper).
-    Only two vtable+0x40 values are genuine SetVisible (a base entry + a
-    focus-handling override, each reachable via a thunk -- four accepted values
-    total). `enb.hide_cockpit` (C++) currently does NOT allowlist, so it has been
-    blindly calling non-gadget vtable+0x40 methods (it has not crashed, but that is
-    luck) -- **latent bug, do not rely on `enb.hide_cockpit` until it allowlists.**
-  - **DONE + live-verified, shipped in the hide-ui mod (commit c4b232d2, pure Lua,
-    no rebuild)**: the bottom-left xp/discipline trough bars (xp_ctrl +0x1c/0x20/0x24)
-    are hidden via the allowlisted SetVisible -- the "subtle empty bars" the owner
-    wanted gone; the throttle/warp gadget cluster is hidden the same way; the
-    throttle controller's ReactorBar children (vtable 0xaff1f4, not gadgets) are
-    dimmed via their inherited base visible byte at +0x1c (0 == hidden, no side
-    effects, value the parent itself writes at construction).
-  - **STILL NOT HIDDEN -- controllers not capturable this session**: the numbered
-    ability hotbar, the 4 skill "orb" buttons, the central reactor dial, and the
-    right radar dial. Their controllers' constructors ran at login BEFORE the mod's
-    hooks armed and there is no global to read them back (the cockpit-manager chain
-    `[[0x00be8b38+0x78]+0x127c]` from static analysis resolves to garbage live --
-    +0x78 is not a pointer; the decomp offsets here are unreliable). The
-    `CockpitCommands` hook (0x0057be50) installed fine but never fires, so its
-    controller stays `cmd_ctrl == 0`. Reliable fix = a constructor-capture hook that
-    fires on the next login / cockpit-page build (then the mod hides them per-tick
-    like the throttle); a heap scan was deliberately NOT shipped (fragile,
-    per-session pointer, too slow per-tick). Needs a C++ change + relaunch + relogin.
+  - **CORRECTION -- SetVisible (the +0x2c visible bit) does NOT visually remove
+    these widgets.** This retracts the "SetVisible is the clean hide" claim made
+    earlier the same day. Proven live: registering a PER-TICK `gadget_set_visible(g,
+    false)` on the JEFIVE ship-vitals bars (`UI_POWER_ENERGY/SHIELDS/HULL_0`) and on
+    the cockpit buttons (`UI_CPIT_SHIP_BUT_0` etc.) flips the +0x2c bit 0x20 to 0 but
+    the panel still renders unchanged (screenshots pixel-equal). The tell: the
+    `<<Warp` text and the `UI_CPIT_WARP_0` gadget keep drawing while reading vis=0.
+    These widgets are painted by their CONTROLLER's per-frame paint, which ignores
+    the child gadget visible bit. `enb.hide_cockpit()` returns "hid 12" and changes
+    NOTHING on screen -- same reason. **So commit c4b232d2's SetVisible-based hides
+    of the xp/discipline and throttle clusters are very likely visually
+    ineffective** (could not re-verify the xp class 0xAF15EC before the client wedged
+    -- see below; treat as unconfirmed, NOT done). Only the original fill-mesh
+    SCALE-zeroing (QUAD vtable 0xb10f24, scales +0x10/+0x50) is a proven visible
+    removal, and only for fill bars -- not frames, text, buttons, dials.
+  - **NEW capability found: gadgets carry their UI name C-string at instance +0x24**
+    (verified live: `UI_POWER_SHIELDS_0`, `UI_EXPERIENCE_COMBAT_0`, `UI_CPIT_WARP_0`,
+    `UI_SCAN_PREV_TARGET_0`, ...). A bounded heap scan of the gadget arena
+    (~0x75E0000..0x7640000) enumerates them by name -- the way to TARGET specific
+    native elements. (No reachable global GadgetManager: gadget+0x08 is the owning
+    controller, not a manager; the decomp's manager-list offsets did not hold live.)
+  - **"JEFIVE" is the player's SHIP NAME, not a panel** (found as the ship entity's
+    name string). So `enb.vitals_ctrl()` (@runtime vt 0x00af5d70) IS the ship-vitals
+    panel controller; its gauges at +0x1c/+0x20/+0x24 are the on-screen Hull/Shield/
+    Energy bars.
+  - **Promising-but-UNVALIDATED mechanism: `vt_hide_paint(vtable, slot)`** -- no-op a
+    controller's per-frame paint vtable slot so the WHOLE element stops drawing
+    regardless of the visible bit. This is the right shape (kills frame+text+bars+
+    buttons at once). NOT yet proven: the slot index must be identified WITHOUT the
+    profiler (see caution).
+  - **CAUTION / INCIDENT: `vt_dump` / `vt_profile` wedged the client.** They install
+    call-counting stubs on vtable slots; profiling the vitals controller vtable
+    (0x00af5d70) left the client spinning at ~874% CPU with winedbg attached -- a
+    hard hang, had to `kill -9` client.exe + relaunch + relogin. **Do NOT run
+    vt_profile/vt_dump on a hot (per-frame) slot on a live session.** Identify the
+    paint slot from the decomp instead, then `vt_hide_paint` it directly.
+  - **STILL NOT HIDDEN (the user's "ALL of cropped 018" target)**: the JEFIVE ship-
+    vitals panel, the numbered ability hotbar, the 4 skill "orb" buttons, the central
+    reactor dial, the right radar dial, the `<<Warp` text. Next step: identify each
+    owning controller's per-frame paint slot from the decomp and `vt_hide_paint` it
+    (validated carefully, with `vt_restore` ready), OR scale-zero the fill meshes for
+    the bar fills. Needs a live client (relaunch + relogin after the wedge).
 
 - **Change**: client-only (enbmod.dll). The stock bottom-center cockpit widgets
   (the throttle / up-down / WARP cluster, and the "UI COMMANDS" action buttons)
