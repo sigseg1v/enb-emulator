@@ -847,9 +847,9 @@ static const int kVtSlots = 64;
 static uint32_t g_vt_counts[kVtSlots];
 static uintptr_t g_vt_orig[kVtSlots];
 static uintptr_t g_vt_copy[kVtSlots]; // replacement vtable handed to the gadget
-static uint8_t* g_vt_stubs = nullptr;  // kVtSlots * 12 bytes, RWX
-static uintptr_t g_vt_target = 0;      // instrumented gadget instance
-static uintptr_t g_vt_saved = 0;       // its original vtable pointer
+static uint8_t* g_vt_stubs = nullptr; // kVtSlots * 12 bytes, RWX
+static uintptr_t g_vt_target = 0;     // instrumented gadget instance
+static uintptr_t g_vt_saved = 0;      // its original vtable pointer
 
 static bool vt_profile_install(uintptr_t g) {
     if (g_vt_target)
