@@ -1310,6 +1310,40 @@ format & byte order", Trap 2).
 
 ### [ ] CV-AS-HIDE-COCKPIT -- bottom-center throttle/warp + action buttons suppressed
 
+- **UPDATE (live session, 2026-06-17) -- supersedes the gadget+0x60 plan below**:
+  - **+0x60 is NOT a usable hide.** Live test: clearing the low byte of +0x60 on
+    all three vitals gauges changed NOTHING on screen (pixel-identical before/after).
+    +0x60 is an "Exists/has-buffer" flag set once at construction; clearing it can
+    trip an `_Exists` assertion and disables update logic broadly, not just paint.
+    Abandoned.
+  - **The clean hide is GadgetClass::SetVisible (vtable+0x40), with an allowlist.**
+    `enb.gadget_set_visible(g, false)` dispatches `*(vtable+0x40)` -- but a
+    controller int-slot may hold a NON-gadget sub-object whose vtable+0x40 is a
+    different virtual (getter / list-walk / **destructor** / render-state helper).
+    Only two vtable+0x40 values are genuine SetVisible (a base entry + a
+    focus-handling override, each reachable via a thunk -- four accepted values
+    total). `enb.hide_cockpit` (C++) currently does NOT allowlist, so it has been
+    blindly calling non-gadget vtable+0x40 methods (it has not crashed, but that is
+    luck) -- **latent bug, do not rely on `enb.hide_cockpit` until it allowlists.**
+  - **DONE + live-verified, shipped in the hide-ui mod (commit c4b232d2, pure Lua,
+    no rebuild)**: the bottom-left xp/discipline trough bars (xp_ctrl +0x1c/0x20/0x24)
+    are hidden via the allowlisted SetVisible -- the "subtle empty bars" the owner
+    wanted gone; the throttle/warp gadget cluster is hidden the same way; the
+    throttle controller's ReactorBar children (vtable 0xaff1f4, not gadgets) are
+    dimmed via their inherited base visible byte at +0x1c (0 == hidden, no side
+    effects, value the parent itself writes at construction).
+  - **STILL NOT HIDDEN -- controllers not capturable this session**: the numbered
+    ability hotbar, the 4 skill "orb" buttons, the central reactor dial, and the
+    right radar dial. Their controllers' constructors ran at login BEFORE the mod's
+    hooks armed and there is no global to read them back (the cockpit-manager chain
+    `[[0x00be8b38+0x78]+0x127c]` from static analysis resolves to garbage live --
+    +0x78 is not a pointer; the decomp offsets here are unreliable). The
+    `CockpitCommands` hook (0x0057be50) installed fine but never fires, so its
+    controller stays `cmd_ctrl == 0`. Reliable fix = a constructor-capture hook that
+    fires on the next login / cockpit-page build (then the mod hides them per-tick
+    like the throttle); a heap scan was deliberately NOT shipped (fragile,
+    per-session pointer, too slow per-tick). Needs a C++ change + relaunch + relogin.
+
 - **Change**: client-only (enbmod.dll). The stock bottom-center cockpit widgets
   (the throttle / up-down / WARP cluster, and the "UI COMMANDS" action buttons)
   bleed through the Freya overlay that replaces them. Unlike vitals/xp, these have
