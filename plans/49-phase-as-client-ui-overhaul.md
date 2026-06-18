@@ -128,10 +128,21 @@ per-vertex gradient quads + rounded corners from triangle fans, not PNGs.
   draw pass skip that widget** -- no vtable edit, no value-field write, no crash.
   The `hide-ui` mod (`native_hud_hide.lua`) re-applies this every tick (widgets
   rebuild on sector/dock change) on leaves of class 0x00b1327c only, which is the
-  native chrome: cockpit bars/dial/throttle/warp, the action + skill buttons, the
-  reactor bars, the scanner, AND the top button/menu bar. The chat window (a
-  different leaf class, 0x00afbf28) and the 3D cockpit border mesh (a separate PIP
-  scene list) are untouched. Result: bottom HUD is bare 3D border + chat only.
+  native chrome. The chat window (a different leaf class, 0x00afbf28) and the 3D
+  cockpit border mesh (a separate PIP scene list) are untouched.
+- `[x]` **Per-element control API (2026-06-18).** The 16 chrome panels are each
+  named (by observing which on-screen widget vanished when each leaf was hidden)
+  and exposed via `enb.hud.{hide,show,toggle,set,hide_all,show_all,list,names,dump}`
+  -- a modder/`/run` addresses a panel by name (e.g. `enb.hud.show("TargetFrame")`).
+  The panel is the ATOMIC unit: a panel paints its own children, ignoring per-child
+  draw gates (tested live -- clearing a child gadget's 0x700 bits did nothing), so
+  sub-widget hiding would need a DLL draw-hook or mesh-scale, deliberately out of
+  scope. Panels carry no name/id at a fixed offset, so the key is the chrome-ordinal
+  (position among 0x00b1327c leaves); `enb.hud.dump()` prints the live mapping.
+  Bits 0x100/0x200/0x400 are Visible/Enabled/in-Layout and ALSO gate hit-testing,
+  so hiding a panel can break 3D click-to-select -- show it back if so.
+  Default hidden set: ActionBarIcons, LevelBarsAndMicroMenu, BottomHudChrome,
+  ActionBarBackground, ChatFrameBackgroundAndScroll (owner-chosen 2026-06-18).
 - `[x]` **Why every earlier approach was a visual no-op** (all disproven live
   2026-06-18, kept here so we never retry them):
   - `patch_ret(VitalsPaint 0x005dcae0)` / `patch_ret(XpPaint 0x0058cf60)`: changed
@@ -230,7 +241,7 @@ screenshots commit and push".
 | AS-3 calibration | partial -- scaffolding done (`scripts/autocalib.lua` find/probe/save, `scripts/.gitignore` for `calib_data.lua`, init.lua loads it via pcall). Live offset VALUES still need owner in-game session |
 | AS-4 freya_ui.lua | done -- `scripts/freya_ui.lua`: cover panel + swallow, 12-button action bar (1..9 0 - =) with click->`enb.tap`/keypress-lit, 3 stacked stat bars (gray until AS-3) |
 | AS-5 xp_overlay fix | done -- `scripts/xp_overlay.lua` rewritten: labels right-aligned LEFT of each bar, screen-bottom-anchored via `enb.screen()` |
-| AS-6 Tier B hide | **SOLVED 2026-06-18.** `hide-ui` mod clears bit 0x400 of each chrome leaf's flags dword (leaf+0x18) every tick, so the in-space HUD draw pass skips it. Removes all native cockpit chrome (bars/dial/throttle/warp/buttons/scanner) + top menu bar; keeps chat + the 3D border. Screenshot-verified on the real WINE client. Replaces the disproven patch_ret/vt_hide_paint/mesh-scale approaches (all visual no-ops). See CV-AS-HIDE-COCKPIT |
+| AS-6 Tier B hide | **SOLVED 2026-06-18.** `hide-ui` mod clears bit 0x400 of a chrome leaf's flags dword (leaf+0x18) every tick, so the in-space HUD draw pass skips it. Exposes a per-element `enb.hud.*` API over the 16 named chrome panels (panel is the atomic unit; sub-widget control needs a DLL draw-hook, out of scope). Default hides ActionBarIcons/LevelBarsAndMicroMenu/BottomHudChrome/ActionBarBackground/ChatFrameBackgroundAndScroll; keeps chat + 3D border. Screenshot-verified on the real WINE client. Replaces the disproven patch_ret/vt_hide_paint/mesh-scale approaches (all visual no-ops). See CV-AS-HIDE-COCKPIT |
 | AS-7 build+docs | done -- `make clean && make` clean (zero -Wall -Wextra warnings); README API table + AS section updated |
 | AS-8 headless test suite | done -- 43 tests green + 5 rendered screenshot scenarios (incl. station); `make test` |
 | AS-9 design port | done -- freya_hud/freya_ui/xp_overlay ported to the `Earth & Beyond HUD.html` glass design; state-gated (space/station/login); cursor-on-top; specs + screenshots rewritten. Real-client checks: CV-AS-STATE/-CURSOR/-HIDE-* |

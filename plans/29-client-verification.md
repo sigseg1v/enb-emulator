@@ -1343,7 +1343,18 @@ format & byte order", Trap 2).
     on sector/dock changes and value updaters re-raise the flag. Every pointer is
     range- + readable-checked and the walk is iteration-bounded (MAX_NODES=256);
     worst case it no-ops and the native UI shows. Screenshot-verified on the real
-    WINE client: bottom HUD = bare 3D border + chat only.
+    WINE client.
+  - **Per-element API (2026-06-18).** The 16 chrome panels are named and exposed via
+    `enb.hud.{hide,show,toggle,set,hide_all,show_all,list,names,dump}`; a modder
+    addresses a panel by name. Findings (all verified live, so nobody re-walks them):
+    the PANEL is the atomic unit -- it paints its own children and ignores per-child
+    draw gates (clearing a child gadget's 0x700 bits did nothing on screen), so
+    sub-widget hiding needs a DLL draw-hook or mesh-scale (out of scope); panels
+    carry NO name/id at a fixed offset so the key is the chrome-ordinal; the bits
+    0x100/0x200/0x400 are Visible/Enabled/in-Layout and ALSO gate hit-testing, so
+    hiding a panel can break 3D click-to-select (show it back if so). Default hidden
+    set (owner-chosen): ActionBarIcons, LevelBarsAndMicroMenu, BottomHudChrome,
+    ActionBarBackground, ChatFrameBackgroundAndScroll.
 - **What to look for (real client, owner confirm):** in space, all native bottom
   chrome (the 3 black status text bars bottom-left, the 6 circular action buttons,
   the ^/v + `<<Warp` cluster, the green reactor / red hull / blue shield bars, and
