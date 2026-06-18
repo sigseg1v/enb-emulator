@@ -173,6 +173,32 @@ namespace LaunchFreya
             _statusTimer = new DispatcherTimer { Interval = StatusRefreshInterval };
             _statusTimer.Tick += OnStatusTimerTick;
             _statusTimer.Start();
+
+            MaybeAutoPlay();
+        }
+
+        // Automation hook: when FREYA_AUTOPLAY=1 is set in the environment, click
+        // Play automatically once the selected server reports ONLINE/READY. This
+        // lets the login-automation skill launch the client WITHOUT driving the
+        // mouse onto the Play button -- the desktop may have another app holding a
+        // pointer grab (a VM / fullscreen game recentering the cursor), which makes
+        // a synthetic XTEST click on the launcher unreliable. No-op unless set.
+        async void MaybeAutoPlay()
+        {
+            if (Environment.GetEnvironmentVariable("FREYA_AUTOPLAY") != "1")
+                return;
+            AppendLog("FREYA_AUTOPLAY=1: will click Play once the server is ONLINE.");
+            // Wait up to ~30s for the status probe to confirm the server so we
+            // never launch against a not-yet-ready stack. On the dev build Play is
+            // never gated, but we still wait for the liveness label to flip.
+            for (int i = 0; i < 60; i++)
+            {
+                var st = (c_ServerStatus?.Text ?? "").ToUpperInvariant();
+                if (st.Contains("ONLINE") || st.Contains("READY")) break;
+                await Task.Delay(500);
+            }
+            AppendLog("FREYA_AUTOPLAY: server status=" + (c_ServerStatus?.Text ?? "") + " -- clicking Play.");
+            OnPlayClick(this, new RoutedEventArgs());
         }
 
         void OnClosing(object sender, EventArgs e)
