@@ -148,6 +148,26 @@ per-vertex gradient quads + rounded corners from triangle fans, not PNGs.
 - Note: the earlier "Tier A cover panel" approach is GONE -- the design is
   translucent glass, so an opaque cover would defeat the look. Suppression
   (patch_ret) is the only path to a clean result, and it is gated on CV.
+- `[x]` Live RE toolkit for finding/killing per-frame paint (commit e46793a1,
+  2026-06-18): `enb.vt_profile(g)`/`enb.vt_dump()`/`enb.vt_restore()` (copy an
+  instance vtable into counting stubs, report the ~1-call-per-frame paint slot,
+  reversible) and `enb.vt_hide_paint(g,slot,pop)`/`enb.vt_unhide()` (give ONE
+  instance a private vtable copy whose paint slot is a bare `ret <pop>`; restores
+  all). Plus `enb.unpatch([addr])` to revert `enb.patch_ret` writes live, and
+  `enb.gadget_set_visible(g,bool)` (generic +0x40 dispatch). The copy-per-instance
+  design fixes the 06-17 shared-vtable profiler wedge (no recurrence).
+- `[x]` Empirical findings (live, recorded in game.h + CV-AS-HIDE-COCKPIT):
+  SetVisible(+0x40) is INEFFECTIVE on the HUD controllers (dispatches, widget
+  keeps painting). The per-frame paint slot is class-specific: cockpit-panel
+  controller = slot 24, vitals + xp controllers = slot 4 (all pop 0).
+  `vt_hide_paint` on those three cleanly removes native vitals/xp/cockpit-panel
+  widgets, reversibly. This is an alternative to the static `patch_ret` hides and
+  the path for elements with no clean standalone paint function.
+- `[!]` Round throttle/warp dial + action-button row still NOT hidden: their
+  `addr::CockpitCommands` controller (ctor hook 0x0057be50) never fires, so
+  `enb.cockpit_ctrl()` returns 0 -- no instance to suppress. The "throttle"
+  controller actually parents the vitals bars, not the dial. CV-AS-HIDE-COCKPIT
+  stays open pending that capture.
 
 ### AS-7 Build + docs  `[x]`
 

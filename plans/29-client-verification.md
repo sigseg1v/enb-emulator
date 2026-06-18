@@ -1310,6 +1310,36 @@ format & byte order", Trap 2).
 
 ### [ ] CV-AS-HIDE-COCKPIT -- bottom-center throttle/warp + action buttons suppressed
 
+- **UPDATE (live session, 2026-06-18) -- `vt_hide_paint` PROVEN, supersedes the
+  "promising-but-unvalidated" note below; commit e46793a1**:
+  - **The per-instance vtable-copy hide WORKS and is reversible.**
+    `enb.vt_hide_paint(gadget, slot, pop)` no longer patches the shared class
+    vtable (that is what wedged the client on 06-17). It allocates a PRIVATE copy
+    of just that one instance's vtable, replaces the paint slot with a bare
+    `ret <pop>` stub, and repoints the instance. Only that instance stops painting;
+    every other gadget of the same class is untouched, input/state are untouched,
+    and `enb.vt_unhide()` restores all hidden instances. No crash across multiple
+    relaunch/probe cycles via the login-to-client skill.
+  - **The profiler is now safe via the same copy trick.** `enb.vt_profile(gadget)`
+    copies the vtable into counting+forwarding stubs (kVtSlots=64) on a private
+    copy, so the 06-17 "spinning at ~874% CPU on a hot slot" wedge does not recur.
+    `enb.vt_dump()` reports per-slot call counts; `enb.vt_restore()` reverts.
+  - **Paint slot is CLASS-SPECIFIC (measured live, not from any external source):**
+    the cockpit-panel controller paints via vtable **slot 24**; the vitals and xp
+    controllers paint via **slot 4**. All three pop 0. `vt_hide_paint` on those
+    three cleanly removes the native vitals + xp readouts and the cockpit panel's
+    painted children.
+  - **SetVisible(+0x40) confirmed ineffective again** -- consistent with the 06-17
+    correction below. The working hide is paint-slot suppression, full stop.
+  - **STILL OPEN -- the round throttle/warp dial + action-button row.** Their
+    owning controller (`addr::CockpitCommands`, ctor hooked at 0x0057be50 in
+    hooks.cpp) is never captured: the hook never fires, so `enb.cockpit_ctrl()`
+    returns 0 and there is no instance to `vt_hide_paint`. The controller captured
+    as "throttle" (vt 0x00af... , addr::CockpitThrottle) actually parents the
+    VITALS bars (child slot 0x34 == vitals_ctrl), NOT the dial. Next step: fix the
+    commands-controller capture (correct ctor address/label, or walk the child
+    tree from a known parent / heap-name-scan for `UI_CPIT_*`), then `vt_hide_paint`
+    its paint slot. Until then this CV stays open.
 - **UPDATE (live session, 2026-06-17) -- supersedes the gadget+0x60 plan below**:
   - **+0x60 is NOT a usable hide.** Live test: clearing the low byte of +0x60 on
     all three vitals gauges changed NOTHING on screen (pixel-identical before/after).
