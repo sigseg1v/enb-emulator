@@ -73,6 +73,19 @@ unsigned vitals_ctrl();
 // (installed by enable_event_hooks) has fired. lua_api reads levels off this.
 unsigned rpg_mgr();
 
+// ECX (this) captured from the most recent XpBars-updater call: the discipline
+// XP-bar controller, whose combat/trade/explore bar gadgets cache the live 0..1 xp
+// fill fraction. 0 until the updater has run in space. lua_api reads the fractions
+// off this (enb.xp_frac).
+unsigned xp_ctrl();
+
+// ECX (this) captured from the cockpit constructors: the throttle/warp cluster
+// controller and the "UI COMMANDS" action-button controller. 0 until each ctor
+// has run (entering space). lua_api walks each controller's child gadgets and
+// clears their visible flag (enb.hide_cockpit) so the Freya overlay replaces them.
+unsigned cockpit_throttle_ctrl();
+unsigned cockpit_cmd_ctrl();
+
 // Event sinks set by the Lua layer. Args are best-effort raw pointers/values.
 void set_on_skill(std::function<void(unsigned /*this*/, unsigned /*arg*/)> cb);
 void set_on_chat(std::function<void(unsigned /*this*/, unsigned /*arg*/)> cb);

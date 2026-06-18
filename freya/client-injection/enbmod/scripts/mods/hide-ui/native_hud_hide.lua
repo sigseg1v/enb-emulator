@@ -31,9 +31,37 @@
 -- ret hides the widget without side effects" is only fully provable on the real
 -- client. If the client crashes on load, disable this mod (CV-AS-HIDE-VITALS /
 -- -XP in plans/29-client-verification.md track the confirmation).
+--
+-- DEFER UNTIL IN SPACE. The widgets these routines paint only exist in space, so
+-- patching at mod-load (which happens at the front-end / login screen, where the
+-- bars are not even visible) serves no purpose there. We gate the patch behind
+-- the in-space heartbeat and apply it exactly once, the first frame we see space.
+-- patch_ret has no restore, so this is one-way for the session; a reload re-runs
+-- this file and (if already in space) re-applies the same byte, which is
+-- idempotent.
 
-enb.patch_ret(enb.addr.VitalsPaint)       -- CV-AS-HIDE-VITALS
-enb.patch_ret(enb.addr.XpPaint)           -- CV-AS-HIDE-XP
+local applied = false
+enb.on_tick(function()
+    if not (enb.inspace and enb.inspace()) then return end
+
+    -- One-shot: the vitals/xp PAINT routines are pure, so an early ret hides them
+    -- for good (CV-AS-HIDE-VITALS / -XP). Done once the first frame we see space.
+    if not applied then
+        enb.patch_ret(enb.addr.VitalsPaint)
+        enb.patch_ret(enb.addr.XpPaint)
+        applied = true
+        enb.log("hide-ui: in space -> patched native vitals/xp paint")
+    end
+
+    -- Per-tick: the bottom-center cockpit widgets (throttle/up-down/warp cluster
+    -- and the "UI COMMANDS" action buttons) have NO pure-paint entry to ret-patch,
+    -- and the game re-shows the throttle gadgets whenever throttle/warp state
+    -- changes -- so we re-clear their engine visible flag every frame. The Freya
+    -- overlay draws the replacement controls. enb.hide_cockpit is fully guarded and
+    -- runs no game code; it returns 0 until the cockpit controllers are captured
+    -- (their constructors run on entering space). CV-AS-HIDE-COCKPIT.
+    if enb.hide_cockpit then enb.hide_cockpit() end
+end)
 
 -- The skill buttons have NO standalone pure-paint entry (render is fused with
 -- state mutation), so there is no clean ret-patch for them; hiding them needs a

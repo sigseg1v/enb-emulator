@@ -227,6 +227,67 @@ extern "C" __attribute__((naked)) void hk_RpgLevels() {
                          "jmp *_real_RpgLevels_tramp\n\t");
 }
 
+// ---- XpBars controller capture ---------------------------------------------
+// game.h::addr::XpBarsUpdate (0x0058cb50) is the discipline XP-bar value updater:
+// __fastcall(ECX = the XpBars controller). It recomputes each bar's 0..1 fill
+// fraction and caches it on the bar gadget (gadget + xp::fill_frac). The
+// explore/trade fractions go through a getter chain we cannot replicate from Lua,
+// so we capture the controller `this` (ECX) here -- the read-only pattern of
+// hk_RpgLevels -- and lua_api reads the cached fractions off it (hooks::xp_ctrl()).
+// Forwards every argument untouched via the trampoline; never alters game behaviour.
+static volatile unsigned g_xp_ctrl = 0; // ECX (this) of the XpBars updater
+extern "C" {
+void* real_XpBars_tramp = nullptr;
+void notify_xp(unsigned thisp) {
+    g_xp_ctrl = thisp;
+}
+}
+extern "C" __attribute__((naked)) void hk_XpBars() {
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl %ecx\n\t" // this (XpBars controller)
+                         "call _notify_xp\n\t"
+                         "addl $4, %esp\n\t"
+                         "popal\n\t"
+                         "jmp *_real_XpBars_tramp\n\t");
+}
+
+// ---- cockpit controller capture ---------------------------------------------
+// game.h::addr::CockpitThrottle (0x0057dd20) and CockpitCommands (0x0057be50) are
+// the two cockpit-widget CONSTRUCTORS (__fastcall, ECX = the controller). They run
+// once when the cockpit comes up (entering space). We capture each `this` (ECX)
+// read-only -- the exact pattern of hk_XpBars -- so lua_api (enb.hide_cockpit) can
+// walk each controller's child gadgets and clear their visible flag, letting the
+// Freya throttle/action overlay replace the stock widgets. Forwards every argument
+// untouched via the trampoline; never alters the constructor's behaviour.
+static volatile unsigned g_cockpit_throttle = 0; // ECX of the throttle/warp ctor
+static volatile unsigned g_cockpit_cmd = 0;      // ECX of the UI-commands ctor
+extern "C" {
+void* real_CockpitThrottle_tramp = nullptr;
+void* real_CockpitCommands_tramp = nullptr;
+void notify_cockpit_throttle(unsigned thisp) {
+    g_cockpit_throttle = thisp;
+}
+void notify_cockpit_cmd(unsigned thisp) {
+    g_cockpit_cmd = thisp;
+}
+}
+extern "C" __attribute__((naked)) void hk_CockpitThrottle() {
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl %ecx\n\t" // this (throttle controller)
+                         "call _notify_cockpit_throttle\n\t"
+                         "addl $4, %esp\n\t"
+                         "popal\n\t"
+                         "jmp *_real_CockpitThrottle_tramp\n\t");
+}
+extern "C" __attribute__((naked)) void hk_CockpitCommands() {
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl %ecx\n\t" // this (UI-commands controller)
+                         "call _notify_cockpit_cmd\n\t"
+                         "addl $4, %esp\n\t"
+                         "popal\n\t"
+                         "jmp *_real_CockpitCommands_tramp\n\t");
+}
+
 // At naked entry: [esp]=return addr, [esp+4]=arg0, ECX=this. After `pushal` (32 bytes) the return
 // addr sits at 0x20(%esp) and arg0 at 0x24(%esp). We push arg0 then this for cdecl notify(this,arg0).
 extern "C" __attribute__((naked)) void hk_Skill() {
@@ -340,10 +401,28 @@ bool enable_event_hooks() {
         logf("hook RpgLevels failed");
         ok = false;
     }
+    if (MH_CreateHook((void*)game::addr::XpBarsUpdate, (void*)&hk_XpBars, &real_XpBars_tramp) !=
+        MH_OK) {
+        logf("hook XpBarsUpdate failed");
+        ok = false;
+    }
+    if (MH_CreateHook((void*)game::addr::CockpitThrottle, (void*)&hk_CockpitThrottle,
+                      &real_CockpitThrottle_tramp) != MH_OK) {
+        logf("hook CockpitThrottle failed");
+        ok = false;
+    }
+    if (MH_CreateHook((void*)game::addr::CockpitCommands, (void*)&hk_CockpitCommands,
+                      &real_CockpitCommands_tramp) != MH_OK) {
+        logf("hook CockpitCommands failed");
+        ok = false;
+    }
     MH_EnableHook((void*)game::addr::SkillLifecycle);
     MH_EnableHook((void*)game::addr::ChatChannel);
     MH_EnableHook((void*)game::addr::ChatSend);
     MH_EnableHook((void*)game::addr::RpgLevels);
+    MH_EnableHook((void*)game::addr::XpBarsUpdate);
+    MH_EnableHook((void*)game::addr::CockpitThrottle);
+    MH_EnableHook((void*)game::addr::CockpitCommands);
     g_event_hooks_on = ok;
     logf("event hooks %s", ok ? "enabled" : "partially enabled");
     return ok;
@@ -354,6 +433,9 @@ void disable_event_hooks() {
     MH_DisableHook((void*)game::addr::ChatChannel);
     MH_DisableHook((void*)game::addr::ChatSend);
     MH_DisableHook((void*)game::addr::RpgLevels);
+    MH_DisableHook((void*)game::addr::XpBarsUpdate);
+    MH_DisableHook((void*)game::addr::CockpitThrottle);
+    MH_DisableHook((void*)game::addr::CockpitCommands);
     g_event_hooks_on = false;
 }
 
@@ -385,6 +467,15 @@ unsigned vitals_ctrl() {
 }
 unsigned rpg_mgr() {
     return g_rpg_mgr;
+}
+unsigned xp_ctrl() {
+    return g_xp_ctrl;
+}
+unsigned cockpit_throttle_ctrl() {
+    return g_cockpit_throttle;
+}
+unsigned cockpit_cmd_ctrl() {
+    return g_cockpit_cmd;
 }
 
 } // namespace hooks

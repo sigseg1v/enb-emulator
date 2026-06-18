@@ -11,10 +11,11 @@
 -- (C / E / T in the discipline color), a thin xp-progress bar (fill width =
 -- xp%), and an "LV n" badge on the right.
 --
--- DATA: enb.self().{combat,explore,trade}_{lvl,pct}. Until the player offsets
--- are calibrated those are nil and the card renders a gray skeleton (letters
--- uncalibrated-gray, "LV --", empty bars) -- still proves the overlay path is
--- alive before the numbers are real.
+-- DATA: discipline levels come from H.stats() (enb.rpg_level off the RPG manager);
+-- the per-discipline xp-bar fill fraction comes from enb.xp_frac(which) -- the live
+-- 0..1 value the native bar paints, read off the XpBars controller. Until those
+-- resolve the card renders a gray skeleton (letters uncalibrated-gray, "LV --",
+-- empty bars) -- still proving the overlay path is alive before the numbers are real.
 --
 -- VISIBILITY: shown in space and station, hidden on login/charsel/load -- same
 -- freya_hud.vis() gate as the rest of the HUD (the discipline card is part of
@@ -66,7 +67,10 @@ enb.on_tick(function()
     local ry = y + CFG.PAD_Y
     for _, row in ipairs(ROWS) do
         local lvl = st[row.key] or me[row.key .. "_lvl"]
-        local pct = me[row.key .. "_pct"]
+        -- per-discipline xp fill: live 0..1 fraction off the XpBars controller,
+        -- shown as a percent. Falls back to a flat-struct pct if ever calibrated.
+        local frac = enb.xp_frac and enb.xp_frac(row.key)
+        local pct = frac and frac * 100 or me[row.key .. "_pct"]
         local text_y = ry + math.floor((CFG.ROW_H - 14) / 2)
 
         -- colored discipline letter

@@ -11,6 +11,7 @@
 #include <mutex>
 #include <string>
 #include <cstring>
+#include <cstdio>
 #include <windows.h>
 
 extern "C" {
@@ -647,6 +648,121 @@ static int l_rpg_level(lua_State* L) {
     return 1;
 }
 
+// enb.rpg_mgr() -> int. Raw pointer to the RPG manager captured by the RpgLevels
+// hook (hooks::rpg_mgr()). 0 = the client's level-reader has NOT run yet this
+// session, so enb.rpg_level() will return nothing. Diagnostic: open the in-game
+// status/avatar panel (which triggers the reader) and re-check -- a non-zero value
+// means the hook fired and the levels are now readable.
+static int l_rpg_mgr(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)hooks::rpg_mgr());
+    return 1;
+}
+
+// enb.xp_frac(which) -> number | nil. The live 0..1 XP-bar fill fraction for a
+// discipline: which = "combat" | "trade" | "explore". Read off the XpBars
+// controller captured by the updater hook (hooks::xp_ctrl()): the controller holds
+// each bar gadget at a fixed slot, and the gadget caches its computed fill at
+// gadget + xp::fill_frac (the same value the native bar paints). nil until the
+// updater has run in space (controller == 0), the bar gadget is absent, or the
+// bar is not live (exists flag clear). Returns 0 on a real 0% bar, not nil.
+static int l_xp_frac(lua_State* L) {
+    const char* which = luaL_checkstring(L, 1);
+    int slot;
+    if (std::strcmp(which, "combat") == 0)
+        slot = game::xp::bar_combat;
+    else if (std::strcmp(which, "trade") == 0)
+        slot = game::xp::bar_trade;
+    else if (std::strcmp(which, "explore") == 0)
+        slot = game::xp::bar_explore;
+    else
+        return luaL_error(L, "xp_frac: which must be combat|trade|explore");
+
+    uintptr_t ctrl = hooks::xp_ctrl();
+    if (!ctrl || !mem::readable((void*)(ctrl + slot), 4))
+        return 0;
+    uintptr_t bar = mem::ptr(ctrl + slot);
+    if (!bar || !mem::readable((void*)(bar + game::xp::fill_frac), 4))
+        return 0;
+    if (mem::u8(bar + game::xp::exists_flag) == 0)
+        return 0; // bar not live this frame
+    float v = mem::f32(bar + game::xp::fill_frac);
+    if (v != v)
+        return 0; // NaN guard
+    if (v < 0.0f)
+        v = 0.0f;
+    if (v > 1.0f)
+        v = 1.0f;
+    lua_pushnumber(L, v);
+    return 1;
+}
+
+// enb.xp_ctrl() -> int. Raw pointer to the XpBars controller captured by the
+// updater hook (hooks::xp_ctrl()). 0 = the updater has not run in space yet, so
+// enb.xp_frac() returns nothing. Diagnostic, mirrors enb.rpg_mgr().
+static int l_xp_ctrl(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)hooks::xp_ctrl());
+    return 1;
+}
+
+// Clear the engine visible flag (gadget + cockpit::visible_flag) on every child
+// gadget of one captured cockpit controller, over the inclusive int-slot range
+// [first, last]. Each step is fully guarded (mem::ptr / mem::write skip anything
+// not committed), so a wrong controller or slot can only no-op, never fault.
+// Returns how many gadgets it actually cleared (were visible and got zeroed).
+static int hide_cockpit_ctrl(uintptr_t ctrl, int first, int last) {
+    if (!ctrl)
+        return 0;
+    int cleared = 0;
+    for (int slot = first; slot <= last; ++slot) {
+        uintptr_t slot_addr = ctrl + (uintptr_t)slot * 4; // int-slot -> byte offset
+        if (!mem::readable((void*)slot_addr, 4))
+            continue;
+        uintptr_t g = mem::ptr(slot_addr);
+        if (!g || !mem::readable((void*)(g + game::cockpit::visible_flag), 1))
+            continue;
+        if (mem::u8(g + game::cockpit::visible_flag) == 0)
+            continue; // already hidden
+        if (mem::write<uint8_t>(g + game::cockpit::visible_flag, 0))
+            ++cleared;
+    }
+    return cleared;
+}
+
+// enb.hide_cockpit() -> int. Hide the stock bottom-center cockpit widgets (the
+// throttle/warp cluster and the "UI COMMANDS" action buttons) that the Freya
+// overlay replaces, by clearing each child gadget's engine visible flag on the
+// two captured cockpit controllers. Returns the number of gadgets cleared THIS
+// call (0 until the constructors have run -- i.e. until in space). Reversible:
+// it writes no game code, and the engine repaints a gadget the moment we stop
+// clearing it, so disabling the hide-ui mod restores the stock cockpit.
+static int l_hide_cockpit(lua_State* L) {
+    int n = 0;
+    n += hide_cockpit_ctrl(hooks::cockpit_throttle_ctrl(), game::cockpit::throttle_first,
+                           game::cockpit::throttle_last);
+    n += hide_cockpit_ctrl(hooks::cockpit_cmd_ctrl(), game::cockpit::command_first,
+                           game::cockpit::command_last);
+    lua_pushinteger(L, n);
+    return 1;
+}
+
+// enb.cockpit_ctrl() -> throttle_ctrl, cmd_ctrl. Raw pointers to the two cockpit
+// controllers captured by the constructor hooks. 0,0 until the cockpit has been
+// built (entering space). Diagnostic, mirrors enb.xp_ctrl()/enb.rpg_mgr().
+static int l_cockpit_ctrl(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)hooks::cockpit_throttle_ctrl());
+    lua_pushinteger(L, (lua_Integer)hooks::cockpit_cmd_ctrl());
+    return 2;
+}
+
+// enb.reset_callbacks() -- drop every registered on_tick/on_skill/on_chat/on_input
+// handler so a hot-reload re-runs init.lua from a clean slate instead of stacking a
+// second copy of every handler. The Lua-side reload() (init.lua) calls this before
+// it re-dofiles the bootstrap; the C++ mtime-poll hot-reload uses it too.
+static int l_reset_callbacks(lua_State* L) {
+    reset_callbacks(L);
+    return 0;
+}
+
 // enb.on_input(fn [, mask])  -- fn(msg, wparam, lparam) -> truthy to SWALLOW.
 // Optional mask = bitwise-or of enb.WANT_KEY/WANT_CHAR/WANT_MOUSE; default all.
 // Registering nil clears the handler.
@@ -922,6 +1038,12 @@ void open(lua_State* L) {
                                    {"aux", l_aux},
                                    {"aux_i", l_aux_i},
                                    {"rpg_level", l_rpg_level},
+                                   {"rpg_mgr", l_rpg_mgr},
+                                   {"xp_frac", l_xp_frac},
+                                   {"xp_ctrl", l_xp_ctrl},
+                                   {"hide_cockpit", l_hide_cockpit},
+                                   {"cockpit_ctrl", l_cockpit_ctrl},
+                                   {"reset_callbacks", l_reset_callbacks},
                                    {"tap", l_tap},
                                    {"key", l_key},
                                    {"char", l_char},
@@ -1105,7 +1227,60 @@ static void run_console(lua_State* L, const std::string& code) {
     lua_pop(L, nres);
 }
 
+// ---- external console channel (enbmod.cmd) ---------------------------------
+// A dev/debug channel so Lua can be driven into the running client from OUTSIDE
+// the game (a shell, the launcher, an agent): write line(s) of Lua to a file
+// "enbmod.cmd" sited next to enbmod.log, and the next tick runs each line through
+// the exact same path as the in-game "/run" console -- output (results, errors)
+// lands in enbmod.log. Read-then-truncate: the external writer appends, we
+// consume and clear so each command runs exactly once. Single-writer is assumed
+// (this is a debug aid, not an RPC); a line written in the tiny window between
+// our read and truncate is the writer's to retry. Blank lines and lines starting
+// with '#' are ignored so the file can carry comments.
+static void poll_cmd_file(lua_State* L) {
+    const char* dir = log_dir();
+    if (!dir || !dir[0])
+        return;
+    char path[MAX_PATH];
+    snprintf(path, sizeof path, "%s\\enbmod.cmd", dir);
+    FILE* f = fopen(path, "rb");
+    if (!f)
+        return; // no pending commands (the common case)
+    std::string body;
+    char buf[1024];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof buf, f)) > 0)
+        body.append(buf, n);
+    fclose(f);
+    if (body.empty())
+        return;
+    // consume: truncate so the same command never re-runs next tick
+    if (FILE* t = fopen(path, "wb"))
+        fclose(t);
+
+    size_t start = 0;
+    while (start < body.size()) {
+        size_t nl = body.find('\n', start);
+        std::string line =
+            body.substr(start, nl == std::string::npos ? std::string::npos : nl - start);
+        start = (nl == std::string::npos) ? body.size() : nl + 1;
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t'))
+            line.pop_back();
+        size_t b = line.find_first_not_of(" \t");
+        if (b == std::string::npos || line[b] == '#')
+            continue; // blank line or '#' comment
+        run_console(L, line.substr(b));
+    }
+}
+
 void tick(lua_State* L) {
+    // poll the external command channel (throttled; cheap no-op when absent)
+    static unsigned cmd_poll = 0;
+    if (++cmd_poll >= 15) {
+        cmd_poll = 0;
+        poll_cmd_file(L);
+    }
+
     // run any queued "/run" console snippets (game thread enqueued; we run here)
     std::vector<std::string> runs;
     {

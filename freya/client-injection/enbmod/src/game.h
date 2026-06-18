@@ -42,6 +42,12 @@ constexpr uintptr_t XpBars =
 constexpr uintptr_t XpPaint =
     0x0058cf60; // xp per-frame PAINT (combat/trade/explore). Pure paint, clean ret-patch
                 // target (discipline card replaces it)
+constexpr uintptr_t XpBarsUpdate =
+    0x0058cb50; // xp bar VALUE updater (recomputes each bar's fill fraction from the RPGInfo
+                // AuxData container and writes it to gadget+0x68). __fastcall(ECX = the XpBars
+                // controller). We hook it READ-ONLY to capture the controller `this` so the
+                // discipline card can read the live fill (hooks::xp_ctrl()); never patched
+                // (XpPaint above is the hide target -- a different entry on the same object).
 constexpr uintptr_t RpgLevels = 0x0074bfb0; // reads RPGInfo Combat/TradeLevel from AuxData
 
 // ---- target ----
@@ -76,6 +82,22 @@ constexpr uintptr_t SkillButton =
                 // standalone pure-paint entry (render is fused with state mutation), so unlike
                 // vitals/xp there is no clean ret-patch; hiding it needs a runtime per-gadget
                 // visible-flag write instead. Left to CV-AS-HIDE-SKILL.
+
+// ---- cockpit (bottom-center throttle/warp cluster + UI command buttons) ----
+// Two controllers built once when the cockpit comes up (entering space). We hook
+// each CONSTRUCTOR read-only to capture its `this` (ECX), exactly like the vitals/
+// xp/rpg capture hooks, then clear each child gadget's engine visible flag
+// (gadget + 0x60 -- the engine-wide "is this gadget painted" byte, read by 43
+// paint gates across the client) so the Freya overlay's own throttle/action UI is
+// the only one drawn. Read-only on the ctor; the only write is the guarded byte
+// clear, which runs NO game code and is reversible (stop clearing -> the engine
+// repaints the gadget next frame). NOT patched -- these are capture targets.
+constexpr uintptr_t CockpitThrottle =
+    0x0057dd20; // throttle/warp cluster CTOR. __fastcall(ECX = controller). Children
+                // (WARP BAR/THROTTLE/REVERSE/LEFT/RIGHT) at controller int-slots 0x2d..0x31.
+constexpr uintptr_t CockpitCommands =
+    0x0057be50; // "UI COMMANDS" action-button CTOR. __fastcall(ECX = controller). Button
+                // children from int-slot 0x2b upward (two groups: 0x2b.. and 0x2d..0x33).
 
 // ---- AuxData accessor candidates (universal read primitive once resolved) ----
 constexpr uintptr_t AuxGet_Ability = 0x006a4b40;
@@ -145,6 +167,37 @@ namespace rpg {
 constexpr int container_off = 0x12c0;       // manager + this -> RPGInfo AuxData container
 constexpr uintptr_t get_entry = 0x00514b60; // __cdecl(container, keybuf) -> entry|0
 } // namespace rpg
+
+// Discipline XP-bar fill fractions (combat/trade/explore). The per-discipline XP
+// progress is NOT a plain AuxData key we can read directly: the explore/trade
+// fractions are computed through a multi-step getter chain inside the XpBars
+// updater (addr::XpBarsUpdate) that we cannot replicate from Lua. But that updater
+// caches the final 0..1 fraction on each bar gadget at gadget + fill_frac, exactly
+// like the vitals bars. So we capture the XpBars controller `this` live from the
+// updater hook (hooks::xp_ctrl()) and read the cached fraction off each bar gadget.
+// Build-constant offsets observed in addr::XpBarsUpdate; only the controller
+// pointer varies per run, so it is read live rather than stored.
+namespace xp {
+constexpr int bar_combat = 0x1c;  // [ctrl + 0x1c] -> combat xp-bar gadget
+constexpr int bar_trade = 0x20;   // [ctrl + 0x20] -> trade xp-bar gadget
+constexpr int bar_explore = 0x24; // [ctrl + 0x24] -> explore xp-bar gadget
+constexpr int exists_flag = 0x60; // gadget + 0x60 -> nonzero when the bar is live
+constexpr int fill_frac = 0x68;   // gadget + 0x68 -> 0..1 xp fill fraction
+} // namespace xp
+
+// Cockpit child-gadget layout. Each controller (captured live, see addr::Cockpit*)
+// stores its child gadget pointers at fixed int-slots; clearing each child's
+// engine visible flag (child + visible_flag) hides it. Build-constant offsets read
+// out of the two constructors; only the controller pointer varies per run.
+namespace cockpit {
+constexpr int visible_flag = 0x60; // gadget + 0x60 -> engine "is painted" byte (clear to hide)
+// throttle/warp cluster controller: WARP/THROTTLE/REVERSE/LEFT/RIGHT.
+constexpr int throttle_first = 0x2d; // first child int-slot (inclusive)
+constexpr int throttle_last = 0x31;  // last child int-slot (inclusive)
+// "UI COMMANDS" action buttons controller: two adjacent groups.
+constexpr int command_first = 0x2b; // first child int-slot (inclusive)
+constexpr int command_last = 0x33;  // last child int-slot (inclusive)
+} // namespace cockpit
 
 // Runtime-editable field offsets. -1 means "not calibrated -- reads return nil/0".
 // Layout intentionally flat & simple so the Lua calibrate() can poke any field by name.

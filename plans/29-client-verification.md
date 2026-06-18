@@ -1308,6 +1308,60 @@ format & byte order", Trap 2).
   apply automatically at startup. If the client crashes on load, comment the two
   `patch_ret` lines in init.lua and re-launch to bisect.
 
+### [ ] CV-AS-HIDE-COCKPIT -- bottom-center throttle/warp + action buttons suppressed
+
+- **Change**: client-only (enbmod.dll). The stock bottom-center cockpit widgets
+  (the throttle / up-down / WARP cluster, and the "UI COMMANDS" action buttons)
+  bleed through the Freya overlay that replaces them. Unlike vitals/xp, these have
+  NO pure per-frame PAINT routine to ret-patch -- they are painted by a generic
+  widget-tree walker -- so the clean `patch_ret` approach is unavailable. Instead
+  the hide-ui mod clears each child gadget's engine visible flag (gadget + 0x60 --
+  the same byte VitalsPaint and 42 other paint gates read to decide whether to
+  paint a gadget) every frame while in space (`enb.hide_cockpit`).
+- **Mechanism**: two read-only capture hooks on the cockpit CONSTRUCTORS record
+  each controller `this` (ECX), the proven naked-trampoline pattern of the vitals/
+  xp/rpg capture hooks -- `game::addr::CockpitThrottle` 0x0057dd20 (children at
+  controller int-slots 0x2d..0x31: WARP/THROTTLE/REVERSE/LEFT/RIGHT) and
+  `game::addr::CockpitCommands` 0x0057be50 ("UI COMMANDS", children from slot 0x2b,
+  inclusive 0x2b..0x33). `enb.hide_cockpit` (lua_api `l_hide_cockpit`) walks those
+  slots off the captured controllers and clears child+0x60. Every step is
+  guarded (mem::ptr / mem::write skip anything not committed), so a wrong
+  controller/slot can only no-op, never fault.
+- **Reversible, runs no game code**: the only write is the guarded visible-flag
+  byte clear -- no constructor/updater is patched and no game method is called.
+  Because it is a per-frame clear (not a one-way ret-patch), disabling the hide-ui
+  mod restores the stock cockpit the next frame (the engine repaints it). Per-tick
+  rather than one-shot specifically because the game re-shows the throttle gadgets
+  whenever throttle/warp state changes.
+- **Decomp-verified, NOT live-verified -- needs RELAUNCH + the owner's eyes**: the
+  constructor conventions (__fastcall ECX) and child slots were read out of the two
+  constructors; +0x60 as the engine visible flag is proven for the vitals/xp gadget
+  class but only *inferred* for the cockpit gadget classes (button/bar widgets
+  built by different gadget ctors). The running session this was built against has
+  the OLD injected DLL (`enb.hide_cockpit` / `enb.cockpit_ctrl` are nil), so it
+  cannot be exercised until `just play-local` rebuilds + redeploys. If clearing
+  +0x60 does NOT hide a given cockpit gadget class, the fallback is the game's own
+  SetVisible -- each gadget's vtable +0x40 method called with 0 (observed in
+  FUN_0057c1c0, the UI-commands hide-all) -- which definitely works but runs game
+  code; escalate to it only if the flag clear proves insufficient on test.
+- **NOT DONE -- moving the 4 bottom-left action buttons up**: the owner also asked
+  to shift the bottom-left action buttons upward to clear the bottom-left glass
+  card. The widget screen-position field offsets are NOT confidently located (the
+  decomp does not expose an unambiguous SetPosition / X-Y field on these gadgets),
+  so a position write would be a blind guess that risks corrupting the client. This
+  sub-task is deliberately left unimplemented pending verified position offsets --
+  do not ship a guessed offset.
+- **Headless coverage**: none -- the mock has no cockpit controllers.
+- **What to look for (real client, after relaunch)**:
+  - In space, the stock throttle/up-down/WARP cluster and the bottom-center action
+    buttons are gone; the Freya overlay's controls remain; flight/throttle/warp
+    still WORK (the gadgets are only hidden, not destroyed); no crash on load/zone/
+    undock/dock. `/run return enb.hide_cockpit()` returns a non-zero count once in
+    space, and `/run return enb.cockpit_ctrl()` shows two non-zero pointers.
+  - If a cockpit widget is still visible, +0x60 is not the gate for that gadget
+    class -> escalate to the vtable-+0x40 SetVisible fallback noted above.
+- **Setup**: `just play-local` with `UseClientMods=true`; rebuilds enbmod.dll.
+
 ### [ ] CV-AS-AUXNUMS -- HUD shows correct numeric cur/max vitals + discipline levels (AuxData getter)
 
 - **Change**: client-only (enbmod.dll). New `enb.aux(key)` / `enb.aux_i(key)`
@@ -1326,6 +1380,15 @@ format & byte order", Trap 2).
   Called from on_tick = the game message-pump thread = the same thread the game's
   own vitals updater runs the identical getter on, so it is single-threaded
   against the game's aux access (no concurrent-mutation race).
+- **Discipline-level KEY STRING fix (2026-06-17).** The level keys are the client's
+  own DOTTED form -- `RPGInfo.CombatLevel` / `RPGInfo.TradeLevel` /
+  `RPGInfo.ExploreLevel` (verified by reading the static image strings at
+  0x00b79eb0 / 0x00b79e88 / 0x00b79e60). The earlier SPACE form
+  ("RPGInfo CombatLevel") never matched an entry, so `enb.rpg_level` returned
+  nothing and the card showed "LV --". With the dotted keys it reads the real
+  level live (0/0/0 on a fresh char -> overall "LV 0"), verified over the live
+  `/run` channel this session. `H.stats()` now passes the dotted keys via
+  `H.RPG_KEY`; the dead Lua BSS-scratch fallback recipe was deleted.
 - **Headless coverage**: none -- the mock has no aux property bag; correctness is
   entirely this entry. The CLI cannot validate it.
 - **What to look for (real client)**:
@@ -1337,8 +1400,9 @@ format & byte order", Trap 2).
   - No crash on load / zone / undock / dock from the aux calls. If it crashes,
     the convention or an offset is wrong -- comment the `enb.aux*` use in
     freya_hud.lua `H.stats()` to bisect (the rest of the HUD is independent).
-  - Overall level + xp% still show "LV --" (not yet pinned) -- that is expected,
-    not a regression.
+  - Overall level (JEFIVE card) now reads the SUM of the three discipline levels
+    (0 on a fresh char) -- no longer the "LV --" skeleton. Per-discipline xp% is
+    pinned separately by CV-AS-XPFRAC below.
 - **Setup**: `just play-local` with `UseClientMods=true`.
 
 ## CV-AS-RUNJMP -- /run console no longer crashes (Lua error path uses GCC builtins)
@@ -1373,6 +1437,10 @@ format & byte order", Trap 2).
   Both fixes are now in; verify `/run` against the combined build.
 
 ## CV-AS-CHATSEND -- /run (and any chat command hook) no longer corrupts the stack
+
+> **Confirmed by project owner (2026-06-17):** in-space `/run return 1 + 1;`
+> produced `[run] 2` in enbmod.log and the client did NOT crash. The
+> __thiscall/__cdecl stack-imbalance crash is fixed.
 
 - **What was wrong**: the enbmod chat send-line hook (`hk_ChatSend`, target
   `game::addr::ChatSend`) was declared as a typed `__cdecl` C function. The
@@ -1427,6 +1495,37 @@ format & byte order", Trap 2).
     If it crashes, comment the enb.rpg_level use in freya_hud H.stats() lvl() to
     bisect (vitals + the rest of the HUD are independent of it).
 - **Setup**: `just play-local` with `UseClientMods=true`; `just build-enbmod` first.
+
+## CV-AS-XPFRAC -- per-discipline xp bar fill % reads off the XpBars controller
+
+- **What was wrong**: the discipline card's per-row xp bars had no live data --
+  there was no flat-struct or AuxData source for the 0..1 xp fill fraction, so the
+  bars rendered empty (the one xp pair we had fed the overall card only). The
+  Explore bar should read ~94.50% on the owner's character; it showed empty.
+- **Fix (client-only, enbmod.dll)**: a new read-only capture hook on the client's
+  own XpBars value-updater (game.h addr::XpBarsUpdate `0x0058cb50`, __fastcall
+  ECX = the XpBars controller) records the controller pointer live
+  (hooks::xp_ctrl()), the same proven naked-trampoline pattern as the vitals/RPG
+  capture hooks. enb.xp_frac(which) then resolves the per-discipline bar gadget
+  off the controller (combat +0x1c / trade +0x20 / explore +0x24), checks the
+  gadget's exists flag (+0x60), and reads the cached fill fraction f32 at +0x68
+  (NaN-guarded, clamped 0..1). xp_overlay.lua multiplies by 100 for the row %.
+- **Calling convention is load-bearing** (same risk class as CV-AS-RPGLVL): the
+  capture hook only reads ECX and jumps to the trampoline -- it never alters the
+  updater's behaviour. The pointer chain (ctrl -> bar gadget -> +0x68) is
+  readability-guarded at every deref.
+- **Decomp-verified, NOT live-verified**: the +0x24/+0x68 chain was confirmed by
+  reading the XpBars updater + paint, but the running session predates the rebuilt
+  DLL (xp_ctrl() == 0, enb.xp_frac returns the empty fallback) -- it needs a client
+  RELAUNCH (`just play-local`, which rebuilds enbmod.dll) to take effect. I cannot
+  relaunch the WINE client myself, so this is staged-and-pending the owner's run.
+- **Headless coverage**: none -- the mock has no XpBars controller.
+- **What to look for (real client, after relaunch)**:
+  - In space, the discipline card's Explore row bar fills to ~94.50% (and Combat /
+    Trade to their real fractions); `/run return enb.xp_frac("explore")` logs
+    ~0.945 and `/run return enb.xp_ctrl()` is non-zero once the updater has run.
+  - No crash on load / zone from the new hook or the pointer-chain reads.
+- **Setup**: `just play-local` with `UseClientMods=true`; rebuilds enbmod.dll.
 
 ## CV-AR-1 -- /AuthLogin throttle returns wire-identical Valid=False (low risk)
 
@@ -1703,3 +1802,36 @@ format & byte order", Trap 2).
   classes (no parse error introduced).
 - **Setup**: `just rebuild server` then `just play-local`. A Progen Sentinel
   character; open the skills window.
+
+### [ ] CV-AS-NOTICE -- account-notice dialog ret-patch stops the login-screen crash (enbmod)
+
+- **What changed**: new always-on enbmod client safe-patch
+  (`freya/client-injection/enbmod/scripts/lib/safe_patches.lua`, applied from
+  `init.lua` before mods load) ret-patches the retail account-notice /
+  subscription-expiry dialog at `0x005aea60` so it never runs.
+- **Root cause (empirically confirmed, live crashed process)**: the dialog reads
+  an account-status block (`account+0x1098..`, expiry int32 at `account+0x1130`)
+  that the retail billing server populated. Our global-login flow never sends
+  that data (the server has no subscription concept), so the block is left as
+  uninitialised heap garbage. When `account+0x1d` (notice flag) is a nonzero
+  garbage byte the dialog fires; when `account+0x1130` is a negative garbage
+  int32 the date formatter `0x00a2a68f` returns NULL (it bails on negative
+  input) and the dialog `rep movs` 9 dwords from NULL -> access violation at
+  `0x005aebce` during LoginTask (after auth, before char select). Intermittent
+  because it depends on the heap contents at account-object allocation. Verified
+  by reading the live faulting process: `account+0x1d = 1`,
+  `account+0x1130 = 0x81460010` (= -2126118896), block contained stale
+  sound-asset string fragments, not account data.
+- **NOT enbmod / NOT hide-ui**: hide-ui's `patch_ret` writes single `0xC3` bytes
+  at `0x005dcae0`/`0x0058cf60` (unrelated paint routines); the crash is at
+  `0x005aebce`. Confirmed by relaunching with the hide-ui patch gated to
+  in-space -- crash reproduced identically.
+- **What to look for (real client)**: log in repeatedly (the crash was
+  intermittent). The client should reach character select every time, with no
+  account-notice popup (there is none to show on this server). `enbmod.log`
+  prints `safe_patches: account-notice dialog ret-patched -> true`.
+- **Setup**: restage scripts (`run-lua-client-command/scripts/restage.sh`) then
+  `just play-local`. No DLL rebuild needed (pure-Lua patch).
+- **Long-term**: the faithful fix is server-side -- initialise the account-status
+  block in the global-login flow (notice flag 0, valid/empty expiry) so the
+  retail path sees sane data. Tracked as follow-up; this stops the crash now.

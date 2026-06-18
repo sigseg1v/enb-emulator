@@ -124,7 +124,7 @@ local function draw_player_card(L)
     if st.level then
         lv, lv_known = "LV " .. st.level, true
     elseif has_flat then
-        lv = "LV " .. math.max(me.combat_lvl or 0, me.explore_lvl or 0, me.trade_lvl or 0)
+        lv = "LV " .. ((me.combat_lvl or 0) + (me.explore_lvl or 0) + (me.trade_lvl or 0))
         lv_known = true
     end
     if lv_known and st.xp_pct then
