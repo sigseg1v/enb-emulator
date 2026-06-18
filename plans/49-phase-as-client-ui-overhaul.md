@@ -157,17 +157,22 @@ per-vertex gradient quads + rounded corners from triangle fans, not PNGs.
   `enb.gadget_set_visible(g,bool)` (generic +0x40 dispatch). The copy-per-instance
   design fixes the 06-17 shared-vtable profiler wedge (no recurrence).
 - `[x]` Empirical findings (live, recorded in game.h + CV-AS-HIDE-COCKPIT):
-  SetVisible(+0x40) is INEFFECTIVE on the HUD controllers (dispatches, widget
-  keeps painting). The per-frame paint slot is class-specific: cockpit-panel
-  controller = slot 24, vitals + xp controllers = slot 4 (all pop 0).
-  `vt_hide_paint` on those three cleanly removes native vitals/xp/cockpit-panel
-  widgets, reversibly. This is an alternative to the static `patch_ret` hides and
-  the path for elements with no clean standalone paint function.
-- `[!]` Round throttle/warp dial + action-button row still NOT hidden: their
-  `addr::CockpitCommands` controller (ctor hook 0x0057be50) never fires, so
-  `enb.cockpit_ctrl()` returns 0 -- no instance to suppress. The "throttle"
-  controller actually parents the vitals bars, not the dial. CV-AS-HIDE-COCKPIT
-  stays open pending that capture.
+  SetVisible(+0x40) is INEFFECTIVE on the HUD controllers. `vt_hide_paint` works
+  ONLY for custom immediate-mode controllers the engine calls through the live
+  instance vtable each frame -- proven on the VITALS controller (runtime vt
+  0x00AF5D70, paint slot 4, pop 0): hiding it cleanly removes the hull/shield/
+  energy bars, reversibly (screenshot-verified 2026-06-18).
+- `[!]` Round throttle/warp dial + action-button row CANNOT be hidden by
+  `vt_hide_paint` (definitive negative, 2026-06-18). The dial owner IS captured
+  (`enb.cockpit_ctrl()` = 0x3B66B10, ctor 0x0057DD20, vt 0x00AF0CFC) and owns the
+  UI_CPIT_* dial gadgets, the UI_CPIT_*_BUT action buttons, and the UI_POWER
+  vitals gadgets. But repointing the owner's paint slot (24 -> 0x581670) OR every
+  leaf gadget's per-frame slot (12/24/43; e.g. WARP vt 0x00AFBB58 slot 24 ->
+  base-class 0x00407496) changed NOTHING on screen: standard framework gadgets are
+  drawn by the gadget render PASS, not via the per-instance vtable slot the
+  technique repoints. Path forward needs deeper RE (hook the render pass + gate on
+  a flag it reads, or scale-zero each gadget mesh). CV-AS-HIDE-COCKPIT stays open;
+  the dial/buttons remain visible and the Freya glass overlay coexists with them.
 
 ### AS-7 Build + docs  `[x]`
 

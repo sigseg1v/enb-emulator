@@ -1331,15 +1331,37 @@ format & byte order", Trap 2).
     painted children.
   - **SetVisible(+0x40) confirmed ineffective again** -- consistent with the 06-17
     correction below. The working hide is paint-slot suppression, full stop.
-  - **STILL OPEN -- the round throttle/warp dial + action-button row.** Their
-    owning controller (`addr::CockpitCommands`, ctor hooked at 0x0057be50 in
-    hooks.cpp) is never captured: the hook never fires, so `enb.cockpit_ctrl()`
-    returns 0 and there is no instance to `vt_hide_paint`. The controller captured
-    as "throttle" (vt 0x00af... , addr::CockpitThrottle) actually parents the
-    VITALS bars (child slot 0x34 == vitals_ctrl), NOT the dial. Next step: fix the
-    commands-controller capture (correct ctor address/label, or walk the child
-    tree from a known parent / heap-name-scan for `UI_CPIT_*`), then `vt_hide_paint`
-    its paint slot. Until then this CV stays open.
+  - **DEFINITIVE NEGATIVE (live, 2026-06-18): the dial + action buttons CANNOT be
+    hidden by `vt_hide_paint`.** Investigation, all proven live this session:
+    - The throttle/dial controller is `cockpit_ctrl()` = 0x3B66B10 (ctor 0x0057DD20
+      per decomp, vtable 0x00AF0CFC). It owns the dial gadgets (UI_CPIT_WARP/
+      THROTTLE/REVERSE/LEFT/RIGHT at controller fields +0x2d..+0x31) AND the
+      UI_POWER vitals gadgets AND the UI_CPIT_*_BUT action buttons. `enb.cockpit_ctrl()`
+      DOES capture it (returns 0x3B66B10, non-zero) -- the earlier "ctor 0x0057BE50
+      never fires / returns 0" note was about a different (commands) label and is
+      moot: the dial's owner is captured fine.
+    - Hiding the owner's per-frame paint slot (profiled: slot 24 -> 0x581670, the
+      only per-frame slot, count ~222) did NOTHING on screen.
+    - The dial gadgets are referenced by a second object 0x76444D8 (vt 0x00AEAA20)
+      at +0x20, but that object's vtable is NEVER called per-frame (empty profile)
+      -- it is a layout/registry holder, not a painter.
+    - The leaf gadgets self-report per-frame on vtable slots 12/24/43 (WARP vt
+      0x00AFBB58, slot 24 -> base-class 0x00407496). `vt_hide_paint(g, 24)` on ALL
+      11 cockpit leaf gadgets (UI_CPIT_* + UI_COMMANDS: MAP/CHARACTER/SHIP/OPTIONS/
+      X_SPECIALS buttons + WARP/THROTTLE/REVERSE/LEFT/RIGHT dial) changed NOTHING.
+    - **Conclusion:** instance-vtable-repoint only intercepts CUSTOM immediate-mode
+      controllers the engine calls through the live instance vtable each frame (the
+      vitals controller vt 0x00AF5D70 slot 4 -- proven to hide the bars). STANDARD
+      framework gadgets (dial, throttle, buttons) are drawn by the gadget render
+      PASS, which does not dispatch through the per-instance vtable slot we repoint,
+      so the technique has no effect on them. SetVisible(+0x40) and the +0x60 flag
+      are also ineffective (above).
+    - **Path forward (not done, needs deeper RE):** intercept the gadget framework's
+      render pass itself and gate per-gadget on a flag the renderer actually reads,
+      OR scale-zero each gadget's fill/quad mesh (the only proven visible removal for
+      standard elements, per the QUAD vtable note above) -- a per-gadget-type effort.
+      Until one of those lands, the dial + action buttons stay visible and the Freya
+      glass overlay must coexist with them. This CV stays open.
 - **UPDATE (live session, 2026-06-17) -- supersedes the gadget+0x60 plan below**:
   - **+0x60 is NOT a usable hide.** Live test: clearing the low byte of +0x60 on
     all three vitals gauges changed NOTHING on screen (pixel-identical before/after).
