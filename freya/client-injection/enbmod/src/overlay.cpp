@@ -1,5 +1,6 @@
 #include "overlay.h"
 #include "log.h"
+#include "mem.h"
 #include <windows.h>
 #include <d3d8.h>
 #include "MinHook.h"
@@ -18,17 +19,18 @@ namespace enb {
 namespace overlay {
 
 // ---- display list -----------------------------------------------------------
-enum Kind { K_TEXT, K_RECT, K_LINE, K_IMAGE, K_RECT_GRAD, K_RRECT, K_RRECT_GRAD };
+enum Kind { K_TEXT, K_RECT, K_LINE, K_IMAGE, K_RECT_GRAD, K_RRECT, K_RRECT_GRAD, K_TEXQUAD };
 struct Cmd {
     Kind kind;
     int x, y, w, h;
     uint32_t rgb;
     bool filled;
     int alpha;
-    std::string s;      // text, or image path
-    uint32_t rgb2;      // gradient bottom color (K_RECT_GRAD / K_RRECT_GRAD)
-    int radius;         // corner radius (K_RRECT / K_RRECT_GRAD)
-    float scale = 1.0f; // glyph scale (K_TEXT; 1.0 = native atlas size)
+    std::string s;       // text, or image path
+    uint32_t rgb2;       // gradient bottom color (K_RECT_GRAD / K_RRECT_GRAD)
+    int radius;          // corner radius (K_RRECT / K_RRECT_GRAD)
+    float scale = 1.0f;  // glyph scale (K_TEXT; 1.0 = native atlas size)
+    void* tex = nullptr; // live game-owned IDirect3DTexture8* (K_TEXQUAD)
 };
 static std::vector<Cmd> g_staging; // built by Lua during tick
 static std::vector<Cmd> g_render;  // consumed by the Present hook
@@ -551,6 +553,16 @@ static void draw_frame(IDirect3DDevice8* dev) {
                       argb(0xFFFFFF, c.alpha));
             break;
         }
+        case K_TEXQUAD: {
+            // A live game-owned texture. Guard the pointer (and its vtable) before
+            // binding -- the offsets that produced it are tuned from Lua and may be
+            // wrong; a bad pointer must no-op, not fault the renderer.
+            if (!c.tex || !enb::mem::readable(c.tex, 4) || !enb::mem::readable(*(void**)c.tex, 4))
+                break;
+            draw_quad(dev, (IDirect3DTexture8*)c.tex, (float)c.x, (float)c.y, (float)c.w,
+                      (float)c.h, 0, 0, 1, 1, argb(0xFFFFFF, c.alpha));
+            break;
+        }
         }
     }
 
@@ -730,6 +742,18 @@ void rrect_grad(int x, int y, int w, int h, int radius, uint32_t rgb_top, uint32
 }
 void image(const std::string& path, int x, int y, int w, int h, int alpha) {
     g_staging.push_back({K_IMAGE, x, y, w, h, 0, false, alpha, path, 0, 0});
+}
+void texture_quad(void* tex, int x, int y, int w, int h, int alpha) {
+    Cmd c{};
+    c.kind = K_TEXQUAD;
+    c.x = x;
+    c.y = y;
+    c.w = w;
+    c.h = h;
+    c.rgb = 0xFFFFFF;
+    c.alpha = alpha;
+    c.tex = tex;
+    g_staging.push_back(c);
 }
 
 void set_cursor(bool on, void* hwnd) {

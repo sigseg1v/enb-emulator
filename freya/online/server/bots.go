@@ -209,6 +209,13 @@ func botTopUp(ctx context.Context, s *Store) {
 
 // botPickBucket rolls a selection bucket and returns the candidate + whether it
 // carries a quality roll (equipment) and its stack size.
+//
+// The equipment buckets also require sub_category <> 0: every real piece of
+// equipment carries a non-zero sub_category (its slot/class), so a zero one is a
+// dev/test item that should never reach the AH. In the current content this band
+// is exactly two unobtainable weapons -- "Energy Cannon" and "Disruptor Mortar"
+// -- which the bot was otherwise listing for sale. Filtering on the structural
+// flag (not a name blacklist) keeps any future dev junk out automatically.
 func botPickCandidate(ctx context.Context, s *Store) (botCandidate, bool, int, bool) {
 	roll := rand.IntN(100)
 	switch {
@@ -217,7 +224,7 @@ func botPickCandidate(ctx context.Context, s *Store) (botCandidate, bool, int, b
 		c, ok := botQuery(ctx, s, `
 			SELECT id, buying_price, max_stack, category
 			  FROM item_base
-			 WHERE no_trade = 0 AND buying_price > 0
+			 WHERE no_trade = 0 AND buying_price > 0 AND sub_category <> 0
 			   AND ( (category = ANY($1) AND level BETWEEN 5 AND 9)
 			      OR (category = ANY($2) AND level BETWEEN 1 AND 9) )
 			 ORDER BY random() LIMIT 1`, botEquipmentCats, botDeviceCats)
@@ -227,7 +234,7 @@ func botPickCandidate(ctx context.Context, s *Store) (botCandidate, bool, int, b
 		c, ok := botQuery(ctx, s, `
 			SELECT id, buying_price, max_stack, category
 			  FROM item_base
-			 WHERE no_trade = 0 AND buying_price > 0
+			 WHERE no_trade = 0 AND buying_price > 0 AND sub_category <> 0
 			   AND category = ANY($1) AND level BETWEEN 1 AND 4
 			 ORDER BY random() LIMIT 1`, botEquipmentCats, nil)
 		return c, true, 1, ok

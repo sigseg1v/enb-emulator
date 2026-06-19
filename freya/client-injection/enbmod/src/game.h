@@ -42,6 +42,12 @@ constexpr uintptr_t XpBars =
 constexpr uintptr_t XpPaint =
     0x0058cf60; // xp per-frame PAINT (combat/trade/explore). Pure paint, clean ret-patch
                 // target (discipline card replaces it)
+constexpr uintptr_t XpBarsUpdate =
+    0x0058cb50; // xp bar VALUE updater (recomputes each bar's fill fraction from the RPGInfo
+                // AuxData container and writes it to gadget+0x68). __fastcall(ECX = the XpBars
+                // controller). We hook it READ-ONLY to capture the controller `this` so the
+                // discipline card can read the live fill (hooks::xp_ctrl()); never patched
+                // (XpPaint above is the hide target -- a different entry on the same object).
 constexpr uintptr_t RpgLevels = 0x0074bfb0; // reads RPGInfo Combat/TradeLevel from AuxData
 
 // ---- target ----
@@ -71,11 +77,34 @@ constexpr uintptr_t BindCategories = 0x004081fc; // Targeting/Navigation/Camera/
 // ---- skills / abilities ----
 constexpr uintptr_t AbilitySlots = 0x006a4b40;   // RPGInfo SkillPowerupAbilityNumber
 constexpr uintptr_t SkillLifecycle = 0x0060f1a0; // Skill Activated/Deactivated/Interrupted
+// In-space action-bar slot dispatcher ("Use Slot"): __thiscall(ECX = the action-bar
+// controller, arg0 = the clicked slot's gadget id). Reached from both a slot click
+// and a "1".."6" keypress. We hook it read-only to capture its `this` (ECX) -- the
+// exact pattern of the rpg/xp/cockpit capture hooks -- so the Freya HUD can read the
+// slots (primary + alternate) off it and re-dispatch a slot by calling this fn with
+// the slot's real gadget id. Capture only; never alters the dispatch.
+constexpr uintptr_t ActionBarUse = 0x006120e0;
 constexpr uintptr_t SkillButton =
     0x00662dc0; // skill button CONSTRUCTOR -- NOT a hide target. The skill gadget has no
                 // standalone pure-paint entry (render is fused with state mutation), so unlike
                 // vitals/xp there is no clean ret-patch; hiding it needs a runtime per-gadget
                 // visible-flag write instead. Left to CV-AS-HIDE-SKILL.
+
+// ---- cockpit (bottom-center throttle/warp cluster + UI command buttons) ----
+// Two controllers built once when the cockpit comes up (entering space). We hook
+// each CONSTRUCTOR read-only to capture its `this` (ECX), exactly like the vitals/
+// xp/rpg capture hooks, then clear each child gadget's engine visible flag
+// (gadget + 0x60 -- the engine-wide "is this gadget painted" byte, read by 43
+// paint gates across the client) so the Freya overlay's own throttle/action UI is
+// the only one drawn. Read-only on the ctor; the only write is the guarded byte
+// clear, which runs NO game code and is reversible (stop clearing -> the engine
+// repaints the gadget next frame). NOT patched -- these are capture targets.
+constexpr uintptr_t CockpitThrottle =
+    0x0057dd20; // throttle/warp cluster CTOR. __fastcall(ECX = controller). Children
+                // (WARP BAR/THROTTLE/REVERSE/LEFT/RIGHT) at controller int-slots 0x2d..0x31.
+constexpr uintptr_t CockpitCommands =
+    0x0057be50; // "UI COMMANDS" action-button CTOR. __fastcall(ECX = controller). Button
+                // children from int-slot 0x2b upward (two groups: 0x2b.. and 0x2d..0x33).
 
 // ---- AuxData accessor candidates (universal read primitive once resolved) ----
 constexpr uintptr_t AuxGet_Ability = 0x006a4b40;
@@ -145,6 +174,56 @@ namespace rpg {
 constexpr int container_off = 0x12c0;       // manager + this -> RPGInfo AuxData container
 constexpr uintptr_t get_entry = 0x00514b60; // __cdecl(container, keybuf) -> entry|0
 } // namespace rpg
+
+// Discipline XP-bar fill fractions (combat/trade/explore). The per-discipline XP
+// progress is NOT a plain AuxData key we can read directly: the explore/trade
+// fractions are computed through a multi-step getter chain inside the XpBars
+// updater (addr::XpBarsUpdate) that we cannot replicate from Lua. But that updater
+// caches the final 0..1 fraction on each bar gadget at gadget + fill_frac, exactly
+// like the vitals bars. So we capture the XpBars controller `this` live from the
+// updater hook (hooks::xp_ctrl()) and read the cached fraction off each bar gadget.
+// Build-constant offsets observed in addr::XpBarsUpdate; only the controller
+// pointer varies per run, so it is read live rather than stored.
+namespace xp {
+constexpr int bar_combat = 0x1c;  // [ctrl + 0x1c] -> combat xp-bar gadget
+constexpr int bar_trade = 0x20;   // [ctrl + 0x20] -> trade xp-bar gadget
+constexpr int bar_explore = 0x24; // [ctrl + 0x24] -> explore xp-bar gadget
+constexpr int exists_flag = 0x60; // gadget + 0x60 -> nonzero when the bar is live
+constexpr int fill_frac = 0x68;   // gadget + 0x68 -> 0..1 xp fill fraction
+} // namespace xp
+
+// GadgetClass: the engine's base UI-widget class. Every HUD widget (vitals bars,
+// xp bars, cockpit throttle/warp/speed, action buttons) derives from it. The slot
+// at vtable byte +0x40 is a candidate visibility setter (__thiscall(this, BOOL)).
+// EMPIRICAL RESULT (live, 2026-06-18): dispatching it on the captured cockpit /
+// vitals / xp HUD controllers had NO visible effect -- those gadgets keep
+// painting regardless. The mechanism that DOES hide them is per-instance paint-
+// slot suppression: give one instance its own vtable copy whose per-frame paint
+// slot is a bare `ret` (lua_api enb.vt_profile to find the slot, enb.vt_hide_paint
+// to suppress it, enb.vt_unhide to restore). The per-frame paint slot is class-
+// specific, not universal: the cockpit panel controller paints via vtable slot 24,
+// while the vitals and xp controllers paint via slot 4 (all pop 0). Keep this
+// constant for gadget classes that may yet honour a visibility setter.
+namespace gadget {
+constexpr int vt_set_visible = 0x40; // vtable byte offset of the candidate visibility setter
+} // namespace gadget
+
+// Cockpit child-gadget layout. The controller captured at addr::CockpitThrottle
+// stores its child gadget pointers at fixed int-slots; the children span
+// 0x2b..0x38 (0x2c is a sub-object, 0x36 unused -- both skipped safely because the
+// per-gadget guard rejects a non-gadget vtable). NOTE: the controller captured
+// under the "throttle" label actually parents the in-space VITALS bars (its child
+// at slot 0x34 is the vitals controller); the round throttle/warp dial + action
+// buttons live under a separate controller that is NOT yet captured
+// (addr::CockpitCommands's ctor hook does not fire -- enb.cockpit_ctrl() returns 0
+// for it). Revisit the address/label mapping before relying on these ranges.
+namespace cockpit {
+constexpr int throttle_first = 0x2b; // first child int-slot (inclusive)
+constexpr int throttle_last = 0x38;  // last child int-slot (inclusive)
+// "UI COMMANDS" action buttons controller (addr::CockpitCommands), same scheme.
+constexpr int command_first = 0x2b; // first child int-slot (inclusive)
+constexpr int command_last = 0x33;  // last child int-slot (inclusive)
+} // namespace cockpit
 
 // Runtime-editable field offsets. -1 means "not calibrated -- reads return nil/0".
 // Layout intentionally flat & simple so the Lua calibrate() can poke any field by name.

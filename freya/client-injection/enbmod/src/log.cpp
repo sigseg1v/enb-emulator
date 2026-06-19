@@ -7,6 +7,7 @@
 namespace enb {
 static std::mutex g_mx;
 static char g_path[MAX_PATH] = {0};
+static char g_dir[MAX_PATH] = {0};
 
 void log_init() {
     // Put enbmod.log next to the loaded module.
@@ -19,6 +20,7 @@ void log_init() {
     char* slash = strrchr(dir, '\\');
     if (slash)
         *slash = 0;
+    snprintf(g_dir, MAX_PATH, "%s", dir);
     snprintf(g_path, MAX_PATH, "%s\\enbmod.log", dir);
     FILE* f = fopen(g_path, "w");
     if (f) {
@@ -38,6 +40,10 @@ void logs(const std::string& s) {
             fclose(f);
         }
     }
+}
+
+const char* log_dir() {
+    return g_dir;
 }
 
 void logf(const char* fmt, ...) {

@@ -100,9 +100,29 @@ end
 -- only the max (MaxShieldPower / MaxEnergyPower); their current is max * the live
 -- gadget fill fraction (enb.vitals()), so the card computes cur from frac * max.
 --
--- Still NOT resolved: overall level + per-level xp progress (the owner confirmed
--- overall level is 0 on a fresh char, and no single aux key has surfaced it yet).
--- Until one does, out.level/out.xp_* stay nil and the header shows "LV --".
+-- Overall level is the SUM of the three discipline levels (the EnB definition),
+-- so out.level is derived from the three RPGInfo level reads -- no separate key.
+-- Still NOT resolved here: per-discipline xp progress is read separately by
+-- xp_overlay (the XpBars controller), not via these AuxData keys.
+--
+-- Discipline levels come from enb.rpg_level(key): the C++ wrapper interns the key
+-- on the RPG manager's RPGInfo AuxData container and reads the int level off the
+-- matching entry. The key string MUST be the client's own dotted form
+-- ("RPGInfo.CombatLevel", with a DOT) -- the space-form "RPGInfo CombatLevel"
+-- never matches an entry and reads nothing. Returns 0 (not nil) on a fresh
+-- character: a real, valid level of 0. nil only until the client's level-reader
+-- has run once (rpg_mgr == 0) or on a genuine miss.
+H.RPG_KEY = {
+    combat  = "RPGInfo.CombatLevel",
+    trade   = "RPGInfo.TradeLevel",
+    explore = "RPGInfo.ExploreLevel",
+}
+function H.discipline_level(which)
+    local key = H.RPG_KEY[which]
+    if not (key and enb.rpg_level) then return nil end
+    return enb.rpg_level(key)
+end
+
 function H.stats()
     local out = {}
     if not enb.aux then return out end
@@ -111,18 +131,19 @@ function H.stats()
         local v = enb.aux(key)
         if v and v >= lo and v <= hi then return v end
     end
-    local function lvl(key)
-        local v = enb.rpg_level and enb.rpg_level(key)
-        if v and v >= 0 and v <= 100 then return v end
-    end
 
     out.hull       = num("HullPoints",     0, 1e6)
     out.hull_max   = num("MaxHullPoints",  0, 1e6)
     out.shield_max = num("MaxShieldPower", 0, 1e6)
     out.energy_max = num("MaxEnergyPower", 0, 1e6)
-    out.combat  = lvl("RPGInfo CombatLevel")
-    out.explore = lvl("RPGInfo ExploreLevel")
-    out.trade   = lvl("RPGInfo TradeLevel")
+    out.combat  = H.discipline_level("combat")
+    out.explore = H.discipline_level("explore")
+    out.trade   = H.discipline_level("trade")
+    -- overall level = sum of the three disciplines (EnB definition). Only when all
+    -- three resolved, so a partial read never shows a too-low total.
+    if out.combat and out.explore and out.trade then
+        out.level = out.combat + out.explore + out.trade
+    end
     return out
 end
 

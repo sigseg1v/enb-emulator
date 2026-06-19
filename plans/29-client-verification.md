@@ -1308,6 +1308,331 @@ format & byte order", Trap 2).
   apply automatically at startup. If the client crashes on load, comment the two
   `patch_ret` lines in init.lua and re-launch to bisect.
 
+### [x] CV-AS-HIDE-COCKPIT -- all native bottom 2D cockpit chrome suppressed (SOLVED)
+
+- **SOLVED (live, screenshot-verified, 2026-06-18) -- the draw-gate flag clear.**
+  This supersedes EVERYTHING below it in this entry, including the "DEFINITIVE
+  NEGATIVE" note (which was wrong: it concluded the dial/buttons could not be
+  hidden because it was poking per-instance paint vtable slots, which are NOT on
+  the actual draw path). The native chrome IS hideable, cleanly and reversibly.
+  - **The whole in-space 2D HUD is ONE interface-scene object** (vtable
+    `0x00aff1f4`), reachable at `enb.cockpit_ctrl() + 0x44`. It owns one intrusive,
+    circular doubly-linked list of 2D widget render objects -- the list the
+    per-frame draw pass walks. List layout: begin = `*(scene+0x40)`; the loop stops
+    when the node pointer equals the sentinel `scene+0x3c`; `node next = *(node+0x04)`;
+    `node+0x0c` points 0x10 bytes INTO the child object, so child base =
+    `*(node+0x0c) - 0x10`.
+  - **The draw gate:** each leaf draws only when `(*(uint*)(leaf+0x18) & 0x700) == 0x700`.
+    Clearing ANY one of bits 0x100/0x200/0x400 makes the draw pass SKIP that widget.
+    We clear bit **0x400**. This touches no vtable and no value field, runs no game
+    code, and is fully reversible (re-raise the bit and it repaints). This is why
+    SetVisible (the +0x2c bit), the +0x60 flag, mesh scale-zeroing, and per-instance
+    paint-slot `vt_hide_paint` all had NO visual effect -- none of them is the bit
+    the draw pass actually reads.
+  - **Scope.** The same widget list also holds the chat window (a different leaf
+    class, `0x00afbf28`) and a band of inactive leaves (`0x00b111a4`). We clear the
+    hide bit ONLY on leaves of class `0x00b1327c` -- the native cockpit chrome. The
+    3D cockpit border is a separate PIP scene list (scene+0x58 / +0x70) and is
+    untouched. Chat and the 3D border survive; all native bottom chrome disappears.
+  - **Side effect (disclosed):** class `0x00b1327c` ALSO covers the top menu bar
+    (Chat/Group/Options/Help/Emote) and the top-right buttons, so those go too. If
+    the menu bar must come back, scope has to tighten by screen position (per-class
+    relative float fields -- fragile), not by class.
+  - **Implementation:** `freya/client-injection/enbmod/scripts/mods/hide-ui/native_hud_hide.lua`
+    re-applies the clear every tick (`enb.on_tick`) because the widgets are rebuilt
+    on sector/dock changes and value updaters re-raise the flag. Every pointer is
+    range- + readable-checked and the walk is iteration-bounded (MAX_NODES=256);
+    worst case it no-ops and the native UI shows. Screenshot-verified on the real
+    WINE client.
+  - **Per-element API (2026-06-18).** The chrome panels are named and exposed via
+    `enb.hud.{hide,show,toggle,set,hide_all,show_all,list,names,dump}`; a modder
+    addresses a panel by name. (The baseline is **16** persistent chrome leaves;
+    see CV-AS-HUD-INVENTORY for the tail-anchoring fix to ordinal drift.) Findings
+    (all verified live, so nobody re-walks them):
+    the PANEL is the atomic unit -- it paints its own children and ignores per-child
+    draw gates (clearing a child gadget's 0x700 bits did nothing on screen), so
+    sub-widget hiding needs a DLL draw-hook or mesh-scale (out of scope); panels
+    carry NO name/id at a fixed offset so the key is tail-anchored position; the bits
+    0x100/0x200/0x400 are Visible/Enabled/in-Layout and ALSO gate hit-testing, so
+    hiding a panel can break 3D click-to-select (show it back if so). Default hidden
+    set (owner-chosen): ActionBarIcons, LevelBarsAndMicroMenu, BottomHudChrome,
+    ActionBarBackground, ChatFrameBackgroundAndScroll.
+- **What to look for (real client, owner confirm):** in space, all native bottom
+  chrome (the 3 black status text bars bottom-left, the 6 circular action buttons,
+  the ^/v + `<<Warp` cluster, the green reactor / red hull / blue shield bars, and
+  the bottom-right scanner + its 2 bars) is gone; the 3D cockpit border and the
+  chat window remain; flight/throttle/warp still WORK (widgets are hidden, not
+  destroyed); no crash on load/zone/undock/dock. The top menu bar + top-right
+  buttons also vanish (known side effect above).
+- **Setup:** `just play-local` with `UseClientMods=true`, hide-ui mod enabled.
+
+---
+
+## [ ] CV-AS-HUD-INVENTORY -- inventory equipment view + loot button no longer clobbered by hide-ui
+
+- **What was wrong.** The in-space HUD scene list is NOT static: opening a window
+  inserts chrome leaves (inventory +5, target +1, comm/portrait +2) which shifts
+  later ordinals. hide-ui keyed its hides by raw ordinal, and apply() runs every
+  tick, so whatever inventory/loot/equipment leaf happened to land on a "hidden"
+  ordinal had its draw bit cleared permanently. That blanked the inventory
+  **equipment frame** ("shows my ship but not engine/reactors/weapons/etc") and
+  dropped the **loot button** when a target was selected.
+- **Ground truth (verified live, raw scene walks).** Baseline is **16** persistent
+  chrome leaves. Every transient window inserts its leaves at the FRONT, ahead of the
+  persistent block (inventory +5 before it, a target +1), so the persistent panels
+  are always the LAST 16 chrome leaves with ActionBarBackground last. The inventory
+  equipment paperdoll is one of the transient FRONT leaves -- a DIFFERENT object from
+  `ActionBarIcons` (the native ability glyph by hotbar slot 1), proven by diffing the
+  chrome list across an inventory open: ActionBarIcons keeps its exact address+flags
+  while inventory is open. They were never the same leaf.
+- **The fix (Lua only, no DLL/server change).** `native_hud_hide.lua` rewritten to
+  **tail-anchor**: key each of the 16 persistent panels off the END of the list
+  (`leaves[count - #ELEMENTS + k]`), immune to ordinal drift and to a target selected
+  when the mod first runs. `ActionBarIcons` is hidden unconditionally -- the old
+  "restore it while a modal is open" hack (from a wrong 17-leaf theory that also
+  broke load timing) was both unnecessary (equipment is a separate untouched leaf)
+  and the cause of the ability glyph FLASHING back on inventory open. Verified live
+  via `enb.hud.dump()` draw bits in space (front=0), with a target (front=1), and
+  inventory-open (front=5): ActionBarIcons stays hidden throughout; equipment leaves
+  keep their draw bit set. Screenshot-confirmed clean action bar (no glyph by slot 1).
+- **What to look for (real client, owner confirm):** in space with hide-ui on, open
+  inventory (`i`) -> the ship paperdoll shows engine/reactor/shield/weapon equipment
+  slots (not just the bare ship), with NO ability-glyph flash on the action bar, and
+  the native ability glyph stays hidden by hotbar slot 1; select a target -> the loot
+  button is visible on the target frame; the 5 default-hidden cockpit-chrome panels
+  stay hidden throughout. No crash on open/close/zone.
+- **Why CLI cannot prove it:** purely client-side 2D widget draw-gate state; no wire
+  traffic. (Draw-bit state machine-verified here; the equip-view pixels are the
+  owner's eyeball check.)
+- **Setup:** `just play-local`, `UseClientMods=true`, hide-ui enabled.
+
+---
+
+**SUPERSEDED HISTORY (kept for the record -- all conclusions below are WRONG or
+moot; the SOLVED block above is the truth):**
+
+- **UPDATE (live session, 2026-06-18) -- `vt_hide_paint` PROVEN, supersedes the
+  "promising-but-unvalidated" note below; commit e46793a1**:
+  - **The per-instance vtable-copy hide WORKS and is reversible.**
+    `enb.vt_hide_paint(gadget, slot, pop)` no longer patches the shared class
+    vtable (that is what wedged the client on 06-17). It allocates a PRIVATE copy
+    of just that one instance's vtable, replaces the paint slot with a bare
+    `ret <pop>` stub, and repoints the instance. Only that instance stops painting;
+    every other gadget of the same class is untouched, input/state are untouched,
+    and `enb.vt_unhide()` restores all hidden instances. No crash across multiple
+    relaunch/probe cycles via the login-to-client skill.
+  - **The profiler is now safe via the same copy trick.** `enb.vt_profile(gadget)`
+    copies the vtable into counting+forwarding stubs (kVtSlots=64) on a private
+    copy, so the 06-17 "spinning at ~874% CPU on a hot slot" wedge does not recur.
+    `enb.vt_dump()` reports per-slot call counts; `enb.vt_restore()` reverts.
+  - **Paint slot is CLASS-SPECIFIC (measured live, not from any external source):**
+    the cockpit-panel controller paints via vtable **slot 24**; the vitals and xp
+    controllers paint via **slot 4**. All three pop 0. `vt_hide_paint` on those
+    three cleanly removes the native vitals + xp readouts and the cockpit panel's
+    painted children.
+  - **SetVisible(+0x40) confirmed ineffective again** -- consistent with the 06-17
+    correction below. The working hide is paint-slot suppression, full stop.
+  - **DEFINITIVE NEGATIVE (live, 2026-06-18): the dial + action buttons CANNOT be
+    hidden by `vt_hide_paint`.** Investigation, all proven live this session:
+    - The throttle/dial controller is `cockpit_ctrl()` = 0x3B66B10 (ctor 0x0057DD20
+      per decomp, vtable 0x00AF0CFC). It owns the dial gadgets (UI_CPIT_WARP/
+      THROTTLE/REVERSE/LEFT/RIGHT at controller fields +0x2d..+0x31) AND the
+      UI_POWER vitals gadgets AND the UI_CPIT_*_BUT action buttons. `enb.cockpit_ctrl()`
+      DOES capture it (returns 0x3B66B10, non-zero) -- the earlier "ctor 0x0057BE50
+      never fires / returns 0" note was about a different (commands) label and is
+      moot: the dial's owner is captured fine.
+    - Hiding the owner's per-frame paint slot (profiled: slot 24 -> 0x581670, the
+      only per-frame slot, count ~222) did NOTHING on screen.
+    - The dial gadgets are referenced by a second object 0x76444D8 (vt 0x00AEAA20)
+      at +0x20, but that object's vtable is NEVER called per-frame (empty profile)
+      -- it is a layout/registry holder, not a painter.
+    - The leaf gadgets self-report per-frame on vtable slots 12/24/43 (WARP vt
+      0x00AFBB58, slot 24 -> base-class 0x00407496). `vt_hide_paint(g, 24)` on ALL
+      11 cockpit leaf gadgets (UI_CPIT_* + UI_COMMANDS: MAP/CHARACTER/SHIP/OPTIONS/
+      X_SPECIALS buttons + WARP/THROTTLE/REVERSE/LEFT/RIGHT dial) changed NOTHING.
+    - **Conclusion:** instance-vtable-repoint only intercepts CUSTOM immediate-mode
+      controllers the engine calls through the live instance vtable each frame (the
+      vitals controller vt 0x00AF5D70 slot 4 -- proven to hide the bars). STANDARD
+      framework gadgets (dial, throttle, buttons) are drawn by the gadget render
+      PASS, which does not dispatch through the per-instance vtable slot we repoint,
+      so the technique has no effect on them. SetVisible(+0x40) and the +0x60 flag
+      are also ineffective (above).
+    - **Path forward (not done, needs deeper RE):** intercept the gadget framework's
+      render pass itself and gate per-gadget on a flag the renderer actually reads,
+      OR scale-zero each gadget's fill/quad mesh (the only proven visible removal for
+      standard elements, per the QUAD vtable note above) -- a per-gadget-type effort.
+      Until one of those lands, the dial + action buttons stay visible and the Freya
+      glass overlay must coexist with them. This CV stays open.
+- **UPDATE (live session, 2026-06-17) -- supersedes the gadget+0x60 plan below**:
+  - **+0x60 is NOT a usable hide.** Live test: clearing the low byte of +0x60 on
+    all three vitals gauges changed NOTHING on screen (pixel-identical before/after).
+    +0x60 is an "Exists/has-buffer" flag set once at construction; clearing it can
+    trip an `_Exists` assertion and disables update logic broadly, not just paint.
+    Abandoned.
+  - **CORRECTION -- SetVisible (the +0x2c visible bit) does NOT visually remove
+    these widgets.** This retracts the "SetVisible is the clean hide" claim made
+    earlier the same day. Proven live: registering a PER-TICK `gadget_set_visible(g,
+    false)` on the JEFIVE ship-vitals bars (`UI_POWER_ENERGY/SHIELDS/HULL_0`) and on
+    the cockpit buttons (`UI_CPIT_SHIP_BUT_0` etc.) flips the +0x2c bit 0x20 to 0 but
+    the panel still renders unchanged (screenshots pixel-equal). The tell: the
+    `<<Warp` text and the `UI_CPIT_WARP_0` gadget keep drawing while reading vis=0.
+    These widgets are painted by their CONTROLLER's per-frame paint, which ignores
+    the child gadget visible bit. `enb.hide_cockpit()` returns "hid 12" and changes
+    NOTHING on screen -- same reason. **So commit c4b232d2's SetVisible-based hides
+    of the xp/discipline and throttle clusters are very likely visually
+    ineffective** (could not re-verify the xp class 0xAF15EC before the client wedged
+    -- see below; treat as unconfirmed, NOT done). Only the original fill-mesh
+    SCALE-zeroing (QUAD vtable 0xb10f24, scales +0x10/+0x50) is a proven visible
+    removal, and only for fill bars -- not frames, text, buttons, dials.
+  - **NEW capability found: gadgets carry their UI name C-string at instance +0x24**
+    (verified live: `UI_POWER_SHIELDS_0`, `UI_EXPERIENCE_COMBAT_0`, `UI_CPIT_WARP_0`,
+    `UI_SCAN_PREV_TARGET_0`, ...). A bounded heap scan of the gadget arena
+    (~0x75E0000..0x7640000) enumerates them by name -- the way to TARGET specific
+    native elements. (No reachable global GadgetManager: gadget+0x08 is the owning
+    controller, not a manager; the decomp's manager-list offsets did not hold live.)
+  - **"JEFIVE" is the player's SHIP NAME, not a panel** (found as the ship entity's
+    name string). So `enb.vitals_ctrl()` (@runtime vt 0x00af5d70) IS the ship-vitals
+    panel controller; its gauges at +0x1c/+0x20/+0x24 are the on-screen Hull/Shield/
+    Energy bars.
+  - **Promising-but-UNVALIDATED mechanism: `vt_hide_paint(vtable, slot)`** -- no-op a
+    controller's per-frame paint vtable slot so the WHOLE element stops drawing
+    regardless of the visible bit. This is the right shape (kills frame+text+bars+
+    buttons at once). NOT yet proven: the slot index must be identified WITHOUT the
+    profiler (see caution).
+  - **CAUTION / INCIDENT: `vt_dump` / `vt_profile` wedged the client.** They install
+    call-counting stubs on vtable slots; profiling the vitals controller vtable
+    (0x00af5d70) left the client spinning at ~874% CPU with winedbg attached -- a
+    hard hang, had to `kill -9` client.exe + relaunch + relogin. **Do NOT run
+    vt_profile/vt_dump on a hot (per-frame) slot on a live session.** Identify the
+    paint slot from the decomp instead, then `vt_hide_paint` it directly.
+  - **STILL NOT HIDDEN (the user's "ALL of cropped 018" target)**: the JEFIVE ship-
+    vitals panel, the numbered ability hotbar, the 4 skill "orb" buttons, the central
+    reactor dial, the right radar dial, the `<<Warp` text. Next step: identify each
+    owning controller's per-frame paint slot from the decomp and `vt_hide_paint` it
+    (validated carefully, with `vt_restore` ready), OR scale-zero the fill meshes for
+    the bar fills. Needs a live client (relaunch + relogin after the wedge).
+
+- **Change**: client-only (enbmod.dll). The stock bottom-center cockpit widgets
+  (the throttle / up-down / WARP cluster, and the "UI COMMANDS" action buttons)
+  bleed through the Freya overlay that replaces them. Unlike vitals/xp, these have
+  NO pure per-frame PAINT routine to ret-patch -- they are painted by a generic
+  widget-tree walker -- so the clean `patch_ret` approach is unavailable. Instead
+  the hide-ui mod clears each child gadget's engine visible flag (gadget + 0x60 --
+  the same byte VitalsPaint and 42 other paint gates read to decide whether to
+  paint a gadget) every frame while in space (`enb.hide_cockpit`).
+- **Mechanism**: two read-only capture hooks on the cockpit CONSTRUCTORS record
+  each controller `this` (ECX), the proven naked-trampoline pattern of the vitals/
+  xp/rpg capture hooks -- `game::addr::CockpitThrottle` 0x0057dd20 (children at
+  controller int-slots 0x2d..0x31: WARP/THROTTLE/REVERSE/LEFT/RIGHT) and
+  `game::addr::CockpitCommands` 0x0057be50 ("UI COMMANDS", children from slot 0x2b,
+  inclusive 0x2b..0x33). `enb.hide_cockpit` (lua_api `l_hide_cockpit`) walks those
+  slots off the captured controllers and clears child+0x60. Every step is
+  guarded (mem::ptr / mem::write skip anything not committed), so a wrong
+  controller/slot can only no-op, never fault.
+- **Reversible, runs no game code**: the only write is the guarded visible-flag
+  byte clear -- no constructor/updater is patched and no game method is called.
+  Because it is a per-frame clear (not a one-way ret-patch), disabling the hide-ui
+  mod restores the stock cockpit the next frame (the engine repaints it). Per-tick
+  rather than one-shot specifically because the game re-shows the throttle gadgets
+  whenever throttle/warp state changes.
+- **Decomp-verified, NOT live-verified -- needs RELAUNCH + the owner's eyes**: the
+  constructor conventions (__fastcall ECX) and child slots were read out of the two
+  constructors; +0x60 as the engine visible flag is proven for the vitals/xp gadget
+  class but only *inferred* for the cockpit gadget classes (button/bar widgets
+  built by different gadget ctors). The running session this was built against has
+  the OLD injected DLL (`enb.hide_cockpit` / `enb.cockpit_ctrl` are nil), so it
+  cannot be exercised until `just play-local` rebuilds + redeploys. If clearing
+  +0x60 does NOT hide a given cockpit gadget class, the fallback is the game's own
+  SetVisible -- each gadget's vtable +0x40 method called with 0 (observed in
+  FUN_0057c1c0, the UI-commands hide-all) -- which definitely works but runs game
+  code; escalate to it only if the flag clear proves insufficient on test.
+- **NOT DONE -- moving the 4 bottom-left action buttons up**: the owner also asked
+  to shift the bottom-left action buttons upward to clear the bottom-left glass
+  card. The widget screen-position field offsets are NOT confidently located (the
+  decomp does not expose an unambiguous SetPosition / X-Y field on these gadgets),
+  so a position write would be a blind guess that risks corrupting the client. This
+  sub-task is deliberately left unimplemented pending verified position offsets --
+  do not ship a guessed offset.
+- **Headless coverage**: none -- the mock has no cockpit controllers.
+- **What to look for (real client, after relaunch)**:
+  - In space, the stock throttle/up-down/WARP cluster and the bottom-center action
+    buttons are gone; the Freya overlay's controls remain; flight/throttle/warp
+    still WORK (the gadgets are only hidden, not destroyed); no crash on load/zone/
+    undock/dock. `/run return enb.hide_cockpit()` returns a non-zero count once in
+    space, and `/run return enb.cockpit_ctrl()` shows two non-zero pointers.
+  - If a cockpit widget is still visible, +0x60 is not the gate for that gadget
+    class -> escalate to the vtable-+0x40 SetVisible fallback noted above.
+- **Setup**: `just play-local` with `UseClientMods=true`; rebuilds enbmod.dll.
+
+### [ ] CV-AS-ACTIONBAR -- Freya hotbar fires the native action bar (dispatch half)
+
+- **Change**: client-only (enbmod.dll + freya-hud Lua). A read-only ECX-capture
+  hook on the in-space Use-Slot dispatcher exposes the live action-bar controller
+  as `enb.actionbar()`; `freya_ui.lua` routes each Freya hotbar slot back through
+  that dispatcher via `enb.call`, so clicking/pressing a Freya slot fires the
+  exact native action. Freya 1-6 -> the native bar's six PRIMARY actions, Freya
+  7-12 -> the six ALTERNATE actions. No server/proxy/wire change.
+- **Why it is safe**: the dispatcher call is byte-identical to a native slot
+  click / "1".."6" keypress -- same controller, same gadget id, same per-slot
+  on/off toggle gating (`slot+0x6c`). We add no behaviour; we only invoke the
+  existing path the native UI invokes. The capture hook is the established
+  read-only `pushal/push ecx/call/popal/jmp` trampoline (same shape as the
+  rpg/xp/cockpit capture hooks), so it cannot alter game state.
+- **Verified live (this dev box, in space)**: mapping resolves to bank0 gid
+  2/3/4 + bank1 gid 9/10/11 (primaries) and bank0 gid 5/6/7 + bank1 gid 12/13/14
+  (alternates); dispatching the toggle gadget id flipped the bar state 0->1->0
+  with no crash (`enb.inspace()` stayed true).
+- **What to look for (real client, owner confirm)**: in space, clicking a Freya
+  hotbar slot 1-6 fires the same weapon/ability as the native "1".."6"; pressing
+  physical 1-6 still fires natively (Freya slot just lights); clicking Freya 7-12
+  or pressing 7/8/9/0/-/= fires the native ALTERNATE of slots 1-6 (the actions
+  behind the native alt-toggle button); toggle abilities turn on/off correctly;
+  no double-fire on key auto-repeat; no crash on use/zone/undock.
+- **NOTE**: the alternates need the bar touched once first (any primary use
+  captures the controller); before that, clicking 7-12 no-ops.
+- **Setup**: `just play-local` with `UseClientMods=true`, freya-hud enabled. The
+  Lua is hot-reloadable (`reload()`); the capture hook needs the staged DLL.
+
+### [ ] CV-AS-ACTIONBAR-ICONS -- Freya hotbar shows each slot's real ability icon (icon half, NOT done)
+
+- **Status**: NOT implemented. The dispatch half (CV-AS-ACTIONBAR) works without
+  it; this entry tracks the remaining "show the native icon on the Freya slot".
+- **Why it is non-trivial**: the ability icons are packed inside Westwood
+  `.mix`/`.th6` archives (not loose files), and EA art cannot be redistributed,
+  so loading a PNG from disk (`enb.draw.image`) is out. The correct route is to
+  blit the LIVE game texture: the overlay already draws inside the game's D3D8
+  Present hook with the game device, so a new `enb.draw.game_tex(tex, uv..., rect)`
+  primitive that binds a game-owned `IDirect3DTexture8*` is feasible (no art
+  redistribution, live-correct).
+- **The open work**: locate, per slot, the icon gadget's texture pointer + UV
+  rect in the gadget tree (the `ICON_BOX_%02d` / AbilityIcons gadgets resolved by
+  name at action-bar setup). This is unfinished deep RE; it also needs a DLL
+  rebuild + relaunch (an injected DLL cannot hot-swap).
+- **Progress 2026-06-18 (pipeline PROVEN + wired; awaits a populated bar)**:
+  - DONE: `enb.draw.texture_quad(texptr,x,y,w,h[,alpha])` -- the game-texture blit
+    primitive (`K_TEXQUAD`, pointer-guarded), built + staged.
+  - PROVEN live: captured the game's own font-glyph atlas texture by walking the
+    gadget tree and blitted it with `texture_quad` -- the glyphs rendered on screen.
+    So binding a game-owned `IDirect3DTexture8*` from memory and drawing it in our
+    Present hook works end-to-end. (The earlier "no readable texture" conclusion was
+    WRONG: there IS a stable live texture object; it just is not where the static
+    address pointed and not via a draw hook.)
+  - FOUND: the per-slot icon texture is reachable by a FIXED pointer chain off the
+    captured action-bar bank -- slot gadget (bank `+0x10 + k*4`, k=0..2) `-> +0x64`
+    ability-data `-> +0x64` icon gadget (vt `0x00afcd04`) `-> +0x24` image node
+    `-> +0x34` = the live `IDirect3DTexture8*` (device ptr at `+0x18`, refcount at
+    `+0x04`, vtable in the `0x7f______` band). No draw hook needed.
+  - WIRED: `freya_ui.lua` `slot_icon_tex(i)` walks that chain per Freya slot and
+    blits the icon onto the glass button; empty slots draw nothing. Live-reloaded,
+    no crash. The dead `0x006a8760` "IconDraw" hook (fired 0 times -> wrong fn) and
+    `enb.icon_src`/`enb.icon_stats` were removed; DLL rebuilt clean.
+  - STILL TO VERIFY HERE: the dev character's bar is EMPTY (every slot = "Unused
+    Slot" placeholder -> transparent texture), so a real icon has never rendered on
+    the Freya bar. Confirm with the real client + a character that has an equipped
+    weapon / trained ability that (a) the chain yields the correct icon art for a
+    populated slot, and (b) the primary (1-6) vs alternate (7-12) icons are right
+    (both currently resolve through the same slot gadget).
+
 ### [ ] CV-AS-AUXNUMS -- HUD shows correct numeric cur/max vitals + discipline levels (AuxData getter)
 
 - **Change**: client-only (enbmod.dll). New `enb.aux(key)` / `enb.aux_i(key)`
@@ -1326,6 +1651,15 @@ format & byte order", Trap 2).
   Called from on_tick = the game message-pump thread = the same thread the game's
   own vitals updater runs the identical getter on, so it is single-threaded
   against the game's aux access (no concurrent-mutation race).
+- **Discipline-level KEY STRING fix (2026-06-17).** The level keys are the client's
+  own DOTTED form -- `RPGInfo.CombatLevel` / `RPGInfo.TradeLevel` /
+  `RPGInfo.ExploreLevel` (verified by reading the static image strings at
+  0x00b79eb0 / 0x00b79e88 / 0x00b79e60). The earlier SPACE form
+  ("RPGInfo CombatLevel") never matched an entry, so `enb.rpg_level` returned
+  nothing and the card showed "LV --". With the dotted keys it reads the real
+  level live (0/0/0 on a fresh char -> overall "LV 0"), verified over the live
+  `/run` channel this session. `H.stats()` now passes the dotted keys via
+  `H.RPG_KEY`; the dead Lua BSS-scratch fallback recipe was deleted.
 - **Headless coverage**: none -- the mock has no aux property bag; correctness is
   entirely this entry. The CLI cannot validate it.
 - **What to look for (real client)**:
@@ -1337,8 +1671,9 @@ format & byte order", Trap 2).
   - No crash on load / zone / undock / dock from the aux calls. If it crashes,
     the convention or an offset is wrong -- comment the `enb.aux*` use in
     freya_hud.lua `H.stats()` to bisect (the rest of the HUD is independent).
-  - Overall level + xp% still show "LV --" (not yet pinned) -- that is expected,
-    not a regression.
+  - Overall level (JEFIVE card) now reads the SUM of the three discipline levels
+    (0 on a fresh char) -- no longer the "LV --" skeleton. Per-discipline xp% is
+    pinned separately by CV-AS-XPFRAC below.
 - **Setup**: `just play-local` with `UseClientMods=true`.
 
 ## CV-AS-RUNJMP -- /run console no longer crashes (Lua error path uses GCC builtins)
@@ -1367,6 +1702,39 @@ format & byte order", Trap 2).
 - **Setup**: `just play-local` with `UseClientMods=true`. Rebuild the DLL first
   (`just build-enbmod`); the Lua objects must be recompiled with the new
   `-include` (a stale `build/lua/ldo.o` would keep the old libc-jmp behaviour).
+- **UPDATE 2026-06-17**: this longjmp fix was real but was NOT what crashed the
+  live `/run return 1 + 1` repro -- that was the ChatSend calling-convention bug
+  (CV-AS-CHATSEND below). The crash happened BEFORE the Lua error path ever ran.
+  Both fixes are now in; verify `/run` against the combined build.
+
+## CV-AS-CHATSEND -- /run (and any chat command hook) no longer corrupts the stack
+
+> **Confirmed by project owner (2026-06-17):** in-space `/run return 1 + 1;`
+> produced `[run] 2` in enbmod.log and the client did NOT crash. The
+> __thiscall/__cdecl stack-imbalance crash is fixed.
+
+- **What was wrong**: the enbmod chat send-line hook (`hk_ChatSend`, target
+  `game::addr::ChatSend`) was declared as a typed `__cdecl` C function. The
+  client calls that member as `__thiscall` (`this` in ECX, **callee** pops the
+  4-byte arg -- `ret 4`). A `__cdecl` detour returns `ret 0`, so every chat send
+  left ESP 4 bytes high. The next pointer the real ChatSend loaded from the stack
+  (`mov 0x14(%esp),%ecx`) came back as an adjacent slot's small integer (`0x10`),
+  and `mov -0x1(%ecx),%al` faulted reading `0x0F`. First fault `eip=0074b083`,
+  `c0000005`, in the real ChatSend body -- a stack-misalignment crash, not heap.
+- **Fix (commit 853d0e33)**: `hk_ChatSend` is now a NAKED `__thiscall`
+  trampoline (the same pattern as the AuxData/RpgLevels capture hooks):
+  `pushal` / push the original `[esp+4]` line arg / `call notify_chat_send` /
+  on swallow `popal; mov $1,eax; ret $4` / on pass-through `popal; jmp
+  *real_ChatSend_tramp`. Both paths now balance the stack and preserve ECX.
+  Verified in the emitted DLL: swallow path emits `mov $1,eax ; ret $0x4`.
+- **Why UNVERIFIED here**: needs the real Win32 client under Wine; the headless
+  Lua tests never exercise the client's ChatSend.
+- **What to look for (real client)**: in space, type `/run return 1 + 1` -> no
+  crash, `enbmod.log` shows `[run] 2`. Any normal chat line (no leading command)
+  still sends to other players. Repeated chat sends do not destabilise the client.
+- **Setup**: `just play-local` with `UseClientMods=true` -- it rebuilds
+  enbmod.dll and the launcher redeploys it into the wine prefix. (The DLL that
+  crashed, prefix copy stamped 08:22, predated this fix.)
 
 ## CV-AS-RPGLVL -- discipline levels read off the RPG manager (not the ship entity)
 
@@ -1398,6 +1766,37 @@ format & byte order", Trap 2).
     If it crashes, comment the enb.rpg_level use in freya_hud H.stats() lvl() to
     bisect (vitals + the rest of the HUD are independent of it).
 - **Setup**: `just play-local` with `UseClientMods=true`; `just build-enbmod` first.
+
+## CV-AS-XPFRAC -- per-discipline xp bar fill % reads off the XpBars controller
+
+- **What was wrong**: the discipline card's per-row xp bars had no live data --
+  there was no flat-struct or AuxData source for the 0..1 xp fill fraction, so the
+  bars rendered empty (the one xp pair we had fed the overall card only). The
+  Explore bar should read ~94.50% on the owner's character; it showed empty.
+- **Fix (client-only, enbmod.dll)**: a new read-only capture hook on the client's
+  own XpBars value-updater (game.h addr::XpBarsUpdate `0x0058cb50`, __fastcall
+  ECX = the XpBars controller) records the controller pointer live
+  (hooks::xp_ctrl()), the same proven naked-trampoline pattern as the vitals/RPG
+  capture hooks. enb.xp_frac(which) then resolves the per-discipline bar gadget
+  off the controller (combat +0x1c / trade +0x20 / explore +0x24), checks the
+  gadget's exists flag (+0x60), and reads the cached fill fraction f32 at +0x68
+  (NaN-guarded, clamped 0..1). xp_overlay.lua multiplies by 100 for the row %.
+- **Calling convention is load-bearing** (same risk class as CV-AS-RPGLVL): the
+  capture hook only reads ECX and jumps to the trampoline -- it never alters the
+  updater's behaviour. The pointer chain (ctrl -> bar gadget -> +0x68) is
+  readability-guarded at every deref.
+- **Decomp-verified, NOT live-verified**: the +0x24/+0x68 chain was confirmed by
+  reading the XpBars updater + paint, but the running session predates the rebuilt
+  DLL (xp_ctrl() == 0, enb.xp_frac returns the empty fallback) -- it needs a client
+  RELAUNCH (`just play-local`, which rebuilds enbmod.dll) to take effect. I cannot
+  relaunch the WINE client myself, so this is staged-and-pending the owner's run.
+- **Headless coverage**: none -- the mock has no XpBars controller.
+- **What to look for (real client, after relaunch)**:
+  - In space, the discipline card's Explore row bar fills to ~94.50% (and Combat /
+    Trade to their real fractions); `/run return enb.xp_frac("explore")` logs
+    ~0.945 and `/run return enb.xp_ctrl()` is non-zero once the updater has run.
+  - No crash on load / zone from the new hook or the pointer-chain reads.
+- **Setup**: `just play-local` with `UseClientMods=true`; rebuilds enbmod.dll.
 
 ## CV-AR-1 -- /AuthLogin throttle returns wire-identical Valid=False (low risk)
 
@@ -1653,3 +2052,57 @@ format & byte order", Trap 2).
   (same lookup path). MANUFACTURE mode already worked before the fix.
 - **Setup**: `just rebuild server` then `just play-local`. A character docked at
   a manufacturing terminal with an analyzable item in cargo.
+
+### [ ] CV-PB19 -- "Build Ammunition" skill appears + trains on a Progen Sentinel (PB-19)
+
+- **What changed**: `server/data/Skills.xml` gained the `<Skill ID="59"
+  Name="Build Ammunition" Category="Trade" Type="Passive">` block (Sentinel +
+  Scout, Max=7, Quest=1, LearnLvl=30). Primary source: client `cskill_t.ini`
+  `[All Skills]` `59=Build Ammunition` (the skill-id enumeration the server's
+  Skills.xml indexes into) and the Build_Ammunition wiki page (classes, rank,
+  level-30 quest unlock). The skill list is wire-visible -- the server sends the
+  skill table to the client, so this is a content add the real client renders.
+- **SCOPE / honesty**: this is the skill DEFINITION only. The unlock mission
+  "Bite The Bullet", the ammo recipes the skill gates, and the ammo economy are
+  NOT implemented (separate work, tied to PB-26).
+- **What to look for (real client)**: on a Progen Sentinel (or Terran Scout),
+  "Build Ammunition" now appears in the Trade skill list, max rank 7, and does
+  NOT error in the skill window. It is gated behind the level-30 quest (so it
+  may show as locked/untrainable until that mission exists -- which is expected,
+  not a regression). Confirm the skill table still loads cleanly for OTHER
+  classes (no parse error introduced).
+- **Setup**: `just rebuild server` then `just play-local`. A Progen Sentinel
+  character; open the skills window.
+
+### [ ] CV-AS-NOTICE -- account-notice dialog ret-patch stops the login-screen crash (enbmod)
+
+- **What changed**: new always-on enbmod client safe-patch
+  (`freya/client-injection/enbmod/scripts/lib/safe_patches.lua`, applied from
+  `init.lua` before mods load) ret-patches the retail account-notice /
+  subscription-expiry dialog at `0x005aea60` so it never runs.
+- **Root cause (empirically confirmed, live crashed process)**: the dialog reads
+  an account-status block (`account+0x1098..`, expiry int32 at `account+0x1130`)
+  that the retail billing server populated. Our global-login flow never sends
+  that data (the server has no subscription concept), so the block is left as
+  uninitialised heap garbage. When `account+0x1d` (notice flag) is a nonzero
+  garbage byte the dialog fires; when `account+0x1130` is a negative garbage
+  int32 the date formatter `0x00a2a68f` returns NULL (it bails on negative
+  input) and the dialog `rep movs` 9 dwords from NULL -> access violation at
+  `0x005aebce` during LoginTask (after auth, before char select). Intermittent
+  because it depends on the heap contents at account-object allocation. Verified
+  by reading the live faulting process: `account+0x1d = 1`,
+  `account+0x1130 = 0x81460010` (= -2126118896), block contained stale
+  sound-asset string fragments, not account data.
+- **NOT enbmod / NOT hide-ui**: hide-ui's `patch_ret` writes single `0xC3` bytes
+  at `0x005dcae0`/`0x0058cf60` (unrelated paint routines); the crash is at
+  `0x005aebce`. Confirmed by relaunching with the hide-ui patch gated to
+  in-space -- crash reproduced identically.
+- **What to look for (real client)**: log in repeatedly (the crash was
+  intermittent). The client should reach character select every time, with no
+  account-notice popup (there is none to show on this server). `enbmod.log`
+  prints `safe_patches: account-notice dialog ret-patched -> true`.
+- **Setup**: restage scripts (`run-lua-client-command/scripts/restage.sh`) then
+  `just play-local`. No DLL rebuild needed (pure-Lua patch).
+- **Long-term**: the faithful fix is server-side -- initialise the account-status
+  block in the global-login flow (notice flag 0, valid/empty expiry) so the
+  retail path sees sane data. Tracked as follow-up; this stops the crash now.

@@ -173,6 +173,32 @@ namespace LaunchFreya
             _statusTimer = new DispatcherTimer { Interval = StatusRefreshInterval };
             _statusTimer.Tick += OnStatusTimerTick;
             _statusTimer.Start();
+
+            MaybeAutoPlay();
+        }
+
+        // Automation hook: when FREYA_AUTOPLAY=1 is set in the environment, click
+        // Play automatically once the selected server reports ONLINE/READY. This
+        // lets the login-automation skill launch the client WITHOUT driving the
+        // mouse onto the Play button -- the desktop may have another app holding a
+        // pointer grab (a VM / fullscreen game recentering the cursor), which makes
+        // a synthetic XTEST click on the launcher unreliable. No-op unless set.
+        async void MaybeAutoPlay()
+        {
+            if (Environment.GetEnvironmentVariable("FREYA_AUTOPLAY") != "1")
+                return;
+            AppendLog("FREYA_AUTOPLAY=1: will click Play once the server is ONLINE.");
+            // Wait up to ~30s for the status probe to confirm the server so we
+            // never launch against a not-yet-ready stack. On the dev build Play is
+            // never gated, but we still wait for the liveness label to flip.
+            for (int i = 0; i < 60; i++)
+            {
+                var st = (c_ServerStatus?.Text ?? "").ToUpperInvariant();
+                if (st.Contains("ONLINE") || st.Contains("READY")) break;
+                await Task.Delay(500);
+            }
+            AppendLog("FREYA_AUTOPLAY: server status=" + (c_ServerStatus?.Text ?? "") + " -- clicking Play.");
+            OnPlayClick(this, new RoutedEventArgs());
         }
 
         void OnClosing(object sender, EventArgs e)
@@ -876,27 +902,50 @@ namespace LaunchFreya
                 tabControl.Items.Add(new TabItem { Header = t.Header, Content = t.Box });
             }
 
-            var refresh = new Button
-            {
-                Content = "↻ Refresh",   // ↻
-                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
-            };
-            refresh.Click += (_, __) =>
-            {
-                int i = tabControl.SelectedIndex;
-                if (i < 0 || i >= tabs.Length) return;
-                RenderLogTab(tabs[i]);   // re-read the file, show the last LogTail lines
-            };
-
-            tabControl.SelectionChanged += (_, __) =>
+            // re-read + re-render whichever tab is selected (shared by the manual
+            // Refresh button, the tab switch, and the auto-refresh timer).
+            void RenderSelected()
             {
                 int i = tabControl.SelectedIndex;
                 if (i >= 0 && i < tabs.Length) RenderLogTab(tabs[i]);
+            }
+
+            var refresh = new Button { Content = "↻ Refresh" };   // ↻
+            refresh.Click += (_, __) => RenderSelected();
+
+            // Auto-refresh: default OFF. When checked, re-read the selected tab on a
+            // fixed interval so a live log (enbmod.log, the proxy log) tails itself.
+            var autoRefresh = new CheckBox
+            {
+                Content = "Auto-refresh",
+                IsChecked = false,
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                Margin = new Avalonia.Thickness(10, 0, 0, 0),
+            };
+            var autoTimer = new Avalonia.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(5),
+            };
+            autoTimer.Tick += (_, __) => RenderSelected();
+            autoRefresh.IsCheckedChanged += (_, __) =>
+            {
+                if (autoRefresh.IsChecked == true) { RenderSelected(); autoTimer.Start(); }
+                else autoTimer.Stop();
             };
 
+            var controls = new StackPanel
+            {
+                Orientation = Avalonia.Layout.Orientation.Horizontal,
+                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+            };
+            controls.Children.Add(refresh);
+            controls.Children.Add(autoRefresh);
+
+            tabControl.SelectionChanged += (_, __) => RenderSelected();
+
             var root = new DockPanel { Margin = new Avalonia.Thickness(8) };
-            DockPanel.SetDock(refresh, Dock.Top);
-            root.Children.Add(refresh);
+            DockPanel.SetDock(controls, Dock.Top);
+            root.Children.Add(controls);
             root.Children.Add(tabControl);   // fills the rest
 
             var dlg = new Window
@@ -906,6 +955,8 @@ namespace LaunchFreya
                 Height = 560,
                 Content = root,
             };
+            // stop the timer when the dialog closes so it never ticks a dead window.
+            dlg.Closed += (_, __) => autoTimer.Stop();
 
             tabControl.SelectedIndex = 0;
             RenderLogTab(tabs[0]);   // SelectionChanged does not fire for the initial index

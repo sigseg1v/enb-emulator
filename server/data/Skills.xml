@@ -87,6 +87,11 @@
      <Tradesman Max="7" Quest="1" LvlType="NON" LearnLvl="0"></Tradesman>
 </Skill>
 
+<Skill Category="Trade" ID="59" Name="Build Ammunition" Type="Passive">
+     <Sentinel Max="7" Quest="1" LvlType="NON" LearnLvl="30"></Sentinel>
+     <Scout Max="7" Quest="1" LvlType="NON" LearnLvl="30"></Scout>
+</Skill>
+
 <Skill Category="Trade" ID="5" Name="Build Devices" Type="Passive">
      <Sentinel Max="7" Quest="1" LvlType="NON" LearnLvl="10"></Sentinel>
      <Defender Max="7" Quest="1" LvlType="NON" LearnLvl="30"></Defender>

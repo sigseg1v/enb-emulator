@@ -30,6 +30,36 @@
 
 enb.log("init.lua running")
 
+-- Capture the pristine set of preloaded C modules ONCE (string/table/os/io/...),
+-- so reload() can drop ONLY our pure-Lua modules from package.loaded -- forcing
+-- require() to re-read them from disk -- while leaving the built-in libraries
+-- intact. Guarded so a reload (which re-runs this file) never re-snapshots after
+-- our own modules have already been required.
+if not _FREYA_CORE_MODULES then
+    _FREYA_CORE_MODULES = {}
+    for name in pairs(package.loaded) do _FREYA_CORE_MODULES[name] = true end
+end
+
+-- reload(): hot-reload the whole mod runtime from disk. Drops every cached
+-- pure-Lua module (lib/*, each mod's files) so the next require() re-parses the
+-- file on disk, clears accumulated event handlers, then re-runs THIS bootstrap --
+-- which re-discovers and re-initialises every staged mod. This is the in-client
+-- equivalent of relaunching: edit a .lua, re-stage it next to the client, then
+-- `/run reload()` (or push `reload()` over enbmod.cmd) to see the change live with
+-- no game restart. Defined before the rest of init runs so it survives a partial
+-- failure further down.
+function reload()
+    for name in pairs(package.loaded) do
+        if not _FREYA_CORE_MODULES[name] then package.loaded[name] = nil end
+    end
+    if enb.reset_callbacks then enb.reset_callbacks() end
+    enb.log("reload: re-running init.lua")
+    local path = (enb.script_dir or "scripts") .. "\\init.lua"
+    local ok, err = pcall(dofile, path)
+    if not ok then enb.log("reload FAILED: " .. tostring(err)) end
+    return ok
+end
+
 -- dump(v[,opts]): global value pretty-printer for the "/run" chat console. The
 -- console auto-dumps a returned table, but `dump` is also callable directly
 -- (e.g. `/run dump(enb.self(), {depth=2})`) to inspect any live data structure.
@@ -85,6 +115,20 @@ do
             last_inspace = ins
         end
     end)
+end
+
+-- Always-on client correctness patches (NOT opt-in mods). Currently just the
+-- account-notice dialog ret-patch that prevents the intermittent login-screen
+-- crash (the dialog reads an account-status block our server never populates and
+-- faults on a garbage negative expiry -- see lib/safe_patches.lua). Applied
+-- before mods load so it is in place before the login task can fire the dialog.
+do
+    local ok, patches = pcall(require, "safe_patches")
+    if ok and patches and patches.apply then
+        patches.apply()
+    else
+        enb.log("init.lua: safe_patches not applied: " .. tostring(patches))
+    end
 end
 
 -- Discover and load every staged (= enabled) mod.

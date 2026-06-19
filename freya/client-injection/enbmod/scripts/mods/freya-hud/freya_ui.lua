@@ -40,6 +40,84 @@ local KEYS = {
 local VK_TO_IDX = {}
 for i, k in ipairs(KEYS) do VK_TO_IDX[k.vk] = i end
 
+-- ---- native action-bar binding ---------------------------------------------
+-- The native in-space action bar is two adjacent 3-slot "bank" controllers that
+-- share one vtable and sit 0x60 bytes apart: bank0 owns the first three slots,
+-- bank1 the next three -- six slots total. Each slot fires in two modes, a
+-- PRIMARY and an ALTERNATE; the native UI shows the six primaries as "1".."6"
+-- plus a toggle button that swaps the bar to the six alternates. That is the 12
+-- the player sees. We map them onto our twelve keys: Freya 1-6 -> the six
+-- primaries, Freya 7-12 -> the six alternates.
+--
+-- A bank exposes the gadget id its primary slots START at (+0x50) and the id its
+-- alternate slots start at (+0x54); slot k within a bank is primary id (v50+k)
+-- and alternate id (v54+k), k in 0..2. The dispatcher (ActionBarUse) takes
+-- (controller, gadget_id) and fires EXACTLY what a native click or "1".."6"
+-- keypress fires -- so routing a Freya slot through it is byte-identical to the
+-- native action, including the per-slot on/off toggle gating.
+--
+-- We capture one bank pointer read-only via the Use-Slot hook (enb.actionbar);
+-- the sibling bank is that pointer +/-0x60. Capture happens the first time any
+-- slot is used (a Freya 1-6 click taps its key, which dispatches AND captures),
+-- so the alternate slots become live after the bar has been touched once.
+local ACTIONBAR_DISPATCH = 0x006120e0
+local AB_VTABLE = 0x00af7484
+
+-- Return (bank0, bank1) controller pointers, or nil if not captured yet.
+local function ab_banks()
+    local ab = enb.actionbar and enb.actionbar() or 0
+    if not ab or ab == 0 then return nil end
+    if not enb.mem.readable(ab, 0x58) then return nil end
+    if enb.mem.u32(ab) ~= AB_VTABLE then return nil end  -- not the controller we expect
+    local bank = enb.mem.u32(ab + 0x3c)
+    local b0 = (bank == 1) and (ab - 0x60) or ab
+    if not enb.mem.readable(b0, 0x58) or not enb.mem.readable(b0 + 0x60, 0x58) then return nil end
+    return b0, b0 + 0x60
+end
+
+-- Fire the native action mapped to Freya hotbar slot i (1..12). Slots 1-6 are
+-- the six primaries, 7-12 the six alternates. Returns true if dispatched.
+local function dispatch_slot(i)
+    local b0, b1 = ab_banks()
+    if not b0 then return false end
+    local n = (i - 1) % 6           -- 0..5 logical action within the six
+    local bank = (n < 3) and b0 or b1
+    local k = n % 3                 -- slot within the bank
+    local base = (i <= 6) and enb.mem.u32(bank + 0x50) or enb.mem.u32(bank + 0x54)
+    enb.call(ACTIONBAR_DISPATCH, bank, base + k)
+    return true
+end
+
+-- Resolve the live game-owned icon texture for Freya hotbar slot i (1..12), or 0.
+-- Walks the native slot's gadget tree to the IDirect3DTexture8 the action bar
+-- draws: slot gadget (bank+0x10+k*4) -> ability-data (+0x64) -> icon gadget
+-- (+0x64) -> image node (+0x24) -> bound texture (+0x34). enb.draw.texture_quad
+-- binds + blits that texture inside the game's Present hook, so the real icon
+-- art appears with no redistribution. Returns 0 for an empty slot (the "Unused
+-- Slot" placeholder points at a transparent texture, which draws as nothing).
+-- The same slot gadget backs a slot's primary (1-6) and alternate (7-12) modes;
+-- the alternate icon may resolve to the primary art until verified on a real
+-- populated bar (CV-AS-ACTIONBAR-ICONS).
+local function slot_icon_tex(i)
+    local b0, b1 = ab_banks()
+    if not b0 then return 0 end
+    local m = enb.mem
+    local n = (i - 1) % 6
+    local bank = (n < 3) and b0 or b1
+    local k = n % 3
+    local slot = m.u32(bank + 0x10 + k * 4) or 0
+    if slot == 0 or not m.readable(slot, 0x68) then return 0 end
+    local ad = m.u32(slot + 0x64) or 0
+    if ad == 0 or not m.readable(ad, 0x68) then return 0 end
+    local ico = m.u32(ad + 0x64) or 0
+    if ico == 0 or not m.readable(ico, 0x28) then return 0 end
+    local img = m.u32(ico + 0x24) or 0
+    if img == 0 or not m.readable(img, 0x38) then return 0 end
+    local tex = m.u32(img + 0x34) or 0
+    if tex == 0 or not m.readable(tex, 4) then return 0 end
+    return tex
+end
+
 -- ---- the three vitals (top -> bottom: hull, shield, reactor) ----------------
 local VITALS = {
     { key = "hull",   max = "hull_max",   rgb = H.HULL },
@@ -124,7 +202,7 @@ local function draw_player_card(L)
     if st.level then
         lv, lv_known = "LV " .. st.level, true
     elseif has_flat then
-        lv = "LV " .. math.max(me.combat_lvl or 0, me.explore_lvl or 0, me.trade_lvl or 0)
+        lv = "LV " .. ((me.combat_lvl or 0) + (me.explore_lvl or 0) + (me.trade_lvl or 0))
         lv_known = true
     end
     if lv_known and st.xp_pct then
@@ -192,6 +270,14 @@ local function draw_hotbar(L)
         local top = lit and CFG.SLOT_LIT_TOP or CFG.SLOT_TOP
         local bot = lit and CFG.SLOT_LIT_BOT or CFG.SLOT_BOT
         enb.draw.rrect_grad(x, y, w, h, H.RADIUS, top, bot, 235)
+        -- real ability/weapon icon, blitted from the native slot's live D3D
+        -- texture (transparent when the slot is empty -> draws nothing)
+        local tex = slot_icon_tex(i)
+        if tex ~= 0 then
+            local inset = 3
+            enb.draw.texture_quad(tex, x + inset, y + inset, w - 2 * inset,
+                                  h - 2 * inset, 255)
+        end
         -- gloss sheen across the top
         enb.draw.rrect_grad(x, y, w, math.floor(h * 0.46), H.RADIUS, 0xffffff, top,
                             lit and 42 or 24)
@@ -239,7 +325,13 @@ enb.on_input(function(msg, wparam, lparam)
     -- hotbar is up). Never swallow -- the game still needs the bind.
     if msg == M.KEYDOWN or msg == M.SYSKEYDOWN then
         local i = VK_TO_IDX[wparam]
-        if i and show_hotbar then state[i].held = true end
+        if i and show_hotbar then
+            -- alternate slots (7-12) have no native keybind, so we dispatch them
+            -- ourselves on the leading edge (guard auto-repeat with .held).
+            -- Primary slots (1-6) keep their native keybind -- do not double-fire.
+            if i >= 7 and not state[i].held then dispatch_slot(i) end
+            state[i].held = true
+        end
         return false
     elseif msg == M.KEYUP or msg == M.SYSKEYUP then
         local i = VK_TO_IDX[wparam]
@@ -259,7 +351,10 @@ enb.on_input(function(msg, wparam, lparam)
             for i = 1, #KEYS do
                 local x, y, w, h = slot_rect(L, i)
                 if point_in(mx, my, x, y, w, h) then
-                    enb.tap(KEYS[i].vk)
+                    -- primaries: tap the native key (works before any bank is
+                    -- captured, and the tap captures the bank for the alts).
+                    -- alternates: dispatch straight through the controller.
+                    if i <= 6 then enb.tap(KEYS[i].vk) else dispatch_slot(i) end
                     state[i].flash = CFG.FLASH_TICKS
                     return true
                 end

@@ -92,22 +92,50 @@ static BOOL WINAPI hk_GetMessageA(LPMSG m, HWND h, UINT min, UINT max) {
     return r;
 }
 
-// ---- chat send-line interception (cdecl) ------------------------------------
-// game::addr::ChatSend takes the raw typed chat line as its only argument, by
-// cdecl (caller-cleaned `ret`, no `ret 4`), so a plain typed C detour forwards
-// it correctly -- no naked trampoline needed. We give the Lua layer first refusal
-// on the line via g_on_chat_send; if it returns true the line is consumed (we
-// return without calling the real function, so no chat packet is ever built).
-typedef int(__cdecl* ChatSend_t)(const char*);
-static ChatSend_t real_ChatSend = nullptr;
-
-static int __cdecl hk_ChatSend(const char* line) {
-    // g_on_chat_send only inspects text + enqueues (no Lua, no throw). On true we
-    // swallow: skip the real send and report "handled" (1). The original return
-    // value is a success flag the caller does not act on for typed input.
+// ---- chat send-line interception (__thiscall) -------------------------------
+// game::addr::ChatSend is a C++ member function, NOT cdecl: `this` in ECX, the
+// raw typed chat line as the one stack arg, callee-cleaned (`ret 4`, verified by
+// disassembly -- the prologue does `mov %ecx,%ebx` and the function ends in
+// `c2 04 00`). A plain `__cdecl` detour is WRONG twice over: it ends in `ret 0`,
+// leaking 4 stack bytes on every chat send until ESP climbs into a bad return
+// slot and the client jumps onto its own stack (the "/run" crash); and on the
+// pass-through it re-enters the trampoline without ECX = the caller's `this`, so
+// the original runs against a garbage object. So this is a NAKED trampoline,
+// exactly like hk_Skill/hk_Chat: observe via a cdecl notify, then either swallow
+// (`ret 4`) or tail-`jmp` into MinHook's trampoline with ECX + stack untouched.
+//
+// We give the Lua layer first refusal on the line via g_on_chat_send (called
+// from notify_chat_send); if it returns true the line is consumed -- we return
+// 1 and never call the real function, so no chat packet is ever built.
+extern "C" {
+void* real_ChatSend_tramp = nullptr;
+// g_on_chat_send only inspects text + enqueues under a mutex (no Lua, no throw).
+// Returns 1 to swallow the line, 0 to forward it to the real send.
+int notify_chat_send(const char* line) {
     if (g_on_chat_send && line && g_on_chat_send(line))
         return 1;
-    return real_ChatSend(line);
+    return 0;
+}
+}
+// At naked entry: [esp]=return addr, [esp+4]=line, ECX=this. After `pushal`
+// (0x20 bytes) the line arg sits at 0x24(%esp). notify_chat_send is cdecl(line).
+// On swallow we restore regs, set eax=1 (a success flag the caller ignores for
+// typed input) and `ret 4` to clean the one stack arg the client pushed; on
+// pass-through we restore regs and tail-jmp the trampoline with ECX + stack
+// exactly as the game left them, so the original does its own `ret 4`.
+extern "C" __attribute__((naked)) void hk_ChatSend() {
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl 0x24(%esp)\n\t" // line (original [esp+4])
+                         "call _notify_chat_send\n\t"
+                         "addl $4, %esp\n\t"
+                         "testl %eax, %eax\n\t"
+                         "jnz 1f\n\t"
+                         "popal\n\t"
+                         "jmp *_real_ChatSend_tramp\n\t"
+                         "1:\n\t"
+                         "popal\n\t"
+                         "movl $1, %eax\n\t"
+                         "ret $4\n\t");
 }
 
 // ---- game __thiscall event hooks --------------------------------------------
@@ -197,6 +225,90 @@ extern "C" __attribute__((naked)) void hk_RpgLevels() {
                          "addl $4, %esp\n\t"
                          "popal\n\t"
                          "jmp *_real_RpgLevels_tramp\n\t");
+}
+
+// ---- action-bar controller capture -----------------------------------------
+// game.h::addr::ActionBarUse (0x006120e0) is the in-space action-bar slot
+// dispatcher: __thiscall(ECX = the action-bar controller). It fires on every slot
+// click and every "1".."6" keypress. We capture its `this` (ECX) read-only -- the
+// exact pattern of hk_RpgLevels -- so lua_api (hooks::actionbar()) hands the Freya
+// HUD the controller it reads the slots off and re-dispatches through. Forwards
+// every argument untouched via the trampoline; never alters the dispatch.
+static volatile unsigned g_actionbar = 0; // ECX (this) of the action-bar dispatcher
+extern "C" {
+void* real_ActionBar_tramp = nullptr;
+void notify_actionbar(unsigned thisp) {
+    g_actionbar = thisp;
+}
+}
+extern "C" __attribute__((naked)) void hk_ActionBar() {
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl %ecx\n\t" // this (action-bar controller)
+                         "call _notify_actionbar\n\t"
+                         "addl $4, %esp\n\t"
+                         "popal\n\t"
+                         "jmp *_real_ActionBar_tramp\n\t");
+}
+
+// ---- XpBars controller capture ---------------------------------------------
+// game.h::addr::XpBarsUpdate (0x0058cb50) is the discipline XP-bar value updater:
+// __fastcall(ECX = the XpBars controller). It recomputes each bar's 0..1 fill
+// fraction and caches it on the bar gadget (gadget + xp::fill_frac). The
+// explore/trade fractions go through a getter chain we cannot replicate from Lua,
+// so we capture the controller `this` (ECX) here -- the read-only pattern of
+// hk_RpgLevels -- and lua_api reads the cached fractions off it (hooks::xp_ctrl()).
+// Forwards every argument untouched via the trampoline; never alters game behaviour.
+static volatile unsigned g_xp_ctrl = 0; // ECX (this) of the XpBars updater
+extern "C" {
+void* real_XpBars_tramp = nullptr;
+void notify_xp(unsigned thisp) {
+    g_xp_ctrl = thisp;
+}
+}
+extern "C" __attribute__((naked)) void hk_XpBars() {
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl %ecx\n\t" // this (XpBars controller)
+                         "call _notify_xp\n\t"
+                         "addl $4, %esp\n\t"
+                         "popal\n\t"
+                         "jmp *_real_XpBars_tramp\n\t");
+}
+
+// ---- cockpit controller capture ---------------------------------------------
+// game.h::addr::CockpitThrottle (0x0057dd20) and CockpitCommands (0x0057be50) are
+// the two cockpit-widget CONSTRUCTORS (__fastcall, ECX = the controller). They run
+// once when the cockpit comes up (entering space). We capture each `this` (ECX)
+// read-only -- the exact pattern of hk_XpBars -- so lua_api (enb.hide_cockpit) can
+// walk each controller's child gadgets and clear their visible flag, letting the
+// Freya throttle/action overlay replace the stock widgets. Forwards every argument
+// untouched via the trampoline; never alters the constructor's behaviour.
+static volatile unsigned g_cockpit_throttle = 0; // ECX of the throttle/warp ctor
+static volatile unsigned g_cockpit_cmd = 0;      // ECX of the UI-commands ctor
+extern "C" {
+void* real_CockpitThrottle_tramp = nullptr;
+void* real_CockpitCommands_tramp = nullptr;
+void notify_cockpit_throttle(unsigned thisp) {
+    g_cockpit_throttle = thisp;
+}
+void notify_cockpit_cmd(unsigned thisp) {
+    g_cockpit_cmd = thisp;
+}
+}
+extern "C" __attribute__((naked)) void hk_CockpitThrottle() {
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl %ecx\n\t" // this (throttle controller)
+                         "call _notify_cockpit_throttle\n\t"
+                         "addl $4, %esp\n\t"
+                         "popal\n\t"
+                         "jmp *_real_CockpitThrottle_tramp\n\t");
+}
+extern "C" __attribute__((naked)) void hk_CockpitCommands() {
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl %ecx\n\t" // this (UI-commands controller)
+                         "call _notify_cockpit_cmd\n\t"
+                         "addl $4, %esp\n\t"
+                         "popal\n\t"
+                         "jmp *_real_CockpitCommands_tramp\n\t");
 }
 
 // At naked entry: [esp]=return addr, [esp+4]=arg0, ECX=this. After `pushal` (32 bytes) the return
@@ -302,7 +414,7 @@ bool enable_event_hooks() {
         logf("hook ChatChannel failed");
         ok = false;
     }
-    if (MH_CreateHook((void*)game::addr::ChatSend, (void*)&hk_ChatSend, (void**)&real_ChatSend) !=
+    if (MH_CreateHook((void*)game::addr::ChatSend, (void*)&hk_ChatSend, &real_ChatSend_tramp) !=
         MH_OK) {
         logf("hook ChatSend failed");
         ok = false;
@@ -312,10 +424,34 @@ bool enable_event_hooks() {
         logf("hook RpgLevels failed");
         ok = false;
     }
+    if (MH_CreateHook((void*)game::addr::XpBarsUpdate, (void*)&hk_XpBars, &real_XpBars_tramp) !=
+        MH_OK) {
+        logf("hook XpBarsUpdate failed");
+        ok = false;
+    }
+    if (MH_CreateHook((void*)game::addr::ActionBarUse, (void*)&hk_ActionBar,
+                      &real_ActionBar_tramp) != MH_OK) {
+        logf("hook ActionBarUse failed");
+        ok = false;
+    }
+    if (MH_CreateHook((void*)game::addr::CockpitThrottle, (void*)&hk_CockpitThrottle,
+                      &real_CockpitThrottle_tramp) != MH_OK) {
+        logf("hook CockpitThrottle failed");
+        ok = false;
+    }
+    if (MH_CreateHook((void*)game::addr::CockpitCommands, (void*)&hk_CockpitCommands,
+                      &real_CockpitCommands_tramp) != MH_OK) {
+        logf("hook CockpitCommands failed");
+        ok = false;
+    }
     MH_EnableHook((void*)game::addr::SkillLifecycle);
     MH_EnableHook((void*)game::addr::ChatChannel);
     MH_EnableHook((void*)game::addr::ChatSend);
     MH_EnableHook((void*)game::addr::RpgLevels);
+    MH_EnableHook((void*)game::addr::XpBarsUpdate);
+    MH_EnableHook((void*)game::addr::ActionBarUse);
+    MH_EnableHook((void*)game::addr::CockpitThrottle);
+    MH_EnableHook((void*)game::addr::CockpitCommands);
     g_event_hooks_on = ok;
     logf("event hooks %s", ok ? "enabled" : "partially enabled");
     return ok;
@@ -326,6 +462,10 @@ void disable_event_hooks() {
     MH_DisableHook((void*)game::addr::ChatChannel);
     MH_DisableHook((void*)game::addr::ChatSend);
     MH_DisableHook((void*)game::addr::RpgLevels);
+    MH_DisableHook((void*)game::addr::XpBarsUpdate);
+    MH_DisableHook((void*)game::addr::ActionBarUse);
+    MH_DisableHook((void*)game::addr::CockpitThrottle);
+    MH_DisableHook((void*)game::addr::CockpitCommands);
     g_event_hooks_on = false;
 }
 
@@ -357,6 +497,18 @@ unsigned vitals_ctrl() {
 }
 unsigned rpg_mgr() {
     return g_rpg_mgr;
+}
+unsigned xp_ctrl() {
+    return g_xp_ctrl;
+}
+unsigned actionbar() {
+    return g_actionbar;
+}
+unsigned cockpit_throttle_ctrl() {
+    return g_cockpit_throttle;
+}
+unsigned cockpit_cmd_ctrl() {
+    return g_cockpit_cmd;
 }
 
 } // namespace hooks
