@@ -77,6 +77,13 @@ constexpr uintptr_t BindCategories = 0x004081fc; // Targeting/Navigation/Camera/
 // ---- skills / abilities ----
 constexpr uintptr_t AbilitySlots = 0x006a4b40;   // RPGInfo SkillPowerupAbilityNumber
 constexpr uintptr_t SkillLifecycle = 0x0060f1a0; // Skill Activated/Deactivated/Interrupted
+// In-space action-bar slot dispatcher ("Use Slot"): __thiscall(ECX = the action-bar
+// controller, arg0 = the clicked slot's gadget id). Reached from both a slot click
+// and a "1".."6" keypress. We hook it read-only to capture its `this` (ECX) -- the
+// exact pattern of the rpg/xp/cockpit capture hooks -- so the Freya HUD can read the
+// slots (primary + alternate) off it and re-dispatch a slot by calling this fn with
+// the slot's real gadget id. Capture only; never alters the dispatch.
+constexpr uintptr_t ActionBarUse = 0x006120e0;
 constexpr uintptr_t SkillButton =
     0x00662dc0; // skill button CONSTRUCTOR -- NOT a hide target. The skill gadget has no
                 // standalone pure-paint entry (render is fused with state mutation), so unlike

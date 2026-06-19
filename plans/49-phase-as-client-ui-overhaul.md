@@ -143,6 +143,38 @@ per-vertex gradient quads + rounded corners from triangle fans, not PNGs.
   so hiding a panel can break 3D click-to-select -- show it back if so.
   Default hidden set: ActionBarIcons, LevelBarsAndMicroMenu, BottomHudChrome,
   ActionBarBackground, ChatFrameBackgroundAndScroll (owner-chosen 2026-06-18).
+- `[x]` **Ordinal-drift fix via tail anchoring (2026-06-18).** The scene list is NOT
+  static: opening a window inserts chrome leaves (inventory +5, target +1,
+  comm/portrait +2), which shifts later ordinals -- so keying a hide by raw ordinal
+  moved it onto the wrong panel and, because apply() runs every tick, permanently
+  cleared the draw bit on whatever inventory/loot/equipment leaf landed on a "hidden"
+  ordinal. That produced the blank inventory **equipment frame** ("shows my ship but
+  not engine/reactors/weapons") and the missing **loot button** with a target.
+  - **Fix: tail anchoring.** Verified live (`enb.hud.dump()` + raw scene walks): the
+    16 persistent cockpit panels are a contiguous block at the END of the list (last
+    leaf is always ActionBarBackground), and EVERY transient window inserts its
+    leaves at the FRONT, ahead of that block (inventory adds 5 before it, a target 1,
+    comm 2). So the persistent panels are simply the LAST `#ELEMENTS` chrome leaves;
+    keying each name off the end (`leaves[count - #ELEMENTS + k]`) is correct no
+    matter how many transient windows are open, including a target selected when the
+    mod first runs. No baseline-capture or ordinal-timing step to get wrong.
+  - **Baseline is 16 chrome leaves, not 17.** (A mid-session "17 / off-by-one"
+    theory was WRONG and briefly broke the mod -- with a bogus 17th name `map_panels`
+    required `count>=17`, which only happened once a transient opened, so the mod did
+    nothing for ~15s after load. Reverted to 16; it now applies from the first
+    in-space tick. This is the "wrong at load, correct ~15s later" report.)
+  - **The equipment paperdoll is a SEPARATE leaf, not ActionBarIcons.** Proven by
+    diffing the chrome list across an inventory open: ActionBarIcons (the native
+    ability glyph by hotbar slot 1) keeps its exact address and flags when inventory
+    opens; the equipment paperdoll is one of the 5 NEW transient front leaves. They
+    were never the same object, so there is nothing to "separate" -- and the
+    "restore ActionBarIcons while a modal is open" hack from the 17-theory was
+    unnecessary AND was the cause of the **glyph flashing back on inventory open**.
+    Removed it: ActionBarIcons is hidden unconditionally, the equipment frame
+    (untouched transient leaf) draws on its own, no flash.
+  - Visually confirmed on the live client: clean action bar (Freya hotbar 1-9,0, no
+    native glyph by slot 1), inventory open/close keeps the glyph hidden with no
+    flash. -> CV-AS-HUD-INVENTORY for owner equip-view confirm.
 - `[x]` **Why every earlier approach was a visual no-op** (all disproven live
   2026-06-18, kept here so we never retry them):
   - `patch_ret(VitalsPaint 0x005dcae0)` / `patch_ret(XpPaint 0x0058cf60)`: changed
@@ -231,6 +263,54 @@ screenshots commit and push".
   blur, single-stop shape alpha.
 - Font + draw-order + the native-widget hide still need the real client
   (CV-AS-STATE / -CURSOR / -HIDE-*).
+- `[x]` **AS-12 action-bar binding (dispatch half).** The Freya hotbar now fires
+  the native in-space action bar. The native bar is two adjacent 3-slot "bank"
+  controllers (one vtable `0x00af7484`, `0x60` bytes apart): 6 slots, each with a
+  PRIMARY and an ALTERNATE fire mode -- the 6 primaries are the native "1".."6",
+  the 6 alternates are what the native alt-toggle button swaps to. Mapped onto our
+  twelve keys: Freya 1-6 -> the six primaries, Freya 7-12 -> the six alternates.
+  - Read-only ECX-capture hook on the Use-Slot dispatcher `FUN_006120e0`
+    (`game::addr::ActionBarUse`, staged in game.h/hooks.cpp/.h/lua_api.cpp) exposes
+    the live controller as `enb.actionbar()`; the sibling bank is `+/-0x60`, so one
+    capture yields both banks. Each bank gives its primary START gadget id at
+    `+0x50` and alt START id at `+0x54`; slot k is primary `(v50+k)` / alt
+    `(v54+k)`, k in 0..2.
+  - `freya_ui.lua` `dispatch_slot(i)` calls `enb.call(0x006120e0, bank, gid)` --
+    byte-identical to a native click/keypress, incl. the per-slot `+0x6c` on/off
+    gating. Click slots 1-6 tap their native key (works cold + captures the bank);
+    click 7-12 and physical keys 7-12 (no native bind) dispatch through the
+    controller (edge-triggered to suppress auto-repeat). Verified live: mapping
+    resolves to b0 gid 2/3/4 + b1 gid 9/10/11 (primary) and b0 gid 5/6/7 + b1 gid
+    12/13/14 (alt); a toggle-id dispatch flipped bar state 0->1->0 (no crash).
+  - `[~]` **icon half: pipeline PROVEN + wired; awaits populated-bar verification
+    (2026-06-18).** Built + staged (not committed):
+    - `enb.draw.texture_quad(texptr,x,y,w,h[,alpha])` -- new `K_TEXQUAD` overlay
+      display-list cmd that binds an arbitrary game-owned `IDirect3DTexture8*` and
+      blits it (UV 0..1) inside the existing Present hook. Pointer-guarded
+      (null/garbage -> no-op). overlay.cpp/.h + lua_api.cpp.
+    - PROVEN live: captured the game's font-glyph atlas texture by walking the
+      gadget tree and blitted it with `texture_quad` -- the glyphs rendered on
+      screen. Capturing a game-owned `IDirect3DTexture8*` from memory and drawing it
+      in our Present hook works end-to-end.
+    - The per-slot icon texture is reachable by a FIXED pointer chain off the native
+      action-bar bank (no draw hook needed): slot gadget (bank `+0x10 + k*4`,
+      k=0..2) `-> +0x64` ability-data `-> +0x64` icon gadget (vt `0x00afcd04`)
+      `-> +0x24` image node `-> +0x34` = the live `IDirect3DTexture8*`. Verified the
+      leaf is a real WINE d3d8 resource: device ptr `0x015a99d8` at `+0x18`, refcount
+      at `+0x04`, vtable `0x7fc8d5a0` (same `0x7f______` band as every live texture).
+    - `freya_ui.lua` now walks that chain per Freya slot (`slot_icon_tex(i)`) and
+      blits the icon onto the glass button; empty slots resolve to a transparent
+      placeholder and draw nothing. Reloaded live, no crash, hotbar intact.
+    - DEAD CODE REMOVED: the earlier `0x006a8760` "IconDraw" hook fired **0 times**
+      in space -- wrong function. Deleted it + `enb.icon_src`/`enb.icon_stats`
+      (game.h `addr::IconDraw`, hooks.cpp/.h, lua_api.cpp) and the now-unused
+      `<mutex>`/`<unordered_map>`/`mem.h` includes. DLL rebuilt clean (-Wall -Wextra).
+    - REMAINING (CV-AS-ACTIONBAR-ICONS): the dev character's bar is EMPTY (every slot
+      is the "Unused Slot" placeholder -> transparent texture), so a real
+      ability/weapon icon has never been on screen to confirm the chain yields the
+      right ART for a POPULATED slot, and the primary-vs-alternate split (Freya 1-6
+      vs 7-12 share one slot gadget) is unverified. Needs a character with an
+      equipped weapon / trained ability to validate visually with the real client.
 
 ## Status
 
@@ -247,3 +327,4 @@ screenshots commit and push".
 | AS-9 design port | done -- freya_hud/freya_ui/xp_overlay ported to the `Earth & Beyond HUD.html` glass design; state-gated (space/station/login); cursor-on-top; specs + screenshots rewritten. Real-client checks: CV-AS-STATE/-CURSOR/-HIDE-* |
 | AS-10 mod folders + launcher Configure Mods | done -- scripts restructured into `scripts/lib/` (shared: modloader, json, freya_hud, calib) + `scripts/mods/<id>/` (player-hud, discipline-card, native-hud-hide, autocalibrate), each with a `mod.json` (id/name/author/description/entrypoint). New C++ `enb.list_dir` + `enb.script_dir`; `init.lua` is now a loader (`lib/modloader.lua` discovers + dofiles enabled mods). Launcher gained a "Configure Mods..." button (enabled only when "Enable Lua Mods" is checked) opening a scrollable popup of enable/disable + name + author rows with description tooltips; `UserSettings.ModStates` persists choices; `StageClientMods` stages only enabled mods and prunes disabled ones (disabled = not loaded/injected). `ModCatalog.cs` reads the manifests. Suite green (20/20 enbmod incl. loader test); launcher builds 0 warnings |
 | AS-11 consolidate HUD into one mod + dep system | done -- merged `player-hud` + `discipline-card` into a single **`freya-hud`** mod (`init.lua` requires xp_overlay then freya_ui); pulled the bar-hiding out as the separate **`hide-ui`** mod and made `freya-hud` declare it in a new `mod.json` `"dependencies"` array. `ModCatalog.ModInfo.Dependencies` parses it; the Configure Mods window now paints a row red ("requires &lt;id&gt; (disabled/missing)") when an enabled mod has an unmet dep, re-evaluated live on every checkbox toggle. The loader does NOT enforce deps (freya-hud still draws if hide-ui is off, just over the natives). README/MOD-STRUCTURE.md document the field. Suite + dotnet tests green |
+| AS-12 action-bar binding | dispatch half done -- Freya hotbar fires the native bar via the Use-Slot dispatcher (`enb.actionbar` capture hook + `enb.call`), Freya 1-6 -> 6 primaries, 7-12 -> 6 alternates; live-verified, staged (no rebuild needed). Icon half: pipeline PROVEN (captured the game font atlas + blitted it via the new `texture_quad`) and wired -- `freya_ui` walks the fixed slot chain (slot `+0x64` ability `+0x64` icon `+0x24` image `+0x34` = live `IDirect3DTexture8*`) and blits each icon. Dead `0x006a8760` IconDraw hook removed. Awaits a POPULATED bar (equipped weapon / trained ability) to confirm real-icon art + primary/alt split. CV-AS-ACTIONBAR-ICONS |

@@ -227,6 +227,29 @@ extern "C" __attribute__((naked)) void hk_RpgLevels() {
                          "jmp *_real_RpgLevels_tramp\n\t");
 }
 
+// ---- action-bar controller capture -----------------------------------------
+// game.h::addr::ActionBarUse (0x006120e0) is the in-space action-bar slot
+// dispatcher: __thiscall(ECX = the action-bar controller). It fires on every slot
+// click and every "1".."6" keypress. We capture its `this` (ECX) read-only -- the
+// exact pattern of hk_RpgLevels -- so lua_api (hooks::actionbar()) hands the Freya
+// HUD the controller it reads the slots off and re-dispatches through. Forwards
+// every argument untouched via the trampoline; never alters the dispatch.
+static volatile unsigned g_actionbar = 0; // ECX (this) of the action-bar dispatcher
+extern "C" {
+void* real_ActionBar_tramp = nullptr;
+void notify_actionbar(unsigned thisp) {
+    g_actionbar = thisp;
+}
+}
+extern "C" __attribute__((naked)) void hk_ActionBar() {
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl %ecx\n\t" // this (action-bar controller)
+                         "call _notify_actionbar\n\t"
+                         "addl $4, %esp\n\t"
+                         "popal\n\t"
+                         "jmp *_real_ActionBar_tramp\n\t");
+}
+
 // ---- XpBars controller capture ---------------------------------------------
 // game.h::addr::XpBarsUpdate (0x0058cb50) is the discipline XP-bar value updater:
 // __fastcall(ECX = the XpBars controller). It recomputes each bar's 0..1 fill
@@ -406,6 +429,11 @@ bool enable_event_hooks() {
         logf("hook XpBarsUpdate failed");
         ok = false;
     }
+    if (MH_CreateHook((void*)game::addr::ActionBarUse, (void*)&hk_ActionBar,
+                      &real_ActionBar_tramp) != MH_OK) {
+        logf("hook ActionBarUse failed");
+        ok = false;
+    }
     if (MH_CreateHook((void*)game::addr::CockpitThrottle, (void*)&hk_CockpitThrottle,
                       &real_CockpitThrottle_tramp) != MH_OK) {
         logf("hook CockpitThrottle failed");
@@ -421,6 +449,7 @@ bool enable_event_hooks() {
     MH_EnableHook((void*)game::addr::ChatSend);
     MH_EnableHook((void*)game::addr::RpgLevels);
     MH_EnableHook((void*)game::addr::XpBarsUpdate);
+    MH_EnableHook((void*)game::addr::ActionBarUse);
     MH_EnableHook((void*)game::addr::CockpitThrottle);
     MH_EnableHook((void*)game::addr::CockpitCommands);
     g_event_hooks_on = ok;
@@ -434,6 +463,7 @@ void disable_event_hooks() {
     MH_DisableHook((void*)game::addr::ChatSend);
     MH_DisableHook((void*)game::addr::RpgLevels);
     MH_DisableHook((void*)game::addr::XpBarsUpdate);
+    MH_DisableHook((void*)game::addr::ActionBarUse);
     MH_DisableHook((void*)game::addr::CockpitThrottle);
     MH_DisableHook((void*)game::addr::CockpitCommands);
     g_event_hooks_on = false;
@@ -470,6 +500,9 @@ unsigned rpg_mgr() {
 }
 unsigned xp_ctrl() {
     return g_xp_ctrl;
+}
+unsigned actionbar() {
+    return g_actionbar;
 }
 unsigned cockpit_throttle_ctrl() {
     return g_cockpit_throttle;

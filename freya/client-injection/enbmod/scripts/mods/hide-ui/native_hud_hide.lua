@@ -16,50 +16,55 @@
 -- widget -- a side-effect-free hide that touches no vtable and no value field
 -- (unlike SetVisible, whose +0x2c "visible" bit this draw path never reads).
 --
--- The native cockpit chrome panels are the leaves whose class is CHROME_VT. There
--- are several of them; their order in the list is stable within a session, so we
--- address each by its ORDINAL among the CHROME_VT leaves (0-based, in list order)
--- and give each ordinal a human name in ELEMENTS below. The chat window (a
--- different leaf class) and the 3D cockpit border (a separate PIP scene list) are
--- never touched.
+-- The native cockpit chrome panels are the leaves whose class is CHROME_VT. The chat
+-- window (a different leaf class, 0x00afbf28) and a band of inactive leaves
+-- (0x00b111a4) live in the same list and are skipped; the 3D cockpit border is a
+-- separate PIP scene list (scene+0x58 / +0x70) and is never touched.
+--
+-- TAIL ANCHORING (how we name panels stably). The scene's widget list is NOT static:
+-- opening a window (inventory, target frame + its loot button, comm/portrait) inserts
+-- more CHROME_VT leaves. Verified live against the running client: those transient
+-- leaves ALWAYS insert at the FRONT, ahead of the persistent cockpit block -- the
+-- inventory adds 5 leaves before the block, a target adds 1, etc., and the persistent
+-- panels keep their order with ActionBarBackground always last. So the persistent
+-- panels are the LAST #ELEMENTS leaves of the list, in fixed order, regardless of how
+-- many transient windows are open. We therefore key each name off the END of the list
+-- (leaves[count - #ELEMENTS + k]); there is no baseline-capture or ordinal-timing step
+-- to get wrong, and a target selected when the mod first runs no longer mis-names
+-- everything by one (the bug the old "bind at the smallest leaf count" scheme had).
+--
+-- CRUCIAL consequence we verified by experiment: the inventory ship+equipment
+-- paperdoll is one of the transient FRONT leaves, a DIFFERENT object from
+-- ActionBarIcons (the native ability glyph by hotbar slot 1). Hiding ActionBarIcons
+-- does NOT blank the equipment frame, so we hide it unconditionally -- no
+-- "restore while a modal is open" hack (that hack is what made the ability glyph
+-- flash back when the inventory opened).
 --
 -- WHAT WE FOUND while building this (all verified live against the running client,
 -- so the next person does not re-walk the same dead ends):
 --
 --  * THE PANEL IS THE ATOMIC UNIT. A CHROME_VT leaf is a multi-widget panel
 --    (e.g. NavButtonBar = several buttons, TargetFrame = 2 bars + 2 arrows + a
---    background, LevelBarsAndMicroMenu = the level bars AND the micro-menu). You
---    CANNOT hide a sub-widget of a panel with this flag trick: the panel paints
---    its own children in its draw method and ignores each child's draw gate. Test
---    that proves it: a child gadget at panel+0x14 (an associative/tree container of
---    child render objects) had its own (flags & 0x700) bits set; clearing them
---    changed nothing on screen. Sub-widget control would need a different
---    mechanism (DLL hook of the panel draw routine, or per-gadget mesh scale-zero)
---    -- deliberately out of scope here.
+--    background). You CANNOT hide a sub-widget of a panel with this flag trick: the
+--    panel paints its own children in its draw method and ignores each child's draw
+--    gate. Sub-widget control would need a different mechanism (DLL hook of the panel
+--    draw routine, or per-gadget mesh scale-zero) -- deliberately out of scope here.
 --
 --  * THE PANELS HAVE NO STABLE NAME/ID. There is no UI-name C-string or id at any
---    fixed offset on a CHROME_VT panel object (only the panels' *child* gadgets
---    carry UI names like "UI_CPIT_WARP_0" at gadget+0x24 -- and those are the
---    children we cannot control, see above). So ordinal is the key we have.
+--    fixed offset on a CHROME_VT panel object (only the panels' *child* gadgets carry
+--    UI names like "UI_CPIT_WARP_0" at gadget+0x24 -- and those are the children we
+--    cannot control). So position (tail-anchored) is the key we have.
 --
 --  * GEOMETRY IS NOT A USABLE KEY. The float fields on a panel (+0x1c..+0xc0) are
 --    parent-relative sizes/offsets, not absolute screen coordinates, and several
---    panels share values, so a screen-rect fingerprint would not reliably
---    disambiguate them. Ordinal stays the key.
+--    panels share values, so a screen-rect fingerprint would not disambiguate them.
 --
 --  * THE 0x700 GATE IS V|E|L AND GATES INPUT TOO. The three bits are Visible
 --    (0x100), Enabled (0x200), and in-Layout (0x400); a leaf draws only when all
 --    three are set. Clearing any of them ALSO drops the leaf from hit-testing, not
 --    just drawing -- which is why hiding panels can break 3D click-to-select if the
 --    panel routes those clicks. If click-to-select stops working, show panels back
---    one at a time (enb.hud.show) to find the one that owns the click region and
---    leave it shown.
---
--- NAMING CAVEAT: ordinals are positional. If the client ever reorders/adds/removes
--- a chrome panel (e.g. a target-dependent panel that only exists while a target is
--- selected), the name->ordinal mapping can drift. enb.hud.dump() prints the live
--- ordinal list so the mapping can be re-checked, and is the first thing to run if
--- the names look wrong.
+--    one at a time (enb.hud.show) to find the one that owns the click region.
 --
 -- PUBLIC API (added to the global `enb` table, callable from any mod or /run):
 --   enb.hud.hide(name)        -- hide one element
@@ -70,8 +75,8 @@
 --   enb.hud.hide_all()        -- hide every named chrome element
 --   enb.hud.show_all()
 --   enb.hud.list()            -- "name = hidden|shown" for every element
---   enb.hud.names()           -- array of element names, in ordinal order
---   enb.hud.dump()            -- live ordinal -> leaf-address/flags (diagnostic)
+--   enb.hud.names()           -- array of element names, in tail-anchored order
+--   enb.hud.dump()            -- live position -> name/leaf/flags (diagnostic)
 --
 -- SAFETY: every pointer is range- + readable-checked before use, the list walk is
 -- iteration-bounded, and we bail unless the scene's own vtable matches HUD_SCENE_VT
@@ -92,11 +97,12 @@ local LEAF_FLAGS   = 0x18       -- leaf -> visibility flags dword
 local DRAW_BIT     = 0x400      -- one of the 0x700 "drawn" bits; clearing it hides
 local MAX_NODES    = 256        -- iteration bound (corrupt-list guard)
 
--- Named chrome elements in scene-list order. Index here = ordinal + 1; the Nth
--- CHROME_VT leaf encountered while walking the list gets the Nth name. Names were
--- assigned by observing which on-screen widget vanished when each leaf was hidden.
+-- The persistent cockpit chrome panels, in list order. These are the LAST #ELEMENTS
+-- CHROME_VT leaves of the scene list (tail anchoring, see header). Names were
+-- assigned by observing which on-screen widget vanished when each leaf's draw bit was
+-- cleared; the 5 default-hidden ones (ords 0,7,9,13,15) were re-confirmed live.
 local ELEMENTS = {
-    "ActionBarIcons",               -- 0
+    "ActionBarIcons",               -- 0  native ability glyph poking out by hotbar slot 1
     "Unknown1",                     -- 1
     "ChatDownArrow",                -- 2
     "ChatUpArrow",                  -- 3
@@ -148,40 +154,65 @@ local function hud_scene()
     return 0
 end
 
--- Walk the scene list and call fn(ordinal, leaf) for each CHROME_VT leaf, in order.
-local function each_chrome(fn)
+-- Walk the scene list and collect the CHROME_VT leaves, in order.
+local function chrome_leaves()
     local scene = hud_scene()
-    if scene == 0 then return end
+    if scene == 0 then return nil end
     local sentinel = scene + LIST_END
     local node = mem.u32(scene + LIST_BEGIN)
-    local ord = 0
+    local leaves = {}
     for _ = 1, MAX_NODES do
         if node == sentinel or node == 0 or not mem.readable(node) then break end
         local cp = mem.u32(node + NODE_CHILD)
         if cp ~= 0 and mem.readable(cp) then
             local leaf = cp - CHILD_ADJ
             if mem.readable(leaf) and mem.u32(leaf) == CHROME_VT then
-                fn(ord, leaf)
-                ord = ord + 1
+                leaves[#leaves + 1] = leaf
             end
         end
         node = mem.u32(node + NODE_NEXT)
     end
+    return leaves
+end
+
+-- Map name -> leaf for THIS frame by tail anchoring: the persistent panels are the
+-- last #ELEMENTS chrome leaves of the list (transients always insert ahead of them).
+-- Returns map, the live ordered leaf list, and the transient front-block size, or nil
+-- if the scene is not up / has fewer leaves than we have names for.
+local function map_panels()
+    local leaves = chrome_leaves()
+    if not leaves then return nil end
+    local n = #leaves
+    if n < #ELEMENTS then return nil end
+    local base = n - #ELEMENTS   -- transient leaves ahead of the persistent block
+    local map = {}
+    for k = 1, #ELEMENTS do
+        map[ELEMENTS[k]] = leaves[base + k]
+    end
+    return map, leaves, base
+end
+
+-- Set or clear a leaf's draw bit, no-op if already in the wanted state.
+local function set_draw(leaf, on)
+    if not (leaf and mem.readable(leaf + LEAF_FLAGS)) then return end
+    local fl = mem.u32(leaf + LEAF_FLAGS)
+    if on then
+        if (fl & DRAW_BIT) == 0 then mem.write_u32(leaf + LEAF_FLAGS, fl | DRAW_BIT) end
+    else
+        if (fl & DRAW_BIT) ~= 0 then mem.write_u32(leaf + LEAF_FLAGS, fl & ~DRAW_BIT) end
+    end
 end
 
 local function apply()
-    each_chrome(function(ord, leaf)
-        local name = ELEMENTS[ord + 1]
-        if not name then return end
-        if not mem.readable(leaf + LEAF_FLAGS) then return end
-        local fl = mem.u32(leaf + LEAF_FLAGS)
-        if hidden[name] then
-            if (fl & DRAW_BIT) ~= 0 then mem.write_u32(leaf + LEAF_FLAGS, fl & ~DRAW_BIT) end
-        elseif force_show[name] then
-            if (fl & DRAW_BIT) == 0 then mem.write_u32(leaf + LEAF_FLAGS, fl | DRAW_BIT) end
-            force_show[name] = nil
-        end
-    end)
+    local map = map_panels()
+    if not map then return end
+    for name in pairs(hidden) do
+        set_draw(map[name], false)
+    end
+    for name in pairs(force_show) do
+        set_draw(map[name], true)
+        force_show[name] = nil
+    end
 end
 
 local function set(name, hide)
@@ -223,14 +254,21 @@ local function list()
     return table.concat(out, "\n")
 end
 
--- Diagnostic: live ordinal -> leaf address + flags, for re-checking the mapping.
+-- Diagnostic: live position -> tail-anchored name + leaf address + flags, plus the
+-- transient front-block size (leaves inserted ahead of the persistent panels).
 local function dump()
+    local map, leaves, base = map_panels()
+    if not leaves then return "no scene" end
+    local rev = {}
+    for name, leaf in pairs(map or {}) do rev[leaf] = name end
     local out = {}
-    each_chrome(function(ord, leaf)
+    for i = 1, #leaves do
+        local leaf = leaves[i]
         local fl = mem.readable(leaf + LEAF_FLAGS) and mem.u32(leaf + LEAF_FLAGS) or 0
         out[#out + 1] = string.format("%2d %-30s leaf=%08x fl=%08x",
-            ord, ELEMENTS[ord + 1] or "(unnamed)", leaf, fl)
-    end)
+            i - 1, rev[leaf] or "(transient)", leaf, fl)
+    end
+    out[#out + 1] = string.format("chrome=%d front=%d", #leaves, base or -1)
     return table.concat(out, "\n")
 end
 

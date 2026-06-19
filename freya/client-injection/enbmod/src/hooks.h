@@ -79,6 +79,12 @@ unsigned rpg_mgr();
 // off this (enb.xp_frac).
 unsigned xp_ctrl();
 
+// ECX (this) captured from the most recent action-bar "Use Slot" dispatch: the
+// in-space action-bar controller that owns the numbered ability/weapon slots
+// (primary + alternate). 0 until a slot has been used in space. lua_api reads the
+// slots off this and re-dispatches a slot through it (enb.actionbar).
+unsigned actionbar();
+
 // ECX (this) captured from the cockpit constructors: the throttle/warp cluster
 // controller and the "UI COMMANDS" action-button controller. 0 until each ctor
 // has run (entering space). lua_api walks each controller's child gadgets and

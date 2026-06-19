@@ -1,6 +1,6 @@
 ---
 name: login-to-client
-description: Log the local EnB client all the way into the game (clean slate -> in-game on a character), driving the launcher, EULA, login screen, and character select automatically with screenshot/ref verification at each step. Use when you need a live client to do in-game / Lua-HUD work and don't want a human to click through login.
+description: Launch / relaunch / restart the local EnB client and log it all the way into the game (clean slate -> in-game on a character), driving the launcher, EULA, login screen, and character select automatically with screenshot/ref verification at each step. Use to launch or relaunch the client (e.g. after rebuilding enbmod.dll, which only reloads on a fresh launch), or whenever you need a live client to do in-game / Lua-HUD work and don't want a human to click through login.
 ---
 
 # Log in to the EnB client

@@ -757,6 +757,15 @@ static int l_xp_ctrl(lua_State* L) {
     return 1;
 }
 
+// enb.actionbar() -> int. Raw pointer to the in-space action-bar controller captured
+// by the "Use Slot" dispatch hook (hooks::actionbar()). 0 until a slot has been used
+// in space (the hook only fires on a slot click / "1".."6" keypress). The Freya HUD
+// reads the numbered slots off this and re-dispatches a slot through it.
+static int l_actionbar(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)hooks::actionbar());
+    return 1;
+}
+
 // Call GadgetClass::SetVisible(visible) on one gadget via its vtable (slot at byte
 // game::gadget::vt_set_visible, __thiscall(this, BOOL)). This is the engine's own
 // hide/show: it flips the visible bit AND releases the rendered child (gadget+0x20)
@@ -1155,6 +1164,17 @@ static int l_draw_image(lua_State* L) {
     overlay::image(p, x, y, w, h, a);
     return 0;
 }
+// enb.draw.texture_quad(texptr, x, y, w, h [, alpha]) -- blit a live game-owned
+// IDirect3DTexture8* (e.g. an action-bar icon resolved by walking the slot gadget
+// tree) into a quad, UV 0..1, inside the game's Present hook.
+static int l_draw_texquad(lua_State* L) {
+    void* tex = (void*)(uintptr_t)luaL_checkinteger(L, 1);
+    int x = (int)luaL_checkinteger(L, 2), y = (int)luaL_checkinteger(L, 3);
+    int w = (int)luaL_checkinteger(L, 4), h = (int)luaL_checkinteger(L, 5);
+    int a = (int)luaL_optinteger(L, 6, 255);
+    overlay::texture_quad(tex, x, y, w, h, a);
+    return 0;
+}
 
 // =====================================================================================
 // enb.tap / enb.key / enb.char / enb.call(_cdecl)  -- actions
@@ -1310,6 +1330,7 @@ void open(lua_State* L) {
                                    {"rpg_mgr", l_rpg_mgr},
                                    {"xp_frac", l_xp_frac},
                                    {"xp_ctrl", l_xp_ctrl},
+                                   {"actionbar", l_actionbar},
                                    {"hide_cockpit", l_hide_cockpit},
                                    {"cockpit_ctrl", l_cockpit_ctrl},
                                    {"gadget_set_visible", l_gadget_set_visible},
@@ -1335,6 +1356,7 @@ void open(lua_State* L) {
                                        {"rect", l_draw_rect},
                                        {"line", l_draw_line},
                                        {"image", l_draw_image},
+                                       {"texture_quad", l_draw_texquad},
                                        {"rect_grad", l_draw_rect_grad},
                                        {"rrect", l_draw_rrect},
                                        {"rrect_grad", l_draw_rrect_grad},

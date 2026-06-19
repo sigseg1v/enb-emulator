@@ -47,6 +47,13 @@ void rrect_grad(int x, int y, int w, int h, int radius, uint32_t rgb_top, uint32
 // Cached by path after first load. alpha 0..255 scales overall opacity.
 void image(const std::string& path, int x, int y, int w, int h, int alpha);
 
+// Blit a LIVE game-owned IDirect3DTexture8* (e.g. an action-bar ability icon captured
+// from the game's own draw path) into a w x h quad at (x,y), sampling the full texture
+// (UV 0..1). `tex` is the raw IDirect3DTexture8* the game already created on its own
+// device; we only bind and draw it (no ownership, no Release). A null/garbage pointer
+// is skipped in the Present hook. alpha 0..255 scales overall opacity.
+void texture_quad(void* tex, int x, int y, int w, int h, int alpha);
+
 // Draw our own mouse pointer on TOP of the display list (the native cursor
 // renders underneath the HUD). `on` toggles it; `hwnd` is the game window, used
 // to map the screen-space cursor into client coords. A procedural arrow (no
