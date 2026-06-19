@@ -88,34 +88,46 @@ local function dispatch_slot(i)
     return true
 end
 
+-- Per-slot 2D icon texture, rooted on the captured action-bar controller (NOT a
+-- fixed HUD-scene chain -- those addresses move session to session and the old
+-- scene-rooted chain broke on every relaunch). From a bank's slot box
+-- (bank +0x10 + k*4, vtable SLOT_VT) the chain to that slot's bound icon is
+-- box +0x64 (slot data) -> +0x64 (item card) -> +0x24 (icon gadget) -> +0x34
+-- (the live IDirect3DTexture8*, vtable D3DTEX_VT). enb.draw.texture_quad binds +
+-- blits that game-owned texture inside the Present hook, so the real icon art
+-- appears with no art redistribution (EA art cannot ship in the repo).
+--
+-- IMPORTANT (CV-AS-ACTIONBAR-ICONS): a WEAPON group renders as a live 3D model in
+-- the native bar and has NO 2D icon -- its icon texture resolves but is fully
+-- transparent, so a weapon slot draws nothing here. 2D glyphs exist only for
+-- activated abilities / devices; those render. A weapon thumbnail would need the
+-- 3D model re-rendered (out of scope) -- it is not a bug that beam-weapon slots
+-- show no glyph.
+local D3DTEX_VT = 0x7fc8d5a0
+local SLOT_VT   = 0x00afac78   -- a filled primary slot box ("Shortcut Box")
+
 -- Resolve the live game-owned icon texture for Freya hotbar slot i (1..12), or 0.
--- Walks the native slot's gadget tree to the IDirect3DTexture8 the action bar
--- draws: slot gadget (bank+0x10+k*4) -> ability-data (+0x64) -> icon gadget
--- (+0x64) -> image node (+0x24) -> bound texture (+0x34). enb.draw.texture_quad
--- binds + blits that texture inside the game's Present hook, so the real icon
--- art appears with no redistribution. Returns 0 for an empty slot (the "Unused
--- Slot" placeholder points at a transparent texture, which draws as nothing).
--- The same slot gadget backs a slot's primary (1-6) and alternate (7-12) modes;
--- the alternate icon may resolve to the primary art until verified on a real
--- populated bar (CV-AS-ACTIONBAR-ICONS).
+-- Re-resolved every frame from the captured controller (never cached) so a freed
+-- or changed texture simply breaks the chain and draws nothing instead of
+-- faulting. Slots 1-6 are the six primaries; 7-12 the alternates currently
+-- resolve through the same primary box (alternate-icon split is unverified).
 local function slot_icon_tex(i)
+    local m = enb.mem
     local b0, b1 = ab_banks()
     if not b0 then return 0 end
-    local m = enb.mem
-    local n = (i - 1) % 6
+    local n = (i - 1) % 6                 -- 0..5 logical action within the six
     local bank = (n < 3) and b0 or b1
-    local k = n % 3
-    local slot = m.u32(bank + 0x10 + k * 4) or 0
-    if slot == 0 or not m.readable(slot, 0x68) then return 0 end
-    local ad = m.u32(slot + 0x64) or 0
-    if ad == 0 or not m.readable(ad, 0x68) then return 0 end
-    local ico = m.u32(ad + 0x64) or 0
-    if ico == 0 or not m.readable(ico, 0x28) then return 0 end
-    local img = m.u32(ico + 0x24) or 0
-    if img == 0 or not m.readable(img, 0x38) then return 0 end
-    local tex = m.u32(img + 0x34) or 0
-    if tex == 0 or not m.readable(tex, 4) then return 0 end
-    return tex
+    local k = n % 3                       -- slot within the bank
+    local box = m.u32(bank + 0x10 + k * 4)
+    if not m.readable(box, 4) or m.u32(box) ~= SLOT_VT then return 0 end
+    local p = box
+    for _, off in ipairs({ 0x64, 0x64, 0x24, 0x34 }) do
+        if p == 0 or not m.readable(p + off, 4) then return 0 end
+        p = m.u32(p + off) or 0
+        if p == 0 or not m.readable(p, 8) then return 0 end
+    end
+    if m.u32(p) ~= D3DTEX_VT then return 0 end
+    return p
 end
 
 -- ---- the three vitals (top -> bottom: hull, shield, reactor) ----------------

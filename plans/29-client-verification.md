@@ -1632,6 +1632,40 @@ moot; the SOLVED block above is the truth):**
     weapon / trained ability that (a) the chain yields the correct icon art for a
     populated slot, and (b) the primary (1-6) vs alternate (7-12) icons are right
     (both currently resolve through the same slot gadget).
+- **Progress 2026-06-19 (root-caused the "empty bar" + fixed the resolution chain)**:
+  - The bar is NOT empty. With the Freya HUD hidden, slots 1/2/3 of the native
+    circular weapon-group bar (bottom-middle, flanking the warp dial) hold the
+    character's beam weapon (slot id = 85 at slot box `+0x68`, identical across all
+    three). The earlier "every slot = Unused Slot placeholder" read conflated
+    "no 2D icon" with "empty slot".
+  - ROOT CAUSE of "no icon ever renders": a WEAPON group is drawn as a live 3D
+    MODEL in the native bar (slot box `+0x30` display node -> `+0x8c` render node
+    vt `0x00b11d88`: mesh `+0x0c` + materials vt `0x00aea230` -- no flat texture in
+    the node or material). The slot's 2D icon atlas (box `+0x64` data `+0x80`
+    embedded icon `+0x34`, AND the item-card path box `+0x64` -> `+0x64` -> `+0x24`
+    -> `+0x34`) IS a valid `IDirect3DTexture8*` but renders fully TRANSPARENT --
+    weapons have no 2D glyph. Proven by blitting both textures over a magenta
+    background: magenta showed through 100%. So a beam-weapon slot correctly draws
+    nothing; 2D glyphs exist only for activated abilities / devices. A weapon
+    thumbnail would require re-rendering the 3D model (out of scope; the rejected
+    "replicate 3D render" option). EA art cannot ship in the repo, so the disk-PNG
+    route stays out -- the live game-texture blit is the only legitimate path, and
+    it is correct as-is.
+  - FIXED: `freya_ui.lua` `slot_icon_tex` was rooting on a FIXED HUD-scene offset
+    chain (`{0x3c,0x2c,0x14,0x00,0x14,0x3c,0x34}` off `cockpit_ctrl +0x44`) that is
+    session-unstable -- it broke at hop 3 (`+0x14 -> 0`) on this relaunch and would
+    break on every relaunch. Replaced it with the controller-rooted chain the spec
+    above already documents: captured action-bar bank (`enb.actionbar`/`ab_banks`)
+    -> slot box (`bank +0x10 + k*4`, vt `0x00afac78`) -> `+0x64` -> `+0x64` ->
+    `+0x24` -> `+0x34` (vt `0x7fc8d5a0`). Verified live: all three primary slots
+    resolve to a valid d3d texture (transparent, as expected for a weapon).
+    Re-resolved each frame, freed-safe; dead `hud_scene`/`follow_to_tex`/
+    `HUD_SCENE_VT`/`SCENE_OFF`/`SLOT_ICON_CHAIN` removed. Reloaded clean, no crash,
+    HUD intact.
+  - STILL TO VERIFY (unchanged): needs a character with a trained activated ability
+    / a 2D-icon device slotted to confirm the chain yields the correct glyph art on
+    the Freya bar, and the primary (1-6) vs alternate (7-12) split. Beam-weapon
+    slots will never show a glyph here -- that is correct, not a bug.
 
 ### [ ] CV-AS-AUXNUMS -- HUD shows correct numeric cur/max vitals + discipline levels (AuxData getter)
 
