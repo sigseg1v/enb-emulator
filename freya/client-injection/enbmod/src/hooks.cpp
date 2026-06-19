@@ -234,18 +234,30 @@ extern "C" __attribute__((naked)) void hk_RpgLevels() {
 // exact pattern of hk_RpgLevels -- so lua_api (hooks::actionbar()) hands the Freya
 // HUD the controller it reads the slots off and re-dispatches through. Forwards
 // every argument untouched via the trampoline; never alters the dispatch.
-static volatile unsigned g_actionbar = 0; // ECX (this) of the action-bar dispatcher
+static volatile unsigned g_actionbar = 0;     // ECX (this) of the action-bar dispatcher
+static volatile unsigned g_actionbar_arg = 0; // first stack arg of the last dispatch
 extern "C" {
 void* real_ActionBar_tramp = nullptr;
-void notify_actionbar(unsigned thisp) {
+// thisp = ECX (controller); arg = the dispatch's first stack arg (the action id
+// the game itself selected for this slot/keypress). Logging every call turns the
+// real action bar into a recorder: press a native action and read back the exact
+// (this, arg) the game used, so the Freya bar can replay the identical dispatch
+// instead of guessing the id from memory offsets.
+void notify_actionbar(unsigned thisp, unsigned arg) {
     g_actionbar = thisp;
+    g_actionbar_arg = arg;
+    logf("[ab] dispatch this=%08x arg=%u (0x%x)", thisp, arg, arg);
 }
 }
 extern "C" __attribute__((naked)) void hk_ActionBar() {
+    // __thiscall: ECX = controller, [esp+4] = action id. After pushal (esp -= 32)
+    // the original [esp+4] sits at [esp+36]. Pass (thisp, arg) cdecl to notify.
     __asm__ __volatile__("pushal\n\t"
-                         "pushl %ecx\n\t" // this (action-bar controller)
+                         "movl 36(%esp), %eax\n\t" // action id (orig [esp+4])
+                         "pushl %eax\n\t"          // arg  (2nd param)
+                         "pushl %ecx\n\t"          // this (1st param)
                          "call _notify_actionbar\n\t"
-                         "addl $4, %esp\n\t"
+                         "addl $8, %esp\n\t"
                          "popal\n\t"
                          "jmp *_real_ActionBar_tramp\n\t");
 }
@@ -503,6 +515,9 @@ unsigned xp_ctrl() {
 }
 unsigned actionbar() {
     return g_actionbar;
+}
+unsigned actionbar_arg() {
+    return g_actionbar_arg;
 }
 unsigned cockpit_throttle_ctrl() {
     return g_cockpit_throttle;

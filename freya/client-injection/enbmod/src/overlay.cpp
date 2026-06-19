@@ -559,8 +559,15 @@ static void draw_frame(IDirect3DDevice8* dev) {
             // wrong; a bad pointer must no-op, not fault the renderer.
             if (!c.tex || !enb::mem::readable(c.tex, 4) || !enb::mem::readable(*(void**)c.tex, 4))
                 break;
+            // Game icon textures (action-bar abilities, item portraits) are opaque
+            // RGB with no meaningful alpha channel -- alpha bytes read as 0. The
+            // default ALPHAOP=MODULATE (texAlpha * diffuseAlpha) would multiply by
+            // that zero and render the icon fully transparent. Take alpha solely
+            // from the diffuse (our requested c.alpha) for this draw, then restore.
+            dev->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG2);
             draw_quad(dev, (IDirect3DTexture8*)c.tex, (float)c.x, (float)c.y, (float)c.w,
                       (float)c.h, 0, 0, 1, 1, argb(0xFFFFFF, c.alpha));
+            dev->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
             break;
         }
         }

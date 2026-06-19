@@ -85,6 +85,12 @@ unsigned xp_ctrl();
 // slots off this and re-dispatches a slot through it (enb.actionbar).
 unsigned actionbar();
 
+// The first stack argument (the action id) of the most recent action-bar dispatch
+// -- the exact value the game itself passed for the slot/keypress it serviced.
+// 0 until a slot has been used. Pairs with actionbar() (the `this`) to replay a
+// dispatch verbatim instead of computing the id from controller memory offsets.
+unsigned actionbar_arg();
+
 // ECX (this) captured from the cockpit constructors: the throttle/warp cluster
 // controller and the "UI COMMANDS" action-button controller. 0 until each ctor
 // has run (entering space). lua_api walks each controller's child gadgets and

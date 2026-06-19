@@ -12,9 +12,15 @@
 --     name + level header and three vitals (hull / shield / reactor). Each vital
 --     is a track with a vertical-gradient fill, the current/max printed INSIDE
 --     the bar (right-aligned, white, outlined) and the percentage to its right.
---   * Hotbar -- twelve square glass slots for keys 1 2 3 4 5 6 7 8 9 0 - =, with
---     the design's small radius + gloss + hairline border and a cyan armed glow.
---     Click a slot -> taps its key (enb.tap); a physical keypress lights it.
+--   * Hotbar -- six square glass slots for keys 1 2 3 4 5 6, with the design's
+--     small radius + gloss + hairline border and a cyan armed glow. Six is the
+--     real count: the native in-space action bar is two 3-box bank controllers
+--     (six boxes total). The "alternate bar" the player toggles to is a second
+--     PAGE swapped into those same six boxes, not six more live slots; a page
+--     button at the right of the bar flips both banks together, so the six slots
+--     page as a unit between actions 1-6 and 7-12 (their labels follow). Click a
+--     slot -> dispatches the native action through the captured controller; a
+--     physical keypress lights it (the native keybind still fires it).
 --
 -- VISIBILITY (owner ask): the HUD draws only in space and station; nothing on
 -- the login / character-select / load screens. In station the hotbar is hidden
@@ -30,36 +36,48 @@
 
 local H = require("freya_hud")
 
--- ---- the twelve action-bar keys --------------------------------------------
+-- ---- the six action-bar keys -----------------------------------------------
 local KEYS = {
     { label = "1", vk = 0x31 }, { label = "2", vk = 0x32 }, { label = "3", vk = 0x33 },
     { label = "4", vk = 0x34 }, { label = "5", vk = 0x35 }, { label = "6", vk = 0x36 },
-    { label = "7", vk = 0x37 }, { label = "8", vk = 0x38 }, { label = "9", vk = 0x39 },
-    { label = "0", vk = 0x30 }, { label = "-", vk = 0xBD }, { label = "=", vk = 0xBB },
 }
 local VK_TO_IDX = {}
 for i, k in ipairs(KEYS) do VK_TO_IDX[k.vk] = i end
 
 -- ---- native action-bar binding ---------------------------------------------
--- The native in-space action bar is two adjacent 3-slot "bank" controllers that
--- share one vtable and sit 0x60 bytes apart: bank0 owns the first three slots,
--- bank1 the next three -- six slots total. Each slot fires in two modes, a
--- PRIMARY and an ALTERNATE; the native UI shows the six primaries as "1".."6"
--- plus a toggle button that swaps the bar to the six alternates. That is the 12
--- the player sees. We map them onto our twelve keys: Freya 1-6 -> the six
--- primaries, Freya 7-12 -> the six alternates.
+-- The native in-space action bar is two adjacent 3-box "bank" controllers that
+-- share one vtable (AB_VTABLE) and sit 0x60 bytes apart: bank0 owns the first
+-- three slots, bank1 the next three -- six slots total, our keys 1-6. Each bank
+-- holds its three box pointers at +0x10/+0x14/+0x18.
 --
--- A bank exposes the gadget id its primary slots START at (+0x50) and the id its
--- alternate slots start at (+0x54); slot k within a bank is primary id (v50+k)
--- and alternate id (v54+k), k in 0..2. The dispatcher (ActionBarUse) takes
--- (controller, gadget_id) and fires EXACTLY what a native click or "1".."6"
--- keypress fires -- so routing a Freya slot through it is byte-identical to the
--- native action, including the per-slot on/off toggle gating.
+-- The dispatcher FUN_006120e0(controller, id) is PRESS/RELEASE-keyed, not
+-- primary/alternate. A bank exposes a press-id base (+0x50) and a release-id
+-- base (+0x54); box k (k in 0..2) has press id (v50+k) and release id (v54+k):
+--   * press  (id in [v50, v50+3)) fires the action ONLY when the box is idle
+--     (box +0x6c == 0), then marks it active (+0x6c = 1).
+--   * release (id in [v54, v54+3)) fires ONLY when the box is active
+--     (box +0x6c != 0), then clears it (+0x6c = 0).
+-- For an instant ability/weapon a press fires it; the game clears +0x6c again on
+-- cooldown. For a toggle (a sustained buff / continuous weapon) press turns it on
+-- and a second activation must use the RELEASE id to turn it off. So replaying a
+-- keypress means: read the box's live +0x6c and pick press-or-release exactly as
+-- the native keybind handler does. Calling a press id on an already-active box
+-- (or a release id on an idle box) hits neither branch and FUN_006120e0 returns
+-- 0 -- a silent no-op. That mis-pick (computing an id outside both ranges) is why
+-- the previous mapping never actually dispatched. The id+box layout here is read
+-- live from the controller and verified against the running client.
+--
+-- The "alternate bar" the player toggles to is NOT six more slots: the bar-toggle
+-- id (v54+3) advances a page index (controller +0x4c) that swaps the action bound
+-- to each of the same six boxes. We drive that toggle (see toggle_page below) from
+-- a page button on the bar, flipping both banks together so all six slots page as
+-- a unit between actions 1-6 and 7-12.
 --
 -- We capture one bank pointer read-only via the Use-Slot hook (enb.actionbar);
--- the sibling bank is that pointer +/-0x60. Capture happens the first time any
--- slot is used (a Freya 1-6 click taps its key, which dispatches AND captures),
--- so the alternate slots become live after the bar has been touched once.
+-- the sibling bank is that pointer +/-0x60 (normalized via the +0x3c bank flag).
+-- Capture happens the first time any slot is used in space.
+local RECORD_MODE = false
+
 local ACTIONBAR_DISPATCH = 0x006120e0
 local AB_VTABLE = 0x00af7484
 
@@ -75,92 +93,177 @@ local function ab_banks()
     return b0, b0 + 0x60
 end
 
--- Fire the native action mapped to Freya hotbar slot i (1..12). Slots 1-6 are
--- the six primaries, 7-12 the six alternates. Returns true if dispatched.
-local function dispatch_slot(i)
-    local b0, b1 = ab_banks()
-    if not b0 then return false end
-    local n = (i - 1) % 6           -- 0..5 logical action within the six
-    local bank = (n < 3) and b0 or b1
-    local k = n % 3                 -- slot within the bank
-    local base = (i <= 6) and enb.mem.u32(bank + 0x50) or enb.mem.u32(bank + 0x54)
-    enb.call(ACTIONBAR_DISPATCH, bank, base + k)
-    return true
-end
-
--- Per-slot 2D icon texture, rooted on the captured action-bar controller (NOT a
--- fixed HUD-scene chain -- those addresses move session to session and the old
--- scene-rooted chain broke on every relaunch). From a bank's slot box
--- (bank +0x10 + k*4, vtable SLOT_VT) the chain to that slot's bound icon is
--- box +0x64 (slot data) -> +0x64 (item card) -> +0x24 (icon gadget) -> +0x34
--- (the live IDirect3DTexture8*, vtable D3DTEX_VT). enb.draw.texture_quad binds +
--- blits that game-owned texture inside the Present hook, so the real icon art
--- appears with no art redistribution (EA art cannot ship in the repo).
---
--- IMPORTANT (CV-AS-ACTIONBAR-ICONS): a WEAPON group renders as a live 3D model in
--- the native bar and has NO 2D icon -- its icon texture resolves but is fully
--- transparent, so a weapon slot would draw nothing via the texture blit. 2D
--- glyphs exist only for activated abilities / devices; those blit their real art.
--- For weapon slots we instead draw an original Freya placeholder glyph (an MIT
--- asset we authored, weapon_icon.png -- no EA art) so a filled weapon group is
--- not a blank square. Weapon slots are detected by their 3D render node: the
--- slot's display object (box +0x30) has its render node at +0x8c with vtable
--- RENDER3D_VT; an ability/device slot does not render through that node.
-local D3DTEX_VT   = 0x7fc8d5a0
-local SLOT_VT     = 0x00afac78   -- a filled primary slot box ("Shortcut Box")
-local RENDER3D_VT = 0x00b11d88   -- weapon-group 3D model render node
-local WEAPON_ICON = "scripts/mods/freya-hud/weapon_icon.png"
-
--- Resolve the live, OCCUPIED slot box backing Freya hotbar slot i (1..12), or
--- nil. Re-resolved every frame from the captured controller (never cached).
--- Slots 1-6 are the six primaries (bank0 k0-2, bank1 k0-2); 7-12 the alternates
--- currently resolve through the same primary boxes (alternate-icon split is
--- unverified). A bank exposes three boxes regardless of how many are filled and
--- the stale boxes keep their last vtable/id, so emptiness MUST be read from the
--- bank's live fill count (bank +0x34), not from the box's own fields.
-local function slot_box(i)
+-- (bank, box) backing Freya hotbar slot i (1..6), or nil. Slots 1-3 are bank0's
+-- three boxes, 4-6 bank1's. A box is occupied iff it holds an action object
+-- (box +0x64 != 0); an empty slot returns nil.
+local function slot_bank_box(i)
     local m = enb.mem
     local b0, b1 = ab_banks()
     if not b0 then return nil end
-    local n = (i - 1) % 6
-    local bank = (n < 3) and b0 or b1
-    local k = n % 3
-    if k >= (m.u32(bank + 0x34) or 0) then return nil end   -- slot not filled
+    local bank = (i <= 3) and b0 or b1
+    local k = (i - 1) % 3
     local box = m.u32(bank + 0x10 + k * 4)
-    if not m.readable(box, 4) or m.u32(box) ~= SLOT_VT then return nil end
-    return box
+    if box == 0 or not m.readable(box, 0x70) or m.u32(box + 0x64) == 0 then return nil end
+    return bank, box, k
 end
 
--- True when occupied Freya hotbar slot i holds a 3D-model weapon group (no 2D
--- icon): its display object (box +0x30) renders through a node (+0x8c) of vtable
--- RENDER3D_VT. Ability/device slots do not render through that node.
-local function slot_is_weapon(i)
+-- The (controller, action id) FUN_006120e0 wants to replay Freya hotbar slot i
+-- (1..6) exactly as its native keypress would, or nil for an empty slot. Picks
+-- the press or release id from the box's live active flag (+0x6c), mirroring the
+-- native keybind handler -- see the binding note above.
+local function slot_action(i)
     local m = enb.mem
-    local box = slot_box(i)
-    if not box then return false end
-    local disp = m.u32(box + 0x30)
-    if not m.readable(disp, 0x90) then return false end
-    local node = m.u32(disp + 0x8c)
-    if not m.readable(node, 4) then return false end
-    return m.u32(node) == RENDER3D_VT
+    local bank, box, k = slot_bank_box(i)
+    if not bank then return nil end
+    local base = (m.u32(box + 0x6c) ~= 0) and 0x54 or 0x50
+    return bank, m.u32(bank + base) + k
 end
 
--- Resolve the live game-owned icon texture for Freya hotbar slot i (1..12), or 0.
--- Re-resolved every frame from the captured controller (never cached) so a freed
--- or changed texture simply breaks the chain and draws nothing instead of
--- faulting.
+-- Fire the native action mapped to Freya hotbar slot i (1..6).
+local function dispatch_slot(i)
+    local bank, arg = slot_action(i)
+    if not bank then return false end
+    enb.call(ACTIONBAR_DISPATCH, bank, arg)
+    return true
+end
+
+-- ---- paging (the "alternate bar": slots 7-12) ------------------------------
+-- The native bar holds TWO pages of actions in the same six boxes; the player
+-- flips between them. The page is a per-bank index at controller +0x4c, advanced
+-- by a bank-local toggle id = (release base at +0x54) + 3 (8 for bank0, 15 for
+-- bank1). The six press ids are fixed across pages, so once a bank is flipped its
+-- three boxes dispatch the OTHER page's actions through the same ids -- our keys
+-- and clicks need no remap, they fire whatever page is live. We just drive the
+-- toggle (both banks together, so all six slots page as a unit) and relabel the
+-- slots 1-6 <-> 7-12 to match. Verified live: dispatching 8+15 flips both pages
+-- 0->1 and a second 8+15 restores them.
+local function current_page()
+    local b0 = ab_banks()
+    if not b0 then return 0 end
+    local pg = enb.mem.u32(b0 + 0x4c)
+    return (pg ~= 0) and 1 or 0
+end
+
+-- Flip both banks to the other page. Uses the live per-bank toggle id so it works
+-- regardless of which bank enb.actionbar() last captured (ab_banks normalizes).
+local function toggle_page()
+    local m = enb.mem
+    local b0, b1 = ab_banks()
+    if not b0 then return false end
+    enb.call(ACTIONBAR_DISPATCH, b0, m.u32(b0 + 0x54) + 3)
+    enb.call(ACTIONBAR_DISPATCH, b1, m.u32(b1 + 0x54) + 3)
+    return true
+end
+
+-- The key/label a Freya hotbar slot shows for the current page: 1-6 on page 0,
+-- 7-12 on page 1.
+local function slot_label(i)
+    return tostring(i + current_page() * 6)
+end
+
+-- Slot art. A slot's action object lives at box +0x64 (the "slot data" gadget);
+-- its bound item/ability card is one hop further at +0x64 again, and that card's
+-- vtable tells weapon from ability: WEAPON_VT for a beam/projectile group,
+-- ABILITY_VT for an activated ability / device. (Verified live: the only slot
+-- reading WEAPON_VT was the equipped beam weapon; every ability read ABILITY_VT.
+-- The earlier 3D-render-node test flagged every slot and was wrong.)
+--
+-- ABILITY ICON: the card carries the real per-ability icon and surfaces it through
+-- its own vtable. The card's slot-render uses a "get icon" virtual at vtable +0x34
+-- (the engine's preset-texture branch, taken when the card has a 2D glyph): called
+-- thiscall on the card it returns the ability's TextureClass (vtable TEXCLASS_VT),
+-- a 64x64 already-realized texture whose IDirect3DTexture8* lives at +0x34. We blit
+-- that texture straight into the slot -- it is the client's OWN runtime-loaded art
+-- (resolved from the skill's icon name by the engine), drawn on the user's machine,
+-- never redistributed. Re-resolved every frame from the captured controller; the
+-- texture pointer is never cached. Verified live: the virtual returns a distinct
+-- texture per ability (two boxes holding the same ability return the same texture).
+--
+-- A weapon group has no 2D glyph in the native bar (it renders a live 3D model) and
+-- its card's +0x34 virtual returns only shared item-state chrome, not a per-weapon
+-- icon, so we draw an original Freya placeholder (weapon_icon.png -- an MIT asset we
+-- authored, no EA art) for it. Per-weapon icons (off the item record) are a separate
+-- follow-up (see plans/29 CV-AS-ACTIONBAR-ICONS).
+local SLOT_VT     = 0x00afac78   -- a slot box ("Shortcut Box")
+local WEAPON_VT   = 0x00afcd04   -- item card: weapon group
+local ABILITY_VT  = 0x00afd664   -- item card: activated ability / device
+local TEXCLASS_VT = 0x00b119f0   -- engine TextureClass (IDirect3DTexture8* at +0x34)
+local ICON_VFN    = 0x34         -- card vtable slot: thiscall -> icon TextureClass
+local TEX_D3D     = 0x34         -- TextureClass -> IDirect3DTexture8*
+local TEX_INIT    = 0x0094b920   -- TextureClass::Init (thiscall) -- realize +0x34 if NULL
+local WEAPON_ICON = "scripts/mods/freya-hud/weapon_icon.png"
+
+-- The IDirect3DTexture8* of the per-ability icon for occupied Freya hotbar slot i
+-- (1..6), or nil. Only ability cards (ABILITY_VT) carry a 2D icon; weapons return
+-- nil (placeholder handled by the caller). Re-resolved each frame; never cached.
 local function slot_icon_tex(i)
     local m = enb.mem
-    local box = slot_box(i)
-    if not box then return 0 end
-    local p = box
-    for _, off in ipairs({ 0x64, 0x64, 0x24, 0x34 }) do
-        if p == 0 or not m.readable(p + off, 4) then return 0 end
-        p = m.u32(p + off) or 0
-        if p == 0 or not m.readable(p, 8) then return 0 end
+    local bank, box = slot_bank_box(i)
+    if not bank then return nil end
+    if m.u32(box) ~= SLOT_VT then return nil end
+    local card = m.u32(box + 0x64)
+    if card == 0 or not m.readable(card + 0x64, 4) then return nil end
+    card = m.u32(card + 0x64)
+    if card == 0 or not m.readable(card, 4) or m.u32(card) ~= ABILITY_VT then return nil end
+    local vfn = m.u32(m.u32(card) + ICON_VFN)
+    if vfn == 0 then return nil end
+    local tc = enb.call(vfn, card)
+    if tc == 0 or not m.readable(tc + TEX_D3D, 4) or m.u32(tc) ~= TEXCLASS_VT then return nil end
+    local d3d = m.u32(tc + TEX_D3D)
+    if d3d == 0 then                       -- not realized yet -> realize it (we run in Present)
+        enb.call(TEX_INIT, tc)
+        d3d = m.u32(tc + TEX_D3D)
     end
-    if m.u32(p) ~= D3DTEX_VT then return 0 end
-    return p
+    return (d3d ~= 0) and d3d or nil
+end
+
+-- True when occupied Freya hotbar slot i (1..6) holds a weapon group: its action
+-- object's bound card (box +0x64 -> +0x64) carries WEAPON_VT. Re-resolved each
+-- frame from the captured controller (never cached).
+local function slot_is_weapon(i)
+    local m = enb.mem
+    local bank, box = slot_bank_box(i)
+    if not bank then return false end
+    if m.u32(box) ~= SLOT_VT then return false end
+    local card = m.u32(box + 0x64)
+    if card == 0 or not m.readable(card + 0x64, 4) then return false end
+    card = m.u32(card + 0x64)
+    if card == 0 or not m.readable(card, 4) then return false end
+    return m.u32(card) == WEAPON_VT
+end
+
+-- Suppress the native action-bar slot glyphs that would otherwise bleed through
+-- our glass slots (and around them -- the native layout spreads its icons either
+-- side of the reticle, not in a tidy row). Each box owns its 2D glyph as a chrome
+-- panel leaf at box +0x74 (vtable GLYPH_VT). The in-space HUD draw pass draws a
+-- chrome leaf only when (flags & 0x700) == 0x700 at leaf +0x18; clearing the
+-- 0x400 bit drops it from BOTH the draw pass and the input/hover pass (the 0x700
+-- gate is Visible|Enabled|inLayout and gates input too), so the icon AND its hover
+-- highlight go away. This is the per-slot complement to hide-ui's single named
+-- "ActionBarIcons" leaf (which only covered box 0): we walk all six boxes from the
+-- captured controller and clear each glyph every frame, so re-slotting / paging
+-- can never leave a stale native glyph lit. Re-resolved each frame; never cached.
+local GLYPH_VT       = 0x00b1327c   -- native cockpit chrome panel leaf
+local GLYPH_FLAGS    = 0x18         -- leaf -> visibility flags dword
+local GLYPH_DRAW_BIT = 0x400        -- clearing it drops the leaf from draw + input
+local function hide_native_glyphs()
+    local m = enb.mem
+    local b0, b1 = ab_banks()
+    if not b0 then return end
+    for _, bank in ipairs({ b0, b1 }) do
+        for k = 0, 2 do
+            local box = m.u32(bank + 0x10 + k * 4)
+            if box ~= 0 and m.readable(box + 0x74, 4) then
+                local gl = m.u32(box + 0x74)
+                if gl ~= 0 and m.readable(gl + GLYPH_FLAGS, 4) and m.u32(gl) == GLYPH_VT then
+                    local fl = m.u32(gl + GLYPH_FLAGS)
+                    if (fl & GLYPH_DRAW_BIT) ~= 0 then
+                        m.write_u32(gl + GLYPH_FLAGS, fl & ~GLYPH_DRAW_BIT)
+                    end
+                end
+            end
+        end
+    end
 end
 
 -- ---- the three vitals (top -> bottom: hull, shield, reactor) ----------------
@@ -173,6 +276,7 @@ local VITALS = {
 local CFG = {
     SLOT          = 46,    -- hotbar slot square edge
     GAP           = 6,     -- gap between slots
+    PAGE_W        = 30,    -- width of the page-toggle button at the bar's right
     BOTTOM        = 18,    -- gap from screen bottom to the hotbar (design bottom:18)
 
     PC_W          = 224,   -- player-card width (design)
@@ -194,9 +298,11 @@ local CFG = {
     KEY_INK       = 0xcfe0f2,
 }
 
--- per-slot live state: held (physical key down) + flash (click countdown)
+-- per-slot live state: held (physical key down) + owned (we dispatched this key
+-- cycle, so swallow it) + flash (click countdown)
 local state = {}
-for i = 1, #KEYS do state[i] = { held = false, flash = 0 } end
+for i = 1, #KEYS do state[i] = { held = false, owned = false, flash = 0 } end
+local page_flash = 0   -- click-feedback glow on the page-toggle button
 
 -- ---- layout (recomputed each frame from enb.screen()) ----------------------
 local function layout()
@@ -216,6 +322,10 @@ end
 
 local function slot_rect(L, i)
     return L.bar_x + (i - 1) * (CFG.SLOT + CFG.GAP), L.bar_y, CFG.SLOT, CFG.SLOT
+end
+-- The page-toggle button, a narrow cell just right of slot 6.
+local function page_rect(L)
+    return L.bar_x + L.bar_w + CFG.GAP, L.bar_y, CFG.PAGE_W, CFG.SLOT
 end
 local function point_in(px, py, x, y, w, h)
     return px >= x and px < x + w and py >= y and py < y + h
@@ -307,6 +417,26 @@ local function draw_player_card(L)
     end
 end
 
+-- The page-toggle button. Shows the page it will switch TO (7-12 while on page 0,
+-- 1-6 while on page 1) so the label always reads as the action it performs.
+local function draw_page_button(L)
+    local x, y, w, h = page_rect(L)
+    local lit = page_flash > 0
+    local top = lit and CFG.SLOT_LIT_TOP or CFG.SLOT_TOP
+    local bot = lit and CFG.SLOT_LIT_BOT or CFG.SLOT_BOT
+    enb.draw.rrect_grad(x, y, w, h, H.RADIUS, top, bot, 235)
+    enb.draw.rrect_grad(x, y, w, math.floor(h * 0.46), H.RADIUS, 0xffffff, top,
+                        lit and 42 or 24)
+    enb.draw.rrect(x, y, w, h, H.RADIUS, lit and H.LINE_HOT or H.LINE,
+                   lit and 220 or 150, false)
+    local target = (current_page() == 0) and "7-12" or "1-6"
+    local tw, th = H.measure(target)
+    H.otext(x + math.floor((w - tw) / 2), y + math.floor((h - th) / 2) + 3,
+            target, CFG.KEY_INK)
+    H.otext(x + math.floor((w - H.measure("PG")) / 2), y + 3, "PG", H.INK_DIM)
+    if page_flash > 0 then page_flash = page_flash - 1 end
+end
+
 -- ---- hotbar ----------------------------------------------------------------
 local function draw_hotbar(L)
     for i, k in ipairs(KEYS) do
@@ -315,17 +445,16 @@ local function draw_hotbar(L)
         local top = lit and CFG.SLOT_LIT_TOP or CFG.SLOT_TOP
         local bot = lit and CFG.SLOT_LIT_BOT or CFG.SLOT_BOT
         enb.draw.rrect_grad(x, y, w, h, H.RADIUS, top, bot, 235)
-        -- slot icon. A weapon group is a 3D model with no 2D glyph -> draw our
-        -- original Freya placeholder. Everything else (abilities / devices)
-        -- blits its real game-owned 2D texture (transparent -> nothing for empty
-        -- slots). Re-resolved each frame; never cached.
+        -- slot icon. An ability draws its real per-ability icon (the client's own
+        -- runtime texture, blitted via texture_quad); a weapon group has no 2D glyph
+        -- so we draw our original Freya placeholder. Both re-resolved each frame.
         local inset = 3
         if slot_is_weapon(i) then
             enb.draw.image(WEAPON_ICON, x + inset, y + inset, w - 2 * inset,
                            h - 2 * inset, 255)
         else
             local tex = slot_icon_tex(i)
-            if tex ~= 0 then
+            if tex then
                 enb.draw.texture_quad(tex, x + inset, y + inset, w - 2 * inset,
                                       h - 2 * inset, 255)
             end
@@ -336,11 +465,13 @@ local function draw_hotbar(L)
         -- border (cyan armed glow when lit)
         enb.draw.rrect(x, y, w, h, H.RADIUS, lit and H.LINE_HOT or H.LINE,
                        lit and 220 or 150, false)
-        -- key label, top-right corner
-        local lw, lh = H.measure(k.label)
-        H.otext(x + w - lw - 5, y + 3, k.label, CFG.KEY_INK)
+        -- key label, top-right corner -- follows the live page (1-6 or 7-12)
+        local label = slot_label(i)
+        local lw = H.measure(label)
+        H.otext(x + w - lw - 5, y + 3, label, CFG.KEY_INK)
         if state[i].flash > 0 then state[i].flash = state[i].flash - 1 end
     end
+    draw_page_button(L)
 end
 
 -- ===========================================================================
@@ -354,7 +485,10 @@ enb.on_tick(function()
     if not show then return end
     local L = layout()
     draw_player_card(L)
-    if show_hotbar then draw_hotbar(L) end
+    if show_hotbar and not RECORD_MODE then
+        hide_native_glyphs()   -- kill the native slot icons before painting ours
+        draw_hotbar(L)
+    end
 end)
 
 -- ===========================================================================
@@ -377,17 +511,32 @@ enb.on_input(function(msg, wparam, lparam)
     -- hotbar is up). Never swallow -- the game still needs the bind.
     if msg == M.KEYDOWN or msg == M.SYSKEYDOWN then
         local i = VK_TO_IDX[wparam]
-        if i and show_hotbar then
-            -- alternate slots (7-12) have no native keybind, so we dispatch them
-            -- ourselves on the leading edge (guard auto-repeat with .held).
-            -- Primary slots (1-6) keep their native keybind -- do not double-fire.
-            if i >= 7 and not state[i].held then dispatch_slot(i) end
-            state[i].held = true
+        if i and show_hotbar and not RECORD_MODE then
+            -- OWN the keybind: on the leading edge dispatch through our path
+            -- (one toggle, press-or-release auto-picked from box +0x6c, exactly
+            -- as the native keybind does) and SWALLOW the key so the native bar
+            -- never sees it -- no native light, no double-fire. If the controller
+            -- is not captured yet dispatch_slot returns false; we then fall
+            -- through (return false) so the native keybind fires it AND warms the
+            -- capture, and we do NOT swallow this cycle's up either.
+            if not state[i].held then
+                state[i].held = true
+                state[i].owned = dispatch_slot(i)
+            end
+            if state[i].owned then return true end   -- swallow leading edge + auto-repeat
         end
         return false
     elseif msg == M.KEYUP or msg == M.SYSKEYUP then
         local i = VK_TO_IDX[wparam]
-        if i then state[i].held = false end
+        if i then
+            state[i].held = false
+            local owned = state[i].owned
+            state[i].owned = false
+            -- swallow the matching up only when we owned the down (so a native
+            -- handled key keeps its up; a Freya-owned key never reaches native).
+            -- No dispatch on up: the slot is a toggle, keydown already flipped it.
+            if owned and show_hotbar and not RECORD_MODE then return true end
+        end
         return false
     end
 
@@ -399,24 +548,35 @@ enb.on_input(function(msg, wparam, lparam)
         local mx, my = mouse_xy(lparam)
         local L = layout()
 
-        if show_hotbar and msg == M.LBUTTONDOWN then
+        if show_hotbar and not RECORD_MODE and msg == M.LBUTTONDOWN then
+            -- page-toggle button: flip both banks to the other page (7-12 <-> 1-6)
+            local px, py, pw, ph = page_rect(L)
+            if point_in(mx, my, px, py, pw, ph) then
+                if toggle_page() then page_flash = CFG.FLASH_TICKS end
+                return true
+            end
             for i = 1, #KEYS do
                 local x, y, w, h = slot_rect(L, i)
                 if point_in(mx, my, x, y, w, h) then
-                    -- primaries: tap the native key (works before any bank is
-                    -- captured, and the tap captures the bank for the alts).
-                    -- alternates: dispatch straight through the controller.
-                    if i <= 6 then enb.tap(KEYS[i].vk) else dispatch_slot(i) end
+                    -- dispatch through the captured controller (our own path, the
+                    -- proof the Freya bar drives the action). Before any slot has
+                    -- been used in space the bank is not captured yet, so fall
+                    -- back to tapping the native key -- which fires it AND warms
+                    -- the capture so subsequent clicks take our path.
+                    if not dispatch_slot(i) then enb.tap(KEYS[i].vk) end
                     state[i].flash = CFG.FLASH_TICKS
                     return true
                 end
             end
         end
 
-        -- swallow mouse over the player card (always) and the hotbar (when up)
+        -- swallow mouse over the player card (always) and the hotbar + page
+        -- button (when up)
         local p = L.pc
         if point_in(mx, my, p.x, p.y, p.w, p.h) then return true end
-        if show_hotbar and point_in(mx, my, L.bar_x, L.bar_y, L.bar_w, CFG.SLOT) then
+        if show_hotbar and not RECORD_MODE
+           and point_in(mx, my, L.bar_x, L.bar_y,
+                        L.bar_w + CFG.GAP + CFG.PAGE_W, CFG.SLOT) then
             return true
         end
     end

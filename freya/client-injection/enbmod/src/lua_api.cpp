@@ -766,6 +766,14 @@ static int l_actionbar(lua_State* L) {
     return 1;
 }
 
+// enb.actionbar_arg() -> int. The action id of the most recent dispatch (the first
+// stack arg the game itself passed). Pairs with enb.actionbar() (the `this`) so the
+// Freya HUD can replay a dispatch verbatim. 0 until a slot has been used in space.
+static int l_actionbar_arg(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)hooks::actionbar_arg());
+    return 1;
+}
+
 // Call GadgetClass::SetVisible(visible) on one gadget via its vtable (slot at byte
 // game::gadget::vt_set_visible, __thiscall(this, BOOL)). This is the engine's own
 // hide/show: it flips the visible bit AND releases the rendered child (gadget+0x20)
@@ -1331,6 +1339,7 @@ void open(lua_State* L) {
                                    {"xp_frac", l_xp_frac},
                                    {"xp_ctrl", l_xp_ctrl},
                                    {"actionbar", l_actionbar},
+                                   {"actionbar_arg", l_actionbar_arg},
                                    {"hide_cockpit", l_hide_cockpit},
                                    {"cockpit_ctrl", l_cockpit_ctrl},
                                    {"gadget_set_visible", l_gadget_set_visible},
