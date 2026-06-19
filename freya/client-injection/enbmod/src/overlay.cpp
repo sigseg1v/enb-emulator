@@ -26,11 +26,11 @@ struct Cmd {
     uint32_t rgb;
     bool filled;
     int alpha;
-    std::string s;        // text, or image path
-    uint32_t rgb2;        // gradient bottom color (K_RECT_GRAD / K_RRECT_GRAD)
-    int radius;           // corner radius (K_RRECT / K_RRECT_GRAD)
-    float scale = 1.0f;   // glyph scale (K_TEXT; 1.0 = native atlas size)
-    void* tex = nullptr;  // live game-owned IDirect3DTexture8* (K_TEXQUAD)
+    std::string s;       // text, or image path
+    uint32_t rgb2;       // gradient bottom color (K_RECT_GRAD / K_RRECT_GRAD)
+    int radius;          // corner radius (K_RRECT / K_RRECT_GRAD)
+    float scale = 1.0f;  // glyph scale (K_TEXT; 1.0 = native atlas size)
+    void* tex = nullptr; // live game-owned IDirect3DTexture8* (K_TEXQUAD)
 };
 static std::vector<Cmd> g_staging; // built by Lua during tick
 static std::vector<Cmd> g_render;  // consumed by the Present hook
