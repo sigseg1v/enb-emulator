@@ -1662,10 +1662,23 @@ moot; the SOLVED block above is the truth):**
     Re-resolved each frame, freed-safe; dead `hud_scene`/`follow_to_tex`/
     `HUD_SCENE_VT`/`SCENE_OFF`/`SLOT_ICON_CHAIN` removed. Reloaded clean, no crash,
     HUD intact.
+  - 2D PLACEHOLDER for weapon slots (owner ask "use a 2d placeholder for weap"):
+    since a weapon group has no 2D glyph, an empty square reads as "unfilled".
+    `freya_ui.lua` now draws an ORIGINAL Freya placeholder (`weapon_icon.png`, a
+    cyan energy-bolt we authored -- MIT mod art, NOT EA art, so it ships fine) on
+    any occupied weapon slot, detected by the slot's 3D render node (display
+    `+0x30` -> node `+0x8c` vt `0x00b11d88`). Ability/device slots keep blitting
+    their real live 2D texture. Empty slots draw nothing -- emptiness is read from
+    the bank fill count (`bank +0x34`), NOT the box's own vtable/id, because a
+    bank always exposes three boxes and the unfilled ones keep stale vtable/id
+    (id=85 lingered on bank1's empty boxes). New shared `slot_box(i)` resolver
+    gates both the placeholder and the texture blit on that count. Verified live:
+    bolts show on the 3 filled weapon slots (and their 7-9 alternate-fire mirror);
+    the 6 empty slots stay blank; reloaded clean, no crash.
   - STILL TO VERIFY (unchanged): needs a character with a trained activated ability
     / a 2D-icon device slotted to confirm the chain yields the correct glyph art on
     the Freya bar, and the primary (1-6) vs alternate (7-12) split. Beam-weapon
-    slots will never show a glyph here -- that is correct, not a bug.
+    slots show the placeholder bolt (by design), not a real thumbnail.
 
 ### [ ] CV-AS-AUXNUMS -- HUD shows correct numeric cur/max vitals + discipline levels (AuxData getter)
 

@@ -99,27 +99,60 @@ end
 --
 -- IMPORTANT (CV-AS-ACTIONBAR-ICONS): a WEAPON group renders as a live 3D model in
 -- the native bar and has NO 2D icon -- its icon texture resolves but is fully
--- transparent, so a weapon slot draws nothing here. 2D glyphs exist only for
--- activated abilities / devices; those render. A weapon thumbnail would need the
--- 3D model re-rendered (out of scope) -- it is not a bug that beam-weapon slots
--- show no glyph.
-local D3DTEX_VT = 0x7fc8d5a0
-local SLOT_VT   = 0x00afac78   -- a filled primary slot box ("Shortcut Box")
+-- transparent, so a weapon slot would draw nothing via the texture blit. 2D
+-- glyphs exist only for activated abilities / devices; those blit their real art.
+-- For weapon slots we instead draw an original Freya placeholder glyph (an MIT
+-- asset we authored, weapon_icon.png -- no EA art) so a filled weapon group is
+-- not a blank square. Weapon slots are detected by their 3D render node: the
+-- slot's display object (box +0x30) has its render node at +0x8c with vtable
+-- RENDER3D_VT; an ability/device slot does not render through that node.
+local D3DTEX_VT   = 0x7fc8d5a0
+local SLOT_VT     = 0x00afac78   -- a filled primary slot box ("Shortcut Box")
+local RENDER3D_VT = 0x00b11d88   -- weapon-group 3D model render node
+local WEAPON_ICON = "scripts/mods/freya-hud/weapon_icon.png"
+
+-- Resolve the live, OCCUPIED slot box backing Freya hotbar slot i (1..12), or
+-- nil. Re-resolved every frame from the captured controller (never cached).
+-- Slots 1-6 are the six primaries (bank0 k0-2, bank1 k0-2); 7-12 the alternates
+-- currently resolve through the same primary boxes (alternate-icon split is
+-- unverified). A bank exposes three boxes regardless of how many are filled and
+-- the stale boxes keep their last vtable/id, so emptiness MUST be read from the
+-- bank's live fill count (bank +0x34), not from the box's own fields.
+local function slot_box(i)
+    local m = enb.mem
+    local b0, b1 = ab_banks()
+    if not b0 then return nil end
+    local n = (i - 1) % 6
+    local bank = (n < 3) and b0 or b1
+    local k = n % 3
+    if k >= (m.u32(bank + 0x34) or 0) then return nil end   -- slot not filled
+    local box = m.u32(bank + 0x10 + k * 4)
+    if not m.readable(box, 4) or m.u32(box) ~= SLOT_VT then return nil end
+    return box
+end
+
+-- True when occupied Freya hotbar slot i holds a 3D-model weapon group (no 2D
+-- icon): its display object (box +0x30) renders through a node (+0x8c) of vtable
+-- RENDER3D_VT. Ability/device slots do not render through that node.
+local function slot_is_weapon(i)
+    local m = enb.mem
+    local box = slot_box(i)
+    if not box then return false end
+    local disp = m.u32(box + 0x30)
+    if not m.readable(disp, 0x90) then return false end
+    local node = m.u32(disp + 0x8c)
+    if not m.readable(node, 4) then return false end
+    return m.u32(node) == RENDER3D_VT
+end
 
 -- Resolve the live game-owned icon texture for Freya hotbar slot i (1..12), or 0.
 -- Re-resolved every frame from the captured controller (never cached) so a freed
 -- or changed texture simply breaks the chain and draws nothing instead of
--- faulting. Slots 1-6 are the six primaries; 7-12 the alternates currently
--- resolve through the same primary box (alternate-icon split is unverified).
+-- faulting.
 local function slot_icon_tex(i)
     local m = enb.mem
-    local b0, b1 = ab_banks()
-    if not b0 then return 0 end
-    local n = (i - 1) % 6                 -- 0..5 logical action within the six
-    local bank = (n < 3) and b0 or b1
-    local k = n % 3                       -- slot within the bank
-    local box = m.u32(bank + 0x10 + k * 4)
-    if not m.readable(box, 4) or m.u32(box) ~= SLOT_VT then return 0 end
+    local box = slot_box(i)
+    if not box then return 0 end
     local p = box
     for _, off in ipairs({ 0x64, 0x64, 0x24, 0x34 }) do
         if p == 0 or not m.readable(p + off, 4) then return 0 end
@@ -282,13 +315,20 @@ local function draw_hotbar(L)
         local top = lit and CFG.SLOT_LIT_TOP or CFG.SLOT_TOP
         local bot = lit and CFG.SLOT_LIT_BOT or CFG.SLOT_BOT
         enb.draw.rrect_grad(x, y, w, h, H.RADIUS, top, bot, 235)
-        -- real ability/weapon icon, blitted from the native slot's live D3D
-        -- texture (transparent when the slot is empty -> draws nothing)
-        local tex = slot_icon_tex(i)
-        if tex ~= 0 then
-            local inset = 3
-            enb.draw.texture_quad(tex, x + inset, y + inset, w - 2 * inset,
-                                  h - 2 * inset, 255)
+        -- slot icon. A weapon group is a 3D model with no 2D glyph -> draw our
+        -- original Freya placeholder. Everything else (abilities / devices)
+        -- blits its real game-owned 2D texture (transparent -> nothing for empty
+        -- slots). Re-resolved each frame; never cached.
+        local inset = 3
+        if slot_is_weapon(i) then
+            enb.draw.image(WEAPON_ICON, x + inset, y + inset, w - 2 * inset,
+                           h - 2 * inset, 255)
+        else
+            local tex = slot_icon_tex(i)
+            if tex ~= 0 then
+                enb.draw.texture_quad(tex, x + inset, y + inset, w - 2 * inset,
+                                      h - 2 * inset, 255)
+            end
         end
         -- gloss sheen across the top
         enb.draw.rrect_grad(x, y, w, math.floor(h * 0.46), H.RADIUS, 0xffffff, top,
