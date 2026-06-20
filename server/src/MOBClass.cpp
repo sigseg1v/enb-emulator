@@ -696,6 +696,15 @@ aggro:
 
 void MOB::CheckWarningShots(Player *p)
 {
+	// A spawn that references a mob_id absent from mob_base leaves m_MOB_Data
+	// NULL (SetMOBType bails before loading it). Such a mob still ticks and is
+	// scanned against nearby players, so guard before dereferencing -- without
+	// this, any player coming within range crashes the whole sector server.
+	if (!m_MOB_Data)
+	{
+		return;
+	}
+
 	//first make sure this player isn't already on the shitlist
 	if (CheckHateList(p->GameID()) || p->Hijackee() || p->HasCombatImmunity())
 	{
@@ -747,6 +756,14 @@ void MOB::CheckWarningShots(Player *p)
 
 void MOB::CheckAggro(Player *p)
 {
+	// Same NULL-data guard as CheckWarningShots: a mob whose mob_id is missing
+	// from mob_base has no m_MOB_Data, and this is reached from the per-player
+	// range scan, so the dereference below would fault and crash the server.
+	if (!m_MOB_Data)
+	{
+		return;
+	}
+
 	//first make sure this mob gives aggro and player isn't already on the shitlist
 	if (m_MOB_Data->m_Agressiveness < 3 || CheckHateList(p->GameID()) || p->HasCombatImmunity() || p->Hijackee())
 	{
@@ -1097,6 +1114,9 @@ long MOB::GetMaxDamageID()
 
 float MOB::GetStealthDetectionLevel()
 {
+	// Reached from IsDetectable() during range scans; a NULL-data mob (mob_id
+	// not in mob_base) has no level, so report zero detection rather than fault.
+	if (!m_MOB_Data) return 0.0f;
 	return (m_ScanSkill * 5.0f) + m_MOB_Data->m_Level * 3;
 }
 

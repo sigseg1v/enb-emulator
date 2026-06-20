@@ -2521,3 +2521,28 @@ moot; the SOLVED block above is the truth):**
   exposed-but-unexplored nav (HAS_NAV gating on `AppearsInRadar`), not in the
   entry gate -- investigate there rather than reverting this.
 - **Setup**: `just rebuild server` (done) then `just play-local`, fresh char.
+
+### [ ] CV-PB32 -- Swooping Eagle "Default" lvl-0 crash-mob (PB-32)
+
+- **What changed**: (1) NULL-data guards in `server/src/MOBClass.cpp`
+  (`CheckWarningShots`, `CheckAggro`, `GetStealthDetectionLevel`) so a mob with
+  a missing `mob_base` row no longer faults the sector server; (2) data cleanup
+  `db/postgres/fix_orphan_mob_spawns.sql` (run by schema-init in both compose
+  files) removes the `mob_spawn_group` rows that referenced non-existent mobs,
+  so the unnamed "Default" ghost mob no longer spawns at all.
+- **Why the real client is needed**: the CLI cannot enter a sector and fly a
+  ship within a mob's range; only the real client proves the crash is gone AND
+  that removing the orphan spawns did not leave a visibly broken sector.
+- **What to verify (real client)**, after deploy (Build-And-Push + Update-Stack):
+  1. **Enter Swooping Eagle (Sirius), fly to Field of Glass Point.** Server must
+     NOT crash; no unnamed "Default" lvl-0 mob present. Sit in range for >2 min.
+  2. **Confirm the Juoona mobs behave normally** (no zone-wide spaz-chase of a
+     phantom target).
+  3. **Sanity-check the other 5 affected sectors** if convenient: Carpenter,
+     Mars Gamma, Saturn, Lagarto, Unknown Galaxy -- no "Default" mob, no crash.
+     Note "Nesshix the Hand" (Unknown Galaxy, spawn 12385) referenced ONLY the
+     orphan mob, so that spawn is now empty by design (its mob's stats do not
+     exist in any source and cannot be fabricated) -- expected, not a new bug.
+- **Setup**: deploy to DO (the live-stack fix is automatic on deploy: new server
+  image carries the guards, schema-init auto-deletes the orphan rows from the
+  existing prod volume because its command changed and the DELETE is idempotent).
