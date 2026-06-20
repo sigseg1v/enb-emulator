@@ -84,11 +84,46 @@ local function stop_edit()
     H.chat_capturing = false
 end
 
+-- Channel byte for enb.chat_send: 3 = Local/Sector, 4 = Broadcast.
+local CH_LOCAL = 3
+local CH_BROADCAST = 4
+
+-- Front-end channel shortcuts typed in the Freya box. These are OUR convenience
+-- aliases (not native slash commands): we strip the leading token and route the
+-- rest with the right channel byte / native command. Anything that is not one of
+-- these falls through unchanged so real native slash commands (/gen /ooc /tell ..)
+-- still reach the client's own parser.
+--   /b  <msg> | /broadcast <msg>  -> broadcast (channel 4)
+--   /s  <msg> | /sector <msg>     -> local/sector (channel 3)
+--   /w  <name> <msg>              -> whisper (rewritten to native /tell <name> <msg>)
+local function route(line)
+    if not enb.chat_send then return end
+    -- split leading token (the command) from the remainder
+    local cmd, rest = line:match("^(%S+)%s*(.*)$")
+    if not cmd then enb.chat_send(line, CH_LOCAL); return end
+    local lc = cmd:lower()
+    if lc == "/b" or lc == "/broadcast" then
+        if rest ~= "" then enb.chat_send(rest, CH_BROADCAST) end
+    elseif lc == "/s" or lc == "/sector" then
+        if rest ~= "" then enb.chat_send(rest, CH_LOCAL) end
+    elseif lc == "/w" or lc == "/whisper" then
+        -- /w <name> <msg> -> native /tell <name> <msg> (handled by the dispatcher)
+        local name, msg = rest:match("^(%S+)%s+(.*)$")
+        if name and msg ~= "" then enb.chat_send("/tell " .. name .. " " .. msg) end
+    elseif cmd:sub(1, 1) == "/" then
+        -- some other slash command: hand the whole line to the native parser
+        enb.chat_send(line)
+    else
+        -- plain text -> local/sector
+        enb.chat_send(line, CH_LOCAL)
+    end
+end
+
 local function submit()
     local line = buf
     stop_edit()
-    if line ~= "" and enb.chat_send then
-        enb.chat_send(line)
+    if line ~= "" then
+        route(line)
     end
 end
 
