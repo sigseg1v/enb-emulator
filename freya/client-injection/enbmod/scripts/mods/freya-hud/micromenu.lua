@@ -17,6 +17,7 @@
 --   Character Info  -> enb.pda_switch(2)   (PDA child screen)
 --   Galaxy Map      -> enb.pda_switch(4)   (PDA child screen, opens at sector zoom)
 --   Options         -> enb.shell_screen(1) (in-game screen shell -- NOT a PDA child)
+--   Chat            -> H.open_chat()       (raise the Freya chat input box)
 --
 -- The first three ride the PDA controller captured by the PdaCtor/PdaSwitch hooks
 -- (live the moment we enter space). Options is the in-game OPTIONS_MAIN screen,
@@ -24,6 +25,15 @@
 -- pump runs every frame in-game, so the shell `this` is always live). Until a
 -- controller is captured its dispatch is a no-op (returns 0); the button stays
 -- drawn and simply does nothing that frame rather than erroring.
+--
+-- Chat is the one nav-bar button we recreate: the native chat frame is hidden and
+-- chat.lua draws our own window, so "Chat" raises the Freya input box (H.open_chat,
+-- the same thing Enter does). The other native nav-bar buttons (Group / ChatOptions
+-- / Help / Emote / Message) each open a distinct native window through a cockpit
+-- button dispatch we have NOT located -- the screen shell (enb.shell_screen) is only
+-- the ESC/system-menu family (Options + its sub-pages), and the PDA controller only
+-- the PDA tabs. Wiring those five faithfully is a per-window RE + new C++ dispatch
+-- task, deliberately not done here rather than shipped wired to guessed ids.
 --
 -- require("micromenu") from init.lua. Registers its own on_tick (draw) and
 -- on_input (click-dispatch + mouse-swallow over the strip).
@@ -36,11 +46,12 @@ local BUTTONS = {
     { label = "Character", act = function() return enb.pda_switch(2) end },
     { label = "Map",       act = function() return enb.pda_switch(4) end },
     { label = "Options",   act = function() return enb.shell_screen(1) end },
+    { label = "Chat",      act = function() if H.open_chat then H.open_chat() end end },
 }
 
 local CFG = {
-    MARGIN_X    = 6,    -- gap from the screen's left edge
-    MARGIN_Y    = 6,    -- gap from the screen's top edge
+    MARGIN_X    = 46,   -- gap from the screen's left edge (inset 40px right, owner ask)
+    MARGIN_Y    = 86,   -- gap from the screen's top edge (down 80px, owner ask)
     BTN_H       = 22,   -- button height
     PAD_X       = 11,   -- text inset inside each button
     GAP         = 4,    -- gap between buttons

@@ -73,6 +73,11 @@ local function start_edit()
     H.chat_capturing = true
 end
 
+-- expose the opener so the top-strip "Chat" button (micromenu.lua) can raise the
+-- Freya input box -- the native chat frame is hidden, so this is how a mouse user
+-- starts typing without pressing Enter.
+H.open_chat = start_edit
+
 local function stop_edit()
     editing = false
     buf = ""

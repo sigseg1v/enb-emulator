@@ -156,6 +156,10 @@ local hidden = {
     ChatUpArrow                  = true,
     CombatLogDownArrow           = true,
     CombatLogUpArrow             = true,
+    -- the native chat-frame button row (Chat/Group/ChatOptions/Help/Emote/Message);
+    -- the Freya top strip recreates Chat and the rest are reachable elsewhere, so the
+    -- whole old chat frame is now hidden (owner ask: "kill the entire old chat frame").
+    NavButtonBar                 = true,
 }
 
 -- Hide the native chat TEXT leaves (CHAT_TEXT_VT) wholesale -- Freya draws chat now.
