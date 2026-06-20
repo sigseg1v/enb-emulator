@@ -80,6 +80,25 @@ assume they share a fix.
       move, no top-middle chat duplicate on new messages. Add a CV entry to
       `plans/29-client-verification.md`.
 
+## Related incident -- pump-clocked tick is also a HANG risk (2026-06-20)
+
+A live local client hard-froze ~1 min after entering space (pump dead: enbmod
+log frozen, cmd channel unread, ALL threads parked at 0% CPU; main thread stuck
+in the `PeekMessageA`/`GetMessageA` wait). Root cause: the `autocalibrate` dev
+mod auto-armed a per-frame memory walk (~250 `enb.mem.*` reads/frame across the
+energy/shield/hull gadgets + a churning entity pointer graph) on load. Because
+`on_tick` fires off the message-pump hook, that heavy walk ran on the
+message-pump thread every iteration and wedged the pump. Fixed by making
+autocalibrate opt-in (`require("autocalib").arm()`), so loading it is inert
+(`scripts/mods/autocalibrate/autocalib.lua`).
+
+Lesson for this phase: clocking `on_tick` off the message pump is not just
+*wasteful* (the flicker), it is *unsafe* -- any `on_tick` handler that is heavy,
+blocking, or faults can stall the whole client. AV-3 (decouple rebuild/tick from
+the pump) should ALSO add a per-tick budget/guard so one slow handler cannot
+wedge the pump, and `on_tick` handlers must stay cheap + non-blocking by
+contract. Document that contract where `enb.on_tick` is defined.
+
 ## Notes
 
 - `enb.diag()` is the measurement tool; keep it.
