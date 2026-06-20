@@ -48,8 +48,13 @@ local TYPE_RGB = {
 
 local CFG = {
     PAD     = 7,
-    LINE_H  = 15,
+    -- The overlay has exactly ONE fixed ~14px bitmap font (see freya_hud.lua).
+    -- There is no smaller real font; downscaling the bitmap (SCALE < 1) just
+    -- renders blurry/unreadable glyphs, so chat stays at native size.
+    SCALE   = 1.0,
+    LINE_H  = 16,     -- row pitch at native font size
     INPUT_PAD = 6,
+    INDENT  = "  ",   -- 2-space indent on every wrapped continuation row
 }
 
 -- VK codes
@@ -110,13 +115,56 @@ local function read_lines(want)
     return out
 end
 
--- trim `s` to fit `maxw` pixels, appending a ".." when clipped.
+-- trim `s` to fit `maxw` pixels, appending a ".." when clipped (input line only).
 local function clip(s, maxw)
     if H.measure(s) <= maxw then return s end
     while #s > 1 and H.measure(s .. "..") > maxw do
         s = s:sub(1, #s - 1)
     end
     return s .. ".."
+end
+
+-- rendered width of `s` at the chat font scale.
+local function fitw(s) return H.measure(s) * CFG.SCALE end
+
+-- word-wrap `s` into rows that each fit `maxw` rendered pixels. The first row
+-- starts flush; every continuation row is prefixed with CFG.INDENT (2 spaces).
+-- A single word wider than the box is hard-broken at the character level.
+local function wrap(s, maxw)
+    if fitw(s) <= maxw then return { s } end
+    local rows = {}
+    local prefix, cur = "", ""
+    local function push()
+        rows[#rows + 1] = prefix .. cur
+        prefix, cur = CFG.INDENT, ""
+    end
+    for word in s:gmatch("%S+") do
+        local cand = (cur == "") and word or (cur .. " " .. word)
+        if fitw(prefix .. cand) <= maxw then
+            cur = cand
+        else
+            if cur ~= "" then push() end
+            if fitw(prefix .. word) > maxw then
+                -- the word alone overflows: hard-break it char by char
+                local piece = ""
+                for i = 1, #word do
+                    local ch = word:sub(i, i)
+                    if piece ~= "" and fitw(prefix .. piece .. ch) > maxw then
+                        rows[#rows + 1] = prefix .. piece
+                        prefix, piece = CFG.INDENT, ch
+                    else
+                        piece = piece .. ch
+                    end
+                end
+                cur = piece
+            else
+                cur = word
+            end
+        end
+    end
+    if cur ~= "" then push() end
+    if #rows == 0 then return { s } end
+    return rows
 end
 
 -- ---- render ----------------------------------------------------------------
@@ -131,20 +179,31 @@ enb.on_tick(function()
         local iy = y - H.CHAT.INPUT_H - 3
         H.glass(x, iy, w, H.CHAT.INPUT_H, 170)
         local caret = (frame % 30 < 15) and "_" or " "
-        local shown = clip("> " .. buf, w - CFG.INPUT_PAD * 2 - 8)
-        H.otext(x + CFG.INPUT_PAD, iy + 3, shown .. caret, H.INK)
+        -- clip works in full-size px, so divide the available width by the scale
+        local shown = clip("> " .. buf, (w - CFG.INPUT_PAD * 2 - 8) / CFG.SCALE)
+        H.otext(x + CFG.INPUT_PAD, iy + 3, shown .. caret, H.INK, CFG.SCALE)
     end
 
     -- scrollback box
     H.glass(x, y, w, h)
     local maxw = w - CFG.PAD * 2
-    local max_lines = math.floor((h - CFG.PAD * 2) / CFG.LINE_H)
-    if max_lines < 1 then return end
-    local lines = read_lines(max_lines)
-    local ly = y + CFG.PAD
+    local max_rows = math.floor((h - CFG.PAD * 2) / CFG.LINE_H)
+    if max_rows < 1 then return end
+    -- read the newest raw lines, then word-wrap each into one-or-more rows.
+    -- Reading max_rows raw lines yields at least max_rows rows (each line is >=1
+    -- row); we then keep only the newest max_rows so the box stays full.
+    local lines = read_lines(max_rows)
+    local rows = {}
     for _, ln in ipairs(lines) do
         local rgb = TYPE_RGB[ln.type] or H.INK
-        H.otext(x + CFG.PAD, ly, clip(ln.text, maxw), rgb)
+        for _, seg in ipairs(wrap(ln.text, maxw)) do
+            rows[#rows + 1] = { text = seg, rgb = rgb }
+        end
+    end
+    local first_row = math.max(1, #rows - max_rows + 1)
+    local ly = y + CFG.PAD
+    for i = first_row, #rows do
+        H.otext(x + CFG.PAD, ly, rows[i].text, rows[i].rgb, CFG.SCALE)
         ly = ly + CFG.LINE_H
     end
 end)

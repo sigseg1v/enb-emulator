@@ -204,9 +204,9 @@ end
 -- cycle. The input line is drawn ABOVE the box body (an extra row) only while
 -- capturing, so it does not steal a body row.
 H.CHAT = {
-    X         = 14,   -- left edge (matches the discipline card)
-    BOTTOM    = 14,   -- gap from screen bottom
-    W         = 360,  -- box width
+    X         = 22,   -- left edge (matches the discipline card; in 8px from the edge)
+    BOTTOM    = 20,   -- gap from screen bottom (raised 6px)
+    W         = 460,  -- box width (widened 100px to the right)
     H         = 168,  -- box body height (no input row)
     GAP_ABOVE = 8,    -- gap between the box (or its input row) and the card above
     INPUT_H   = 20,   -- the input line height, shown above the box while capturing

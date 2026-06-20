@@ -24,7 +24,8 @@
 local H = require("freya_hud")
 
 local CFG = {
-    X         = 14,    -- left edge (design left:14)
+    X         = 22,    -- left edge (in 8px from the edge; matches the chat box). Up
+                       -- follows H.chat_top(), which the raised chat BOTTOM moves.
     W         = 196,   -- card width (design)
     BOTTOM    = 14,    -- gap from screen bottom (design bottom:14)
     PAD_X     = 8,
