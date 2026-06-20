@@ -46,8 +46,6 @@ local ROWS = {
 
 enb.on_tick(function()
     if not H.vis() then return end
-    local _, sh = enb.screen()
-    if sh == 0 then sh = 992 end
 
     local me = enb.self()
     -- Discipline levels come live from the controller->data chain (H.stats), so
@@ -59,7 +57,9 @@ enb.on_tick(function()
 
     local dc_h = CFG.PAD_Y * 2 + #ROWS * CFG.ROW_H + (#ROWS - 1) * CFG.ROW_GAP
     local x = CFG.X
-    local y = sh - CFG.BOTTOM - dc_h
+    -- raised ABOVE the Freya chat box (bottom-left): the card's bottom edge sits
+    -- at H.chat_top(), so its top is that minus its own height.
+    local y = H.chat_top() - dc_h
     H.glass(x, y, CFG.W, dc_h)
 
     local bar_x = x + CFG.PAD_X + CFG.LETTER_W + 4

@@ -29,7 +29,17 @@ using namespace enb::game;
 static std::vector<int> g_tick_refs;
 static int g_skill_ref = LUA_NOREF;
 static int g_chat_ref = LUA_NOREF;
-static int g_input_ref = LUA_NOREF;
+// on_input is multi-handler (like on_tick): several mods register their own input
+// handler. Each carries the want-mask it asked for; the C++ input hook is armed with
+// the UNION of all masks. run_input calls them in registration order and STOPS at the
+// first that returns truthy (that one swallowed the message), so an earlier handler can
+// claim a message before a later one sees it. A handler that wants to defer to another
+// (e.g. the action bar yielding while the chat input box is open) just returns false.
+struct InputCb {
+    int ref;
+    unsigned mask;
+};
+static std::vector<InputCb> g_input_cbs;
 // The Lua state, captured in open(). The input handler runs synchronously from
 // the PeekMessageA hook (game thread, after the tick's pcall returns -- not
 // re-entrant) and must return a swallow decision, so unlike skill/chat it can't
@@ -490,10 +500,9 @@ void reset_callbacks(lua_State* L) {
         luaL_unref(L, LUA_REGISTRYINDEX, g_chat_ref);
         g_chat_ref = LUA_NOREF;
     }
-    if (g_input_ref != LUA_NOREF) {
-        luaL_unref(L, LUA_REGISTRYINDEX, g_input_ref);
-        g_input_ref = LUA_NOREF;
-    }
+    for (const InputCb& cb : g_input_cbs)
+        luaL_unref(L, LUA_REGISTRYINDEX, cb.ref);
+    g_input_cbs.clear();
     hooks::set_input_mask(0); // stop entering Lua for input until a reload re-registers
     {
         std::lock_guard<std::mutex> lk(g_evq_mx);
@@ -766,14 +775,6 @@ static int l_actionbar(lua_State* L) {
     return 1;
 }
 
-// enb.actionbar_arg() -> int. The action id of the most recent dispatch (the first
-// stack arg the game itself passed). Pairs with enb.actionbar() (the `this`) so the
-// Freya HUD can replay a dispatch verbatim. 0 until a slot has been used in space.
-static int l_actionbar_arg(lua_State* L) {
-    lua_pushinteger(L, (lua_Integer)hooks::actionbar_arg());
-    return 1;
-}
-
 // Call GadgetClass::SetVisible(visible) on one gadget via its vtable (slot at byte
 // game::gadget::vt_set_visible, __thiscall(this, BOOL)). This is the engine's own
 // hide/show: it flips the visible bit AND releases the rendered child (gadget+0x20)
@@ -849,6 +850,105 @@ static int l_cockpit_ctrl(lua_State* L) {
     lua_pushinteger(L, (lua_Integer)hooks::cockpit_throttle_ctrl());
     lua_pushinteger(L, (lua_Integer)hooks::cockpit_cmd_ctrl());
     return 2;
+}
+
+// enb.chat_panel() -> int. Raw pointer to the chat PANEL object captured by the
+// ChatLocalLine hook (hooks::chat_panel()). 0 until the first line is printed this
+// session. The Freya chat window derives the line ring from it (panel +
+// chat::panel_ring) and walks the ring (chat::ring_cap/ring_count/ring_base, slot
+// stride chat::slot_stride) read-only to mirror the merged system+chat scrollback.
+static int l_chat_panel(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)hooks::chat_panel());
+    return 1;
+}
+
+// enb.chat_buf() -> int. Raw pointer to the chat line RING object captured by the
+// ChatLineAppend hook (hooks::chat_ring()). 0 until the first line is appended this
+// session. The Freya chat window walks its ring (chat::ring_cap/ring_count/ring_base,
+// slot stride chat::slot_stride) read-only to mirror the merged system+chat scrollback.
+static int l_chat_buf(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)hooks::chat_ring());
+    return 1;
+}
+
+// enb.pda_ctrl() -> int. Raw pointer to the PDA panel controller captured by the
+// PdaCtor/PdaSwitch hooks (hooks::pda_ctrl()). 0 until the controller is built
+// (entering space). Diagnostic for the Freya top-left micro-menu.
+static int l_pda_ctrl(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)hooks::pda_ctrl());
+    return 1;
+}
+
+// enb.pda_switch(index) -> uint. Open / switch the PDA to child screen `index`
+// through the game's own dispatcher (game::addr::PdaSwitch == FUN_00695780),
+// exactly as a native micro-menu button click would: 0=Inventory, 1=Skills,
+// 2=Character Info, 3=Vault, 4=Galaxy Map. __thiscall(ECX = the PDA controller,
+// int index) -- it dereferences `this` immediately, so we pass the captured
+// controller. Returns 0 if the controller hasn't been captured yet. MUST run on
+// the game thread (callers are on_tick/on_input).
+static int l_pda_switch(lua_State* L) {
+    int index = (int)luaL_checkinteger(L, 1);
+    unsigned ctrl = hooks::pda_ctrl();
+    if (!ctrl) {
+        lua_pushinteger(L, 0);
+        return 1;
+    }
+    uint32_t a[1] = {(uint32_t)index};
+    lua_pushinteger(L, (lua_Integer)actions::call_thiscall(addr::PdaSwitch, ctrl, a, 1));
+    return 1;
+}
+
+// enb.shell_ctrl() -> int. Raw pointer to the in-game screen shell captured by
+// the ShellApply hook (hooks::shell_ctrl()). 0 until the per-frame apply pump has
+// run this session. Diagnostic for the Freya Options button.
+static int l_shell_ctrl(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)hooks::shell_ctrl());
+    return 1;
+}
+
+// enb.shell_screen(id) -> uint. Request the in-game screen shell show screen `id`,
+// exactly as a native "Options" button does: ShellRequest (game::addr::ShellRequest
+// == FUN_00565f30) just stores the pending id at shell+0x108, and the shell's own
+// per-frame apply pump opens it next frame. Id 1 = the in-game OPTIONS_MAIN screen
+// (the one micro-menu button that is not a PDA child). __thiscall(ECX = the shell,
+// int id); it writes through `this`, so we pass the captured shell. Returns 0 if
+// the shell hasn't been captured yet. MUST run on the game thread (callers are
+// on_tick/on_input).
+static int l_shell_screen(lua_State* L) {
+    int id = (int)luaL_checkinteger(L, 1);
+    unsigned ctrl = hooks::shell_ctrl();
+    if (!ctrl) {
+        lua_pushinteger(L, 0);
+        return 1;
+    }
+    uint32_t a[1] = {(uint32_t)id};
+    lua_pushinteger(L, (lua_Integer)actions::call_thiscall(addr::ShellRequest, ctrl, a, 1));
+    return 1;
+}
+
+// enb.chat_send(line) -> uint. Submit a typed chat line through the game's own
+// chat-line parser/sender (game::addr::ChatSend == FUN_00749ed0). ChatSend is
+// __thiscall(ECX = chat panel, char* line) -- NOT cdecl: it dereferences `this`
+// immediately and faults on a bogus one, so we pass the captured panel as `this`.
+// It parses slash-commands, applies the active channel, and puts the line on the
+// wire, so the Freya chat input box owns text entry while the real send path stays
+// the game's. Returns 0 if the panel hasn't been captured yet (no line printed this
+// session). The string is copied into a buffer kept alive across the call (the callee
+// reads it synchronously). MUST be called on the game thread (it is -- callers run
+// from on_tick/on_input).
+static std::string g_chat_send_buf;
+static int l_chat_send(lua_State* L) {
+    size_t len = 0;
+    const char* s = luaL_checklstring(L, 1, &len);
+    g_chat_send_buf.assign(s, len);
+    unsigned panel = hooks::chat_panel();
+    if (!panel) {
+        lua_pushinteger(L, 0);
+        return 1;
+    }
+    uint32_t a[1] = {(uint32_t)(uintptr_t)g_chat_send_buf.c_str()};
+    lua_pushinteger(L, (lua_Integer)actions::call_thiscall(addr::ChatSend, panel, a, 1));
+    return 1;
 }
 
 // ---- vtable call profiler (read-only) ------------------------------------
@@ -1050,39 +1150,46 @@ static int l_reset_callbacks(lua_State* L) {
 
 // enb.on_input(fn [, mask])  -- fn(msg, wparam, lparam) -> truthy to SWALLOW.
 // Optional mask = bitwise-or of enb.WANT_KEY/WANT_CHAR/WANT_MOUSE; default all.
-// Registering nil clears the handler.
+// MULTI-handler: each call ADDS a handler (like on_tick). Handlers run in
+// registration order and the FIRST that returns truthy swallows the message --
+// later handlers don't see it. The arming mask is the union of every handler's
+// mask. enb.on_input(nil) is a no-op for registration but enb.reset_callbacks()
+// drops them all (called on reload).
 static bool run_input(unsigned msg, unsigned wparam, long lparam) {
-    if (g_input_ref == LUA_NOREF || !g_L)
+    if (g_input_cbs.empty() || !g_L)
         return false;
     lua_State* L = g_L;
-    lua_rawgeti(L, LUA_REGISTRYINDEX, g_input_ref);
-    lua_pushinteger(L, (lua_Integer)msg);
-    lua_pushinteger(L, (lua_Integer)wparam);
-    lua_pushinteger(L, (lua_Integer)lparam);
-    if (lua_pcall(L, 3, 1, 0) != LUA_OK) {
-        logf("lua on_input error: %s", lua_tostring(L, -1));
+    // Snapshot count: a handler must not be able to mutate the list mid-iteration
+    // in a way that invalidates our index (Lua can't re-enter here anyway).
+    for (size_t i = 0; i < g_input_cbs.size(); ++i) {
+        lua_rawgeti(L, LUA_REGISTRYINDEX, g_input_cbs[i].ref);
+        lua_pushinteger(L, (lua_Integer)msg);
+        lua_pushinteger(L, (lua_Integer)wparam);
+        lua_pushinteger(L, (lua_Integer)lparam);
+        if (lua_pcall(L, 3, 1, 0) != LUA_OK) {
+            logf("lua on_input error: %s", lua_tostring(L, -1));
+            lua_pop(L, 1);
+            continue; // FAIL OPEN: a script error never swallows input
+        }
+        bool swallow = lua_toboolean(L, -1);
         lua_pop(L, 1);
-        return false; // FAIL OPEN: a script error never swallows input
+        if (swallow)
+            return true; // first claimant wins; later handlers don't see it
     }
-    bool swallow = lua_toboolean(L, -1);
-    lua_pop(L, 1);
-    return swallow;
+    return false;
 }
 static int l_on_input(lua_State* L) {
-    if (g_input_ref != LUA_NOREF) {
-        luaL_unref(L, LUA_REGISTRYINDEX, g_input_ref);
-        g_input_ref = LUA_NOREF;
-    }
-    if (lua_isnoneornil(L, 1)) {
-        hooks::set_input_mask(0);
-        return 0;
-    }
+    if (lua_isnoneornil(L, 1))
+        return 0; // nil no longer clears; use reset_callbacks()
     luaL_checktype(L, 1, LUA_TFUNCTION);
     unsigned mask =
         (unsigned)luaL_optinteger(L, 2, hooks::WANT_KEY | hooks::WANT_CHAR | hooks::WANT_MOUSE);
     lua_pushvalue(L, 1);
-    g_input_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-    hooks::set_input_mask(mask);
+    g_input_cbs.push_back({luaL_ref(L, LUA_REGISTRYINDEX), mask});
+    unsigned uni = 0;
+    for (const InputCb& cb : g_input_cbs)
+        uni |= cb.mask;
+    hooks::set_input_mask(uni);
     return 0;
 }
 
@@ -1172,15 +1279,25 @@ static int l_draw_image(lua_State* L) {
     overlay::image(p, x, y, w, h, a);
     return 0;
 }
-// enb.draw.texture_quad(texptr, x, y, w, h [, alpha]) -- blit a live game-owned
-// IDirect3DTexture8* (e.g. an action-bar icon resolved by walking the slot gadget
-// tree) into a quad, UV 0..1, inside the game's Present hook.
+// enb.draw.texture_quad(texptr, x, y, w, h [, alpha [, tint [, additive]]]) -- blit
+// a live game-owned IDirect3DTexture8* (e.g. an action-bar icon resolved by walking
+// the slot gadget tree) into a quad, UV 0..1, inside the game's Present hook.
+//   alpha    0..255 brightness scale (default 255).
+//   tint     0xRRGGBB multiplied into the icon (default 0xFFFFFF = untinted); use it
+//            to give the HUD a hue (e.g. a light blue).
+//   additive when true, blend ONE/ONE (pure glow); when false (default), ONE/
+//            INVSRCCOLOR -- a "black key" screen blend that drops the icon's black
+//            background to transparent while keeping bright pixels solid. Game icon
+//            textures are opaque RGB on black with no usable alpha, so this is what
+//            makes the background transparent.
 static int l_draw_texquad(lua_State* L) {
     void* tex = (void*)(uintptr_t)luaL_checkinteger(L, 1);
     int x = (int)luaL_checkinteger(L, 2), y = (int)luaL_checkinteger(L, 3);
     int w = (int)luaL_checkinteger(L, 4), h = (int)luaL_checkinteger(L, 5);
     int a = (int)luaL_optinteger(L, 6, 255);
-    overlay::texture_quad(tex, x, y, w, h, a);
+    uint32_t tint = (uint32_t)luaL_optinteger(L, 7, 0xFFFFFF);
+    bool additive = lua_toboolean(L, 8) != 0;
+    overlay::texture_quad(tex, x, y, w, h, a, tint, additive);
     return 0;
 }
 
@@ -1339,9 +1456,15 @@ void open(lua_State* L) {
                                    {"xp_frac", l_xp_frac},
                                    {"xp_ctrl", l_xp_ctrl},
                                    {"actionbar", l_actionbar},
-                                   {"actionbar_arg", l_actionbar_arg},
                                    {"hide_cockpit", l_hide_cockpit},
                                    {"cockpit_ctrl", l_cockpit_ctrl},
+                                   {"chat_panel", l_chat_panel},
+                                   {"chat_buf", l_chat_buf},
+                                   {"pda_ctrl", l_pda_ctrl},
+                                   {"pda_switch", l_pda_switch},
+                                   {"shell_ctrl", l_shell_ctrl},
+                                   {"shell_screen", l_shell_screen},
+                                   {"chat_send", l_chat_send},
                                    {"gadget_set_visible", l_gadget_set_visible},
                                    {"vt_profile", l_vt_profile},
                                    {"vt_dump", l_vt_dump},

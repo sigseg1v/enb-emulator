@@ -197,4 +197,40 @@ function H.glass(x, y, w, h, alpha)
     ticks(x, y, w, h)
 end
 
+-- ---- chat window geometry + capture flag (shared) --------------------------
+-- The Freya chat box occupies the very bottom-left corner. chat.lua owns its
+-- render/input; xp_overlay anchors its discipline card ABOVE the box via
+-- H.chat_top(). The geometry lives here so both modules agree without a require
+-- cycle. The input line is drawn ABOVE the box body (an extra row) only while
+-- capturing, so it does not steal a body row.
+H.CHAT = {
+    X         = 14,   -- left edge (matches the discipline card)
+    BOTTOM    = 14,   -- gap from screen bottom
+    W         = 360,  -- box width
+    H         = 168,  -- box body height (no input row)
+    GAP_ABOVE = 8,    -- gap between the box (or its input row) and the card above
+    INPUT_H   = 20,   -- the input line height, shown above the box while capturing
+}
+
+-- returns x, y, w, h of the chat box BODY (the scrollback area).
+function H.chat_rect()
+    local sw, sh = enb.screen()
+    if not sh or sh == 0 then sw, sh = 1280, 960 end
+    local c = H.CHAT
+    return c.X, sh - c.BOTTOM - c.H, c.W, c.H
+end
+
+-- the y a sibling card should sit ABOVE (its BOTTOM edge). Leaves room for the
+-- input row so the discipline card never overlaps the input line when it opens.
+function H.chat_top(gap)
+    local _, y = H.chat_rect()
+    return y - H.CHAT.INPUT_H - (gap or H.CHAT.GAP_ABOVE)
+end
+
+-- shared "chat input box is capturing keyboard" flag. chat.lua sets it; freya_ui
+-- reads it to defer ALL keyboard handling while the input box is open (so action
+-- bar / other UI keys are never captured mid-typing). Order-independent: even if
+-- freya_ui's on_input ran before chat's, this flag makes it yield.
+H.chat_capturing = false
+
 return H

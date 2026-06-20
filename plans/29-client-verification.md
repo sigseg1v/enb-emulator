@@ -1903,6 +1903,58 @@ moot; the SOLVED block above is the truth):**
     2D-icon devices slotted, confirm each ability slot on the Freya bar shows the
     correct per-ability art (and that paging 1-6 <-> 7-12 shows the right page's
     icons). Weapon slots show the bolt placeholder by design.
+- **Progress 2026-06-19g (four follow-up fixes after icons confirmed on beasleyte:
+  delayed-icons, icon appearance, hover, key activation)**:
+  - #4 KEY ACTIVATION -- FIXED + VERIFIED LIVE. Pressing 1-6 did nothing because
+    `slot_action` read the box active flag `box+0x6c` as a `u32`; the dispatcher
+    `FUN_006120e0` reads it as a single `char`. The dword always holds a nonzero
+    pointer/float, so the Lua always picked the release base (0x54) and dispatched
+    a release id on an idle box -- a dispatcher no-op -- AND swallowed the native
+    key, so nothing fired. Fix: read `m.u8(box+0x6c)`. Verified live on beasleyte:
+    a real keydown of "1" flips box0 `+0x6c` 0->1 (ability activates), a second tap
+    flips 1->0 (toggle off), and the key is swallowed (no native double-fire).
+    FOLLOW-UP (every-other-tap): the first cut dispatched ONLY a press on key-down
+    and nothing on key-up, so the box flag stuck at 1 and the next press was read by
+    the dispatcher as a release (no fire) -- the user had to press/click TWICE to
+    activate. The native keybind sends press on down AND release on up (ability
+    fires on the press; release just resets the flag). Fixed to mirror that:
+    `press_slot` on key-down, `release_slot` on key-up, `tap_slot` (press+release)
+    for a click. Verified live: keydown sets the byte to 1 (fires), key-up clears it
+    to 0, and three consecutive single taps each net the byte back to 0 -- every tap
+    fires once. Single press/click now activates.
+  - #3 HOVER -- FIXED + VERIFIED LIVE. The native bar stayed hidden in the normal
+    state but reappeared under the cursor on hover. A chrome leaf draws + takes
+    input only when `(flags & 0x700) == 0x700` at leaf `+0x18` (Visible 0x100 |
+    Enabled 0x200 | inLayout 0x400). The old hide cleared only 0x400 (inLayout),
+    which the game RE-SETS on rollover after our per-frame clear -> bar flashes back.
+    Fix: `hide_native_glyphs` clears 0x200 (Enabled) on all three chrome leaves
+    (`box+0x30/+0x58/+0x74`) per box; the game never re-asserts 0x200, so the gate
+    can never complete even on hover. Verified live: flags probe shows en=0 on all
+    nine leaves and a hover screenshot shows no native bar below the Freya HUD.
+  - #1 IMMEDIATE ICONS -- FIXED + VERIFIED LIVE. Icons appeared only after ~30s or
+    a bank switch because the controller was captured ONLY from the
+    interaction-triggered dispatch hook. Fix: added a capture hook on the bank
+    CONSTRUCTOR `FUN_00610f80` (`game.h::ActionBarCtor`), same capture-only naked
+    trampoline as the dispatch hook -- stores `this` (ECX) the moment a bank exists
+    (entering space), before any interaction. Store-only; Lua reads bank fields
+    frames later after construction completes (guarded by `box~=0`/`readable`), so
+    no use-before-init. Verified live on beasleyte: immediately after entering space
+    with ZERO clicks/keypresses, `enb.actionbar()` is non-zero (`0x7672EA8`) -- the
+    only no-interaction capture path is the constructor hook -- and icons render
+    on the bar at once, no ~30s / bank-switch wait.
+  - #2 ICON APPEARANCE -- FIXED + VERIFIED LIVE. Icons rendered on an opaque
+    dark/black square with no tint. Fix: `overlay.cpp` K_TEXQUAD now uses a
+    black-key SCREEN blend (SRCBLEND=ONE, DESTBLEND=INVSRCCOLOR) so the icon art's
+    black background blends to transparent, and a MODULATE color stage multiplies
+    the texture by a diffuse tint. `texture_quad` gained `tint`/`additive` params;
+    `freya_ui.lua` blits abilities with `ICON_TINT = 0xAFD4FF` (light blue).
+    Verified live: the brightest icon pixels measured (168,216,243) under the new
+    DLL vs neutral (233,240,247) under the old -- matching the tint 0xAFD4FF
+    (175,212,255); the black squares now blend into the glass slots.
+  - All four (#1-#4) verified live on beasleyte (account "beasley") this session
+    after relaunch with the rebuilt `bin/enbmod.dll`.
+  - REAL-CLIENT CHECK (owner): confirmed by agent on beasleyte; owner may re-confirm
+    on other ability characters / paging if desired, but the mechanism is proven.
 
 ### [ ] CV-AS-AUXNUMS -- HUD shows correct numeric cur/max vitals + discipline levels (AuxData getter)
 

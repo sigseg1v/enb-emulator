@@ -107,23 +107,32 @@ local function slot_bank_box(i)
     return bank, box, k
 end
 
--- The (controller, action id) FUN_006120e0 wants to replay Freya hotbar slot i
--- (1..6) exactly as its native keypress would, or nil for an empty slot. Picks
--- the press or release id from the box's live active flag (+0x6c), mirroring the
--- native keybind handler -- see the binding note above.
-local function slot_action(i)
-    local m = enb.mem
-    local bank, box, k = slot_bank_box(i)
-    if not bank then return nil end
-    local base = (m.u32(box + 0x6c) ~= 0) and 0x54 or 0x50
-    return bank, m.u32(bank + base) + k
+-- The native keybind drives slot i (1..6) through the dispatcher FUN_006120e0 with
+-- a PRESS id on key-down and a RELEASE id on key-up: the ability fires on the
+-- press, and the release just resets the box's pressed flag (+0x6c) back to 0. The
+-- dispatcher gates each branch on that byte (press acts only when byte==0 then sets
+-- 1; release acts only when byte!=0 then clears 0), so a physical tap must be a
+-- FULL press+release cycle or the byte sticks at 1 and the next press is read as a
+-- release (= every-other-tap fires). press_slot/release_slot mirror that exactly;
+-- tap_slot does a whole cycle for one-shot triggers (clicks).
+local function press_slot(i)
+    local bank, _, k = slot_bank_box(i)
+    if not bank then return false end
+    enb.call(ACTIONBAR_DISPATCH, bank, enb.mem.u32(bank + 0x50) + k) -- press base +0x50
+    return true
 end
 
--- Fire the native action mapped to Freya hotbar slot i (1..6).
-local function dispatch_slot(i)
-    local bank, arg = slot_action(i)
+local function release_slot(i)
+    local bank, _, k = slot_bank_box(i)
     if not bank then return false end
-    enb.call(ACTIONBAR_DISPATCH, bank, arg)
+    enb.call(ACTIONBAR_DISPATCH, bank, enb.mem.u32(bank + 0x54) + k) -- release base +0x54
+    return true
+end
+
+-- One full press+release cycle: fires the ability once and leaves the box idle.
+local function tap_slot(i)
+    if not press_slot(i) then return false end
+    release_slot(i)
     return true
 end
 
@@ -192,6 +201,7 @@ local ICON_VFN    = 0x34         -- card vtable slot: thiscall -> icon TextureCl
 local TEX_D3D     = 0x34         -- TextureClass -> IDirect3DTexture8*
 local TEX_INIT    = 0x0094b920   -- TextureClass::Init (thiscall) -- realize +0x34 if NULL
 local WEAPON_ICON = "scripts/mods/freya-hud/weapon_icon.png"
+local ICON_TINT   = 0xAFD4FF     -- light-blue HUD hue multiplied into slot icons
 
 -- The IDirect3DTexture8* of the per-ability icon for occupied Freya hotbar slot i
 -- (1..6), or nil. Only ability cards (ABILITY_VT) carry a 2D icon; weapons return
@@ -232,20 +242,28 @@ local function slot_is_weapon(i)
     return m.u32(card) == WEAPON_VT
 end
 
--- Suppress the native action-bar slot glyphs that would otherwise bleed through
+-- Suppress the native action-bar slot chrome that would otherwise bleed through
 -- our glass slots (and around them -- the native layout spreads its icons either
--- side of the reticle, not in a tidy row). Each box owns its 2D glyph as a chrome
--- panel leaf at box +0x74 (vtable GLYPH_VT). The in-space HUD draw pass draws a
--- chrome leaf only when (flags & 0x700) == 0x700 at leaf +0x18; clearing the
--- 0x400 bit drops it from BOTH the draw pass and the input/hover pass (the 0x700
--- gate is Visible|Enabled|inLayout and gates input too), so the icon AND its hover
--- highlight go away. This is the per-slot complement to hide-ui's single named
--- "ActionBarIcons" leaf (which only covered box 0): we walk all six boxes from the
--- captured controller and clear each glyph every frame, so re-slotting / paging
--- can never leave a stale native glyph lit. Re-resolved each frame; never cached.
-local GLYPH_VT       = 0x00b1327c   -- native cockpit chrome panel leaf
-local GLYPH_FLAGS    = 0x18         -- leaf -> visibility flags dword
-local GLYPH_DRAW_BIT = 0x400        -- clearing it drops the leaf from draw + input
+-- side of the reticle, not in a tidy row). Each box owns three renderable chrome
+-- leaves: the 2D icon glyph at box +0x74 and two highlight/frame leaves at +0x30
+-- and +0x58. The in-space HUD draw + input/hover pass acts on a leaf only when
+-- (flags & 0x700) == 0x700 at leaf +0x18 (Visible|Enabled|inLayout).
+--
+-- The earlier code cleared only the 0x400 (inLayout) bit on the glyph. That hid
+-- the static icon but NOT the hover highlight: the game RE-SETS 0x400 when the
+-- mouse rolls over a box, and that re-set lands after our per-frame clear (which
+-- runs early, on the message-pump tick) but before the draw -- so on hover the
+-- gate completes again and the native frame flashes back. The fix is to clear a
+-- bit the rollover code does NOT touch: 0x200 (Enabled) is set in the resting
+-- state and, verified live, is never re-asserted per frame, so once cleared the
+-- gate can never reach 0x700 again -- the leaf stays dead in BOTH the normal and
+-- hover states. We clear it on all three leaves of all six boxes every frame, so
+-- re-slotting / paging can never revive a native leaf. Re-resolved each frame.
+local CHROME_VT_LO   = 0x00a00000  -- a renderable UI leaf vtable lands in this band
+local CHROME_VT_HI   = 0x00c00000
+local LEAF_FLAGS     = 0x18         -- leaf -> visibility flags dword
+local LEAF_ENABLE_BIT = 0x200       -- Enabled; clearing it drops the leaf from draw + input
+local LEAF_OFFSETS   = { 0x30, 0x58, 0x74 }  -- the box's renderable chrome leaves
 local function hide_native_glyphs()
     local m = enb.mem
     local b0, b1 = ab_banks()
@@ -253,12 +271,19 @@ local function hide_native_glyphs()
     for _, bank in ipairs({ b0, b1 }) do
         for k = 0, 2 do
             local box = m.u32(bank + 0x10 + k * 4)
-            if box ~= 0 and m.readable(box + 0x74, 4) then
-                local gl = m.u32(box + 0x74)
-                if gl ~= 0 and m.readable(gl + GLYPH_FLAGS, 4) and m.u32(gl) == GLYPH_VT then
-                    local fl = m.u32(gl + GLYPH_FLAGS)
-                    if (fl & GLYPH_DRAW_BIT) ~= 0 then
-                        m.write_u32(gl + GLYPH_FLAGS, fl & ~GLYPH_DRAW_BIT)
+            if box ~= 0 then
+                for _, off in ipairs(LEAF_OFFSETS) do
+                    if m.readable(box + off, 4) then
+                        local gl = m.u32(box + off)
+                        if gl ~= 0 and m.readable(gl + LEAF_FLAGS, 4) then
+                            local vt = m.u32(gl)
+                            if vt >= CHROME_VT_LO and vt < CHROME_VT_HI then
+                                local fl = m.u32(gl + LEAF_FLAGS)
+                                if (fl & LEAF_ENABLE_BIT) ~= 0 then
+                                    m.write_u32(gl + LEAF_FLAGS, fl & ~LEAF_ENABLE_BIT)
+                                end
+                            end
+                        end
                     end
                 end
             end
@@ -446,8 +471,9 @@ local function draw_hotbar(L)
         local bot = lit and CFG.SLOT_LIT_BOT or CFG.SLOT_BOT
         enb.draw.rrect_grad(x, y, w, h, H.RADIUS, top, bot, 235)
         -- slot icon. An ability draws its real per-ability icon (the client's own
-        -- runtime texture, blitted via texture_quad); a weapon group has no 2D glyph
-        -- so we draw our original Freya placeholder. Both re-resolved each frame.
+        -- runtime texture, blitted via texture_quad with the icon's black background
+        -- keyed out and a light-blue HUD tint); a weapon group has no 2D glyph so we
+        -- draw our original Freya placeholder. Both re-resolved each frame.
         local inset = 3
         if slot_is_weapon(i) then
             enb.draw.image(WEAPON_ICON, x + inset, y + inset, w - 2 * inset,
@@ -456,7 +482,7 @@ local function draw_hotbar(L)
             local tex = slot_icon_tex(i)
             if tex then
                 enb.draw.texture_quad(tex, x + inset, y + inset, w - 2 * inset,
-                                      h - 2 * inset, 255)
+                                      h - 2 * inset, 255, ICON_TINT)
             end
         end
         -- gloss sheen across the top
@@ -507,21 +533,31 @@ enb.on_input(function(msg, wparam, lparam)
     local show, show_hotbar = H.vis()
     if not show then return false end   -- HUD hidden -> never touch input
 
+    -- chat input box open -> ALL keyboard belongs to it; yield every key/char so
+    -- the action bar never fires mid-typing. (chat.lua's handler runs first and
+    -- already swallows; this is the order-independent belt-and-suspenders.) Mouse
+    -- still works -- chat captures keyboard only.
+    if H.chat_capturing
+       and (msg == M.KEYDOWN or msg == M.SYSKEYDOWN
+            or msg == M.KEYUP or msg == M.SYSKEYUP or msg == M.CHAR) then
+        return false
+    end
+
     -- physical key down/up lights the matching slot (only meaningful when the
     -- hotbar is up). Never swallow -- the game still needs the bind.
     if msg == M.KEYDOWN or msg == M.SYSKEYDOWN then
         local i = VK_TO_IDX[wparam]
         if i and show_hotbar and not RECORD_MODE then
-            -- OWN the keybind: on the leading edge dispatch through our path
-            -- (one toggle, press-or-release auto-picked from box +0x6c, exactly
-            -- as the native keybind does) and SWALLOW the key so the native bar
-            -- never sees it -- no native light, no double-fire. If the controller
-            -- is not captured yet dispatch_slot returns false; we then fall
-            -- through (return false) so the native keybind fires it AND warms the
-            -- capture, and we do NOT swallow this cycle's up either.
+            -- OWN the keybind: on the leading edge dispatch the PRESS id (fires the
+            -- ability, sets box +0x6c) and SWALLOW the key so the native bar never
+            -- sees it -- no native light, no double-fire. The matching RELEASE is
+            -- sent on key-up so the box flag resets and every tap fires (see
+            -- press_slot/tap_slot note). If the controller is not captured yet
+            -- press_slot returns false; we fall through (return false) so the native
+            -- keybind fires it AND warms the capture, and we don't swallow this up.
             if not state[i].held then
                 state[i].held = true
-                state[i].owned = dispatch_slot(i)
+                state[i].owned = press_slot(i)
             end
             if state[i].owned then return true end   -- swallow leading edge + auto-repeat
         end
@@ -532,10 +568,14 @@ enb.on_input(function(msg, wparam, lparam)
             state[i].held = false
             local owned = state[i].owned
             state[i].owned = false
-            -- swallow the matching up only when we owned the down (so a native
-            -- handled key keeps its up; a Freya-owned key never reaches native).
-            -- No dispatch on up: the slot is a toggle, keydown already flipped it.
-            if owned and show_hotbar and not RECORD_MODE then return true end
+            -- dispatch the matching RELEASE (resets box +0x6c -> 0) and swallow the
+            -- up, but only when we owned the down (a native-handled key keeps its up;
+            -- a Freya-owned key never reaches native). Without this the box flag
+            -- sticks at 1 and the next press reads as a release -> every-other-tap.
+            if owned and show_hotbar and not RECORD_MODE then
+                release_slot(i)
+                return true
+            end
         end
         return false
     end
@@ -563,7 +603,7 @@ enb.on_input(function(msg, wparam, lparam)
                     -- been used in space the bank is not captured yet, so fall
                     -- back to tapping the native key -- which fires it AND warms
                     -- the capture so subsequent clicks take our path.
-                    if not dispatch_slot(i) then enb.tap(KEYS[i].vk) end
+                    if not tap_slot(i) then enb.tap(KEYS[i].vk) end
                     state[i].flash = CFG.FLASH_TICKS
                     return true
                 end

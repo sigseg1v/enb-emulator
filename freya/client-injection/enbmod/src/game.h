@@ -60,10 +60,28 @@ constexpr uintptr_t ChatRender = 0x00680700;    // chat rendering
 constexpr uintptr_t ChatChannel = 0x0065bfd0;   // channel routing
 constexpr uintptr_t ChatSend = 0x00749ed0;      // channel state + send-message
 constexpr uintptr_t ChatLocalLine = 0x0074d990; // local chat-window line printer (no packet).
-    // __stdcall(int channel, const char* msg, int flag):
+    // __thiscall(ECX = chat panel, int channel, const char* msg, char flag):
     // channel 0x11=error 0x13=system 0x15=warning 6=usage.
-    // The client uses it for its own notices; observed at
-    // runtime to take 3 stack args + ret 0xc (stdcall, no this).
+    // The client uses it for its own notices; prefixes COMPUTER/SYSTEM/WARNING then
+    // routes down to ChatLineAppend. (ECX=this confirmed by disasm of its call
+    // sites -- the panel comes from a vtable getter, not a global.)
+// Chat line RING-BUFFER append -- the single choke point every displayed chat-panel
+// line passes through. Call graph: ChatLocalLine(0x0074d990) -> FUN_00563760 (chat-log
+// + add) -> this. System, computer, warning, and network chat (Broadcast/Tell/Guild)
+// all funnel here, because the only path that fills the panel's ring is via
+// ChatLocalLine. __thiscall, ECX = the RING-BUFFER object (== *(chatpanel + 0x13c),
+// confirmed by disasm of FUN_00563760's call site: `mov 0x13c(edi),ecx; call thunk`).
+// We hook it READ-ONLY to capture that ECX -- the exact capture pattern of the
+// cockpit/xp/rpg hooks -- so the Freya chat window can poll the ring from Lua with no
+// further game calls. Lines land in the ring in call order (== chronological), which
+// is exactly the always-interleaved system+chat view we want.
+constexpr uintptr_t ChatLineAppend = 0x0067d780;
+// Two independent READ-ONLY captures, both firing on the first line printed this
+// session: hooking ChatLineAppend (ECX = the RING) gives the scrollback read, and
+// hooking ChatLocalLine (ECX = the PANEL, confirmed: both touch this+0x127c, the
+// _chatpanel field) gives the `this` that ChatSend requires. The ring is NOT a fixed
+// offset off the panel, so we capture each at its own choke point. Both objects are
+// session-stable singletons once captured.
 
 // ---- navs ----
 constexpr uintptr_t NavListBuild = 0x007b7ef0;
@@ -84,6 +102,13 @@ constexpr uintptr_t SkillLifecycle = 0x0060f1a0; // Skill Activated/Deactivated/
 // slots (primary + alternate) off it and re-dispatch a slot by calling this fn with
 // the slot's real gadget id. Capture only; never alters the dispatch.
 constexpr uintptr_t ActionBarUse = 0x006120e0;
+// Action-bar bank CONSTRUCTOR (__thiscall, ECX = the bank controller). Runs once
+// per 3-slot bank when the cockpit comes up (entering space), BEFORE any slot is
+// ever clicked. We hook it read-only to capture the controller `this` the moment
+// it exists -- so the Freya HUD shows real slot icons immediately on load instead
+// of staying blank until the first slot interaction warms ActionBarUse. Same
+// capture-only pattern as the cockpit ctors; never alters the constructor.
+constexpr uintptr_t ActionBarCtor = 0x00610f80;
 constexpr uintptr_t SkillButton =
     0x00662dc0; // skill button CONSTRUCTOR -- NOT a hide target. The skill gadget has no
                 // standalone pure-paint entry (render is fused with state mutation), so unlike
@@ -105,6 +130,38 @@ constexpr uintptr_t CockpitThrottle =
 constexpr uintptr_t CockpitCommands =
     0x0057be50; // "UI COMMANDS" action-button CTOR. __fastcall(ECX = controller). Button
                 // children from int-slot 0x2b upward (two groups: 0x2b.. and 0x2d..0x33).
+
+// ---- PDA / micro-menu screen dispatcher (bottom-left button band) ----------
+// The micro-menu buttons (Inventory / Character Info / Galaxy Map / Skills / Vault)
+// are driven by the PDA panel controller (Ghidra srcfile "pdain", layout TSI14A).
+// PdaSwitch is the unified "make PDA child screen N active" dispatcher,
+// __thiscall(ECX = the PDA controller, int index): 0=Inventory, 1=Skills,
+// 2=Character Info, 3=Vault, 4=Galaxy Map -- verified from FUN_006956c0's
+// child-pointer switch over controller +0x9c..0xa8. PdaCtor is the controller
+// CONSTRUCTOR, __fastcall(ECX = the controller); it builds the child screens and
+// stores the TSI14A screen at controller+0x94. We hook the CTOR read-only to
+// capture the controller `this` the moment it exists (entering space) so the Freya
+// top-left buttons can dispatch on the first click, AND hook the dispatcher as a
+// re-validating refresh -- the same capture-only pattern as ActionBarCtor/Use.
+constexpr uintptr_t PdaCtor = 0x00693230;
+constexpr uintptr_t PdaSwitch = 0x00695780;
+
+// ---- in-game screen shell (Options micro-menu button) -----------------------
+// The bottom-left Options button does NOT open a PDA child; it opens the in-game
+// OPTIONS_MAIN screen (layout fa_opt01a.ini). That screen is owned by the screen
+// SHELL controller, which holds the currently-shown screen at +0x104 and a
+// "pending screen id" at +0x108. ShellApply (FUN_00565f80, __fastcall(ECX = the
+// shell)) is the per-frame "apply the pending screen change" pump: when +0x108
+// is non-zero it tears down the old screen and builds the requested one --
+// id 1 = Options (verified: case 1 constructs the fa_opt01a screen class). It is
+// called every frame by the in-game HUD updater, so hooking it captures the LIVE
+// shell `this` continuously. ShellRequest (FUN_00565f30, __thiscall(ECX = the
+// shell, int id)) just stores the pending id (+0x108 = id) -- exactly what every
+// native "Options" button does; the next ShellApply frame opens it. We hook
+// ShellApply read-only for the `this`, and drive ShellRequest to open a screen.
+constexpr uintptr_t ShellApply = 0x00565f80;
+constexpr uintptr_t ShellRequest = 0x00565f30;
+constexpr int ShellScreenOptions = 1; // +0x108 id for the OPTIONS_MAIN screen
 
 // ---- AuxData accessor candidates (universal read primitive once resolved) ----
 constexpr uintptr_t AuxGet_Ability = 0x006a4b40;
@@ -174,6 +231,24 @@ namespace rpg {
 constexpr int container_off = 0x12c0;       // manager + this -> RPGInfo AuxData container
 constexpr uintptr_t get_entry = 0x00514b60; // __cdecl(container, keybuf) -> entry|0
 } // namespace rpg
+
+// Chat line RING-BUFFER layout, off the ring object captured at addr::ChatLineAppend
+// (hooks::chat_buf() == FUN_0067d780's ECX). NOT a sorted vector -- it is a fixed-size
+// ring of 0x14-byte slots, indexed (write_count % capacity). Confirmed by reading
+// FUN_0067d780's body:
+//   slot = ring[+0xc] + (ring[+8]++ % ring[+4]) * 0x14
+//   slot+0x00 = uint type/channel   slot+0x08 = char* text   slot+0x0c = uint len
+// To read chronologically: i from max(0, count-capacity) to count-1, slot[(i%cap)].
+// Build-constant offsets; only the ring pointer varies per run (captured live).
+namespace chat {
+constexpr int ring_cap = 0x04;    // ring obj -> uint slot capacity
+constexpr int ring_count = 0x08;  // ring obj -> uint monotonic write count
+constexpr int ring_base = 0x0c;   // ring obj -> ptr to slot array
+constexpr int slot_stride = 0x14; // bytes per slot
+constexpr int slot_type = 0x00;   // slot -> uint channel/type id
+constexpr int slot_text = 0x08;   // slot -> char* (NUL-terminated ASCII)
+constexpr int slot_len = 0x0c;    // slot -> uint text length
+} // namespace chat
 
 // Discipline XP-bar fill fractions (combat/trade/explore). The per-discipline XP
 // progress is NOT a plain AuxData key we can read directly: the explore/trade
