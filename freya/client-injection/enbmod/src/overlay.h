@@ -61,5 +61,8 @@ void texture_quad(void* tex, int x, int y, int w, int h, int alpha, uint32_t tin
 // binary asset, per the repo rule). Safe to call every tick.
 void set_cursor(bool on, void* hwnd);
 
+// Diagnostic: monotonic count of Present-hook calls (== HUD draw rate).
+unsigned long present_count();
+
 } // namespace overlay
 } // namespace enb

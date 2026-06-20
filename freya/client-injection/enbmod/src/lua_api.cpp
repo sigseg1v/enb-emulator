@@ -9,6 +9,7 @@
 #include <vector>
 #include <deque>
 #include <mutex>
+#include <atomic>
 #include <string>
 #include <cstring>
 #include <cstdio>
@@ -24,6 +25,10 @@ namespace enb {
 namespace lua {
 
 using namespace enb::game;
+
+// Diagnostic: monotonic count of tick() calls (== HUD display-list rebuild rate,
+// clocked off the PeekMessageA pump). Compare to overlay::present_count() (draw rate).
+static std::atomic<unsigned long> g_tick_n{0};
 
 // Registered Lua callbacks, held as registry refs.
 static std::vector<int> g_tick_refs;
@@ -926,28 +931,50 @@ static int l_shell_screen(lua_State* L) {
     return 1;
 }
 
-// enb.chat_send(line) -> uint. Submit a typed chat line through the game's own
-// chat-line parser/sender (game::addr::ChatSend == FUN_00749ed0). ChatSend is
-// __thiscall(ECX = chat panel, char* line) -- NOT cdecl: it dereferences `this`
-// immediately and faults on a bogus one, so we pass the captured panel as `this`.
-// It parses slash-commands, applies the active channel, and puts the line on the
-// wire, so the Freya chat input box owns text entry while the real send path stays
-// the game's. Returns 0 if the panel hasn't been captured yet (no line printed this
-// session). The string is copied into a buffer kept alive across the call (the callee
-// reads it synchronously). MUST be called on the game thread (it is -- callers run
-// from on_tick/on_input).
+// enb.chat_send(line [, channel]) -> uint. Submit a typed chat line exactly the way
+// the native chat-input box does (mirrors FUN_0065ccd0), so the Freya chat box owns
+// text entry while the real send path stays the game's:
+//   * A '/'-prefixed line goes to the game's command dispatcher (addr::ChatCmdDispatch,
+//     the chat manager's vtable+0x34 entry): /tell <name> <msg> = whisper, /gen /ooc
+//     /mkt /new /jen /ter /pro ... = subscribed channels. If it claims the line we are
+//     done; if it returns 0 (not a command) we fall through to a plain send.
+//   * A plain line is packed into a Client_Chat (opcode 0x33) via addr::ChatBuildMsg
+//     and pushed with addr::ChatMsgSend. `channel` selects the target: 3 = Local/Sector
+//     (default), 4 = Broadcast. (Earlier this called the slash-only parser directly,
+//     which dropped every plain message -- the "box closes but the text vanishes" bug.)
+// Returns 0 if the chat manager has not been captured yet (no line printed this
+// session). The text is copied into a static buffer kept alive across the synchronous
+// build+send (ChatBuildMsg stores the pointer, not a copy). MUST be called on the game
+// thread (it is -- callers run from on_tick/on_input).
 static std::string g_chat_send_buf;
+static unsigned char g_chat_msg_obj[0x80];
 static int l_chat_send(lua_State* L) {
     size_t len = 0;
     const char* s = luaL_checklstring(L, 1, &len);
+    int channel = (int)luaL_optinteger(L, 2, 3); // 3 = Local/Sector, 4 = Broadcast
     g_chat_send_buf.assign(s, len);
-    unsigned panel = hooks::chat_panel();
-    if (!panel) {
+    unsigned mgr = hooks::chat_panel();
+    if (!mgr) {
         lua_pushinteger(L, 0);
         return 1;
     }
-    uint32_t a[1] = {(uint32_t)(uintptr_t)g_chat_send_buf.c_str()};
-    lua_pushinteger(L, (lua_Integer)actions::call_thiscall(addr::ChatSend, panel, a, 1));
+    const char* line = g_chat_send_buf.c_str();
+    if (line[0] == '/') {
+        uint32_t a[1] = {(uint32_t)(uintptr_t)line};
+        unsigned r = actions::call_thiscall(addr::ChatCmdDispatch, mgr, a, 1);
+        if (r & 0xff) { // command claimed the line
+            lua_pushinteger(L, (lua_Integer)r);
+            return 1;
+        }
+        // not a recognised command -> fall through and send it as a plain message
+    }
+    unsigned sender =
+        *reinterpret_cast<unsigned*>(static_cast<uintptr_t>(mgr) + addr::ChatMgrSenderId);
+    uint32_t build[4] = {sender, (uint32_t)(uintptr_t)line, (uint32_t)channel, 0};
+    actions::call_thiscall(addr::ChatBuildMsg, (unsigned)(uintptr_t)g_chat_msg_obj, build, 4);
+    uint32_t snd[1] = {(uint32_t)(uintptr_t)g_chat_msg_obj};
+    actions::call_thiscall(addr::ChatMsgSend, mgr, snd, 1);
+    lua_pushinteger(L, 1);
     return 1;
 }
 
@@ -1201,6 +1228,12 @@ static int l_screen(lua_State* L) {
     lua_pushinteger(L, h);
     return 2;
 }
+// enb.diag() -> tick_count, present_count  (rebuild rate vs draw rate)
+static int l_diag(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)g_tick_n.load(std::memory_order_relaxed));
+    lua_pushinteger(L, (lua_Integer)overlay::present_count());
+    return 2;
+}
 // enb.measure(s) -> w, h  (font pixel size; 0,0 until the atlas is built)
 static int l_measure(lua_State* L) {
     int w = 0, h = 0;
@@ -1397,6 +1430,9 @@ static void push_addr_table(lua_State* L) {
     A(ChatRender);
     A(ChatChannel);
     A(ChatSend);
+    A(ChatCmdDispatch);
+    A(ChatBuildMsg);
+    A(ChatMsgSend);
     A(NavListBuild);
     A(NavListRender);
     A(WarpPath);
@@ -1443,6 +1479,7 @@ void open(lua_State* L) {
                                    {"on_chat", l_on_chat},
                                    {"on_input", l_on_input},
                                    {"screen", l_screen},
+                                   {"diag", l_diag},
                                    {"measure", l_measure},
                                    {"enable_event_hooks", l_enable_event_hooks},
                                    {"enable_inspace", l_enable_inspace},
@@ -1703,6 +1740,7 @@ static void poll_cmd_file(lua_State* L) {
 }
 
 void tick(lua_State* L) {
+    g_tick_n.fetch_add(1, std::memory_order_relaxed);
     // poll the external command channel (throttled; cheap no-op when absent)
     static unsigned cmd_poll = 0;
     if (++cmd_poll >= 15) {

@@ -610,6 +610,11 @@ static void sample_screen(IDirect3DDevice8* dev) {
     }
 }
 
+static std::atomic<unsigned long> g_present_n{0};
+unsigned long present_count() {
+    return g_present_n.load(std::memory_order_relaxed);
+}
+
 static HRESULT WINAPI hk_Present(IDirect3DDevice8* dev, const RECT* src, const RECT* dst, HWND wnd,
                                  const RGNDATA* dirty) {
     static bool logged = false;
@@ -617,6 +622,7 @@ static HRESULT WINAPI hk_Present(IDirect3DDevice8* dev, const RECT* src, const R
         logged = true;
         logf("overlay: Present hook FIRED -- D3D8 present path live");
     }
+    g_present_n.fetch_add(1, std::memory_order_relaxed);
     sample_screen(dev);
     draw_frame(dev);
     return real_Present(dev, src, dst, wnd, dirty);

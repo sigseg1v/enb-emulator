@@ -58,7 +58,28 @@ constexpr uintptr_t TargetPanel = 0x00581e60; // current-target panel / HulkUI
 constexpr uintptr_t ChatGadget = 0x0065e3e0;    // ChatGadget (MSG:%d)
 constexpr uintptr_t ChatRender = 0x00680700;    // chat rendering
 constexpr uintptr_t ChatChannel = 0x0065bfd0;   // channel routing
-constexpr uintptr_t ChatSend = 0x00749ed0;      // channel state + send-message
+constexpr uintptr_t ChatSend = 0x00749ed0;      // slash-command parser (cdecl(char* line))
+// --- chat SEND path (mirrors the native chat-gadget submit handler at 0x0065ccd0) ---
+// A typed chat line is sent in one of two ways, exactly as the native input box does:
+//   1. A '/'-prefixed line is handed to the chat-manager's command dispatcher
+//      (its vtable+0x34 entry == this address): /tell <name> <msg> (whisper),
+//      /gen /ooc /mkt /new /jen /ter /pro ... (subscribed channels). It returns
+//      nonzero when it claimed the line; zero -> not a command, fall through.
+//      NB this is an alternate ENTRY POINT inside ChatSend's function body
+//      (0x749ed0..0x74b5e0), reached only via the manager vtable -- __thiscall,
+//      ECX = chat manager, char* line.
+constexpr uintptr_t ChatCmdDispatch = 0x0074abc0;
+//   2. A plain line is packed into a Client_Chat message (opcode 0x33) and handed
+//      to the sender. ChatBuildMsg is __thiscall(ECX = caller-owned message obj,
+//      uint senderId, char* text, char channel, char* text2=0); it stores the text
+//      POINTER (no copy) so the buffer must outlive the send. channel byte:
+//      3 = Local/Sector, 4 = Broadcast (verified on the wire). senderId is read
+//      from (manager + ChatMgrSenderId).
+constexpr uintptr_t ChatBuildMsg = 0x008785d0;
+//   ChatMsgSend is __thiscall(ECX = chat manager, message obj); it routes the built
+//   message through manager->connection (manager + 0x1124) to the wire.
+constexpr uintptr_t ChatMsgSend = 0x00728150;
+constexpr uintptr_t ChatMgrSenderId = 0x112c; // field offset on the chat manager
 constexpr uintptr_t ChatLocalLine = 0x0074d990; // local chat-window line printer (no packet).
     // __thiscall(ECX = chat panel, int channel, const char* msg, char flag):
     // channel 0x11=error 0x13=system 0x15=warning 6=usage.
