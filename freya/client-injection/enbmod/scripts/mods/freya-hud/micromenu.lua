@@ -18,6 +18,7 @@
 --   Galaxy Map      -> enb.pda_switch(4)   (PDA child screen, opens at sector zoom)
 --   Options         -> enb.shell_screen(1) (in-game screen shell -- NOT a PDA child)
 --   Chat            -> H.open_chat()       (raise the Freya chat input box)
+--   Help            -> cockpit(0x10)       (native Online Manual window)
 --
 -- The first three ride the PDA controller captured by the PdaCtor/PdaSwitch hooks
 -- (live the moment we enter space). Options is the in-game OPTIONS_MAIN screen,
@@ -26,27 +27,48 @@
 -- controller is captured its dispatch is a no-op (returns 0); the button stays
 -- drawn and simply does nothing that frame rather than erroring.
 --
--- Chat is the one nav-bar button we recreate: the native chat frame is hidden and
--- chat.lua draws our own window, so "Chat" raises the Freya input box (H.open_chat,
--- the same thing Enter does). The other native nav-bar buttons (Group / ChatOptions
--- / Help / Emote / Message) each open a distinct native window through a cockpit
--- button dispatch we have NOT located -- the screen shell (enb.shell_screen) is only
--- the ESC/system-menu family (Options + its sub-pages), and the PDA controller only
--- the PDA tabs. Wiring those five faithfully is a per-window RE + new C++ dispatch
--- task, deliberately not done here rather than shipped wired to guessed ids.
+-- Chat is the one nav-bar button we recreate as Freya UI: the native chat frame is
+-- hidden and chat.lua draws our own window, so "Chat" raises the Freya input box
+-- (H.open_chat, the same thing Enter does).
+--
+-- Help routes through the native chat/cockpit nav-bar dispatcher (see cockpit()
+-- below): command 0x10 builds the native Online Manual window, which renders fine
+-- on its own. The remaining native nav-bar buttons (Group / chat-Options / Emote)
+-- are NOT recreated here: each is a native combo-box DROPDOWN whose menu is painted
+-- by the button gadget itself on a real gadget click and anchored to the gadget's
+-- own (bottom-of-screen) screen rect. The dispatcher only handles the post-pick
+-- command/selection -- it sets the controller's active-popup pointer but never
+-- paints the dropdown -- so calling it does nothing visible. Reproducing those
+-- three as top-left Freya buttons needs them rebuilt as Freya glass menus (one
+-- menu-item -> native command id each), a per-item task tracked separately; they
+-- are intentionally omitted rather than shipped wired to a call that no-ops.
 --
 -- require("micromenu") from init.lua. Registers its own on_tick (draw) and
 -- on_input (click-dispatch + mouse-swallow over the strip).
 
 local H = require("freya_hud")
 
--- ---- the four buttons (left -> right) --------------------------------------
+-- The native chat/cockpit nav-bar buttons route through one dispatcher,
+-- __thiscall(chatController, command_id). The controller hangs off the captured
+-- chat uiRoot at +0x127c. Until the chat uiRoot is captured (set by the chat
+-- hooks once in-game) this is a no-op rather than an error.
+local DISPATCH = 0x00563280
+local function cockpit(cmd)
+    local root = enb.chat_panel and enb.chat_panel() or 0
+    if not root or root == 0 then return end
+    local ctrl = enb.mem.u32(root + 0x127c)
+    if not ctrl or ctrl == 0 then return end
+    return enb.call(DISPATCH, ctrl, cmd)
+end
+
+-- ---- the strip buttons (left -> right) -------------------------------------
 local BUTTONS = {
     { label = "Inventory", act = function() return enb.pda_switch(0) end },
     { label = "Character", act = function() return enb.pda_switch(2) end },
     { label = "Map",       act = function() return enb.pda_switch(4) end },
     { label = "Options",   act = function() return enb.shell_screen(1) end },
     { label = "Chat",      act = function() if H.open_chat then H.open_chat() end end },
+    { label = "Help",      act = function() return cockpit(0x10) end },
 }
 
 local CFG = {
