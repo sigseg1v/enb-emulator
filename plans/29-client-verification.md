@@ -2462,3 +2462,55 @@ moot; the SOLVED block above is the truth):**
   Cloudflare JS challenge and could not be machine-fetched to cross-check
   retail prereq fidelity. Our content is internally coherent; if the wiki later
   shows retail gated these differently, revisit then.
+
+### [ ] CV-PB17 -- idle-then-zone-transition no longer hangs on the loading screen (PB-17)
+
+- **What changed**: server `UDP_Connection::HandleLoginStageAck`
+  (server/src/UDP_MVAS.cpp:230) now refreshes `LastAccessTime` on every
+  login-stage ack, mirroring `HandleKeepCommsAlive`. This closes a code-found
+  race: a zone change re-LOGINs the player (resets below `LAST_LOGIN_STAGE`),
+  arming the 2-minute idle reaper in `RunLoginThread`; the per-stage acks did
+  not refresh the idle timer, so a player who idled near the 2-min mark before
+  transitioning could be reaped mid-load, freeing the GameID -> every later
+  keepalive answered with `0x100A MVAS_TERMINATE` -> infinite loading screen.
+- **Why it needs the real client**: the 30s `0x3005` keepalive SHOULD also
+  refresh the timer through the handoff, so on the happy path the race may not
+  fire. This fix is correct regardless (an acking client is not idle) but is
+  NOT a proven cure -- only a live repro confirms PB-17 is actually resolved,
+  and confirms there isn't a SECOND cause (keepalive thread dying, dropped
+  handoff reply).
+- **What to do (real client)**: log in, sit idle in a sector/station for ~110s
+  (just under 2 min), then trigger a load (gate to another sector / dock /
+  undock). The load must COMPLETE every time. Repeat several times and also try
+  a longer idle (3-5 min) to stress the empty-sector teardown path too.
+- **What to watch in logs** (`docker logs freya-dev-server-1` + proxy): there
+  must be NO `Player '<name>' Removed from Galaxy.` line during a loading
+  screen, and NO `0x100A MVAS_TERMINATE` sent in response to a keepalive for a
+  live session. If the hang still reproduces, capture the server+proxy logs at
+  the stuck moment -- the next suspect is whether the keepalive thread is still
+  firing (grep `Received Keepalive`) or a handoff reply was dropped.
+- **Setup**: `just rebuild server` (done) then `just play-local`.
+
+### [ ] CV-PB22 -- how retail rendered a never-visited nav on the in-sector map (PB-22)
+
+- **No code change to test.** This is a reconciliation task: the in-game map
+  shows every nav as "?" at sector entry (report PB-22 says it should reveal
+  only on proximity), but commit `636c6175` made the server send all navs at
+  entry CITING a live capture
+  (`proxy/local-debug/net7-live-2026-06-02-login-undock-clicknavs-warp-logout.pcap`,
+  S2C :3573) that shows retail did exactly that, including undiscovered navs
+  with no HAS_VISITED flag. The report and the capture conflict.
+- **Owner decision required (you are both the reporter and the committer)**:
+  reconcile your 2026-06-02 capture ("retail sends every sector nav at entry")
+  against your 2026-06-17 report ("should reveal only within scanner range").
+  If the capture is right, PB-22 is NOT a bug and should be closed -- current
+  behaviour is retail-faithful. If the report is right, the capture analysis in
+  636c6175 was wrong (e.g. the capture char had already explored those navs) or
+  the create is sent for all navs but the MAP should only DISPLAY exposed ones.
+- **What to verify (real client)**: enter a brand-new character into a sector it
+  has never visited. Do undiscovered navs appear on the F10/sector map as "?"
+  immediately, or only after flying within scanner range? That single
+  observation settles it. Cross-check against the cited capture for the per-nav
+  map/visibility flags before changing any server emit (server-integrity rules
+  forbid altering a capture-backed emit without a new primary source).
+- **Setup**: `just play-local` with a freshly-created character.
