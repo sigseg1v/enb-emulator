@@ -718,6 +718,17 @@ void Player::HandleLoginAckReturn(unsigned char *data)
 
 void Player::HandleLogin(unsigned char *data)
 {
+	// Resetting the stage below LAST_LOGIN_STAGE arms the 2-minute idle reaper
+	// (PlayerManager::RunLoginThread). A gate/dock/undock routes here via
+	// SendServerHandoff, and the client that just initiated that transition is
+	// by definition NOT idle -- but if its keepalive stalled while parked (see
+	// PB-9) LastAccessTime can already be minutes stale at this instant, so the
+	// reaper would drop it on the next ~1s login-thread pass, before the first
+	// stage-ack arrives to refresh the timer. Reset the clock here so the
+	// handshake always gets a full fresh window. Pairs with the per-stage-ack
+	// refresh in UDP_MVAS::HandleLoginStageAck. PB-17 / CV-PB17.
+	SetLastAccessTime(GetNet7TickCount());
+
 	SetLoginStage(0);
 
 	Login * login = (Login *) data;

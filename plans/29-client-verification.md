@@ -2465,7 +2465,8 @@ moot; the SOLVED block above is the truth):**
 
 ### [ ] CV-PB17 -- idle-then-zone-transition no longer hangs on the loading screen (PB-17)
 
-- **What changed**: server `UDP_Connection::HandleLoginStageAck`
+- **What changed**: TWO reap-during-handshake paths closed.
+  (1) server `UDP_Connection::HandleLoginStageAck`
   (server/src/UDP_MVAS.cpp:230) now refreshes `LastAccessTime` on every
   login-stage ack, mirroring `HandleKeepCommsAlive`. This closes a code-found
   race: a zone change re-LOGINs the player (resets below `LAST_LOGIN_STAGE`),
@@ -2473,16 +2474,26 @@ moot; the SOLVED block above is the truth):**
   not refresh the idle timer, so a player who idled near the 2-min mark before
   transitioning could be reaped mid-load, freeing the GameID -> every later
   keepalive answered with `0x100A MVAS_TERMINATE` -> infinite loading screen.
+  (2) `Player::HandleLogin` (server/src/PlayerConnection.cpp) now refreshes
+  `LastAccessTime` BEFORE it resets the stage. The reporter repro ("sit 2-3 min
+  on a station, then leave") proved the stage-ack fix alone is insufficient: a
+  station-parked player is at `LAST_LOGIN_STAGE` so the reaper ignores them, so
+  idle mattering at all means the keepalive is letting `LastAccessTime` go stale
+  during the idle (PB-9). When they then leave, the reaper is armed with an
+  already-stale timer and drops them on the next ~1s pass, before any stage-ack
+  lands. Resetting the clock at the transition gives the handshake a full fresh
+  2-min window regardless of how stale idle left it.
 - **Why it needs the real client**: the 30s `0x3005` keepalive SHOULD also
   refresh the timer through the handoff, so on the happy path the race may not
   fire. This fix is correct regardless (an acking client is not idle) but is
   NOT a proven cure -- only a live repro confirms PB-17 is actually resolved,
   and confirms there isn't a SECOND cause (keepalive thread dying, dropped
   handoff reply).
-- **What to do (real client)**: log in, sit idle in a sector/station for ~110s
-  (just under 2 min), then trigger a load (gate to another sector / dock /
-  undock). The load must COMPLETE every time. Repeat several times and also try
-  a longer idle (3-5 min) to stress the empty-sector teardown path too.
+- **What to do (real client)**: reproduce the reporter's exact path -- log in,
+  sit idle on a STATION for 2-3 min, then leave (undock / dock to another base /
+  gate). The load must COMPLETE every time. Also try the ~110s-then-gate variant
+  and a longer idle (3-5 min) to stress the empty-sector teardown path. Run it
+  enough times to clear the previous "happens intermittently" framing.
 - **What to watch in logs** (`docker logs freya-dev-server-1` + proxy): there
   must be NO `Player '<name>' Removed from Galaxy.` line during a loading
   screen, and NO `0x100A MVAS_TERMINATE` sent in response to a keepalive for a
