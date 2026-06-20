@@ -575,8 +575,8 @@ static void draw_frame(IDirect3DDevice8* dev) {
             D3DCOLOR diffuse = 0xFF000000u | (tr << 16) | (tg << 8) | tb;
             dev->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
             dev->SetRenderState(D3DRS_DESTBLEND, c.filled ? D3DBLEND_ONE : D3DBLEND_INVSRCCOLOR);
-            draw_quad(dev, (IDirect3DTexture8*)c.tex, (float)c.x, (float)c.y, (float)c.w, (float)c.h,
-                      0, 0, 1, 1, diffuse);
+            draw_quad(dev, (IDirect3DTexture8*)c.tex, (float)c.x, (float)c.y, (float)c.w,
+                      (float)c.h, 0, 0, 1, 1, diffuse);
             dev->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
             dev->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
             break;
