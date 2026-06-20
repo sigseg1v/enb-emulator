@@ -55,10 +55,10 @@ constexpr uintptr_t TargetInfo = 0x0065e5e0;  // "Target: %s at" + %.2f distance
 constexpr uintptr_t TargetPanel = 0x00581e60; // current-target panel / HulkUI
 
 // ---- chat ----
-constexpr uintptr_t ChatGadget = 0x0065e3e0;    // ChatGadget (MSG:%d)
-constexpr uintptr_t ChatRender = 0x00680700;    // chat rendering
-constexpr uintptr_t ChatChannel = 0x0065bfd0;   // channel routing
-constexpr uintptr_t ChatSend = 0x00749ed0;      // slash-command parser (cdecl(char* line))
+constexpr uintptr_t ChatGadget = 0x0065e3e0;  // ChatGadget (MSG:%d)
+constexpr uintptr_t ChatRender = 0x00680700;  // chat rendering
+constexpr uintptr_t ChatChannel = 0x0065bfd0; // channel routing
+constexpr uintptr_t ChatSend = 0x00749ed0;    // slash-command parser (cdecl(char* line))
 // --- chat SEND path (mirrors the native chat-gadget submit handler at 0x0065ccd0) ---
 // A typed chat line is sent in one of two ways, exactly as the native input box does:
 //   1. A '/'-prefixed line is handed to the chat-manager's command dispatcher
@@ -79,7 +79,7 @@ constexpr uintptr_t ChatBuildMsg = 0x008785d0;
 //   ChatMsgSend is __thiscall(ECX = chat manager, message obj); it routes the built
 //   message through manager->connection (manager + 0x1124) to the wire.
 constexpr uintptr_t ChatMsgSend = 0x00728150;
-constexpr uintptr_t ChatMgrSenderId = 0x112c; // field offset on the chat manager
+constexpr uintptr_t ChatMgrSenderId = 0x112c;   // field offset on the chat manager
 constexpr uintptr_t ChatLocalLine = 0x0074d990; // local chat-window line printer (no packet).
     // __thiscall(ECX = chat panel, int channel, const char* msg, char flag):
     // channel 0x11=error 0x13=system 0x15=warning 6=usage.
