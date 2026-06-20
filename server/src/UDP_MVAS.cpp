@@ -228,5 +228,17 @@ void UDP_Connection::HandleLoginStageAck(char *msg, EnbUdpHeader *hdr, const lon
 	{
 		LogMessage("*Received login ack from %s\n", player->Name());
 		player->SetLoginAck(true);
+		// A login-stage ack is activity: the client is actively progressing
+		// through the (re)login handshake. Refresh the idle timer like the
+		// keepalive does, so the 2-minute reaper in RunLoginThread cannot drop
+		// a player who is mid-zone-transition. A zone change (gate/dock/undock)
+		// resets the player below LAST_LOGIN_STAGE, which arms that reaper, and
+		// the per-stage acks arrive on this UDP plane -- previously only the 30s
+		// keepalive refreshed LastAccessTime, leaving a race where a player who
+		// had idled near the 2-min mark before transitioning gets reaped during
+		// the loading handshake (DropPlayerFromGalaxy frees the GameID node, so
+		// every subsequent keepalive is answered with MVAS_TERMINATE and the
+		// client hangs on the loading screen forever). See PB-17.
+		player->SetLastAccessTime(GetNet7TickCount());
 	}
 }

@@ -79,10 +79,11 @@ unsigned rpg_mgr();
 // off this (enb.xp_frac).
 unsigned xp_ctrl();
 
-// ECX (this) captured from the most recent action-bar "Use Slot" dispatch: the
-// in-space action-bar controller that owns the numbered ability/weapon slots
-// (primary + alternate). 0 until a slot has been used in space. lua_api reads the
-// slots off this and re-dispatches a slot through it (enb.actionbar).
+// ECX (this) of the in-space action-bar controller that owns the numbered
+// ability/weapon slots (primary + alternate). Captured from the bank constructor
+// the moment a bank exists (entering space) and refreshed on every slot dispatch,
+// so it is valid before any interaction. lua_api reads the slots off this and
+// re-dispatches a slot through it (enb.actionbar).
 unsigned actionbar();
 
 // ECX (this) captured from the cockpit constructors: the throttle/warp cluster
@@ -91,6 +92,34 @@ unsigned actionbar();
 // clears their visible flag (enb.hide_cockpit) so the Freya overlay replaces them.
 unsigned cockpit_throttle_ctrl();
 unsigned cockpit_cmd_ctrl();
+
+// ECX (this) captured from ChatLocalLine (game::addr::ChatLocalLine): the session-stable
+// chat PANEL object. The line RING hangs off it at +chat::panel_ring, and it is the
+// `this` ChatSend requires. 0 until the first line is printed this session. lua_api
+// exposes it (enb.chat_panel()); the Freya chat window derives the ring read-only and
+// passes it as ChatSend's `this`.
+unsigned chat_panel();
+
+// ECX (this) captured from ChatLineAppend (game::addr::ChatLineAppend): the chat line
+// RING object (chat::ring_* layout). 0 until the first line is appended this session.
+// lua_api exposes it (enb.chat_buf()); the Freya chat window walks the ring read-only.
+unsigned chat_ring();
+
+// ECX (this) captured from the PDA panel controller (game::addr::PdaCtor ctor +
+// PdaSwitch dispatcher): the bottom-left micro-menu controller whose child screens
+// are Inventory/Skills/Character Info/Vault/Galaxy Map. 0 until the controller is
+// constructed (entering space). lua_api exposes it (enb.pda_ctrl()) and dispatches
+// a panel through PdaSwitch (enb.pda_switch).
+unsigned pda_ctrl();
+
+// ECX (this) captured from the screen shell's per-frame apply pump
+// (game::addr::ShellApply): the in-game controller that owns the active screen
+// (+0x104) and the pending-screen id (+0x108). The in-game HUD updater calls the
+// pump every frame, so this is captured continuously and stays fresh. lua_api
+// exposes it (enb.shell_ctrl()) and requests a screen through ShellRequest
+// (enb.shell_screen) -- id 1 opens the in-game Options screen, the one micro-menu
+// button that is NOT a PDA child.
+unsigned shell_ctrl();
 
 // Event sinks set by the Lua layer. Args are best-effort raw pointers/values.
 void set_on_skill(std::function<void(unsigned /*this*/, unsigned /*arg*/)> cb);

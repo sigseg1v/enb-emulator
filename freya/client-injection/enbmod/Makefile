@@ -46,7 +46,7 @@ DLL_SRC := $(wildcard src/*.cpp)
 DLL_OBJ := $(patsubst src/%.cpp,$(BUILD)/dll/%.o,$(DLL_SRC))
 DLL     := $(BUILD)/enbmod.dll
 DLL_CXXFLAGS := -O2 -std=c++17 -fno-strict-aliasing -Wall -Wextra -Wno-unused-parameter \
-               -I$(LUA_DIR) -I$(MH_DIR)/include -I$(TP) -DUNICODE -D_UNICODE
+               -I$(LUA_DIR) -I$(MH_DIR)/include -I$(TP) -DUNICODE -D_UNICODE -MMD -MP
 DLL_LDFLAGS  := -shared -static -static-libgcc -static-libstdc++ \
                -Wl,--kill-at -Wl,--enable-stdcall-fixup
 # d3d8 is loaded at runtime (GetModuleHandle/GetProcAddress in overlay.cpp), not linked.
@@ -82,6 +82,11 @@ $(BUILD)/dll/%.o: src/%.cpp
 	$(CXX) $(DLL_CXXFLAGS) -c $< -o $@
 $(DLL): $(DLL_OBJ) $(LUA_LIB) $(MH_LIB)
 	$(CXX) $(DLL_OBJ) $(DLL_LDFLAGS) $(DLL_LIBS) -o $@
+
+# Header dependency files emitted by -MMD (so editing game.h/hooks.h/etc. forces
+# a recompile of the .cpp that includes it -- without this, header-only edits were
+# silently ignored and a stale DLL got injected).
+-include $(DLL_OBJ:.o=.d)
 
 $(INJ): $(INJ_SRC)
 	$(CXX) $(INJ_CXXFLAGS) $(INJ_SRC) $(INJ_LDFLAGS) -o $@

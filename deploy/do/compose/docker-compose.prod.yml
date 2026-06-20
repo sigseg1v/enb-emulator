@@ -179,6 +179,15 @@ services:
         # account_id_guard.sql. See db/postgres/freya_online_bots.sql.
         echo "schema-init: applying /db/freya_online_bots.sql -> net7_user"
         psql -h postgres -U net7 -d net7_user -v ON_ERROR_STOP=1 -f /db/freya_online_bots.sql
+        # Orphan mob-spawn cleanup (ALWAYS, idempotent). Removes mob_spawn_group
+        # rows referencing mob_ids absent from mob_base -- they spawn an unnamed
+        # faction-0 "Default" mob whose NULL m_MOB_Data crashes the sector server
+        # when a player comes in range (the Swooping Eagle / Field of Glass Point
+        # bug). Deleting non-existent rows is a no-op, so UNCONDITIONAL: it must
+        # also clean the pre-existing prod volume. See
+        # db/postgres/fix_orphan_mob_spawns.sql + server/src/MOBClass.cpp guards.
+        echo "schema-init: removing orphan mob_spawn_group rows -> net7"
+        psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/fix_orphan_mob_spawns.sql
         echo "schema-init: syncing identity sequences -> net7"
         psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/sync_sequences.sql
         echo "schema-init: done"

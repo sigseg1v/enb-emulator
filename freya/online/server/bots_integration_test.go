@@ -91,7 +91,7 @@ func TestIT_BotPlaceBid_NeverOutbidsAPlayer(t *testing.T) {
 
 	listingID := postPlayerListing(t, st, ctx, seller, 0, 1)
 
-	if _, err := st.PlaceBid(ctx, bidder.id, listingID); err != nil {
+	if _, err := st.PlaceBid(ctx, bidder.id, bidder.avatars[0].name, listingID); err != nil {
 		t.Fatalf("player PlaceBid: %v", err)
 	}
 

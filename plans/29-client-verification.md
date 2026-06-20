@@ -1567,33 +1567,49 @@ moot; the SOLVED block above is the truth):**
 ### [ ] CV-AS-ACTIONBAR -- Freya hotbar fires the native action bar (dispatch half)
 
 - **Change**: client-only (enbmod.dll + freya-hud Lua). A read-only ECX-capture
-  hook on the in-space Use-Slot dispatcher exposes the live action-bar controller
-  as `enb.actionbar()`; `freya_ui.lua` routes each Freya hotbar slot back through
-  that dispatcher via `enb.call`, so clicking/pressing a Freya slot fires the
-  exact native action. Freya 1-6 -> the native bar's six PRIMARY actions, Freya
-  7-12 -> the six ALTERNATE actions. No server/proxy/wire change.
+  hook on the in-space Use-Slot dispatcher (`FUN_006120e0`) exposes the live
+  action-bar controller as `enb.actionbar()`; `freya_ui.lua` routes each Freya
+  hotbar slot back through that dispatcher via `enb.call`, so clicking a Freya
+  slot fires the exact native action. No server/proxy/wire change.
+- **CORRECTED MODEL (2026-06-19, read from the dispatcher itself + verified live)**:
+  the bar is SIX slots, not twelve. The native bar is two 3-box bank controllers
+  (vt `0x00af7484`) 0x60 apart; bank0 = slots 1-3, bank1 = slots 4-6; each bank's
+  three box pointers are at `+0x10/+0x14/+0x18`. The dispatcher is PRESS/RELEASE
+  keyed, NOT primary/alternate: a bank's `+0x50` is the press-id base, `+0x54` the
+  release-id base, for the SAME three boxes. Box k has press id `v50+k` and
+  release id `v54+k` (k in 0..2). Press fires only when the box is idle
+  (`box+0x6c == 0`) then sets it; release fires only when active then clears it.
+  So replaying a keypress = read the box's live `+0x6c` and pick press-or-release
+  exactly as the native keybind does. Calling a press id on an already-active box
+  (or vice-versa) hits neither branch and the dispatcher returns 0 -- a silent
+  no-op. That mis-pick (the old mapping computed ids OUTSIDE both ranges) is why
+  the Freya bar never actually dispatched: keys 1-6 only looked right because the
+  native keybind fired underneath them. The bar-toggle id (`v54+3`) advances a
+  page index (`controller +0x4c`) that swaps the action bound to each of the same
+  six boxes -- the player's "alternate bar" (their abilities 7-12) is that second
+  PAGE, not six more live slots. Paging is a separate, unimplemented feature.
 - **Why it is safe**: the dispatcher call is byte-identical to a native slot
-  click / "1".."6" keypress -- same controller, same gadget id, same per-slot
-  on/off toggle gating (`slot+0x6c`). We add no behaviour; we only invoke the
-  existing path the native UI invokes. The capture hook is the established
-  read-only `pushal/push ecx/call/popal/jmp` trampoline (same shape as the
-  rpg/xp/cockpit capture hooks), so it cannot alter game state.
-- **Verified live (this dev box, in space)**: mapping resolves to bank0 gid
-  2/3/4 + bank1 gid 9/10/11 (primaries) and bank0 gid 5/6/7 + bank1 gid 12/13/14
-  (alternates); dispatching the toggle gadget id flipped the bar state 0->1->0
-  with no crash (`enb.inspace()` stayed true).
+  click / "1".."6" keypress -- same controller, same id, same per-slot toggle
+  gating. We add no behaviour; we invoke the path the native UI invokes. The
+  capture hook is the established read-only `pushal/push ecx/call/popal/jmp`
+  trampoline (same shape as the rpg/xp/cockpit hooks), so it cannot alter state.
+- **Verified live (this dev box, in space, beasleyte)**: dispatching the release
+  id of an active toggle flipped `box+0x6c` 1->0, and re-pressing flipped it 0->1,
+  via `enb.call` -- proving our path drives the real dispatch (no crash,
+  `enb.inspace()` stayed true). The 6-slot mapping resolves to bank0 ids 2/3/4
+  and bank1 ids 9/11 (press) + 13 (release, the one active toggle) -- all inside
+  the dispatcher's valid ranges, matching the user's loadout slot order.
 - **What to look for (real client, owner confirm)**: in space, clicking a Freya
-  hotbar slot 1-6 fires the same weapon/ability as the native "1".."6"; pressing
-  physical 1-6 still fires natively (Freya slot just lights); clicking Freya 7-12
-  or pressing 7/8/9/0/-/= fires the native ALTERNATE of slots 1-6 (the actions
-  behind the native alt-toggle button); toggle abilities turn on/off correctly;
-  no double-fire on key auto-repeat; no crash on use/zone/undock.
-- **NOTE**: the alternates need the bar touched once first (any primary use
-  captures the controller); before that, clicking 7-12 no-ops.
+  hotbar slot 1-6 fires the same weapon/ability as native "1".."6"; pressing
+  physical 1-6 still fires natively (Freya slot just lights, no double-fire);
+  toggle abilities turn on/off correctly; no crash on use/zone/undock.
+- **NOTE**: a slot dispatches only after the bar has been touched once in space
+  (any use captures the controller); before that, a Freya click falls back to
+  tapping the native key (which fires it AND warms the capture).
 - **Setup**: `just play-local` with `UseClientMods=true`, freya-hud enabled. The
   Lua is hot-reloadable (`reload()`); the capture hook needs the staged DLL.
 
-### [ ] CV-AS-ACTIONBAR-ICONS -- Freya hotbar shows each slot's real ability icon (icon half, NOT done)
+### [~] CV-AS-ACTIONBAR-ICONS -- Freya hotbar shows each slot's real ability icon (icon half SOLVED for abilities; awaits a populated-bar real-client confirm)
 
 - **Status**: NOT implemented. The dispatch half (CV-AS-ACTIONBAR) works without
   it; this entry tracks the remaining "show the native icon on the Freya slot".
@@ -1632,6 +1648,313 @@ moot; the SOLVED block above is the truth):**
     weapon / trained ability that (a) the chain yields the correct icon art for a
     populated slot, and (b) the primary (1-6) vs alternate (7-12) icons are right
     (both currently resolve through the same slot gadget).
+- **Progress 2026-06-19 (root-caused the "empty bar" + fixed the resolution chain)**:
+  - The bar is NOT empty. With the Freya HUD hidden, slots 1/2/3 of the native
+    circular weapon-group bar (bottom-middle, flanking the warp dial) hold the
+    character's beam weapon (slot id = 85 at slot box `+0x68`, identical across all
+    three). The earlier "every slot = Unused Slot placeholder" read conflated
+    "no 2D icon" with "empty slot".
+  - ROOT CAUSE of "no icon ever renders": a WEAPON group is drawn as a live 3D
+    MODEL in the native bar (slot box `+0x30` display node -> `+0x8c` render node
+    vt `0x00b11d88`: mesh `+0x0c` + materials vt `0x00aea230` -- no flat texture in
+    the node or material). The slot's 2D icon atlas (box `+0x64` data `+0x80`
+    embedded icon `+0x34`, AND the item-card path box `+0x64` -> `+0x64` -> `+0x24`
+    -> `+0x34`) IS a valid `IDirect3DTexture8*` but renders fully TRANSPARENT --
+    weapons have no 2D glyph. Proven by blitting both textures over a magenta
+    background: magenta showed through 100%. So a beam-weapon slot correctly draws
+    nothing; 2D glyphs exist only for activated abilities / devices. A weapon
+    thumbnail would require re-rendering the 3D model (out of scope; the rejected
+    "replicate 3D render" option). EA art cannot ship in the repo, so the disk-PNG
+    route stays out -- the live game-texture blit is the only legitimate path, and
+    it is correct as-is.
+  - FIXED: `freya_ui.lua` `slot_icon_tex` was rooting on a FIXED HUD-scene offset
+    chain (`{0x3c,0x2c,0x14,0x00,0x14,0x3c,0x34}` off `cockpit_ctrl +0x44`) that is
+    session-unstable -- it broke at hop 3 (`+0x14 -> 0`) on this relaunch and would
+    break on every relaunch. Replaced it with the controller-rooted chain the spec
+    above already documents: captured action-bar bank (`enb.actionbar`/`ab_banks`)
+    -> slot box (`bank +0x10 + k*4`, vt `0x00afac78`) -> `+0x64` -> `+0x64` ->
+    `+0x24` -> `+0x34` (vt `0x7fc8d5a0`). Verified live: all three primary slots
+    resolve to a valid d3d texture (transparent, as expected for a weapon).
+    Re-resolved each frame, freed-safe; dead `hud_scene`/`follow_to_tex`/
+    `HUD_SCENE_VT`/`SCENE_OFF`/`SLOT_ICON_CHAIN` removed. Reloaded clean, no crash,
+    HUD intact.
+  - 2D PLACEHOLDER for weapon slots (owner ask "use a 2d placeholder for weap"):
+    since a weapon group has no 2D glyph, an empty square reads as "unfilled".
+    `freya_ui.lua` now draws an ORIGINAL Freya placeholder (`weapon_icon.png`, a
+    cyan energy-bolt we authored -- MIT mod art, NOT EA art, so it ships fine) on
+    any occupied weapon slot, detected by the slot's 3D render node (display
+    `+0x30` -> node `+0x8c` vt `0x00b11d88`). Ability/device slots keep blitting
+    their real live 2D texture. Empty slots draw nothing -- emptiness is read from
+    the bank fill count (`bank +0x34`), NOT the box's own vtable/id, because a
+    bank always exposes three boxes and the unfilled ones keep stale vtable/id
+    (id=85 lingered on bank1's empty boxes). New shared `slot_box(i)` resolver
+    gates both the placeholder and the texture blit on that count. Verified live:
+    bolts show on the 3 filled weapon slots (and their 7-9 alternate-fire mirror);
+    the 6 empty slots stay blank; reloaded clean, no crash.
+  - STILL TO VERIFY (unchanged): needs a character with a trained activated ability
+    / a 2D-icon device slotted to confirm the chain yields the correct glyph art on
+    the Freya bar, and the primary (1-6) vs alternate (7-12) split. Beam-weapon
+    slots show the placeholder bolt (by design), not a real thumbnail.
+- **Progress 2026-06-19b (tested on a populated bar -- SUPERSEDES the above on two
+  points; with beasleyte: slot1 weapon, slots 2-6 abilities, all six filled)**:
+  - SUPERSEDED -- weapon detection: the "3D render node `+0x8c` vt `0x00b11d88`"
+    test flagged EVERY slot (all six had a 3D node + the lingering id=85), so it
+    bolted every slot. The RELIABLE discriminator is the bound card's vtable: from
+    a slot box, `+0x64` (slot-data gadget) `-> +0x64` (item card) vtable is
+    `0x00afcd04` for a WEAPON group and `0x00afd664` for an activated ability /
+    device. Verified live: only slot1 (the equipped beam weapon) read
+    `0x00afcd04`; all five abilities read `0x00afd664`. `slot_is_weapon` now uses
+    this; the bolt shows on slot1 only. The `RENDER3D_VT` / `box+0x30` display-node
+    path and the `bank+0x34` fill-count gate are removed (occupancy is now
+    `box+0x64 != 0`, which the dispatcher itself uses).
+  - SUPERSEDED -- 2D ability glyphs: the documented `box+0x64 -> +0x64 -> +0x24 ->
+    +0x34` texture chain CONVERGES on ONE shared `IDirect3DTexture8*` for all six
+    boxes (same `+0x24` node `072b4d80` -> same texture), so it is NOT the
+    per-ability icon -- blitting it would draw identical art on every slot. Removed
+    `slot_icon_tex` + `D3DTEX_VT`; ability slots now draw NO glyph rather than a
+    wrong/identical one. The per-ability 2D icon source is still unfound: it must
+    hang off the per-slot item card (`08c55360`/`03b17fe0`/`06e51e90`, which DO
+    differ per slot), but a scan of that card's first 0xc0 bytes found no texture
+    pointer or name string. `texture_quad` (the blit primitive) stays -- it is
+    proven and will be reused once the real per-slot texture is located.
+  - STILL OPEN: locate the per-ability 2D icon texture (off the per-slot item
+    card), and the page-toggle path for abilities 7-12. The weapon placeholder +
+    the 6-slot dispatch are done and verified live.
+- **Progress 2026-06-19c (keypress SWALLOW + native-glyph HIDE -- both SOLVED &
+  verified live on beasleyte; supersedes the "ability glyph unfound" search above
+  with the working icon-render route)**:
+  - SWALLOW (the user's "you are NOT capturing the keypress" bug) FIXED + VERIFIED:
+    `freya_ui.lua` now OWNS keys 1-6. On keydown it dispatches through our path and
+    returns true (swallow) so the native keybind handler never runs; the matching
+    keyup is swallowed only when we owned the down. Proof: read every box `+0x6c`,
+    sent a real key (xdotool) -- the pressed slot's flag toggled 0->1 EXACTLY once,
+    and 1->0 on the next press. A double-fire (native not swallowed) would toggle
+    twice per press (net zero). One toggle per press == the key was captured and
+    only our `enb.call` ran. If the controller is not captured yet, keydown falls
+    through (native fires + warms the capture) and that cycle's up is not swallowed.
+  - NATIVE GLYPH HIDE (the user's "2d icons from the native bar bleed through ...
+    doesnt hide ANY hover states") SOLVED: each box owns its 2D glyph as a native
+    chrome panel leaf (vt `0x00b1327c`) at `box +0x74`. The in-space HUD draw pass
+    draws a chrome leaf only when `(flags & 0x700) == 0x700` at leaf `+0x18`;
+    clearing the `0x400` bit drops it from BOTH the draw pass and the input/hover
+    pass (the 0x700 gate is V|E|L and gates input too -- so the hover highlight dies
+    with the icon). `hide_native_glyphs()` walks all six boxes from the captured
+    controller and clears each `box+0x74` glyph every frame. Verified live: with our
+    bar ON, every native floating icon (the spread-out yellow key / purple wrench /
+    cyan / yellow "!" / arrow icons either side of the reticle) is gone; only the
+    clean Freya 6-slot bar remains. This is why hide-ui's single named
+    "ActionBarIcons" leaf only hid box 0 -- that leaf is `box0 +0x74` (the slot-1
+    glyph); the other five boxes' glyphs are separate leaves it never named. Note
+    these glyph leaves are NOT in the chrome tail-anchored ELEMENTS block (they sit
+    in the list FRONT), and the box->glyph link (`+0x74`) is the stable, controller-
+    rooted way to reach all six regardless of list position.
+  - ICON SOURCE for #3 FOUND (route, not yet rendered): the `box+0x74` glyph leaf
+    is the thing that renders the real per-slot 2D icon. Its slotted-item descriptor
+    is at glyph-leaf `+0x8c` (a struct tagged "INVITEM"); that descriptor's `+0x20`
+    is the item's AuxData property hashmap (vt `0x00aff304`). The icon texture/name
+    is a property in that map. This is a cleaner lead than the earlier item-card
+    `+0x24 -> +0x34` chain (which converged on one shared/transparent texture). Open
+    work: traverse the INVITEM AuxData map for the icon property and blit via
+    `texture_quad`. Until then ability slots draw no glyph (weapons draw the bolt).
+  - STILL OPEN: render the real per-ability icon (see 2026-06-19d for why the
+    INVITEM-AuxData route does not yield a blittable texture).
+- **Progress 2026-06-19d (7-12 PAGE TOGGLE -- SOLVED & verified live; real-icon
+  route re-assessed)**:
+  - PAGE TOGGLE (the user's "7-12 toggle path") DONE + VERIFIED on beasleyte.
+    `freya_ui.lua` adds `current_page()` / `toggle_page()` / `slot_label()` and a
+    "PG" button at the right of the bar (`page_rect`). Clicking it flips BOTH banks
+    together (per-bank toggle id = `u32(bank+0x54)+3` -> 8 for bank0, 15 for bank1)
+    so all six slots page as a unit; the slot labels follow (1-6 <-> 7-12) and the
+    button shows the page it switches TO. The six press ids are fixed across pages,
+    so keys/clicks need no remap -- they fire whatever page is live. Verified: tapped
+    the toggle (8+15) -> `pg` flipped `0,0`->`1,1` and the labels became 7-12; tapped
+    again -> restored `0,0`. Keyboard dispatch confirmed on both pages (xdotool key
+    2/3 -> `[ab] dispatch arg=3/4`). NOTE the box `+0x6c` active flag is per-box and
+    shared across pages, so a press on one page leaves that physical box active when
+    you flip; for instant abilities the game clears it on cooldown, but a held/toggle
+    ability must be released before/after paging (our keyup does not auto-release on
+    page flip -- a known edge, fine for instant skills which are the common case).
+    Mouse-CLICK on the button could not be driven from the harness (synthetic xdotool
+    mouse events do not reach this in-game WINE window; physical keyboard does, and
+    the user's real mouse does), but the click handler reuses the proven
+    `toggle_page()` and the hit-test math matches the live layout (`enb.screen()`
+    1280x960 -> bar_x=487, page button at x=799).
+  - REAL-ICON ROUTE RE-ASSESSED (the 2026-06-19c "INVITEM +0x20 AuxData" lead does
+    NOT pan out): the action-bar glyph leaf resolves its 2D icon from a texture cache
+    at DRAW time and does NOT persist a blittable `IDirect3DTexture8*` anywhere in its
+    node subtree. Proof: a bounded BFS of the glyph leaf's own subtree (excluding the
+    `+0x7c` HUD-scene parent) found ZERO objects with a module-range (D3D COM) vtable
+    -- only heap/exe-vtable render nodes. The INVITEM at glyph-leaf `+0x8c` carries a
+    `.w3d` model name + a sub-object vtable at `+0x18` (`0x00b10d20`); its `+0x20` is
+    NOT the `0x00aff304` AuxData map the earlier note assumed. The inventory-icon
+    setter `FUN_0056c180` (client/ui) is a DIFFERENT widget class and reads its icon
+    ids from widget `+0x13c/+0x140` via a manager vtable+0x18 call -- not reusable for
+    the action-bar glyph without reconstructing that widget. CONCLUSION: real ability
+    icons need a PASSIVE DLL hook on the glyph-leaf draw to capture the texture it
+    binds (robust, no guessed `enb.call` args -- a guessed dispatcher call on a bad
+    `this` already crashed the client once this session). That is the next step and a
+    DLL change (relaunch cycle), not a Lua-only fix. Weapon slots keep the original
+    Freya bolt placeholder; ability slots draw no glyph until the hook lands.
+  - REAL-ICON RECIPE FOUND (the resolve-by-name path the inventory uses; this is
+    the concrete route to implement, no blind guessing): the inventory icon setter
+    (`client/ui`, the widget whose icon-name fields live at widget `+0x13c` /
+    `+0x140`) resolves its icon as
+    `tex = (*(texmgr))[vtable+0x18](nameA, nameB, variant)` where
+    `texmgr = *(widget + 0x40)`, `nameA = widget+0x13c`, `nameB = widget+0x140`,
+    `variant` = 0/1 (normal/alt). The returned object is then wrapped by an
+    icon-texture HANDLE class (ctor takes the surface as `*param_2`, stores it at
+    handle `+0x8`, vtable `0x00aedd88`). So the engine DOES expose a
+    "get-icon-surface-by-name" manager method (`texmgr` vtable slot `+0x18`,
+    `__thiscall(nameA, nameB, variant)`), and a surface->`IDirect3DTexture8*`
+    accessor lives on the handle/surface. NEXT STEPS to finish #3: (1) find the
+    `texmgr` singleton (the `widget+0x40` value -- likely a global UI texture
+    manager) and the icon-name string for an action-bar ability (off the per-slot
+    item card vt `0x00afd664`, which differs per slot but had no name in its first
+    0xc0 bytes -- the name is deeper, in the ability/item DEFINITION the card
+    points at); (2) either call the manager `+0x18` method via `enb.call` with the
+    REAL (now non-guessed) 3-arg signature, or hook it passively to record
+    name->surface; (3) walk surface -> `IDirect3DTexture8*` and blit with
+    `enb.draw.texture_quad`. This converts the long-standing "per-ability icon
+    source unfound" into a known method call -- the remaining unknown is just the
+    icon-name string per ability and the manager singleton address.
+- **Progress 2026-06-19e (DEFINITIVE: the slot icon is a 3D MODEL render, not a
+  flat sprite -- this CORRECTS every prior "find/capture the icon texture" plan
+  above, including 19c/19d; verified live in space on a populated bar)**:
+  - Empirically force-showed the `box+0x74` glyph leaf (set flags `|0x700` every
+    frame via a run-channel tick) and screenshotted: it renders a **WW3D 3D model**
+    (the per-slot `INVITEM` aggregate, sub-objects named `ITEMON01` = icon mesh,
+    `ITEM_DARK`/`ITEM_NOSKILL`/`ITEM_TIMER` = state overlays, `GD_SLOT_DATA_*` =
+    slot index), NOT a flat 2D icon. So there is NO single blittable
+    `IDirect3DTexture8*` "icon" to capture or chain to -- the icon is a textured,
+    UV-mapped 3D mesh viewed at a fixed angle.
+  - This explains every earlier dead end: the static chains converged on a SHARED
+    texture (the frame/border atlas), and a BFS of the mesh subtree surfaced only
+    transparent overlay/frame textures (`07d54590` = shared frame, `07d545c0` = a
+    near-empty overlay) -- blitting them over a magenta backer showed ~100%
+    transparency. None is the visible icon because the visible icon is geometry,
+    not a sprite.
+  - SEPARATELY corrected: the ornate orange "disks" in the bottom-centre cockpit
+    are NOT the action-bar slot glyphs -- they are part of the always-on cockpit
+    chrome MODEL, a different node. The `0x400` hide (`box+0x74` leaf `+0x18`)
+    correctly drops the slot glyph (confirmed `bit400=clr` in production, and the
+    slot 3D model vanished) but does not (and should not) touch those cockpit
+    disks. So #2 (hide native slot icons) remains correct and complete.
+  - CONSEQUENCE for #3: "show the real per-slot icon on the flat Freya bar"
+    requires **render-to-texture of each slot's 3D `INVITEM` model** into an
+    offscreen RT, then blit that RT region with `enb.draw.texture_quad`. There is
+    no shortcut sprite. RTT is a substantial DLL effort (create RT+depth in
+    `D3DPOOL_DEFAULT`, drive each model's WW3D render with a framing camera into
+    the RT, restore, blit) with real risk that a WW3D `RenderObj` will not render
+    correctly outside the engine's scene/camera pipeline. The "passive SetTexture
+    capture" idea from 19d is ALSO insufficient on its own: even captured, a single
+    bound texture is one material stage of a multi-mesh model, not the composited
+    icon. The honest status: #3 as "pixel-faithful real icon" is a render-to-texture
+    project, not a hook-and-blit; the current Freya bar (numbered labels + weapon
+    bolt placeholder + working dispatch + paging) is the functional state until RTT
+    lands. This is a design call for the owner: invest in per-slot model RTT, or
+    keep the placeholder/label bar.
+- **Progress 2026-06-19f (SOLVED for abilities -- SUPERSEDES 19e's "it is a 3D
+  model, needs RTT" conclusion; the ability card DOES expose a flat icon texture)**:
+  - 19e was WRONG. It force-showed the native `box+0x74` glyph LEAF (a WW3D
+    `INVITEM` 3D aggregate) and concluded "no blittable sprite exists -> RTT only".
+    That leaf is the native bar's renderer, not the icon source. The per-slot ITEM
+    CARD (`box+0x64 -> +0x64`, vt `0x00afd664` for an ability) carries a flat 2D
+    icon and surfaces it through its OWN vtable: the card's vtable slot `+0x34` is a
+    `__thiscall` "get icon texture" getter (the engine's preset-texture branch). Call
+    it on the card and it returns a `TextureClass` (vt `0x00b119f0`, w/h at
+    `+0x2c`/`+0x30`, `IDirect3DTexture8*` at `+0x34`) that the GAME has already
+    loaded and realized -- no RTT, no 3D model, no name lookup needed. Verified live:
+    the getter returns a DISTINCT texture per ability (two boxes holding the same
+    ability return the SAME texture pointer; different abilities differ), and the
+    `+0x34` d3d is already non-NULL (COM vtable in the `0x7f______` d3d8 band).
+  - GENERAL name-resolve path (also proven, used for weapons later / any icon): the
+    asset manager singleton is `*(0x00bfaee0)`; its vtable `+0x30` is
+    `GetTexture(nameA, 1, 0, 1)` (`__thiscall`) returning a `TextureClass`; if its
+    `+0x34` d3d is NULL, `TextureClass::Init` (`0x0094b920`, thiscall, no args)
+    realizes it. The skill icon NAME for an ability lives in the AllSkills static
+    array (base `*(0x00be8e2c)`, end `*(0x00be8e30)`, array of record ptrs; record
+    `+0x04` = `char*` icon name e.g. "skill_afterburn.tga", default "skill_.tga").
+    Proven live: resolved skill_afterburn / skill_befriend / skill_weaponkill by
+    name and blitted all three -- crisp, correct art.
+  - TWO render bugs fixed (this is why earlier blits showed "valid texture, nothing
+    draws"): (1) `enb.draw.texture_quad`'s alpha arg is 0..255, NOT 0..1 -- passing
+    `1.0` truncated to `1` ~= fully transparent; pass `255`. (2) the overlay's
+    `K_TEXQUAD` path used `ALPHAOP=MODULATE` (texAlpha * diffuseAlpha); game icon
+    textures are opaque RGB with a zero/absent alpha channel, so MODULATE multiplied
+    the icon to invisible. `overlay.cpp` now sets `ALPHAOP=SELECTARG2` (alpha solely
+    from the diffuse / our requested alpha) for `K_TEXQUAD`, restoring MODULATE
+    after. DLL rebuilt + reinjected.
+  - WIRED in `freya_ui.lua`: `slot_icon_tex(i)` resolves an ability slot's icon via
+    the card `+0x34` getter (Init fallback if not realized) and `draw_hotbar` blits
+    it with `texture_quad(..., 255)`. Weapon slots keep the `weapon_icon.png` bolt
+    placeholder (a weapon card's `+0x34` returns only SHARED item-state chrome, not a
+    per-weapon icon -- the real weapon icon is off the item record, a follow-up).
+    Re-resolved every frame; texture pointer never cached.
+  - VERIFIED end-to-end EXCEPT a real populated-ability bar: this env's only
+    avatar (and beasley's logged-in char) has 3 weapons + no abilities slotted, so a
+    real ability glyph has not rendered in the live Freya bar. Proved the in-mod
+    plumbing instead: a temp store-only patch made `slot_icon_tex` name-resolve a
+    real skill icon for the empty slots; the actual mod `draw_hotbar` then rendered
+    those skill icons crisply IN the real slot rects (slots 5/6), confirming
+    `draw_hotbar -> slot_icon_tex -> texture_quad` + the alpha fix work in production.
+    The only unproven-in-this-env link is the card `+0x34` getter on a real ability
+    card -- which WAS proven live in the prior session (5 distinct ability textures).
+  - REAL-CLIENT CHECK (owner): on a character with trained activated abilities /
+    2D-icon devices slotted, confirm each ability slot on the Freya bar shows the
+    correct per-ability art (and that paging 1-6 <-> 7-12 shows the right page's
+    icons). Weapon slots show the bolt placeholder by design.
+- **Progress 2026-06-19g (four follow-up fixes after icons confirmed on beasleyte:
+  delayed-icons, icon appearance, hover, key activation)**:
+  - #4 KEY ACTIVATION -- FIXED + VERIFIED LIVE. Pressing 1-6 did nothing because
+    `slot_action` read the box active flag `box+0x6c` as a `u32`; the dispatcher
+    `FUN_006120e0` reads it as a single `char`. The dword always holds a nonzero
+    pointer/float, so the Lua always picked the release base (0x54) and dispatched
+    a release id on an idle box -- a dispatcher no-op -- AND swallowed the native
+    key, so nothing fired. Fix: read `m.u8(box+0x6c)`. Verified live on beasleyte:
+    a real keydown of "1" flips box0 `+0x6c` 0->1 (ability activates), a second tap
+    flips 1->0 (toggle off), and the key is swallowed (no native double-fire).
+    FOLLOW-UP (every-other-tap): the first cut dispatched ONLY a press on key-down
+    and nothing on key-up, so the box flag stuck at 1 and the next press was read by
+    the dispatcher as a release (no fire) -- the user had to press/click TWICE to
+    activate. The native keybind sends press on down AND release on up (ability
+    fires on the press; release just resets the flag). Fixed to mirror that:
+    `press_slot` on key-down, `release_slot` on key-up, `tap_slot` (press+release)
+    for a click. Verified live: keydown sets the byte to 1 (fires), key-up clears it
+    to 0, and three consecutive single taps each net the byte back to 0 -- every tap
+    fires once. Single press/click now activates.
+  - #3 HOVER -- FIXED + VERIFIED LIVE. The native bar stayed hidden in the normal
+    state but reappeared under the cursor on hover. A chrome leaf draws + takes
+    input only when `(flags & 0x700) == 0x700` at leaf `+0x18` (Visible 0x100 |
+    Enabled 0x200 | inLayout 0x400). The old hide cleared only 0x400 (inLayout),
+    which the game RE-SETS on rollover after our per-frame clear -> bar flashes back.
+    Fix: `hide_native_glyphs` clears 0x200 (Enabled) on all three chrome leaves
+    (`box+0x30/+0x58/+0x74`) per box; the game never re-asserts 0x200, so the gate
+    can never complete even on hover. Verified live: flags probe shows en=0 on all
+    nine leaves and a hover screenshot shows no native bar below the Freya HUD.
+  - #1 IMMEDIATE ICONS -- FIXED + VERIFIED LIVE. Icons appeared only after ~30s or
+    a bank switch because the controller was captured ONLY from the
+    interaction-triggered dispatch hook. Fix: added a capture hook on the bank
+    CONSTRUCTOR `FUN_00610f80` (`game.h::ActionBarCtor`), same capture-only naked
+    trampoline as the dispatch hook -- stores `this` (ECX) the moment a bank exists
+    (entering space), before any interaction. Store-only; Lua reads bank fields
+    frames later after construction completes (guarded by `box~=0`/`readable`), so
+    no use-before-init. Verified live on beasleyte: immediately after entering space
+    with ZERO clicks/keypresses, `enb.actionbar()` is non-zero (`0x7672EA8`) -- the
+    only no-interaction capture path is the constructor hook -- and icons render
+    on the bar at once, no ~30s / bank-switch wait.
+  - #2 ICON APPEARANCE -- FIXED + VERIFIED LIVE. Icons rendered on an opaque
+    dark/black square with no tint. Fix: `overlay.cpp` K_TEXQUAD now uses a
+    black-key SCREEN blend (SRCBLEND=ONE, DESTBLEND=INVSRCCOLOR) so the icon art's
+    black background blends to transparent, and a MODULATE color stage multiplies
+    the texture by a diffuse tint. `texture_quad` gained `tint`/`additive` params;
+    `freya_ui.lua` blits abilities with `ICON_TINT = 0xAFD4FF` (light blue).
+    Verified live: the brightest icon pixels measured (168,216,243) under the new
+    DLL vs neutral (233,240,247) under the old -- matching the tint 0xAFD4FF
+    (175,212,255); the black squares now blend into the glass slots.
+  - All four (#1-#4) verified live on beasleyte (account "beasley") this session
+    after relaunch with the rebuilt `bin/enbmod.dll`.
+  - REAL-CLIENT CHECK (owner): confirmed by agent on beasleyte; owner may re-confirm
+    on other ability characters / paging if desired, but the mechanism is proven.
 
 ### [ ] CV-AS-AUXNUMS -- HUD shows correct numeric cur/max vitals + discipline levels (AuxData getter)
 
@@ -2106,3 +2429,131 @@ moot; the SOLVED block above is the truth):**
 - **Long-term**: the faithful fix is server-side -- initialise the account-status
   block in the global-login flow (notice flag 0, valid/empty expiry) so the
   retail path sees sane data. Tracked as follow-up; this stops the crash now.
+
+### [ ] CV-PB29-30 -- Terran-Trader skill-quest offers depend on character state, not content (PB-29 / PB-30)
+
+- **Why this is here, not a content fix**: the PB-29 and PB-30 content audits
+  (plans/41) found the mission/NPC data is CORRECT and self-consistent, so there
+  is nothing to change in the `net7` content DB. The reporter's symptom (quest
+  not offered / skill not trained) can only be explained by the live character's
+  runtime state, which needs the real client + the reporter's actual character
+  to diagnose. Do NOT fabricate a content fix against correct data.
+- **PB-29 -- "Reconfiguration of Shields" (mission 347) not offered by Louden
+  MacEwen (npc 41) at Loki Station**: data is correct -- mission 347 exists,
+  Stage-0 giver == Louden's `npc_Id` 41, gated ONLY to Race==Terran(0) +
+  Profession==Trader(1), rewards skill 51 "Shield Charging", no level/prereq
+  gate. A clean Terran-Trader WILL be offered it. **What to verify on the real
+  client**: with a Terran Trader who has NOT done mission 347, talk to Louden at
+  Loki Station (High Earth) -- the quest should appear. If it does, the
+  reporter's character had already started/completed it, or its stored
+  race/profession is not exactly Terran/Trader. Capture the reporter's
+  completed-missions set + character race/profession to settle it.
+- **PB-30 -- Katlyn Walsh (npc 306) won't train Build Components (skill 4) at
+  New Edinburgh/Somerled**: the reporter's "gated behind Reconfiguration of
+  Shields" premise is FALSE per data. Build Components is taught by mission 117
+  "Tinkering with Parts" (Katlyn), gated by MISSION_REQUIRED on missions **6 +
+  116** (NOT 347). **What to verify on the real client**: a Terran Trader who has
+  completed missions 6 and 116 should be offered "Tinkering with Parts" by
+  Katlyn. If completing 6+116 unlocks it, the report was just an unmet (and
+  mis-attributed) prereq, and there is no defect.
+- **Setup**: `just play-local`, a Terran Tradesman character. No code/content
+  change to test -- this is a state-diagnosis, not a fix verification.
+- **Primary-source caveat**: net7wiki (the cited source for PB-29) is behind a
+  Cloudflare JS challenge and could not be machine-fetched to cross-check
+  retail prereq fidelity. Our content is internally coherent; if the wiki later
+  shows retail gated these differently, revisit then.
+
+### [ ] CV-PB17 -- idle-then-zone-transition no longer hangs on the loading screen (PB-17)
+
+- **What changed**: TWO reap-during-handshake paths closed.
+  (1) server `UDP_Connection::HandleLoginStageAck`
+  (server/src/UDP_MVAS.cpp:230) now refreshes `LastAccessTime` on every
+  login-stage ack, mirroring `HandleKeepCommsAlive`. This closes a code-found
+  race: a zone change re-LOGINs the player (resets below `LAST_LOGIN_STAGE`),
+  arming the 2-minute idle reaper in `RunLoginThread`; the per-stage acks did
+  not refresh the idle timer, so a player who idled near the 2-min mark before
+  transitioning could be reaped mid-load, freeing the GameID -> every later
+  keepalive answered with `0x100A MVAS_TERMINATE` -> infinite loading screen.
+  (2) `Player::HandleLogin` (server/src/PlayerConnection.cpp) now refreshes
+  `LastAccessTime` BEFORE it resets the stage. The reporter repro ("sit 2-3 min
+  on a station, then leave") proved the stage-ack fix alone is insufficient: a
+  station-parked player is at `LAST_LOGIN_STAGE` so the reaper ignores them, so
+  idle mattering at all means the keepalive is letting `LastAccessTime` go stale
+  during the idle (PB-9). When they then leave, the reaper is armed with an
+  already-stale timer and drops them on the next ~1s pass, before any stage-ack
+  lands. Resetting the clock at the transition gives the handshake a full fresh
+  2-min window regardless of how stale idle left it.
+- **Why it needs the real client**: the 30s `0x3005` keepalive SHOULD also
+  refresh the timer through the handoff, so on the happy path the race may not
+  fire. This fix is correct regardless (an acking client is not idle) but is
+  NOT a proven cure -- only a live repro confirms PB-17 is actually resolved,
+  and confirms there isn't a SECOND cause (keepalive thread dying, dropped
+  handoff reply).
+- **What to do (real client)**: reproduce the reporter's exact path -- log in,
+  sit idle on a STATION for 2-3 min, then leave (undock / dock to another base /
+  gate). The load must COMPLETE every time. Also try the ~110s-then-gate variant
+  and a longer idle (3-5 min) to stress the empty-sector teardown path. Run it
+  enough times to clear the previous "happens intermittently" framing.
+- **What to watch in logs** (`docker logs freya-dev-server-1` + proxy): there
+  must be NO `Player '<name>' Removed from Galaxy.` line during a loading
+  screen, and NO `0x100A MVAS_TERMINATE` sent in response to a keepalive for a
+  live session. If the hang still reproduces, capture the server+proxy logs at
+  the stuck moment -- the next suspect is whether the keepalive thread is still
+  firing (grep `Received Keepalive`) or a handoff reply was dropped.
+- **Setup**: `just rebuild server` (done) then `just play-local`.
+
+### [ ] CV-PB22 -- nav map reveals on proximity, not all-at-entry (PB-22)
+
+- **What changed**: `SendAllNavs` (server/src/ObjectManager.cpp:572) entry gate
+  reverted from `obj->IsNav()` (send every nav) to
+  `obj->GetEIndex(player->ExposedNavList())` (send only previously-discovered
+  navs). Undiscovered navs are now revealed by `CheckNavRanges` as the player
+  flies within scanner range. The 636c6175 capture citation was a misread (the
+  capture char had explored the whole sector, so the bytes are identical either
+  way -- owner-confirmed), so this is not a contradiction of the capture.
+- **Why the real client is needed**: confirms the three discovery states render
+  correctly AND that the "Luna empty-map" symptom 636c6175 was chasing does not
+  return in a harmful form.
+- **What to verify (real client)**:
+  1. **Fresh character, never-visited sector**: on entry the sector map should
+     show NO "?" nodes for navs you've never been near (only planets / things
+     in range). Previously every nav showed as "?" immediately -- that must be
+     gone.
+  2. **Fly toward a nav**: as it enters scanner range it should appear as a "?"
+     node (exposed), and the "discovered <nav>" message should arrive TOGETHER
+     with the node appearing (not a message with no node -- the old Luna
+     complaint). Flying closer (explore range) should mark it visited and award
+     XP.
+  3. **Re-enter the sector**: navs you previously exposed/visited should still
+     be on the map at entry (persisted ExposedNavList), so your discovered map
+     is not lost on zone change.
+- **If the Luna symptom returns** (discovered message with no map node): the bug
+  is in `StaticMap::SendObject` / `CheckNavRanges` create emission for an
+  exposed-but-unexplored nav (HAS_NAV gating on `AppearsInRadar`), not in the
+  entry gate -- investigate there rather than reverting this.
+- **Setup**: `just rebuild server` (done) then `just play-local`, fresh char.
+
+### [ ] CV-PB32 -- Swooping Eagle "Default" lvl-0 crash-mob (PB-32)
+
+- **What changed**: (1) NULL-data guards in `server/src/MOBClass.cpp`
+  (`CheckWarningShots`, `CheckAggro`, `GetStealthDetectionLevel`) so a mob with
+  a missing `mob_base` row no longer faults the sector server; (2) data cleanup
+  `db/postgres/fix_orphan_mob_spawns.sql` (run by schema-init in both compose
+  files) removes the `mob_spawn_group` rows that referenced non-existent mobs,
+  so the unnamed "Default" ghost mob no longer spawns at all.
+- **Why the real client is needed**: the CLI cannot enter a sector and fly a
+  ship within a mob's range; only the real client proves the crash is gone AND
+  that removing the orphan spawns did not leave a visibly broken sector.
+- **What to verify (real client)**, after deploy (Build-And-Push + Update-Stack):
+  1. **Enter Swooping Eagle (Sirius), fly to Field of Glass Point.** Server must
+     NOT crash; no unnamed "Default" lvl-0 mob present. Sit in range for >2 min.
+  2. **Confirm the Juoona mobs behave normally** (no zone-wide spaz-chase of a
+     phantom target).
+  3. **Sanity-check the other 5 affected sectors** if convenient: Carpenter,
+     Mars Gamma, Saturn, Lagarto, Unknown Galaxy -- no "Default" mob, no crash.
+     Note "Nesshix the Hand" (Unknown Galaxy, spawn 12385) referenced ONLY the
+     orphan mob, so that spawn is now empty by design (its mob's stats do not
+     exist in any source and cannot be fabricated) -- expected, not a new bug.
+- **Setup**: deploy to DO (the live-stack fix is automatic on deploy: new server
+  image carries the guards, schema-init auto-deletes the orphan rows from the
+  existing prod volume because its command changed and the DELETE is idempotent).

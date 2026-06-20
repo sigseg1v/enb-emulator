@@ -372,10 +372,17 @@ func (s *apiServer) handleBid(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad listing id"})
 		return
 	}
+	var body struct {
+		Avatar string `json:"avatar"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
 
-	view, err := s.store.PlaceBid(ctx, acctID, id)
+	view, err := s.store.PlaceBid(ctx, acctID, body.Avatar, id)
 	if err != nil {
 		mutationError(w, err)
 		return
@@ -395,10 +402,17 @@ func (s *apiServer) handleBuyout(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad listing id"})
 		return
 	}
+	var body struct {
+		Avatar string `json:"avatar"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
 
-	if err := s.store.Buyout(ctx, acctID, id); err != nil {
+	if err := s.store.Buyout(ctx, acctID, body.Avatar, id); err != nil {
 		mutationError(w, err)
 		return
 	}

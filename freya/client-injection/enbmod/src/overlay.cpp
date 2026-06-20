@@ -559,8 +559,26 @@ static void draw_frame(IDirect3DDevice8* dev) {
             // wrong; a bad pointer must no-op, not fault the renderer.
             if (!c.tex || !enb::mem::readable(c.tex, 4) || !enb::mem::readable(*(void**)c.tex, 4))
                 break;
+            // Game icon textures (action-bar abilities, item portraits) are opaque
+            // RGB on a BLACK background with no usable alpha channel (alpha bytes
+            // read as 0). The default SRCALPHA/INVSRCALPHA blend would key on that
+            // zero alpha and draw nothing; a plain opaque draw shows the black box.
+            // Instead blend on COLOR: src*ONE + dst*INVSRCCOLOR (a "black key"
+            // screen blend) so black pixels (src=0) leave the background untouched
+            // -- transparent -- while bright pixels stay solid. additive (ONE/ONE)
+            // is the pure-glow variant. The icon is MODULATEd by the diffuse, which
+            // we set to the tint (c.rgb) scaled by c.alpha, giving the HUD hue and a
+            // brightness/fade control. Restore the standard alpha blend after.
+            uint32_t tr = (((c.rgb >> 16) & 0xFF) * (c.alpha & 0xFF)) / 255;
+            uint32_t tg = (((c.rgb >> 8) & 0xFF) * (c.alpha & 0xFF)) / 255;
+            uint32_t tb = ((c.rgb & 0xFF) * (c.alpha & 0xFF)) / 255;
+            D3DCOLOR diffuse = 0xFF000000u | (tr << 16) | (tg << 8) | tb;
+            dev->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
+            dev->SetRenderState(D3DRS_DESTBLEND, c.filled ? D3DBLEND_ONE : D3DBLEND_INVSRCCOLOR);
             draw_quad(dev, (IDirect3DTexture8*)c.tex, (float)c.x, (float)c.y, (float)c.w,
-                      (float)c.h, 0, 0, 1, 1, argb(0xFFFFFF, c.alpha));
+                      (float)c.h, 0, 0, 1, 1, diffuse);
+            dev->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+            dev->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
             break;
         }
         }
@@ -592,6 +610,11 @@ static void sample_screen(IDirect3DDevice8* dev) {
     }
 }
 
+static std::atomic<unsigned long> g_present_n{0};
+unsigned long present_count() {
+    return g_present_n.load(std::memory_order_relaxed);
+}
+
 static HRESULT WINAPI hk_Present(IDirect3DDevice8* dev, const RECT* src, const RECT* dst, HWND wnd,
                                  const RGNDATA* dirty) {
     static bool logged = false;
@@ -599,6 +622,7 @@ static HRESULT WINAPI hk_Present(IDirect3DDevice8* dev, const RECT* src, const R
         logged = true;
         logf("overlay: Present hook FIRED -- D3D8 present path live");
     }
+    g_present_n.fetch_add(1, std::memory_order_relaxed);
     sample_screen(dev);
     draw_frame(dev);
     return real_Present(dev, src, dst, wnd, dirty);
@@ -743,14 +767,15 @@ void rrect_grad(int x, int y, int w, int h, int radius, uint32_t rgb_top, uint32
 void image(const std::string& path, int x, int y, int w, int h, int alpha) {
     g_staging.push_back({K_IMAGE, x, y, w, h, 0, false, alpha, path, 0, 0});
 }
-void texture_quad(void* tex, int x, int y, int w, int h, int alpha) {
+void texture_quad(void* tex, int x, int y, int w, int h, int alpha, uint32_t tint, bool additive) {
     Cmd c{};
     c.kind = K_TEXQUAD;
     c.x = x;
     c.y = y;
     c.w = w;
     c.h = h;
-    c.rgb = 0xFFFFFF;
+    c.rgb = tint;        // multiplied into the icon (light-blue HUD hue)
+    c.filled = additive; // true = ONE/ONE glow; false = ONE/INVSRCCOLOR black-key
     c.alpha = alpha;
     c.tex = tex;
     g_staging.push_back(c);

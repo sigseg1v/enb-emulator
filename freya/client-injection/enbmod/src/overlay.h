@@ -52,13 +52,17 @@ void image(const std::string& path, int x, int y, int w, int h, int alpha);
 // (UV 0..1). `tex` is the raw IDirect3DTexture8* the game already created on its own
 // device; we only bind and draw it (no ownership, no Release). A null/garbage pointer
 // is skipped in the Present hook. alpha 0..255 scales overall opacity.
-void texture_quad(void* tex, int x, int y, int w, int h, int alpha);
+void texture_quad(void* tex, int x, int y, int w, int h, int alpha, uint32_t tint = 0xFFFFFF,
+                  bool additive = false);
 
 // Draw our own mouse pointer on TOP of the display list (the native cursor
 // renders underneath the HUD). `on` toggles it; `hwnd` is the game window, used
 // to map the screen-space cursor into client coords. A procedural arrow (no
 // binary asset, per the repo rule). Safe to call every tick.
 void set_cursor(bool on, void* hwnd);
+
+// Diagnostic: monotonic count of Present-hook calls (== HUD draw rate).
+unsigned long present_count();
 
 } // namespace overlay
 } // namespace enb

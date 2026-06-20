@@ -6,11 +6,16 @@
 -- this helper finds them at runtime and writes scripts/calib_data.lua (gitignored),
 -- which init.lua loads on the next start / hot-reload.
 --
--- AUTOMATIC (preferred): just enter space. This mod auto-runs probe_vitals()
--- ~1s after you enter space and dumps the live hull/shield/energy gadget chain
--- (reached from the heartbeat-captured controller, no scanning) to enbmod.log
--- with per-offset float/int/ptr annotations. Read the constant field offsets off
--- that dump -- they are the same for every install of this client build.
+-- DEVELOPER TOOL, OPT-IN. Loading this mod is INERT -- it does no per-frame work
+-- until a developer explicitly calls require("autocalib").arm() over the cmd
+-- channel. arm() then auto-runs probe_vitals() ~1s after you enter space and
+-- dumps the live hull/shield/energy gadget chain (reached from the
+-- heartbeat-captured controller, no scanning) to enbmod.log with per-offset
+-- float/int/ptr annotations, then keeps a per-frame change-watcher running. Read
+-- the constant field offsets off that dump -- they are the same for every install
+-- of this client build. (It is opt-in because the per-frame watcher walks ~250
+-- memory addresses every message-pump iteration; auto-arming it in a normal play
+-- session wedged the client's message pump -- see M.arm() below.)
 --
 -- MANUAL fallback (older flat-field scan, in-game with the chat HUD visible):
 --   local ac = require("autocalib")
@@ -114,8 +119,8 @@ local function scan_for_name(label, base, count)
 end
 
 -- The fully-automatic probe. Pulls the live controller from the hook and dumps
--- the whole known chain. Run it in space (init.lua auto-runs it once on first
--- space entry; re-run by hand with `require("autocalib").probe_vitals()`).
+-- the whole known chain. Run it in space (M.arm() runs it once on first space
+-- entry; re-run by hand with `require("autocalib").probe_vitals()`).
 function M.probe_vitals()
     local ctrl = enb.vitals_ctrl and enb.vitals_ctrl() or 0
     enb.log(("[probe] ===== vitals probe; vitals_ctrl=%08x ====="):format(ctrl))
@@ -390,13 +395,24 @@ function M.save(t)
     return true
 end
 
--- Auto-run the vitals probe ONCE ~1s after first entering space (gadgets need a
+-- M.arm(): run the vitals probe ONCE ~1s after entering space (gadgets need a
 -- few frames to populate), THEN keep the change-watcher running every frame.
--- Fully automatic: enter space (one-shot [probe] dump), then move a bar -- fire
+-- After arming: enter space (one-shot [probe] dump), then move a bar -- fire
 -- weapons / boost (drains energy) or take a hit (shield/hull) -- and the live
 -- fill offset shows up in the [watch] lines. Re-run the snapshot by hand with
 -- require("autocalib").probe_vitals().
-do
+--
+-- THIS IS OPT-IN ON PURPOSE. watch_vitals walks ~250 client-memory addresses
+-- EVERY FRAME, and the enbmod tick fires off the Win32 message pump
+-- (PeekMessageA/GetMessageA hook), so an always-on per-frame memory walk runs on
+-- the message-pump thread at full frame rate. Auto-arming this on load wedged a
+-- normal play session's message pump ~1 min after entering space (client froze:
+-- pump dead, all threads parked). A developer calibration tool must never hammer
+-- the pump just by being staged -- so loading this mod is inert until a developer
+-- explicitly calls require("autocalib").arm() over the cmd channel.
+function M.arm()
+    if M._armed then enb.log("autocalib: already armed"); return end
+    M._armed = true
     local probed = false
     local space_ticks = 0
     enb.on_tick(function()
@@ -417,7 +433,9 @@ do
             if not ok then enb.log("[watch] error: " .. tostring(err)) end
         end
     end)
-    enb.log("autocalib: armed -- auto-probe + change-watch after entering space")
+    enb.log("autocalib: ARMED -- auto-probe + per-frame change-watch after entering space")
 end
+
+enb.log("autocalib: loaded (inert) -- run require(\"autocalib\").arm() to start calibrating")
 
 return M

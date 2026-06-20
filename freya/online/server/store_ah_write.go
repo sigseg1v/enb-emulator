@@ -8,8 +8,11 @@
 // item_base + the actual stored instance, not from the request body.
 //
 // Credit model (documented; flagged as an owner question in plans/44):
-//   - The account's PRIMARY live character (lowest slot) is the wallet for
-//     website-initiated debits (deposit, bid, buyout).
+//   - Website debits (deposit, bid, buyout) are charged to the character the
+//     player is ACTING AS -- the SPA's selected topbar character, passed by name
+//     and resolved via ownedAvatarByName. There is NO fallback to the account's
+//     lowest-slot character: charging a wallet other than the chosen one was
+//     PB-31 (a buy/bid on a 2nd avatar failed against the empty slot-0 wallet).
 //   - Proceeds, refunds, and won/returned items are DELIVERED to the mailbox and
 //     looted into a character later -- they are never silently credited.
 //
@@ -107,8 +110,10 @@ func durationHours(d string) (int, bool) {
 	return 0, false
 }
 
-// primaryAvatar returns the lowest-slot live avatar for an account (the wallet /
-// default recipient). Caller must hold the tx.
+// primaryAvatar returns the lowest-slot live avatar for an account. It is the
+// fallback loot recipient for mail addressed to no specific character
+// (store_mail_write.go); it is NOT the AH wallet -- bid/buyout charge the named
+// acting character (see PB-31). Caller must hold the tx.
 func primaryAvatar(ctx context.Context, tx pgx.Tx, accountID int64) (int64, string, error) {
 	var id int64
 	var name string
@@ -309,7 +314,13 @@ func (s *Store) PostListing(ctx context.Context, accountID int64, itemID, slot, 
 
 // PlaceBid bids the next increment on a listing. The first bid lands at
 // start_bid; each subsequent bid adds max(1, 1% of item_value).
-func (s *Store) PlaceBid(ctx context.Context, accountID int64, listingID int64) (ListingView, error) {
+//
+// avatarName is the character the player is acting as (the SPA's selected
+// topbar character); that character's wallet is debited. Bidding does NOT
+// silently fall back to the account's lowest-slot character -- charging a
+// character other than the one the player chose is exactly PB-31 (a buy on a
+// 2nd avatar failed because the empty slot-0 wallet was charged instead).
+func (s *Store) PlaceBid(ctx context.Context, accountID int64, avatarName string, listingID int64) (ListingView, error) {
 	err := s.serialTx(ctx, func(tx pgx.Tx) error {
 		var (
 			sellerAccount  int64
@@ -340,7 +351,7 @@ func (s *Store) PlaceBid(ctx context.Context, accountID int64, listingID int64) 
 			return errOwnListing
 		}
 
-		bidder, _, err := primaryAvatar(ctx, tx, accountID)
+		bidder, err := ownedAvatarByName(ctx, tx, accountID, avatarName)
 		if err != nil {
 			return err
 		}
@@ -446,8 +457,12 @@ func (s *Store) botPlaceBid(ctx context.Context, listingID int64) error {
 	})
 }
 
-// Buyout buys a listing outright at its buyout price.
-func (s *Store) Buyout(ctx context.Context, accountID int64, listingID int64) error {
+// Buyout buys a listing outright at its buyout price. avatarName is the
+// character the player is acting as (the SPA's selected topbar character); that
+// character's wallet is debited and the won item is delivered to its account
+// mailbox. As with PlaceBid, this does NOT fall back to the lowest-slot
+// character -- see PB-31.
+func (s *Store) Buyout(ctx context.Context, accountID int64, avatarName string, listingID int64) error {
 	return s.serialTx(ctx, func(tx pgx.Tx) error {
 		var (
 			sellerAccount  int64
@@ -489,7 +504,7 @@ func (s *Store) Buyout(ctx context.Context, accountID int64, listingID int64) er
 			return errOwnListing
 		}
 
-		buyer, _, err := primaryAvatar(ctx, tx, accountID)
+		buyer, err := ownedAvatarByName(ctx, tx, accountID, avatarName)
 		if err != nil {
 			return err
 		}

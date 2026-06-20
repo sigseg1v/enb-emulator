@@ -550,15 +550,23 @@ void ObjectManager::HandleTempCreation(Object *object)
 //First we send all normal navs, there's never too many of these
 //and any Deco that's within 10000k
 //
-//The retail server sends every sector nav at entry regardless of whether
-//the player has previously discovered it -- undiscovered navs arrive as
-//creates with no HAS_VISITED flag (they render as undiscovered '?' map
-//nodes), and they are sent independent of player range. Gating on
-//ExposedNavList here only sent already-discovered navs, leaving a fresh
-//character's sector map empty until they physically flew into each nav's
-//radar bubble. The per-player visited state is encoded by SendObject from
-//ExploredNavList, so sending all navs up front does not award discovery
-//or change the explored set.
+//At sector entry we send ONLY the navs this player has previously
+//discovered (those in their persisted ExposedNavList). Undiscovered navs
+//are revealed later by CheckNavRanges as the player flies within scanner
+//range. This is what gives the three on-map discovery states, because the
+//create packet (StaticObjectPacket::sig_flags) carries only ONE per-player
+//discovery bit, HAS_VISITED (ObjectClass.h):
+//  - totally undiscovered -> no create is sent (nothing on the map),
+//  - seen but not visited  -> create sent with HAS_VISITED clear ('?' node),
+//  - visited               -> create sent with HAS_VISITED set.
+//The "seen vs undiscovered" distinction is therefore the presence/absence
+//of the create, not a flag, so a never-seen nav must NOT be sent here -- a
+//sent IS_NAV create always renders as at least a '?'. SendObject sets
+//HAS_VISITED from ExploredNavList per player.
+//
+//Planets (OT_PLANET) are always sent: they are huge and unconditionally
+//visible. A previously-discovered nav being re-sent here is a no-op for the
+//ExposedNavList bit (it is already set).
 void ObjectManager::SendAllNavs(Player *player)
 {
     Object *obj;
@@ -569,7 +577,7 @@ void ObjectManager::SendAllNavs(Player *player)
         obj = m_StaticSectorList[index];
 		if (obj->ObjectType() != OT_DECO && obj->Active())
         {
-            if (((obj->ObjectType() == OT_PLANET) || obj->IsNav()) && !obj->GetIndex(player->ObjectRangeList()) )
+            if (((obj->ObjectType() == OT_PLANET) || obj->GetEIndex(player->ExposedNavList())) && !obj->GetIndex(player->ObjectRangeList()) )
             {
                 obj->SendObject(player);
                 obj->SetEIndex(player->ExposedNavList());

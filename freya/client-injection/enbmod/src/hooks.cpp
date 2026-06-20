@@ -83,6 +83,26 @@ static BOOL WINAPI hk_GetMessageA(LPMSG m, HWND h, UINT min, UINT max) {
             // false (do not swallow), so a script bug cannot wedge the user's
             // input. We only swallow on an explicit true.
             if (g_on_input(m->message, (unsigned)m->wParam, (long)m->lParam)) {
+                // We are about to rewrite this message to WM_NULL so the game's
+                // wndproc never acts on it. For a swallowed WM_KEYDOWN that ALSO
+                // kills the WM_CHAR TranslateMessage would have produced from it --
+                // and the Freya chat input box needs that character. So synthesize
+                // the WM_CHAR ourselves (honouring the live shift/caps state via
+                // GetKeyboardState) and hand it straight to the input handler. A
+                // handler not in text-capture mode just ignores WM_CHAR, so this is
+                // harmless for the action-bar keys freya_ui also swallows.
+                if (m->message == WM_KEYDOWN && (g_input_mask & hooks::WANT_CHAR)) {
+                    BYTE ks[256];
+                    if (GetKeyboardState(ks)) {
+                        WORD ch = 0;
+                        UINT sc = ((UINT)m->lParam >> 16) & 0xff;
+                        if (ToAscii((UINT)m->wParam, sc, ks, &ch, 0) == 1) {
+                            unsigned c = ch & 0xff;
+                            if (c >= 0x20 && c != 0x7f)
+                                g_on_input(WM_CHAR, c, 0);
+                        }
+                    }
+                }
                 m->message = WM_NULL;
                 m->wParam = 0;
                 m->lParam = 0;
@@ -228,15 +248,20 @@ extern "C" __attribute__((naked)) void hk_RpgLevels() {
 }
 
 // ---- action-bar controller capture -----------------------------------------
-// game.h::addr::ActionBarUse (0x006120e0) is the in-space action-bar slot
-// dispatcher: __thiscall(ECX = the action-bar controller). It fires on every slot
-// click and every "1".."6" keypress. We capture its `this` (ECX) read-only -- the
-// exact pattern of hk_RpgLevels -- so lua_api (hooks::actionbar()) hands the Freya
-// HUD the controller it reads the slots off and re-dispatches through. Forwards
-// every argument untouched via the trampoline; never alters the dispatch.
-static volatile unsigned g_actionbar = 0; // ECX (this) of the action-bar dispatcher
+// game.h::addr::ActionBarCtor (0x00610f80) is the action-bar bank CONSTRUCTOR and
+// addr::ActionBarUse (0x006120e0) is the slot dispatcher; both are
+// __thiscall(ECX = the bank controller). We capture the controller `this` (ECX)
+// read-only from BOTH -- the constructor so the Freya HUD has the controller the
+// moment a bank exists (entering space), before any interaction, so slot icons
+// show immediately; the dispatcher as a re-validating refresh on every click /
+// "1".."6" keypress. Either is fine: a bank's sibling is +/-0x60 and ab_banks()
+// normalizes via the +0x3c bank flag, so capturing whichever bank fires last is
+// enough. Capture only -- the exact pattern of hk_RpgLevels; never alters either
+// call. Both forward every argument untouched via the trampoline.
+static volatile unsigned g_actionbar = 0; // ECX (this) of the action-bar controller
 extern "C" {
 void* real_ActionBar_tramp = nullptr;
+void* real_ActionBarCtor_tramp = nullptr;
 void notify_actionbar(unsigned thisp) {
     g_actionbar = thisp;
 }
@@ -248,6 +273,14 @@ extern "C" __attribute__((naked)) void hk_ActionBar() {
                          "addl $4, %esp\n\t"
                          "popal\n\t"
                          "jmp *_real_ActionBar_tramp\n\t");
+}
+extern "C" __attribute__((naked)) void hk_ActionBarCtor() {
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl %ecx\n\t" // this (bank controller, captured at ctor entry)
+                         "call _notify_actionbar\n\t"
+                         "addl $4, %esp\n\t"
+                         "popal\n\t"
+                         "jmp *_real_ActionBarCtor_tramp\n\t");
 }
 
 // ---- XpBars controller capture ---------------------------------------------
@@ -309,6 +342,115 @@ extern "C" __attribute__((naked)) void hk_CockpitCommands() {
                          "addl $4, %esp\n\t"
                          "popal\n\t"
                          "jmp *_real_CockpitCommands_tramp\n\t");
+}
+
+// ---- chat panel capture ----------------------------------------------------
+// game.h::addr::ChatLocalLine (0x0074d990) is __thiscall(ECX = the chat PANEL).
+// Every displayed line -- system, local notice, computer, warning, and network
+// chat alike -- funnels through it, so capturing its `this` (ECX) read-only -- the
+// exact pattern of hk_CockpitCommands -- hands us the session-stable panel object.
+// From the panel the Freya chat window derives the line RING at +chat::panel_ring
+// (mirrored merged scrollback) AND chat_send uses it as the `this` ChatSend needs
+// (ChatSend is __thiscall and faults on a bogus `this`). One capture, both uses.
+// Forwards every argument untouched via the trampoline; never alters behaviour.
+static volatile unsigned g_chat_panel = 0; // ECX (this) of the chat panel
+extern "C" {
+void* real_ChatPanel_tramp = nullptr;
+void notify_chat_panel(unsigned thisp) {
+    g_chat_panel = thisp;
+}
+}
+extern "C" __attribute__((naked)) void hk_ChatPanel() {
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl %ecx\n\t" // this (chat panel object)
+                         "call _notify_chat_panel\n\t"
+                         "addl $4, %esp\n\t"
+                         "popal\n\t"
+                         "jmp *_real_ChatPanel_tramp\n\t");
+}
+
+// ---- chat line RING capture ------------------------------------------------
+// Separate from the panel: the ring is NOT a fixed offset off the panel (the old
+// +0x13c guess was wrong). game.h::addr::ChatLineAppend (0x0067d780) is the ring
+// append, __thiscall(ECX = the RING object). We capture its `this` read-only -- the
+// same pattern -- so the Freya chat window walks the ring (chat::ring_* layout) with
+// no game calls. Panel (for send) and ring (for read) are two independent captures;
+// both fire on the first line printed this session.
+static volatile unsigned g_chat_ring = 0; // ECX (this) of the ring append
+extern "C" {
+void* real_ChatRing_tramp = nullptr;
+void notify_chat_ring(unsigned thisp) {
+    g_chat_ring = thisp;
+}
+}
+extern "C" __attribute__((naked)) void hk_ChatRing() {
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl %ecx\n\t" // this (ring object)
+                         "call _notify_chat_ring\n\t"
+                         "addl $4, %esp\n\t"
+                         "popal\n\t"
+                         "jmp *_real_ChatRing_tramp\n\t");
+}
+
+// ---- PDA / micro-menu controller capture -----------------------------------
+// game.h::addr::PdaCtor (0x00693230) is the PDA panel-controller CONSTRUCTOR
+// (__fastcall, ECX = the controller) and addr::PdaSwitch (0x00695780) is the
+// "switch active PDA child screen" dispatcher (__thiscall, ECX = the SAME
+// controller, int index). We capture the controller `this` (ECX) read-only from
+// BOTH -- the ctor so the Freya top-left micro-menu has the controller the moment
+// it exists (entering space), before any interaction, so the buttons work on the
+// first click; the dispatcher as a re-validating refresh on every panel switch.
+// Exactly the action-bar ctor+use capture pattern. Both forward every argument
+// untouched via the trampoline; never alters either call. lua_api reads the
+// controller off this (hooks::pda_ctrl()) and re-dispatches a panel through
+// PdaSwitch (enb.pda_switch).
+static volatile unsigned g_pda_ctrl = 0; // ECX (this) of the PDA controller
+extern "C" {
+void* real_PdaCtor_tramp = nullptr;
+void* real_PdaSwitch_tramp = nullptr;
+void notify_pda(unsigned thisp) {
+    g_pda_ctrl = thisp;
+}
+}
+extern "C" __attribute__((naked)) void hk_PdaCtor() {
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl %ecx\n\t" // this (PDA controller, captured at ctor entry)
+                         "call _notify_pda\n\t"
+                         "addl $4, %esp\n\t"
+                         "popal\n\t"
+                         "jmp *_real_PdaCtor_tramp\n\t");
+}
+extern "C" __attribute__((naked)) void hk_PdaSwitch() {
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl %ecx\n\t" // this (PDA controller)
+                         "call _notify_pda\n\t"
+                         "addl $4, %esp\n\t"
+                         "popal\n\t"
+                         "jmp *_real_PdaSwitch_tramp\n\t");
+}
+
+// ---- in-game screen shell capture (Options micro-menu button) ---------------
+// game.h::addr::ShellApply (0x00565f80) is the screen shell's per-frame "apply
+// pending screen change" pump, __fastcall(ECX = the shell controller). The
+// in-game HUD updater calls it every frame, so hooking it read-only captures the
+// LIVE shell `this` continuously (always fresh, never stale). lua_api reads the
+// shell off this (hooks::shell_ctrl()) and requests a screen through ShellRequest
+// (enb.shell_screen) -- id 1 = the in-game OPTIONS_MAIN screen, the one micro-menu
+// button that is NOT a PDA child. We never alter the call; we only read ECX.
+static volatile unsigned g_shell_ctrl = 0; // ECX (this) of the in-game screen shell
+extern "C" {
+void* real_ShellApply_tramp = nullptr;
+void notify_shell(unsigned thisp) {
+    g_shell_ctrl = thisp;
+}
+}
+extern "C" __attribute__((naked)) void hk_ShellApply() {
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl %ecx\n\t" // this (screen shell controller)
+                         "call _notify_shell\n\t"
+                         "addl $4, %esp\n\t"
+                         "popal\n\t"
+                         "jmp *_real_ShellApply_tramp\n\t");
 }
 
 // At naked entry: [esp]=return addr, [esp+4]=arg0, ECX=this. After `pushal` (32 bytes) the return
@@ -434,6 +576,11 @@ bool enable_event_hooks() {
         logf("hook ActionBarUse failed");
         ok = false;
     }
+    if (MH_CreateHook((void*)game::addr::ActionBarCtor, (void*)&hk_ActionBarCtor,
+                      &real_ActionBarCtor_tramp) != MH_OK) {
+        logf("hook ActionBarCtor failed");
+        ok = false;
+    }
     if (MH_CreateHook((void*)game::addr::CockpitThrottle, (void*)&hk_CockpitThrottle,
                       &real_CockpitThrottle_tramp) != MH_OK) {
         logf("hook CockpitThrottle failed");
@@ -444,14 +591,45 @@ bool enable_event_hooks() {
         logf("hook CockpitCommands failed");
         ok = false;
     }
+    if (MH_CreateHook((void*)game::addr::ChatLocalLine, (void*)&hk_ChatPanel,
+                      &real_ChatPanel_tramp) != MH_OK) {
+        logf("hook ChatLocalLine failed");
+        ok = false;
+    }
+    if (MH_CreateHook((void*)game::addr::ChatLineAppend, (void*)&hk_ChatRing,
+                      &real_ChatRing_tramp) != MH_OK) {
+        logf("hook ChatLineAppend failed");
+        ok = false;
+    }
+    if (MH_CreateHook((void*)game::addr::PdaCtor, (void*)&hk_PdaCtor, &real_PdaCtor_tramp) !=
+        MH_OK) {
+        logf("hook PdaCtor failed");
+        ok = false;
+    }
+    if (MH_CreateHook((void*)game::addr::PdaSwitch, (void*)&hk_PdaSwitch, &real_PdaSwitch_tramp) !=
+        MH_OK) {
+        logf("hook PdaSwitch failed");
+        ok = false;
+    }
+    if (MH_CreateHook((void*)game::addr::ShellApply, (void*)&hk_ShellApply,
+                      &real_ShellApply_tramp) != MH_OK) {
+        logf("hook ShellApply failed");
+        ok = false;
+    }
     MH_EnableHook((void*)game::addr::SkillLifecycle);
     MH_EnableHook((void*)game::addr::ChatChannel);
     MH_EnableHook((void*)game::addr::ChatSend);
     MH_EnableHook((void*)game::addr::RpgLevels);
     MH_EnableHook((void*)game::addr::XpBarsUpdate);
     MH_EnableHook((void*)game::addr::ActionBarUse);
+    MH_EnableHook((void*)game::addr::ActionBarCtor);
     MH_EnableHook((void*)game::addr::CockpitThrottle);
     MH_EnableHook((void*)game::addr::CockpitCommands);
+    MH_EnableHook((void*)game::addr::ChatLocalLine);
+    MH_EnableHook((void*)game::addr::ChatLineAppend);
+    MH_EnableHook((void*)game::addr::PdaCtor);
+    MH_EnableHook((void*)game::addr::PdaSwitch);
+    MH_EnableHook((void*)game::addr::ShellApply);
     g_event_hooks_on = ok;
     logf("event hooks %s", ok ? "enabled" : "partially enabled");
     return ok;
@@ -464,8 +642,14 @@ void disable_event_hooks() {
     MH_DisableHook((void*)game::addr::RpgLevels);
     MH_DisableHook((void*)game::addr::XpBarsUpdate);
     MH_DisableHook((void*)game::addr::ActionBarUse);
+    MH_DisableHook((void*)game::addr::ActionBarCtor);
     MH_DisableHook((void*)game::addr::CockpitThrottle);
     MH_DisableHook((void*)game::addr::CockpitCommands);
+    MH_DisableHook((void*)game::addr::ChatLocalLine);
+    MH_DisableHook((void*)game::addr::ChatLineAppend);
+    MH_DisableHook((void*)game::addr::PdaCtor);
+    MH_DisableHook((void*)game::addr::PdaSwitch);
+    MH_DisableHook((void*)game::addr::ShellApply);
     g_event_hooks_on = false;
 }
 
@@ -509,6 +693,18 @@ unsigned cockpit_throttle_ctrl() {
 }
 unsigned cockpit_cmd_ctrl() {
     return g_cockpit_cmd;
+}
+unsigned chat_panel() {
+    return g_chat_panel;
+}
+unsigned chat_ring() {
+    return g_chat_ring;
+}
+unsigned pda_ctrl() {
+    return g_pda_ctrl;
+}
+unsigned shell_ctrl() {
+    return g_shell_ctrl;
 }
 
 } // namespace hooks

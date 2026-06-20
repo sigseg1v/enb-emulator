@@ -142,11 +142,11 @@ func TestIT_Bid_RefundsPriorBidder(t *testing.T) {
 	}
 	listingID := mustListingID(t, mv.ID)
 
-	if _, err := st.PlaceBid(ctx, bidder1.id, listingID); err != nil {
+	if _, err := st.PlaceBid(ctx, bidder1.id, bidder1.avatars[0].name, listingID); err != nil {
 		t.Fatalf("PlaceBid(bidder1): %v", err)
 	}
 	b1WalletAfterBid := creditsOf(t, st, ctx, bidder1.avatars[0].id)
-	if _, err := st.PlaceBid(ctx, bidder2.id, listingID); err != nil {
+	if _, err := st.PlaceBid(ctx, bidder2.id, bidder2.avatars[0].name, listingID); err != nil {
 		t.Fatalf("PlaceBid(bidder2): %v", err)
 	}
 
@@ -177,7 +177,7 @@ func TestIT_Buyout_DeliversItemAndProceeds(t *testing.T) {
 	listingID := mustListingID(t, mv.ID)
 
 	buyerBefore := creditsOf(t, st, ctx, buyer.avatars[0].id)
-	if err := st.Buyout(ctx, buyer.id, listingID); err != nil {
+	if err := st.Buyout(ctx, buyer.id, buyer.avatars[0].name, listingID); err != nil {
 		t.Fatalf("Buyout: %v", err)
 	}
 	buyerAfter := creditsOf(t, st, ctx, buyer.avatars[0].id)
@@ -193,6 +193,79 @@ func TestIT_Buyout_DeliversItemAndProceeds(t *testing.T) {
 	}
 	if containsListingView(st.openListings(ctx), mv.ID) {
 		t.Error("bought-out listing still in openListings")
+	}
+}
+
+// PB-31: a buy/bid must charge the character the player is ACTING AS (the SPA's
+// selected topbar character), not the account's lowest-slot character. The bug:
+// a player on their 2nd avatar (which holds the credits) had the buy fail
+// because the empty slot-0 wallet was charged instead. Here slot-0 is broke and
+// slot-1 is funded; buying out AS slot-1 must succeed, debit slot-1, and leave
+// slot-0 untouched. Before the fix this returned errInsufficient.
+func TestIT_Buyout_ChargesActingCharacter_NotPrimarySlot(t *testing.T) {
+	st, ctx := testStore(t)
+	seller := seedAccount(t, st, ctx, 60, 1, 1_000_000)
+	buyer := seedAccount(t, st, ctx, 61, 2, 0) // both characters start broke
+	// Fund only the 2nd character (slot 1) -- the one the player is "on".
+	mustExec(t, st.user, ctx,
+		`UPDATE avatar_level_info SET credits = $2 WHERE avatar_id = $1`,
+		buyer.avatars[1].id, int64(1_000_000))
+
+	itemID, _ := pickTradableItem(t, st, ctx, true)
+	seedVaultItem(t, st, ctx, seller.avatars[0].id, 0, itemID, 1, nil)
+	const buyout = 5000
+	mv, err := st.PostListing(ctx, seller.id, itemID, 0, 1, seller.avatars[0].name, "short", 100, buyout)
+	if err != nil {
+		t.Fatalf("PostListing: %v", err)
+	}
+	listingID := mustListingID(t, mv.ID)
+
+	slot0Before := creditsOf(t, st, ctx, buyer.avatars[0].id)
+	slot1Before := creditsOf(t, st, ctx, buyer.avatars[1].id)
+
+	// Buy AS the funded 2nd character.
+	if err := st.Buyout(ctx, buyer.id, buyer.avatars[1].name, listingID); err != nil {
+		t.Fatalf("Buyout as 2nd character: %v (PB-31: must charge the acting char, not slot 0)", err)
+	}
+
+	if got := creditsOf(t, st, ctx, buyer.avatars[1].id); slot1Before-got != buyout {
+		t.Errorf("slot-1 (acting char) debited %d, want %d", slot1Before-got, buyout)
+	}
+	if got := creditsOf(t, st, ctx, buyer.avatars[0].id); got != slot0Before {
+		t.Errorf("slot-0 (primary) wallet changed to %d, want untouched %d", got, slot0Before)
+	}
+}
+
+// PB-31, bid path: bidding AS the funded 2nd character must succeed and debit
+// that character, not the empty slot-0 primary.
+func TestIT_Bid_ChargesActingCharacter_NotPrimarySlot(t *testing.T) {
+	st, ctx := testStore(t)
+	seller := seedAccount(t, st, ctx, 62, 1, 1_000_000)
+	buyer := seedAccount(t, st, ctx, 63, 2, 0)
+	mustExec(t, st.user, ctx,
+		`UPDATE avatar_level_info SET credits = $2 WHERE avatar_id = $1`,
+		buyer.avatars[1].id, int64(1_000_000))
+
+	itemID, _ := pickTradableItem(t, st, ctx, true)
+	seedVaultItem(t, st, ctx, seller.avatars[0].id, 0, itemID, 1, nil)
+	mv, err := st.PostListing(ctx, seller.id, itemID, 0, 1, seller.avatars[0].name, "short", 100, 0)
+	if err != nil {
+		t.Fatalf("PostListing: %v", err)
+	}
+	listingID := mustListingID(t, mv.ID)
+
+	slot0Before := creditsOf(t, st, ctx, buyer.avatars[0].id)
+	slot1Before := creditsOf(t, st, ctx, buyer.avatars[1].id)
+
+	if _, err := st.PlaceBid(ctx, buyer.id, buyer.avatars[1].name, listingID); err != nil {
+		t.Fatalf("PlaceBid as 2nd character: %v (PB-31)", err)
+	}
+
+	if got := creditsOf(t, st, ctx, buyer.avatars[1].id); slot1Before-got != 100 {
+		t.Errorf("slot-1 (acting char) debited %d, want 100 (start_bid)", slot1Before-got)
+	}
+	if got := creditsOf(t, st, ctx, buyer.avatars[0].id); got != slot0Before {
+		t.Errorf("slot-0 (primary) wallet changed to %d, want untouched %d", got, slot0Before)
 	}
 }
 
