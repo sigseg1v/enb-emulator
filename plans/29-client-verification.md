@@ -2491,26 +2491,33 @@ moot; the SOLVED block above is the truth):**
   firing (grep `Received Keepalive`) or a handoff reply was dropped.
 - **Setup**: `just rebuild server` (done) then `just play-local`.
 
-### [ ] CV-PB22 -- how retail rendered a never-visited nav on the in-sector map (PB-22)
+### [ ] CV-PB22 -- nav map reveals on proximity, not all-at-entry (PB-22)
 
-- **No code change to test.** This is a reconciliation task: the in-game map
-  shows every nav as "?" at sector entry (report PB-22 says it should reveal
-  only on proximity), but commit `636c6175` made the server send all navs at
-  entry CITING a live capture
-  (`proxy/local-debug/net7-live-2026-06-02-login-undock-clicknavs-warp-logout.pcap`,
-  S2C :3573) that shows retail did exactly that, including undiscovered navs
-  with no HAS_VISITED flag. The report and the capture conflict.
-- **Owner decision required (you are both the reporter and the committer)**:
-  reconcile your 2026-06-02 capture ("retail sends every sector nav at entry")
-  against your 2026-06-17 report ("should reveal only within scanner range").
-  If the capture is right, PB-22 is NOT a bug and should be closed -- current
-  behaviour is retail-faithful. If the report is right, the capture analysis in
-  636c6175 was wrong (e.g. the capture char had already explored those navs) or
-  the create is sent for all navs but the MAP should only DISPLAY exposed ones.
-- **What to verify (real client)**: enter a brand-new character into a sector it
-  has never visited. Do undiscovered navs appear on the F10/sector map as "?"
-  immediately, or only after flying within scanner range? That single
-  observation settles it. Cross-check against the cited capture for the per-nav
-  map/visibility flags before changing any server emit (server-integrity rules
-  forbid altering a capture-backed emit without a new primary source).
-- **Setup**: `just play-local` with a freshly-created character.
+- **What changed**: `SendAllNavs` (server/src/ObjectManager.cpp:572) entry gate
+  reverted from `obj->IsNav()` (send every nav) to
+  `obj->GetEIndex(player->ExposedNavList())` (send only previously-discovered
+  navs). Undiscovered navs are now revealed by `CheckNavRanges` as the player
+  flies within scanner range. The 636c6175 capture citation was a misread (the
+  capture char had explored the whole sector, so the bytes are identical either
+  way -- owner-confirmed), so this is not a contradiction of the capture.
+- **Why the real client is needed**: confirms the three discovery states render
+  correctly AND that the "Luna empty-map" symptom 636c6175 was chasing does not
+  return in a harmful form.
+- **What to verify (real client)**:
+  1. **Fresh character, never-visited sector**: on entry the sector map should
+     show NO "?" nodes for navs you've never been near (only planets / things
+     in range). Previously every nav showed as "?" immediately -- that must be
+     gone.
+  2. **Fly toward a nav**: as it enters scanner range it should appear as a "?"
+     node (exposed), and the "discovered <nav>" message should arrive TOGETHER
+     with the node appearing (not a message with no node -- the old Luna
+     complaint). Flying closer (explore range) should mark it visited and award
+     XP.
+  3. **Re-enter the sector**: navs you previously exposed/visited should still
+     be on the map at entry (persisted ExposedNavList), so your discovered map
+     is not lost on zone change.
+- **If the Luna symptom returns** (discovered message with no map node): the bug
+  is in `StaticMap::SendObject` / `CheckNavRanges` create emission for an
+  exposed-but-unexplored nav (HAS_NAV gating on `AppearsInRadar`), not in the
+  entry gate -- investigate there rather than reverting this.
+- **Setup**: `just rebuild server` (done) then `just play-local`, fresh char.
