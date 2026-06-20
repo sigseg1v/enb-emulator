@@ -86,10 +86,12 @@ function AhRow({
 /* ---------------- BUY ---------------- */
 function BuyView({
     listings,
+    avatar,
     reload,
     toast,
 }: {
     listings: Listing[];
+    avatar: string;
     reload: () => Promise<void>;
     toast: (msg: string) => void;
 }) {
@@ -120,7 +122,7 @@ function BuyView({
         if (!active || busy) return;
         setBusy(true);
         try {
-            await api.placeBid(active.id);
+            await api.placeBid(active.id, avatar);
             toast('Bid placed -- you are the high bidder');
             await reload();
         } catch (err) {
@@ -134,7 +136,7 @@ function BuyView({
         const price = active.buyout;
         setBusy(true);
         try {
-            await api.buyout(active.id);
+            await api.buyout(active.id, avatar);
             toast(`Bought out -- ${fmtNum(price)} cr -- item sent to your mailbox`);
             setActiveId(null);
             await reload();
@@ -676,7 +678,7 @@ export function AuctionHouse(props: {
             </div>
 
             {sub === 'buy' ? (
-                <BuyView listings={listings} reload={reload} toast={toast} />
+                <BuyView listings={listings} avatar={avatar} reload={reload} toast={toast} />
             ) : (
                 <SellView
                     vault={vault}

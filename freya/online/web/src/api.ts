@@ -182,12 +182,14 @@ export async function fetchMyAvatars(): Promise<AvatarLocation[]> {
     return r.avatars ?? [];
 }
 
-export async function placeBid(listingId: string): Promise<Listing> {
-    return postJSON<Listing>(`/api/auction/${listingId}/bid`, {});
+// avatar is the selected topbar character: the wallet to debit. The server
+// charges this character, not the account's lowest-slot one (PB-31).
+export async function placeBid(listingId: string, avatar: string): Promise<Listing> {
+    return postJSON<Listing>(`/api/auction/${listingId}/bid`, { avatar });
 }
 
-export async function buyout(listingId: string): Promise<{ ok: boolean }> {
-    return postJSON<{ ok: boolean }>(`/api/auction/${listingId}/buyout`, {});
+export async function buyout(listingId: string, avatar: string): Promise<{ ok: boolean }> {
+    return postJSON<{ ok: boolean }>(`/api/auction/${listingId}/buyout`, { avatar });
 }
 
 export async function postListing(input: PostListingInput): Promise<MyListing> {
