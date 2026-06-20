@@ -160,6 +160,11 @@ local hidden = {
     -- the Freya top strip recreates Chat and the rest are reachable elsewhere, so the
     -- whole old chat frame is now hidden (owner ask: "kill the entire old chat frame").
     NavButtonBar                 = true,
+    -- the two boxed down-chevron arrows that float at the top-mid/right edge (the
+    -- chat + combat-log "scroll to bottom" arrows, detached from the hidden frame).
+    -- Identified live by hiding each and watching the arrow vanish (owner ask).
+    Unknown1                     = true,
+    Unknown2                     = true,
 }
 
 -- Hide the native chat TEXT leaves (CHAT_TEXT_VT) wholesale -- Freya draws chat now.

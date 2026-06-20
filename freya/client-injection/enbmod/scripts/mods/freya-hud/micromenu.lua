@@ -50,8 +50,8 @@ local BUTTONS = {
 }
 
 local CFG = {
-    MARGIN_X    = 46,   -- gap from the screen's left edge (inset 40px right, owner ask)
-    MARGIN_Y    = 86,   -- gap from the screen's top edge (down 80px, owner ask)
+    MARGIN_X    = 16,   -- gap from the screen's left edge (top-left, inset in the dark border)
+    MARGIN_Y    = 12,   -- gap from the screen's top edge (top-left, inset in the dark border)
     BTN_H       = 22,   -- button height
     PAD_X       = 11,   -- text inset inside each button
     GAP         = 4,    -- gap between buttons
