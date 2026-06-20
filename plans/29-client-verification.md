@@ -2429,3 +2429,36 @@ moot; the SOLVED block above is the truth):**
 - **Long-term**: the faithful fix is server-side -- initialise the account-status
   block in the global-login flow (notice flag 0, valid/empty expiry) so the
   retail path sees sane data. Tracked as follow-up; this stops the crash now.
+
+### [ ] CV-PB29-30 -- Terran-Trader skill-quest offers depend on character state, not content (PB-29 / PB-30)
+
+- **Why this is here, not a content fix**: the PB-29 and PB-30 content audits
+  (plans/41) found the mission/NPC data is CORRECT and self-consistent, so there
+  is nothing to change in the `net7` content DB. The reporter's symptom (quest
+  not offered / skill not trained) can only be explained by the live character's
+  runtime state, which needs the real client + the reporter's actual character
+  to diagnose. Do NOT fabricate a content fix against correct data.
+- **PB-29 -- "Reconfiguration of Shields" (mission 347) not offered by Louden
+  MacEwen (npc 41) at Loki Station**: data is correct -- mission 347 exists,
+  Stage-0 giver == Louden's `npc_Id` 41, gated ONLY to Race==Terran(0) +
+  Profession==Trader(1), rewards skill 51 "Shield Charging", no level/prereq
+  gate. A clean Terran-Trader WILL be offered it. **What to verify on the real
+  client**: with a Terran Trader who has NOT done mission 347, talk to Louden at
+  Loki Station (High Earth) -- the quest should appear. If it does, the
+  reporter's character had already started/completed it, or its stored
+  race/profession is not exactly Terran/Trader. Capture the reporter's
+  completed-missions set + character race/profession to settle it.
+- **PB-30 -- Katlyn Walsh (npc 306) won't train Build Components (skill 4) at
+  New Edinburgh/Somerled**: the reporter's "gated behind Reconfiguration of
+  Shields" premise is FALSE per data. Build Components is taught by mission 117
+  "Tinkering with Parts" (Katlyn), gated by MISSION_REQUIRED on missions **6 +
+  116** (NOT 347). **What to verify on the real client**: a Terran Trader who has
+  completed missions 6 and 116 should be offered "Tinkering with Parts" by
+  Katlyn. If completing 6+116 unlocks it, the report was just an unmet (and
+  mis-attributed) prereq, and there is no defect.
+- **Setup**: `just play-local`, a Terran Tradesman character. No code/content
+  change to test -- this is a state-diagnosis, not a fix verification.
+- **Primary-source caveat**: net7wiki (the cited source for PB-29) is behind a
+  Cloudflare JS challenge and could not be machine-fetched to cross-check
+  retail prereq fidelity. Our content is internally coherent; if the wiki later
+  shows retail gated these differently, revisit then.
