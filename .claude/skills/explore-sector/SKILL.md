@@ -282,6 +282,8 @@ the window with `xdotool windowactivate --sync` and send them with `xdotool key`
 | `scripts/wreck.sh [shot]` | detect a death panel (`WRECKED <winx> <winy>` for the Request Tow button, else `ALIVE`) via OCR; `ENB_TOW_BTN="x y"` pins the button once a real death calibrates it. |
 | `scripts/undock.sh` | launch the ship back into space when DOCKED at a station (prints `UNDOCKED`/`IN-SPACE`/`FAILED`). See "Undocking from a station" below. `handle_wreck` calls it after a Request-Tow drops us in a bay. |
 | `scripts/logaction.sh <S> <action> [detail]` | append a timestamped line to the gitignored action log. |
+| `scripts/pcap.sh {start\|rotate\|ensure\|stop\|status} [S]` | per-sector packet capture control (best-effort). Wired into `gate.sh` (rotate) + `drive.py` (ensure). See "Per-sector packet capture". |
+| `scripts/pcap-install.sh` | ONE-TIME `sudo` setup: installs the root-owned capture worker + a scoped NOPASSWD rule so capture runs unattended. |
 
 Runtime output (ledgers + `actions.log`) lives in `state/` and is **gitignored**
 -- it is per-playthrough progress, not source.
@@ -500,6 +502,30 @@ type `gate`/`system-gate`/etc. in the ledger):
    nav labels you hover. `logaction.sh <oldS> load-screen "entering <newS>"`.
 4. In the new sector, restart at step 1 of the per-sector loop (identify, init,
    explore).
+
+### Per-sector packet capture (one .pcap per sector)
+
+The survey can record the proxy traffic into **one capture file per sector**,
+each started BEFORE we enter the sector so it includes the entry handshake. This
+is wired automatically and is BEST-EFFORT -- it no-ops if not set up, never
+blocking the survey.
+
+- **Boundaries:** `gate.sh` calls `pcap.sh rotate <to>` the instant before it
+  opens a gate (closes the previous sector's file, opens the destination's), and
+  `drive.py` calls `pcap.sh ensure <sector>` at start (relabels a placeholder or
+  starts a fresh file). For the very first sector, set `ENB_PCAP=1` when running
+  login-to-client so step 07 starts the capture at char-select.
+- **Files:** `state/captures/<Sector>__<UTC>.pcap` (gitignored). tcpdump runs in
+  the proxy container's netns, so each file has the cleartext proxy<->server UDP
+  leg plus the encrypted client<->proxy TCP leg.
+- **Correlation:** pcap frame timestamps are UTC and `actions.log` is UTC, and a
+  `pcap-start`/`pcap-relabel`/`pcap-stop` marker is written to `actions.log` at
+  every boundary -- so log events line up with capture frames directly.
+- **One-time setup (needs sudo once):** `sudo bash scripts/pcap-install.sh`
+  installs the root-owned capture worker to `/usr/local/sbin/freya-pcap-capture`
+  and a SCOPED NOPASSWD sudoers rule for that one binary (NOT a blanket nsenter
+  grant). After that the survey captures unattended. Control it by hand with
+  `scripts/pcap.sh {start|rotate|ensure|stop|status} [sector]`.
 
 ### Locked gates -> reroute
 

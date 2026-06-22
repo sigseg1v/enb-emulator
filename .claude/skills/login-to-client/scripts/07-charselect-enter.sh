@@ -23,6 +23,16 @@ fi
 log "selecting first character"
 click_coord "$W" charselect first
 sleep 0.6
+
+# Per-sector packet capture (explore-sector survey): start the FIRST sector's
+# capture BEFORE pressing Enter so it includes the entry handshake. Opt-in via
+# ENB_PCAP=1; drive.py relabels this placeholder to the real sector name once the
+# sector is identified. Best-effort, cross-skill -- never blocks login.
+if [ "${ENB_PCAP:-0}" = 1 ]; then
+    PCAP="$SKILL_DIR/../../explore-sector/scripts/pcap.sh"
+    [ -x "$PCAP" ] && bash "$PCAP" start "${ENB_PCAP_SECTOR:-entry}" || true
+fi
+
 log "clicking Enter"
 click_coord "$W" charselect enter
 

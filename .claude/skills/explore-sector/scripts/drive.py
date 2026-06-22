@@ -1461,6 +1461,11 @@ def main():
     # GROUND TRUTH before flying a single warp: confirm the ship is actually in the
     # sector we were told to drive. A prior tow may have left it elsewhere.
     verify_sector(sector, "drive-start")
+    # Ensure a per-sector packet capture is running and labelled for THIS sector
+    # (relabels a char-select/gate placeholder, or starts one if none is running).
+    # Best-effort: no-ops if the capture worker is not installed. The pcap-start
+    # marker lands in actions.log so the UTC frame timestamps line up with events.
+    sh("bash", os.path.join(HERE, "pcap.sh"), "ensure", sector)
 
     attempts = {}             # key -> warps attempted at it without reaching <=2k
     flee_streak = 0           # consecutive flees with no new visit (wedge detector)

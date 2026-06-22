@@ -39,5 +39,13 @@ if [ -n "$from" ] && [ -n "$gatename" ]; then
     route="$gatename"; [ -n "$to" ] && route="$gatename ($from -> $to)"
     bash "$SKILL_DIR/logaction.sh" "$from" enter-gate "clicking gate icon now: $route" >/dev/null
 fi
+# Rotate the per-sector capture BEFORE opening the gate, so the destination
+# sector's .pcap includes the entry handshake. Best-effort: pcap.sh no-ops if the
+# capture worker is not installed (see pcap-install.sh), so it never blocks a jump.
+# Named for the destination when known; otherwise the gate label is the best label
+# we have until the new sector is identified post-jump.
+if [ -n "$to" ] || [ -n "$gatename" ]; then
+    bash "$SKILL_DIR/pcap.sh" rotate "${to:-$gatename}" || true
+fi
 elog "clicking use-gate icon at ($gx,$gy)"
 click_win "$id" "$gx" "$gy"
