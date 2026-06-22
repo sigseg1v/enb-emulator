@@ -1,0 +1,16 @@
+{"type": "nav-point", "name": "Crystal Eye", "x": 95.83, "y": 124.58, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Crystal Heart", "x": 56.07, "y": 134.52, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Edge of No Place", "x": 70.42, "y": 207.37, "z": 0.0, "note": "Danger !"}
+{"type": "nav-point", "name": "Feud Rock", "x": 87.01, "y": 28.32, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Glowin´ Rock", "x": 80.97, "y": -33.86, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Odd Graveyard", "x": 134.92, "y": 149.37, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Old Greentooth´s is that way -->", "x": 138.99, "y": 80.85, "z": 0.0, "note": "Danger !"}
+{"type": "nav-point", "name": "Old Greentooth´s Thinkin´ Spot", "x": 162.4, "y": 110.02, "z": 0.0, "note": "Danger !"}
+{"type": "nav-point", "name": "Pearl´s View", "x": 117.51, "y": 50.5, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Seth´s Perch", "x": 34.69, "y": 172.65, "z": 0.0, "note": "Danger !"}
+{"type": "nav-point", "name": "Shooting´ Range", "x": 33.62, "y": -53.47, "z": 0.0, "note": "Danger !"}
+{"type": "nav-point", "name": "The Tradin´ Post", "x": 103.14, "y": -6.7, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Wreck of the Jedd", "x": 82.01, "y": -59.37, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "The Roost", "x": 11.21, "y": 95.3, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Witberg", "x": 96.8, "y": -96.49, "z": 0.0, "note": null}
+{"type": "station", "name": "Grand Ole Homestead", "x": 153.1, "y": -47.72, "z": 0.0, "note": null}

@@ -1,0 +1,25 @@
+{"type": "hidden-nav-point", "name": "GDI Antwerp", "x": -94.67, "y": -50.4, "z": 1.0, "note": null}
+{"type": "hidden-nav-point", "name": "GDI Gutenberg", "x": -89.53, "y": 19.31, "z": -1.0, "note": null}
+{"type": "hidden-nav-point", "name": "GDI Mandela", "x": -80.0, "y": 70.0, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "GDI Naverre", "x": -70.0, "y": 90.0, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "GETCo Somnus 16", "x": -40.0, "y": 85.0, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "GETCo Somnus 17", "x": -10.0, "y": 85.0, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "GETCo Somnus 18", "x": 20.0, "y": 85.0, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "GETCo Somnus 19", "x": 50.0, "y": 85.0, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Kampala Annex", "x": -9.98, "y": 9.92, "z": 3.02, "note": null}
+{"type": "planet", "name": "Earth", "x": 99.0, "y": -99.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Ulysses Point", "x": -55.0, "y": -10.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Rosetta Point", "x": -80.0, "y": 50.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Research Station Earth", "x": -10.0, "y": 10.0, "z": -2.5, "note": null}
+{"type": "nav-point", "name": "Huygens Point", "x": -10.0, "y": 45.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Guiana Path 1", "x": -70.0, "y": 70.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "GETCo Sector Headquarters", "x": 90.0, "y": 90.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "GETCo Path 6", "x": -90.0, "y": -41.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "GETCo Path 5", "x": -79.53, "y": 9.26, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "GETCo Path 3", "x": -50.0, "y": 50.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "GETCo Path 2", "x": 0.0, "y": 67.73, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "GETCo Path 1", "x": 45.91, "y": 75.92, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Cassini Point", "x": 70.0, "y": 58.0, "z": 0.0, "note": null}
+{"type": "class-specific-gate", "name": "Accelerator to Earth", "x": -89.63, "y": -78.08, "z": 0.0, "note": "Only for Terran Scout (TS)"}
+{"type": "class-specific-gate", "name": "System Gate to Proxima Centauri", "x": -82.76, "y": -83.95, "z": 0.0, "note": "Only for Terran Scout (TS)"}
+{"type": "station", "name": "Guiana Space Port", "x": -90.0, "y": 90.0, "z": 0.0, "note": null}

@@ -1,0 +1,3 @@
+# transient scratch produced at runtime, not source
+__pycache__/
+state/

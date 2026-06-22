@@ -1,0 +1,51 @@
+{"type": "hidden-nav-point", "name": "Red Dragon Carrier, T´ien Lung", "x": -295.22, "y": 193.8, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Red Dragon Carrier, Tun Mi Lung", "x": -313.57, "y": 218.65, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Red Dragon Carrier, Shen Lung", "x": -324.56, "y": 208.21, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Red Dragon Beacon", "x": -194.21, "y": 121.97, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Kuei Station", "x": -310.72, "y": 204.56, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Base Module E", "x": -314.14, "y": 202.43, "z": 5.29, "note": null}
+{"type": "hidden-nav-point", "name": "Base Module D", "x": -313.97, "y": 205.13, "z": 5.73, "note": null}
+{"type": "hidden-nav-point", "name": "Base Module C", "x": -311.2, "y": 208.44, "z": 6.62, "note": null}
+{"type": "hidden-nav-point", "name": "Base Module B", "x": -307.78, "y": 206.72, "z": 6.42, "note": null}
+{"type": "hidden-nav-point", "name": "Base Module A", "x": -307.23, "y": 203.88, "z": 6.25, "note": null}
+{"type": "hidden-gate", "name": "Inner Gate to Aragoth Prime", "x": -335.74, "y": 229.53, "z": 0.0, "note": null}
+{"type": "planet", "name": "Aragoth Prime", "x": 6.0, "y": -4.0, "z": 0.0, "note": null}
+{"type": "moon", "name": "Tokee", "x": 183.14, "y": -79.04, "z": 0.0, "note": null}
+{"type": "moon", "name": "Mughwa", "x": -119.64, "y": -97.22, "z": 0.0, "note": null}
+{"type": "moon", "name": "Duth", "x": -178.53, "y": 30.84, "z": 0.0, "note": null}
+{"type": "moon", "name": "Arkan", "x": 80.11, "y": 63.68, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Aragoth Prime 4", "x": -75.73, "y": -32.4, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Aragoth Prime 5", "x": -125.04, "y": -76.11, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Aragoth Prime 6", "x": -138.29, "y": -119.11, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Aragoth Prime 7", "x": -98.16, "y": -105.68, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Aragoth Prime 8", "x": -43.87, "y": -64.82, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Aragoth Prime 9", "x": -5.17, "y": -48.16, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Old Resource Field 1", "x": -140.46, "y": 116.86, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Old Resource Field 2", "x": 146.23, "y": 64.07, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Old Resource Path", "x": -44.74, "y": 123.2, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Old Resource Path 1", "x": -82.85, "y": 122.9, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Old Resource Path 2", "x": -118.11, "y": 122.9, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Satellite Communication Node 1", "x": -158.15, "y": 53.88, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Satellite Communication Node 2", "x": 72.9, "y": 57.14, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Tokee Field", "x": 174.47, "y": -72.31, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Tokee Navway", "x": 179.92, "y": -39.8, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Aragoth Resource Field 1", "x": 37.66, "y": 16.73, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Aragoth Resource Field 2", "x": -38.57, "y": 1.24, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Duth Field", "x": -171.8, "y": 45.1, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Duth Navway", "x": -157.91, "y": 81.49, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Mughwa Field", "x": -106.68, "y": -95.64, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Aragoth Prime 1", "x": -30.25, "y": 103.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Aragoth Prime 10", "x": 33.51, "y": -23.79, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Aragoth Prime 11", "x": 70.09, "y": 3.98, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Aragoth Prime 12", "x": 106.65, "y": 34.62, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Aragoth Prime 13", "x": 144.81, "y": 9.36, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Aragoth Prime 14", "x": 116.37, "y": 86.96, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Aragoth Prime 15", "x": 80.31, "y": 109.35, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Aragoth Prime 16", "x": 35.15, "y": 116.33, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Aragoth Prime 2", "x": -50.56, "y": 61.14, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Aragoth Prime 3", "x": -66.98, "y": 15.81, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Muspelheim", "x": 189.87, "y": 4.39, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Valkyrie Twins", "x": -153.78, "y": -132.76, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Varen´s Girdle", "x": -3.55, "y": 133.0, "z": 0.0, "note": null}
+{"type": "disabled-gate", "name": "Old Disabled Pirate Gate", "x": -161.53, "y": 120.36, "z": 0.0, "note": null}
+{"type": "station", "name": "Chernevog Station", "x": -85.25, "y": -68.91, "z": 0.0, "note": null}

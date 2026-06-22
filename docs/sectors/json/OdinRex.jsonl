@@ -1,0 +1,27 @@
+{"type": "hidden-nav-point", "name": "Chavez Camp", "x": -277.64, "y": 249.05, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Chavez Mining Facility", "x": -23.49, "y": 91.55, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Chavez Outpost", "x": 29.49, "y": 265.6, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Communication Satellite", "x": -89.81, "y": 250.08, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Wrecked Freighter - Progen", "x": -166.18, "y": -17.17, "z": 0.0, "note": null}
+{"type": "planet", "name": "Odin Rex", "x": -11.53, "y": -35.9, "z": 100.0, "note": null}
+{"type": "moon", "name": "Balder", "x": -235.54, "y": 246.86, "z": 0.0, "note": null}
+{"type": "moon", "name": "Hodr", "x": -6.54, "y": 268.97, "z": 0.0, "note": null}
+{"type": "moon", "name": "Vali", "x": -163.2, "y": -20.78, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "The Sinker", "x": -41.7, "y": 126.81, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "The Path", "x": -62.29, "y": 250.03, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "The Line", "x": -58.74, "y": 165.59, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "The Hook", "x": -74.02, "y": 204.96, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Sight", "x": -262.12, "y": 195.25, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Navbuoy V3", "x": -220.26, "y": 75.84, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Navbuoy V2", "x": -211.83, "y": 51.55, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Navbuoy V1", "x": -192.25, "y": 10.14, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Odin Rex 5", "x": -245.69, "y": 114.3, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Odin Rex 4", "x": -216.38, "y": 151.47, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Odin Rex 3", "x": -185.65, "y": 188.99, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Odin Rex 2", "x": -155.99, "y": 226.87, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Odin Rex 1", "x": -128.11, "y": 265.47, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Focus", "x": -270.34, "y": 222.05, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Destroyed Mining Facility", "x": -154.31, "y": -23.62, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Jotunheim", "x": -100.85, "y": 300.5, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Odin´s Belt", "x": -274.63, "y": 78.21, "z": 0.0, "note": null}
+{"type": "factioned-gate", "name": "Sector Gate to Smuggler´s Run", "x": -120.24, "y": 90.72, "z": 0.0, "note": "Red Dragon Faction"}

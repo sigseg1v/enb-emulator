@@ -1,0 +1,41 @@
+{"type": "hidden-nav-point", "name": "Gravity Generator", "x": 21.79, "y": -19.55, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Jenquai Listener", "x": 24.06, "y": -10.63, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Prometheus´ Ember", "x": 62.4, "y": 39.2, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Red Dragon Research Vessel", "x": -45.27, "y": -62.82, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Rimenshi Rock", "x": 82.19, "y": 14.25, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Trader´s Mark", "x": 78.93, "y": 48.27, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Void of Thought Maru", "x": -94.92, "y": -35.31, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Mining Marker 1", "x": -125.18, "y": 62.27, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Mining Marker 2", "x": -117.31, "y": 1.69, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Mining Marker 3", "x": -124.33, "y": -61.29, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Mining Marker 4", "x": 125.86, "y": -45.37, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Saturn 1", "x": 114.01, "y": -17.66, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Saturn 2", "x": 90.13, "y": -20.18, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Saturn 3", "x": 66.91, "y": -21.55, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Upper Saturn 1", "x": -58.13, "y": 42.08, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Upper Saturn 2", "x": -39.71, "y": 21.39, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Upper Saturn 3", "x": -16.1, "y": 7.03, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Venus 1", "x": 69.94, "y": 41.6, "z": -1.0, "note": null}
+{"type": "nav-point", "name": "Venus 2", "x": 65.7, "y": 22.1, "z": -0.5, "note": null}
+{"type": "nav-point", "name": "Venus 3", "x": 66.97, "y": 3.45, "z": -0.1, "note": null}
+{"type": "nav-point", "name": "Alpha-Gamma Beltway 1", "x": -102.88, "y": 103.81, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Alpha-Gamma Beltway 2", "x": -82.53, "y": 64.14, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Alpha-Gamma Beltway 3", "x": -74.86, "y": 18.72, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Alpha-Gamma Beltway 4", "x": -76.25, "y": -30.74, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Alpha-Gamma Beltway 5", "x": -89.04, "y": -74.67, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Alpha-Gamma Beltway 6", "x": -113.77, "y": -117.29, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid BA-299", "x": -60.71, "y": -104.52, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid BA-482", "x": -51.55, "y": 72.53, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Gate War Hulk", "x": 84.2, "y": -30.36, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Jenquai Listening Post 1", "x": 72.08, "y": 1.79, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Jenquai Listening Post 2", "x": 90.97, "y": -48.74, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Lower Saturn 1", "x": -19.56, "y": -26.9, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Lower Saturn 2", "x": -38.04, "y": -44.15, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Lower Saturn 3", "x": -58.08, "y": -57.48, "z": 0.0, "note": null}
+{"type": "wormhole-exit", "name": "Hagoth´s Weft", "x": -28.43, "y": 43.6, "z": 0.0, "note": null}
+{"type": "gate", "name": "Accelerator Sphere 1", "x": 44.98, "y": -23.89, "z": 0.0, "note": null}
+{"type": "gate", "name": "Accelerator Sphere 2", "x": 0.29, "y": -11.79, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Asteroid Belt Alpha", "x": -129.04, "y": 138.87, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Asteroid Belt Gamma", "x": -130.49, "y": -136.05, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Saturn", "x": 139.6, "y": -11.74, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Venus", "x": 74.13, "y": 59.2, "z": 0.0, "note": null}

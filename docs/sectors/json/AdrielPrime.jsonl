@@ -1,0 +1,23 @@
+{"type": "planet", "name": "Proxima", "x": -160.45, "y": 93.49, "z": 0.0, "note": null}
+{"type": "object", "name": "Adriel Prime", "x": 117.33, "y": -3.47, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Radiation Marker 4", "x": -110.13, "y": -67.47, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Radiation Marker 36", "x": -1.6, "y": 57.07, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Radiation Marker 3", "x": -75.73, "y": -43.73, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Radiation Marker 2", "x": -46.67, "y": -11.47, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Radiation Marker 1", "x": -20.0, "y": 17.6, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Proxima Approach 36", "x": 62.82, "y": 57.49, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Proxima Approach 3", "x": -27.47, "y": -94.67, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Proxima Approach 2", "x": 10.13, "y": -52.27, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Proxima Approach 1", "x": 42.39, "y": -1.79, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Gas Collector Ring 5", "x": -156.02, "y": -23.3, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Gas Collector Ring 4", "x": -133.23, "y": -12.05, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Gas Collector Ring 36", "x": -68.0, "y": 63.2, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Gas Collector Ring 35", "x": -56.8, "y": 85.33, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Gas Collector Ring 3", "x": -110.93, "y": 2.13, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Gas Collector Ring 2", "x": -93.6, "y": 19.47, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Gas Collector Ring 1", "x": -77.87, "y": 40.27, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Adriel Collector 36", "x": 146.13, "y": 57.07, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Adriel Collector 2", "x": 76.53, "y": -99.73, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Margesi", "x": 156.53, "y": -53.33, "z": 0.0, "note": null}
+{"type": "gate", "name": "System Gate to Aragoth", "x": 149.07, "y": -57.87, "z": 0.0, "note": null}
+{"type": "station", "name": "Adriel Mining Station", "x": 117.33, "y": -26.13, "z": 0.0, "note": null}

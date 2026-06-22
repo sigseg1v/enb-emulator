@@ -1,0 +1,42 @@
+{"type": "hidden-nav-point", "name": "The Sabine Order", "x": 98.96, "y": -58.74, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Strength of Kahn", "x": 96.45, "y": -48.91, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Sputnik Memorial", "x": 130.78, "y": -22.2, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Sharim Affirmation", "x": 165.69, "y": -8.38, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Progen Primarch", "x": 87.54, "y": -58.26, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Orion Incident", "x": 106.18, "y": -53.99, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Mercury Memorial", "x": 122.16, "y": -19.91, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Jove City Memorial", "x": 172.3, "y": -0.29, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Jenquai Tricentennial", "x": 166.58, "y": 0.81, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Jagerstadt Memorial", "x": 118.64, "y": -28.01, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Idowu Memorial", "x": 149.95, "y": 8.12, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Apollo Memorial", "x": 119.95, "y": -27.85, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Challenger Memorial", "x": 125.95, "y": -20.66, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Columbia Memorial", "x": 122.71, "y": -25.21, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Dai´Shao Mordane Memorial", "x": 173.78, "y": -5.01, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Data Satellite I", "x": -34.57, "y": 59.29, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Data Satellite II", "x": -71.5, "y": 87.5, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Data Satellite III", "x": -57.51, "y": -24.19, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Data Satellite IV", "x": -105.27, "y": -30.21, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "ECS Galapagos Memorial", "x": 159.39, "y": 9.49, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Enduring Freedom Memorial", "x": 127.44, "y": -23.17, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "GETCo Statement", "x": 124.0, "y": -28.19, "z": 0.0, "note": null}
+{"type": "object", "name": "Schirra", "x": -42.79, "y": -83.15, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "The Terran Path", "x": 152.34, "y": 14.06, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "The Progen Path", "x": 96.41, "y": -53.87, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "The Path of the Shared Memory", "x": 123.59, "y": -24.17, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "The Jenquai Path", "x": 166.03, "y": -3.18, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "The Launch Point", "x": 34.78, "y": -2.99, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Sigma 7", "x": -26.36, "y": -93.66, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Red Dragon Training Facility", "x": -94.98, "y": -119.99, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Recource Field 1", "x": 75.68, "y": 17.78, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Mercury Station", "x": 195.5, "y": -50.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Glory`s Orbit 3", "x": -12.33, "y": -13.66, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Glory`s Orbit 2", "x": 0.15, "y": 29.29, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Glory`s Orbit 1", "x": 76.7, "y": -12.97, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Gemini 7", "x": 9.4, "y": -72.77, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Gahaarn`s Rock", "x": 156.41, "y": -122.78, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Crystal View", "x": 31.75, "y": -120.46, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Crystal Vantage", "x": 193.27, "y": 42.99, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Apollo 7", "x": 43.72, "y": -46.87, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Slayton", "x": 231.42, "y": -58.1, "z": 0.0, "note": null}
+{"type": "station", "name": "Mercury Station", "x": 205.36, "y": -40.9, "z": 0.0, "note": null}

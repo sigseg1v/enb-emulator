@@ -1,0 +1,9 @@
+{"type": "hidden-nav-point", "name": "Tower 1 Interface", "x": -17.66, "y": -9.96, "z": 9.8, "note": null}
+{"type": "hidden-nav-point", "name": "Tower 2 Interface", "x": -11.03, "y": -20.35, "z": 10.0, "note": null}
+{"type": "hidden-nav-point", "name": "Tower 3 Interface", "x": -20.2, "y": -20.08, "z": 10.0, "note": null}
+{"type": "nav-point", "name": "Ancient Ruins", "x": -20.87, "y": 11.83, "z": 9.69, "note": null}
+{"type": "nav-point", "name": "Comm Tower", "x": -16.3, "y": -16.26, "z": 11.0, "note": null}
+{"type": "nav-point", "name": "GETCo Sleeper Ship", "x": -15.08, "y": -2.9, "z": 9.36, "note": null}
+{"type": "nav-point", "name": "Ruined Tower", "x": 12.85, "y": 8.8, "z": 14.48, "note": null}
+{"type": "gate", "name": "Accelerator to Upper Orbit", "x": 1.27, "y": -1.54, "z": 11.55, "note": null}
+{"type": "gate", "name": "Wormhole", "x": -20.92, "y": 11.88, "z": 10.29, "note": null}

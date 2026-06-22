@@ -1,0 +1,44 @@
+{"type": "hidden-nav-point", "name": "Wrecked Shinwa Patrol Cruiser", "x": 0.81, "y": 11.3, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "The Prophet Unarmed Maru", "x": 54.35, "y": -71.07, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Sha´ha´dem Adept", "x": 82.11, "y": 7.35, "z": 0.01, "note": null}
+{"type": "hidden-nav-point", "name": "Reclaimer", "x": -33.62, "y": -15.78, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Missing Progen", "x": 8.92, "y": -26.53, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Abandoned Red Dragon", "x": -65.91, "y": 26.68, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Bio-Ripper Stockpile", "x": 70.05, "y": -85.72, "z": 0.6, "note": null}
+{"type": "hidden-nav-point", "name": "Continuum Wrinkle", "x": 96.1, "y": 13.52, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Derelict Shinwa Patrol", "x": -16.67, "y": 4.34, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Empty InfinityCorp Trader", "x": 62.41, "y": -94.1, "z": 0.01, "note": null}
+{"type": "hidden-nav-point", "name": "Empty Red Dragon", "x": 22.97, "y": -88.3, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Full Transport", "x": -49.4, "y": -82.33, "z": -0.5, "note": null}
+{"type": "hidden-nav-point", "name": "Incapacitated Miner", "x": -3.85, "y": 69.71, "z": 0.01, "note": null}
+{"type": "hidden-nav-point", "name": "Malfunctioning Satellite", "x": -2.84, "y": -53.63, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Missing Earthcorps Ship", "x": 40.78, "y": 29.38, "z": 0.0, "note": null}
+{"type": "planet", "name": "Xipe Totec", "x": -220.6, "y": -10.95, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Dragon´s Watch Gamma", "x": 44.8, "y": -18.51, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Intzalan Line I", "x": -102.77, "y": -89.81, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Intzalan Line II", "x": -101.87, "y": -40.47, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Intzalan Line III", "x": -102.39, "y": 8.63, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Intzalan Line IV", "x": -102.01, "y": 58.08, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Observer Relay 1", "x": -57.11, "y": 41.03, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Observer Relay 2", "x": -57.3, "y": -59.76, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Prasad Beacon", "x": -149.22, "y": -74.55, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Prasad Wreckyard", "x": -148.87, "y": 50.27, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Ruined Red Dragon Outpost", "x": 83.09, "y": -40.86, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Tetl", "x": 89.57, "y": 18.56, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Wreck of Kyoka Maru", "x": -18.92, "y": -90.42, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Dragon´s Watch Epsilon", "x": 2.54, "y": -87.09, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Dragon´s Watch Delta", "x": 48.39, "y": -67.15, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Dragon´s Watch Beta", "x": 23.82, "y": 27.61, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Dragon´s Watch Alpha", "x": -14.79, "y": 57.04, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid XT-N17", "x": -189.27, "y": 47.48, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid XT-N16", "x": -193.2, "y": 34.46, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid XT-N15", "x": -189.1, "y": 21.16, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid XT-N14", "x": -187.73, "y": 7.83, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid XT-174", "x": 61.58, "y": -85.05, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid XT-173", "x": 39.62, "y": -90.72, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid XT-131", "x": 84.28, "y": 60.59, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid XT-130", "x": 89.31, "y": 46.23, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid XT-129", "x": 79.89, "y": 35.56, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Swooping Eagle", "x": -185.36, "y": -86.12, "z": 0.0, "note": null}
+{"type": "factioned-gate", "name": "Pirate Gate to Smuggler´s Run", "x": 20.08, "y": -64.93, "z": 0.0, "note": "Red Dragon Faction"}
+{"type": "station", "name": "Prasad Station", "x": -169.84, "y": -29.93, "z": 0.0, "note": null}

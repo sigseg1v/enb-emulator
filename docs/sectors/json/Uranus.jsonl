@@ -1,0 +1,19 @@
+{"type": "hidden-nav-point", "name": "Ice of the South", "x": -49.21, "y": -43.44, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Ice of the North", "x": -54.87, "y": 51.67, "z": 0.0, "note": null}
+{"type": "planet", "name": "Uranus", "x": -98.81, "y": -0.69, "z": 0.0, "note": null}
+{"type": "moon", "name": "Ariel", "x": -65.27, "y": -125.85, "z": 0.0, "note": null}
+{"type": "moon", "name": "Puck", "x": -67.64, "y": 127.16, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Uranus 4", "x": -41.81, "y": 33.9, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Uranus 3", "x": -37.24, "y": 15.14, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Uranus 2", "x": -35.98, "y": -3.44, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Uranus 1", "x": -40.7, "y": -25.8, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Saturn Way 3", "x": -25.9, "y": -36.19, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Saturn Way 2", "x": -7.32, "y": -43.44, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Saturn Way 1", "x": 15.35, "y": -47.53, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Pluto Way 3", "x": -23.07, "y": 38.76, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Pluto Way 1", "x": -2.6, "y": 45.69, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Neptune Way 2", "x": -11.1, "y": 13.88, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Neptune Way 1", "x": 16.61, "y": 6.63, "z": 0.0, "note": null}
+{"type": "gate", "name": "Accelerator to Neptune", "x": 43.73, "y": 2.67, "z": 0.0, "note": null}
+{"type": "gate", "name": "Accelerator to Pluto and Charon", "x": 19.45, "y": 50.72, "z": 0.0, "note": null}
+{"type": "gate", "name": "Accelerator to Saturn", "x": 33.31, "y": -49.11, "z": 0.0, "note": null}

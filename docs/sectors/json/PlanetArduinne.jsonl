@@ -1,0 +1,19 @@
+{"type": "hidden-nav-point", "name": "Crystal Temple", "x": 13.03, "y": 12.27, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Temple Interface", "x": 8.98, "y": 9.32, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Gas Pocket Arduinne F9", "x": -25.05, "y": 13.59, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Gas Pocket Arduinne F8", "x": -26.82, "y": 5.91, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Gas Pocket Arduinne F7", "x": -27.26, "y": -3.4, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Gas Pocket Arduinne F2", "x": 16.87, "y": -11.19, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Gas Pocket Arduinne F1", "x": 13.71, "y": -20.87, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Gas Pocket Arduinne F0", "x": -11.75, "y": 17.43, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Essence Research Lab", "x": 3.4, "y": -1.72, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Arduinne Core 1", "x": -15.14, "y": -16.56, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Arduinne Core 2", "x": -11.3, "y": -12.71, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Arduinne Core 3", "x": -7.46, "y": -10.65, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Arduinne Core 4", "x": -4.06, "y": -7.4, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Arduinne Core 5", "x": -24.97, "y": -34.71, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Arduinne Core 6", "x": 4.46, "y": -11.93, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Arduinne Gas 1", "x": -16.18, "y": -11.83, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Arduinne Gas 2", "x": -16.18, "y": -7.54, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Arduinne Gas 3", "x": -16.18, "y": -3.26, "z": 0.0, "note": null}
+{"type": "gate", "name": "Gate to Arduinne Orbit", "x": -20.32, "y": -20.1, "z": 0.0, "note": null}

@@ -1,0 +1,30 @@
+{"type": "attention", "name": "Gravity Shear", "x": 9.26, "y": 36.59, "z": 0.0, "note": "Warning: Hull damage!"}
+{"type": "hidden-nav-point", "name": "The Pit", "x": 11.01, "y": 37.97, "z": -4.0, "note": null}
+{"type": "hidden-nav-point", "name": "Security Checkpoint", "x": 55.94, "y": -70.48, "z": 3.97, "note": null}
+{"type": "hidden-nav-point", "name": "Security Checkpoint", "x": 55.79, "y": -68.48, "z": 3.93, "note": null}
+{"type": "hidden-nav-point", "name": "Menorb´s Back", "x": 72.03, "y": 2.4, "z": -2.5, "note": null}
+{"type": "hidden-nav-point", "name": "Crystal Altar 5", "x": -21.87, "y": 52.53, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Crystal Altar 4", "x": 39.47, "y": 50.67, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Crystal Altar 3", "x": -17.6, "y": 7.2, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Crystal Altar 2", "x": 38.4, "y": -14.4, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Crystal Altar 1", "x": 21.6, "y": 24.53, "z": 0.0, "note": null}
+{"type": "planet", "name": "Menorb", "x": 11.2, "y": 73.33, "z": 0.0, "note": null}
+{"type": "moon", "name": "Tendrius", "x": 26.85, "y": -28.38, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Androzari", "x": -38.44, "y": -51.46, "z": 2.0, "note": null}
+{"type": "nav-point", "name": "Menorb Skyway 6", "x": 50.93, "y": 73.07, "z": -3.0, "note": null}
+{"type": "nav-point", "name": "Menorb Skyway 5", "x": 55.95, "y": 41.42, "z": -2.5, "note": null}
+{"type": "nav-point", "name": "Menorb Skyway 4", "x": 40.41, "y": 19.43, "z": -2.0, "note": null}
+{"type": "nav-point", "name": "Menorb Skyway 3", "x": 14.88, "y": 9.81, "z": -1.5, "note": null}
+{"type": "nav-point", "name": "Menorb Skyway 2", "x": -13.69, "y": 19.43, "z": -1.0, "note": null}
+{"type": "nav-point", "name": "Menorb Skyway 1", "x": -32.29, "y": 40.29, "z": -0.5, "note": null}
+{"type": "nav-point", "name": "Menorb Path 6", "x": 58.4, "y": -69.07, "z": 4.0, "note": null}
+{"type": "nav-point", "name": "Menorb Path 5", "x": 25.6, "y": -72.27, "z": 3.5, "note": null}
+{"type": "nav-point", "name": "Menorb Path 4", "x": -8.8, "y": -67.47, "z": 3.0, "note": null}
+{"type": "nav-point", "name": "Menorb Path 3", "x": -60.0, "y": -21.6, "z": 2.0, "note": null}
+{"type": "nav-point", "name": "Menorb Path 2", "x": -70.8, "y": 12.88, "z": 1.5, "note": null}
+{"type": "nav-point", "name": "Menorb Path 1", "x": -70.62, "y": 48.26, "z": 0.5, "note": null}
+{"type": "nav-point", "name": "Jenquai Research Ship", "x": 38.55, "y": 86.24, "z": -3.5, "note": null}
+{"type": "nav-point", "name": "Base of Tendrius", "x": 37.74, "y": -31.02, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Ishuan", "x": -70.4, "y": 77.07, "z": 0.0, "note": null}
+{"type": "disabled-gate", "name": "Sector Gate to Nebiros", "x": 87.41, "y": -58.9, "z": 4.5, "note": null}
+{"type": "station", "name": "Androzari [Under Construction]", "x": -73.5, "y": -80.32, "z": 2.0, "note": null}

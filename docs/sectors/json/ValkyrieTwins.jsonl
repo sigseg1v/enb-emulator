@@ -1,0 +1,31 @@
+{"type": "hidden-object", "name": "Aragoth Major", "x": -211.59, "y": 113.05, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Aragoth Probe 1", "x": -129.3, "y": -29.26, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Aragoth Probe 2", "x": -93.04, "y": 36.75, "z": -0.46, "note": null}
+{"type": "hidden-nav-point", "name": "Aragoth Probe 3", "x": -100.87, "y": 13.21, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Aragoth Probe 4", "x": -115.47, "y": -11.82, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Caius Boro", "x": -100.28, "y": 56.97, "z": 0.0, "note": null}
+{"type": "object", "name": "Gunn", "x": 25.69, "y": -24.25, "z": -1.0, "note": null}
+{"type": "object", "name": "Guth", "x": 96.23, "y": 33.75, "z": 1.0, "note": null}
+{"type": "nav-point", "name": "Path of Fire IV", "x": -45.8, "y": -13.82, "z": -2.0, "note": null}
+{"type": "nav-point", "name": "Path of Fire V", "x": -67.91, "y": -21.06, "z": -2.5, "note": null}
+{"type": "nav-point", "name": "Path of Fire VI", "x": -91.82, "y": -28.99, "z": -3.0, "note": null}
+{"type": "nav-point", "name": "Path of Fire VII", "x": -117.19, "y": -35.74, "z": -3.5, "note": null}
+{"type": "nav-point", "name": "Remote Mine Path 1", "x": -10.15, "y": 41.55, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Remote Mine Path 2", "x": -34.0, "y": 47.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Remote Mine Path 3", "x": -57.65, "y": 52.97, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Remote Mine Path 4", "x": -81.3, "y": 56.32, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Remote Minefield", "x": -101.13, "y": 56.79, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Path of Fire III", "x": -25.51, "y": -4.39, "z": -1.5, "note": null}
+{"type": "nav-point", "name": "Path of Fire II", "x": -1.59, "y": 7.56, "z": -1.0, "note": null}
+{"type": "nav-point", "name": "Path of Fire I", "x": 20.87, "y": 19.16, "z": -0.5, "note": null}
+{"type": "nav-point", "name": "Nav Valkyrie 6", "x": 57.45, "y": 21.7, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Valkyrie 4", "x": 97.94, "y": 8.63, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Valkyrie 3", "x": 121.58, "y": 3.64, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Valkyrie 2", "x": 108.28, "y": -11.92, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Valkyrie 1", "x": 90.02, "y": -25.15, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "In Memory of Yoko", "x": 76.35, "y": 14.44, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Field of Danger", "x": -143.33, "y": -36.77, "z": 0.0, "note": null}
+{"type": "wormhole-exit", "name": "Hagoth´s Weft", "x": 79.49, "y": 45.29, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Aragoth Prime", "x": 70.62, "y": -45.32, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Fenris", "x": 135.38, "y": 23.72, "z": 0.0, "note": null}
+{"type": "station", "name": "Aragoth Station", "x": 38.93, "y": 37.75, "z": 0.01, "note": null}

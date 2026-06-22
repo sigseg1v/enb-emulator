@@ -1,0 +1,29 @@
+{"type": "hidden-nav-point", "name": "Scrapyard Anti Grav Generator", "x": -11.48, "y": 30.53, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Gas Pocket 4B", "x": 34.97, "y": 10.07, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Gas Pocket 4A", "x": -37.78, "y": 12.37, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Gas Pocket 3B", "x": 30.38, "y": 1.7, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Gas Pocket 3A", "x": -30.63, "y": 2.38, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Gas Pocket 2B", "x": 23.01, "y": -5.72, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Gas Pocket 2A", "x": -22.67, "y": -4.24, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Gas Pocket 1B", "x": 11.62, "y": -7.61, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Gas Pocket 1A", "x": -11.33, "y": -7.61, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "ECS Speculator", "x": -8.98, "y": 29.84, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "ECS Lucky Dog", "x": -13.68, "y": 30.23, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "ECS Indomitable", "x": -13.05, "y": 32.92, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "ECS Beowulf", "x": -11.02, "y": 32.37, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Stirling", "x": 21.7, "y": 31.6, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Stirling 4", "x": 17.32, "y": 28.46, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Stirling 3", "x": 11.79, "y": 25.14, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Stirling 2", "x": 7.57, "y": 21.35, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Stirling 1", "x": 1.0, "y": 19.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Scrapyard 3", "x": -8.06, "y": 27.76, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Scrapyard 2", "x": -4.38, "y": 24.62, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Scrapyard 1", "x": -1.5, "y": 19.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Inverness Down 2", "x": 0.13, "y": 10.03, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Inverness Down 1", "x": 0.25, "y": 4.19, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Gas Field Beta", "x": -8.31, "y": 16.43, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Gas Field Alpha", "x": 8.82, "y": 16.55, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Gas Field Beta", "x": -14.28, "y": 16.56, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Gas Field Alpha", "x": 15.27, "y": 16.54, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Inverness Orbit", "x": 0.0, "y": -5.08, "z": 0.0, "note": null}
+{"type": "station", "name": "Inverness Down", "x": -0.8, "y": 18.25, "z": -1.94, "note": null}

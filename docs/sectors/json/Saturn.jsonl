@@ -1,0 +1,22 @@
+{"type": "planet", "name": "Saturn", "x": -7.97, "y": -101.11, "z": -183.82, "note": null}
+{"type": "nav-point", "name": "Saturn 3", "x": 141.37, "y": -402.72, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Net-7 SOL! Beacon", "x": 272.01, "y": -386.83, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Ringway Six", "x": 331.55, "y": -265.11, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Ringway Five", "x": 299.39, "y": -302.86, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Ringway Four", "x": 257.73, "y": -338.42, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Ringway Three", "x": 213.47, "y": -372.31, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Ringway Two", "x": 167.44, "y": -407.14, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Ringway One", "x": 118.92, "y": -443.22, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Abandoned Starbase", "x": 238.55, "y": -488.97, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Abandoned Pathway", "x": 229.76, "y": -479.72, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Abandoned Pathway", "x": 212.96, "y": -432.54, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Abandoned Pathway", "x": 233.78, "y": -262.66, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Abandoned Pathway", "x": 282.74, "y": -264.6, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Jupiter", "x": 352.05, "y": -303.69, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Asteroid Belt Gamma", "x": 68.68, "y": -415.26, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Asteroid Belt Beta", "x": 129.15, "y": -489.96, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Asteroid Belt Alpha", "x": 199.62, "y": -322.18, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Akerons Gate", "x": 366.3, "y": -226.73, "z": 0.0, "note": null}
+{"type": "gate", "name": "Gate to Beta Hydri System", "x": 89.61, "y": -467.28, "z": 0.0, "note": null}
+{"type": "gate", "name": "Accelerator to Uranus", "x": 206.16, "y": -247.48, "z": 0.0, "note": null}
+{"type": "station", "name": "Net-7 SOL", "x": 313.64, "y": -425.05, "z": 0.0, "note": null}

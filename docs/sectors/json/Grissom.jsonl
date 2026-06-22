@@ -1,0 +1,44 @@
+{"type": "hidden-nav-point", "name": "Grissom Mining Weigh Station", "x": -345.8, "y": -5.42, "z": 0.0, "note": null}
+{"type": "moon", "name": "Apollo I", "x": -296.49, "y": 26.25, "z": 2.27, "note": null}
+{"type": "moon", "name": "Liberty Bell", "x": -362.9, "y": -253.23, "z": -1.33, "note": null}
+{"type": "moon", "name": "Molly Brown", "x": -90.88, "y": -142.23, "z": 0.0, "note": null}
+{"type": "landable-planet", "name": "Grissom", "x": 33.41, "y": -42.5, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Dzurai Delta 1", "x": -60.0, "y": 27.62, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Dzurai Delta 2", "x": -47.21, "y": 59.99, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Dzurai Gamma 1", "x": -218.96, "y": -217.98, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Dzurai Gamma 2", "x": -197.76, "y": -184.32, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Grissom Hub", "x": -247.08, "y": -252.95, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Grissom Prime 1", "x": -294.21, "y": -460.31, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Grissom Prime 2", "x": -277.5, "y": -383.06, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Grissom Prime 3", "x": -258.77, "y": -303.71, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Grissom Prime 4", "x": -260.51, "y": -183.43, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Grissom Prime 5", "x": -244.56, "y": -97.63, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Grissom Prime 6", "x": -240.38, "y": -12.02, "z": -0.31, "note": null}
+{"type": "nav-point", "name": "Nav Grissom Secundus 1", "x": -164.1, "y": -258.5, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Grissom Secundus 2", "x": -121.37, "y": -180.11, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Grissom Secundus 3", "x": -101.2, "y": -111.52, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Grissom Secundus 4", "x": -73.22, "y": -66.11, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Grissom Secundus 5", "x": -64.54, "y": -6.3, "z": -0.31, "note": null}
+{"type": "nav-point", "name": "Nav Houston 1", "x": -281.29, "y": -17.31, "z": -0.57, "note": null}
+{"type": "nav-point", "name": "Nav Houston 2", "x": -317.73, "y": -18.0, "z": -0.01, "note": null}
+{"type": "nav-point", "name": "Baikonur Resource Field", "x": -47.03, "y": -206.97, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Cape Canaveral Resource Field", "x": -108.99, "y": -418.88, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Dzurai Hunting Ground Alpha", "x": -380.4, "y": -165.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Dzurai Hunting Ground Beta", "x": -38.47, "y": -314.79, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Dzurai Hunting Ground Delta", "x": -44.03, "y": 94.93, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Dzurai Hunting Ground Gamma", "x": -180.89, "y": -149.59, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Houston Resource Field", "x": -350.83, "y": -5.25, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Liberty Path 1", "x": -267.52, "y": -262.04, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Liberty Path 2", "x": -299.17, "y": -260.43, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Liberty Resouce Field", "x": -331.86, "y": -257.36, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Baikonur 1", "x": -87.59, "y": -197.96, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Canaveral 1", "x": -173.31, "y": -302.95, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Canaveral 2", "x": -151.87, "y": -344.24, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Canaveral 3", "x": -121.7, "y": -376.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Dzurai Alpha 1", "x": -300.61, "y": -168.74, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Dzurai Alpha 2", "x": -339.26, "y": -167.49, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Dzurai Beta 1", "x": -120.75, "y": -273.65, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Dzurai Beta 2", "x": -80.24, "y": -295.46, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Cooper", "x": -202.8, "y": 17.21, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Shepard", "x": -308.71, "y": -504.6, "z": 0.0, "note": null}
+{"type": "factioned-gate", "name": "Pirate Gate to Smuggler´s Run", "x": 22.67, "y": -416.42, "z": 0.0, "note": "Red Dragon Faction"}

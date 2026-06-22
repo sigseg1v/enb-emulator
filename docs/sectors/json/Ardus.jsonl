@@ -1,0 +1,71 @@
+{"type": "planet", "name": "Ardus", "x": -3.26, "y": 7.71, "z": -1.7, "note": null}
+{"type": "moon", "name": "Ardus Delta", "x": -45.36, "y": -86.59, "z": -11.09, "note": null}
+{"type": "moon", "name": "Ardus Epsilon", "x": 46.07, "y": -59.11, "z": 7.02, "note": null}
+{"type": "moon", "name": "Ardus Gamma", "x": 90.04, "y": 115.76, "z": -11.4, "note": null}
+{"type": "moon", "name": "Ardus Omega", "x": 122.26, "y": -89.76, "z": 2.97, "note": null}
+{"type": "moon", "name": "Ardus Zeta", "x": 86.54, "y": -30.13, "z": 12.28, "note": null}
+{"type": "nav-point", "name": "AC 167", "x": -109.32, "y": 113.21, "z": 7.09, "note": null}
+{"type": "nav-point", "name": "AC 166", "x": -130.33, "y": 104.16, "z": 5.72, "note": null}
+{"type": "nav-point", "name": "AC 165", "x": -109.0, "y": 135.49, "z": 7.09, "note": null}
+{"type": "nav-point", "name": "AC 164", "x": -52.09, "y": 84.57, "z": 4.65, "note": null}
+{"type": "nav-point", "name": "AC 163", "x": -30.84, "y": 95.55, "z": 2.97, "note": null}
+{"type": "nav-point", "name": "AC 162", "x": -7.89, "y": 95.14, "z": -2.01, "note": null}
+{"type": "nav-point", "name": "AC 161", "x": 14.91, "y": 96.23, "z": 2.52, "note": null}
+{"type": "nav-point", "name": "AC 160", "x": 37.58, "y": 99.27, "z": 2.97, "note": null}
+{"type": "nav-point", "name": "AC 159", "x": 53.57, "y": 110.81, "z": -2.52, "note": null}
+{"type": "nav-point", "name": "AC 158", "x": 71.55, "y": 119.96, "z": -4.35, "note": null}
+{"type": "nav-point", "name": "AC 157", "x": 89.8, "y": 130.85, "z": -0.3, "note": null}
+{"type": "nav-point", "name": "AC 156", "x": 113.97, "y": 129.56, "z": -3.33, "note": null}
+{"type": "nav-point", "name": "AC 155", "x": 52.57, "y": 80.28, "z": 2.63, "note": null}
+{"type": "nav-point", "name": "AC 154", "x": 71.05, "y": 63.3, "z": 8.33, "note": null}
+{"type": "nav-point", "name": "AC 153", "x": 79.05, "y": 41.31, "z": 8.33, "note": null}
+{"type": "nav-point", "name": "AC 152", "x": 87.54, "y": 18.64, "z": 4.66, "note": null}
+{"type": "nav-point", "name": "AC 168", "x": -69.55, "y": 98.52, "z": -0.59, "note": null}
+{"type": "nav-point", "name": "AC 169", "x": -93.5, "y": 97.46, "z": -0.44, "note": null}
+{"type": "nav-point", "name": "AC 170", "x": -95.62, "y": 70.09, "z": 6.63, "note": null}
+{"type": "nav-point", "name": "AC 171", "x": -97.82, "y": 49.5, "z": 5.26, "note": null}
+{"type": "nav-point", "name": "AC 172", "x": -113.91, "y": 6.89, "z": 2.52, "note": null}
+{"type": "nav-point", "name": "AC 173", "x": -103.04, "y": 29.08, "z": 3.99, "note": null}
+{"type": "nav-point", "name": "AC 199", "x": -57.85, "y": -121.62, "z": -4.8, "note": "Danger !"}
+{"type": "nav-point", "name": "AC 227", "x": -136.07, "y": 85.51, "z": 6.18, "note": "Danger !"}
+{"type": "nav-point", "name": "AC 251", "x": 132.53, "y": 4.08, "z": -4.35, "note": "Danger !"}
+{"type": "nav-point", "name": "AC 271", "x": 121.54, "y": 76.21, "z": -5.7, "note": "Danger !"}
+{"type": "nav-point", "name": "AC 273", "x": -133.3, "y": 134.9, "z": 8.62, "note": "Danger !"}
+{"type": "nav-point", "name": "AC 282", "x": -124.3, "y": 142.38, "z": 4.8, "note": "Danger !"}
+{"type": "nav-point", "name": "AC 285", "x": 102.66, "y": -141.95, "z": 0.0, "note": "Danger !"}
+{"type": "nav-point", "name": "AC 296", "x": 135.0, "y": 118.59, "z": -7.09, "note": "Danger !"}
+{"type": "nav-point", "name": "AC 96", "x": -129.8, "y": -64.43, "z": -7.55, "note": "Danger !"}
+{"type": "nav-point", "name": "Antile", "x": 64.81, "y": -78.15, "z": 8.01, "note": null}
+{"type": "nav-point", "name": "AC 116", "x": -38.93, "y": -107.44, "z": -4.8, "note": null}
+{"type": "nav-point", "name": "AC 117", "x": 10.97, "y": -137.38, "z": -2.19, "note": "Danger !"}
+{"type": "nav-point", "name": "AC 118", "x": -10.75, "y": -127.24, "z": -2.19, "note": null}
+{"type": "nav-point", "name": "AC 119", "x": -17.99, "y": -105.23, "z": -2.19, "note": null}
+{"type": "nav-point", "name": "AC 122", "x": -92.14, "y": -0.87, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "AC 123", "x": -87.17, "y": -19.99, "z": -1.6, "note": null}
+{"type": "nav-point", "name": "AC 124", "x": -94.73, "y": -43.19, "z": -2.06, "note": null}
+{"type": "nav-point", "name": "AC 125", "x": -75.84, "y": -54.36, "z": -4.8, "note": null}
+{"type": "nav-point", "name": "AC 126", "x": -128.8, "y": -111.57, "z": 2.52, "note": null}
+{"type": "nav-point", "name": "AC 127", "x": -117.81, "y": -84.11, "z": -4.35, "note": null}
+{"type": "nav-point", "name": "AC 128", "x": -105.82, "y": -103.78, "z": 3.89, "note": null}
+{"type": "nav-point", "name": "AC 129", "x": -86.33, "y": -94.63, "z": -0.23, "note": null}
+{"type": "nav-point", "name": "AC 130", "x": -66.63, "y": -80.78, "z": -2.74, "note": "Danger !"}
+{"type": "nav-point", "name": "AC 131", "x": -55.49, "y": -60.44, "z": -6.63, "note": null}
+{"type": "nav-point", "name": "AC 132", "x": -34.64, "y": -66.04, "z": -4.69, "note": null}
+{"type": "nav-point", "name": "AC 133", "x": -14.88, "y": -81.36, "z": -2.52, "note": null}
+{"type": "nav-point", "name": "AC 151", "x": 90.04, "y": -2.65, "z": 8.33, "note": null}
+{"type": "nav-point", "name": "AC 150", "x": 111.46, "y": -13.22, "z": 2.52, "note": null}
+{"type": "nav-point", "name": "AC 149", "x": 68.55, "y": -14.56, "z": 5.26, "note": null}
+{"type": "nav-point", "name": "AC 148", "x": 63.56, "y": -35.63, "z": 3.43, "note": "Danger !"}
+{"type": "nav-point", "name": "AC 147", "x": 65.06, "y": -61.11, "z": 4.82, "note": null}
+{"type": "nav-point", "name": "AC 146", "x": 49.07, "y": -75.6, "z": 4.82, "note": null}
+{"type": "nav-point", "name": "AC 145", "x": 27.03, "y": -81.54, "z": 2.0, "note": "Danger !"}
+{"type": "nav-point", "name": "AC 144", "x": 31.17, "y": -106.03, "z": 3.51, "note": null}
+{"type": "nav-point", "name": "AC 143", "x": 55.72, "y": -109.12, "z": 0.88, "note": "Danger !"}
+{"type": "nav-point", "name": "AC 142", "x": 77.2, "y": -105.07, "z": 6.63, "note": null}
+{"type": "nav-point", "name": "AC 141", "x": 97.75, "y": -95.89, "z": 4.35, "note": null}
+{"type": "nav-point", "name": "AC 140", "x": 120.32, "y": -79.08, "z": 4.8, "note": null}
+{"type": "nav-point", "name": "AC 139", "x": 140.09, "y": -89.35, "z": -2.06, "note": null}
+{"type": "nav-point", "name": "AC 138", "x": 132.15, "y": -109.9, "z": -3.89, "note": "Danger !"}
+{"type": "nav-point", "name": "AC 137", "x": 118.92, "y": -131.38, "z": -7.09, "note": null}
+{"type": "nav-point", "name": "AC 134", "x": 7.1, "y": -72.67, "z": -1.6, "note": null}
+{"type": "gate", "name": "Ancient Gate to Alpha Centauri", "x": -135.15, "y": -11.82, "z": 1.85, "note": null}

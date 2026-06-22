@@ -1,0 +1,24 @@
+{"type": "hidden-nav-point", "name": "Arduinne Asteroid AA701", "x": -169.93, "y": -106.21, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Arduinne Asteroid AA702", "x": -200.42, "y": -83.1, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Arduinne Asteroid AA703", "x": -226.76, "y": -50.3, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Arduinne Asteroid AA704", "x": -241.54, "y": -18.88, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Arduinne Asteroid AA705", "x": -251.71, "y": 16.69, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Arduinne Asteroid AA706", "x": -261.87, "y": 51.81, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Arduinne Asteroid AA707", "x": -263.72, "y": 86.46, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Arduinne Asteroid AA708", "x": -262.79, "y": 120.65, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Arduinne Asteroid AA709", "x": -261.75, "y": 142.94, "z": 0.0, "note": null}
+{"type": "moon", "name": "Shetland", "x": 200.21, "y": -203.99, "z": 0.0, "note": null}
+{"type": "moon", "name": "Lomond", "x": 176.43, "y": 113.53, "z": 0.0, "note": null}
+{"type": "moon", "name": "Glasgow", "x": -230.12, "y": -223.99, "z": 0.0, "note": null}
+{"type": "moon", "name": "Destroyed Moon Core", "x": 182.19, "y": -4.37, "z": 0.0, "note": null}
+{"type": "landable-planet", "name": "Arduinne", "x": -80.62, "y": 72.97, "z": 0.38, "note": null}
+{"type": "nav-point", "name": "Arduinne Asteroid AA710", "x": -261.75, "y": 135.64, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Glendochart", "x": -140.49, "y": -160.56, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Arduinne 1", "x": 110.47, "y": -174.6, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Arduinne 2", "x": 26.46, "y": -163.21, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Arduinne 3", "x": 6.88, "y": -204.14, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Arduinne 4", "x": -3.13, "y": -246.37, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Arduinne 5", "x": -10.39, "y": -136.68, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Arduinne 6", "x": -54.5, "y": -128.01, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Arduinne 7", "x": -98.27, "y": -141.64, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Inverness", "x": 69.13, "y": -154.57, "z": 0.0, "note": null}

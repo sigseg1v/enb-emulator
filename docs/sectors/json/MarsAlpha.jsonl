@@ -1,0 +1,30 @@
+{"type": "hidden-nav-point", "name": "Warrior´s Folly", "x": 32.85, "y": -134.12, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Nav Revelation 0", "x": 32.04, "y": -130.63, "z": 0.0, "note": null}
+{"type": "object", "name": "Forgestone Alpha", "x": -47.73, "y": -114.16, "z": 0.0, "note": null}
+{"type": "object", "name": "White Fire Alpha", "x": 137.04, "y": -71.9, "z": 2.09, "note": null}
+{"type": "nav-point", "name": "Trade Dock Fire 1", "x": -41.38, "y": -70.47, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Search and Destroy Grounds", "x": 29.81, "y": -116.3, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Progen Survey Satellite", "x": 86.61, "y": 7.3, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Progen Cargo Tug", "x": -35.43, "y": -48.47, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Warrior Training 3", "x": -67.53, "y": 99.87, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Warrior Training 2", "x": -38.98, "y": 68.87, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Warrior Training 1", "x": -14.06, "y": 36.12, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Trade Fire 2", "x": -32.76, "y": -61.28, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Trade Fire 1", "x": -22.52, "y": -40.68, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Survey 2", "x": 80.06, "y": 7.15, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Survey 1", "x": 33.25, "y": 11.98, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Search and Destroy 2", "x": 24.27, "y": -73.11, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Search and Destroy 1", "x": 19.12, "y": -32.43, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Combat Course 1", "x": 16.25, "y": 31.98, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Mercury Training Ground", "x": -25.11, "y": 35.49, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Mactor Combat Course Beta", "x": 40.73, "y": 44.59, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Mactor Combat Course Alpha", "x": 16.06, "y": 56.42, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Hercules Training Ground", "x": -78.07, "y": 99.59, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Docking Buoy", "x": -39.86, "y": -68.84, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Centuriata Way 3", "x": -124.62, "y": 5.21, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Centuriata Way 2", "x": -84.67, "y": 5.21, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Centuriata Way 1", "x": -44.73, "y": 5.21, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Achilles Training Ground", "x": -48.34, "y": 69.4, "z": 0.0, "note": null}
+{"type": "class-specific-gate", "name": "Gate to Mars", "x": 68.28, "y": -14.44, "z": 0.0, "note": "Only for Progen Warrior (PW)"}
+{"type": "class-specific-gate", "name": "System Gate to Vega System", "x": -136.27, "y": 4.27, "z": 0.0, "note": "Only for Progen Warrior (PW)"}
+{"type": "station", "name": "Arx Forgus", "x": -25.24, "y": 23.14, "z": -10.23, "note": null}

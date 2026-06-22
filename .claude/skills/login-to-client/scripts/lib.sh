@@ -113,19 +113,31 @@ raise_win() {
 
 # ---- input ------------------------------------------------------------------
 # Click at window-relative (relx,rely) using absolute XTEST. Raises first.
+#
+# We do NOT use `xdotool mousemove --sync`: --sync waits for a MotionNotify that the
+# WINE client never confirms here, so it blocked ~15s PER CLICK (the whole reason a
+# nav-cycle crawled at ~10s/nav). Plain mousemove lands in ~3ms. --sync was meant to
+# beat a pointer-warping VM, but the cure for THAT is pausing the VM (see the
+# login-to-client "QEMU/KVM pointer warp" note), not blocking on every click. We
+# instead move, verify the pointer actually landed (cheap XQueryPointer), retry once
+# if a stray warp bumped it, then click.
 click_win() {
-    local id="$1" rx="$2" ry="$3" g x y
+    local id="$1" rx="$2" ry="$3" g x y loc px py
     local gx gy gw gh
-    raise_win "$id"; sleep 0.25
+    raise_win "$id"
     g="$(win_abs "$id")" || { err "click_win: no geometry for $id"; return 1; }
     read -r gx gy gw gh <<< "$g"
     x=$(( gx + rx ))
     y=$(( gy + ry ))
     log "click ($rx,$ry) -> abs ($x,$y) on win $id"
-    xdotool mousemove --sync "$x" "$y" 2>/dev/null
-    sleep 0.15
+    xdotool mousemove "$x" "$y" 2>/dev/null
+    # verify the pointer landed; one cheap retry covers a stray warp.
+    loc="$(xdotool getmouselocation --shell 2>/dev/null)"; eval "$loc" 2>/dev/null
+    px="${X:-}"; py="${Y:-}"
+    if [ "$px" != "$x" ] || [ "$py" != "$y" ]; then
+        xdotool mousemove "$x" "$y" 2>/dev/null
+    fi
     xdotool click 1
-    sleep 0.20
 }
 
 click_abs() { xdotool mousemove --sync "$1" "$2"; sleep 0.12; xdotool click 1; sleep 0.15; }

@@ -1,0 +1,33 @@
+{"type": "hidden-nav-point", "name": "Ketsugo Observation Outpost", "x": 0.55, "y": -97.77, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Point of Contemplation", "x": -74.83, "y": 224.71, "z": 0.0, "note": null}
+{"type": "planet", "name": "Yokan", "x": -193.67, "y": 129.94, "z": 4.82, "note": null}
+{"type": "nav-point", "name": "Yokan Beltway 5", "x": -144.49, "y": -0.62, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Yokan Beltway 4", "x": -86.87, "y": 0.78, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Yokan Beltway 3", "x": -27.89, "y": 4.29, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Yokan Beltway 2", "x": 23.3, "y": 33.89, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Yokan Beltway 1", "x": 68.02, "y": 65.67, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Southern Connector", "x": -52.17, "y": -193.3, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Shiva Beacon", "x": 0.75, "y": -185.7, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Saiseki", "x": 98.87, "y": -162.52, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Ouza", "x": 90.03, "y": -205.53, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Net-7 Beacon", "x": -52.63, "y": 72.93, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav P9", "x": -199.92, "y": -59.68, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav P8", "x": -200.64, "y": -109.66, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav P7", "x": -200.64, "y": -160.36, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid YP-X44", "x": -231.08, "y": -78.71, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid YP-X66", "x": 38.79, "y": 63.97, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid YP-X67", "x": 24.78, "y": 74.45, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid YP-X68", "x": 23.94, "y": 92.6, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid YP-X69", "x": 11.98, "y": 104.76, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Ishi", "x": 14.79, "y": -204.62, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Ketsugo´s Rock", "x": -2.96, "y": -92.93, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Ksuru", "x": 25.1, "y": -169.57, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav P1", "x": 100.34, "y": 14.29, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav P2", "x": 100.23, "y": -29.7, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav P3", "x": 99.91, "y": -76.3, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav P4", "x": 99.97, "y": -120.52, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav P5", "x": -110.14, "y": -195.96, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav P6", "x": -166.05, "y": -195.23, "z": 0.0, "note": null}
+{"type": "gate", "name": "Gate to Castor System", "x": -206.59, "y": -200.68, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Kailaasa", "x": -199.47, "y": -0.53, "z": 0.0, "note": null}
+{"type": "gate", "name": "System Gate to Sirius System", "x": 100.53, "y": 100.23, "z": 0.0, "note": null}

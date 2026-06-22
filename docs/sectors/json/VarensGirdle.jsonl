@@ -1,0 +1,35 @@
+{"type": "hidden-nav-point", "name": "Mining Marker", "x": 23.96, "y": 157.1, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Osterae Harvest", "x": 314.46, "y": 36.53, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Spacial Rift VG-01", "x": 72.29, "y": 157.38, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Spacial Rift VG-02", "x": 129.69, "y": 179.5, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Spacial Rift VG-03", "x": 118.18, "y": 192.58, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Spacial Rift VG-04", "x": 66.2, "y": 193.07, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Spacial Rift VG-05", "x": 107.56, "y": 158.55, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Triple Lattice", "x": 326.75, "y": 214.14, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Ratatosk Trail 2", "x": 221.2, "y": 28.34, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Ratatosk Trail 3", "x": 202.94, "y": 15.34, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Ratatosk Trail 4", "x": 180.28, "y": 12.94, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Ratatosk Trail 5", "x": 158.92, "y": 23.41, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Varen´s Girdle 1", "x": 67.3, "y": 46.47, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Varen´s Girdle 2", "x": 111.65, "y": 53.04, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Varen´s Girdle 3", "x": 151.5, "y": 44.38, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Varen´s Girdle 4", "x": 195.32, "y": 55.3, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Varen´s Girdle 5", "x": 235.95, "y": 69.94, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Varen´s Girdle 6", "x": 266.03, "y": 98.77, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Osterae Seeding 1", "x": 277.23, "y": 71.72, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Osterae Seeding 2", "x": 269.94, "y": 43.5, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Ratatosk Trail 1", "x": 233.18, "y": 47.05, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Nithogg Trail 7", "x": 176.33, "y": 70.08, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Nithogg Trail 6", "x": 169.11, "y": 91.43, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Nithogg Trail 5", "x": 160.22, "y": 113.61, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Nithogg Trail 4", "x": 136.76, "y": 135.59, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Nithogg Trail 3", "x": 109.73, "y": 116.18, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Nithogg Trail 2", "x": 103.51, "y": 88.35, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Nithogg Trail 1", "x": 82.21, "y": 69.53, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Lattice 4", "x": 316.91, "y": 187.32, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Lattice 3", "x": 270.9, "y": 201.78, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Lattice 2", "x": 222.03, "y": 183.48, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Lattice 1", "x": 181.28, "y": 179.59, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Andaren´s Tomb", "x": 90.34, "y": 183.38, "z": -2.04, "note": null}
+{"type": "gate", "name": "Sector Gate to Aragoth Prime", "x": 28.6, "y": 50.65, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Fenris", "x": 273.88, "y": 133.81, "z": 0.0, "note": null}

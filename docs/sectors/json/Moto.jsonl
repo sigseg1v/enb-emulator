@@ -1,0 +1,18 @@
+{"type": "nav-point", "name": "Trajan´s Wall", "x": 204.76, "y": -47.88, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Pathway 03", "x": -55.08, "y": 40.37, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Pathway 02", "x": -9.67, "y": -8.39, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Pathway 01", "x": 38.61, "y": -64.31, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Hadrian´s Wall", "x": 117.72, "y": -46.65, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Earth Corps Beacon", "x": -119.74, "y": 166.42, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Constatine´s Wall", "x": 55.81, "y": -109.88, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Centuriata Beacon", "x": 139.96, "y": -134.64, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Camp Hovey", "x": -22.41, "y": 263.08, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Camp Coiner", "x": -202.05, "y": 97.7, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Camp Castle", "x": -8.3, "y": 162.48, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Camp Casey", "x": -117.38, "y": 60.86, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Camp Caroll", "x": -40.63, "y": 104.23, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Antonine Wall", "x": 40.09, "y": -208.35, "z": 0.0, "note": null}
+{"type": "factioned-gate", "name": "Sector Gate to Aganju", "x": -201.14, "y": 226.3, "z": 0.0, "note": "Terran Alliance Faction"}
+{"type": "factioned-gate", "name": "System Gate to Altair", "x": 204.0, "y": -206.93, "z": 0.0, "note": "Progen Combine Faction"}
+{"type": "station", "name": "ECS Bremen", "x": -99.21, "y": 147.76, "z": 0.0, "note": null}
+{"type": "station", "name": "Pax Remar", "x": 116.08, "y": -110.18, "z": 0.0, "note": null}

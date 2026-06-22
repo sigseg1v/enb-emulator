@@ -1,0 +1,17 @@
+{"type": "hidden-nav-point", "name": "A gravity well", "x": -19.82, "y": 47.29, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Nav Meeting Point", "x": 39.09, "y": 77.56, "z": 0.0, "note": null}
+{"type": "moon", "name": "Deimos", "x": 0.57, "y": -0.69, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Waste Disposal Station", "x": 81.83, "y": 10.0, "z": 0.2, "note": null}
+{"type": "nav-point", "name": "Progen Capital Construction Ship", "x": -40.85, "y": -73.85, "z": -0.05, "note": null}
+{"type": "nav-point", "name": "Nav Mars 3", "x": -63.01, "y": 18.52, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Mars 2", "x": -64.09, "y": -12.31, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Mars 1", "x": -51.78, "y": -42.05, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav 4", "x": 73.8, "y": -19.02, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav 3", "x": 56.45, "y": -43.53, "z": -0.1, "note": null}
+{"type": "nav-point", "name": "Nav 2", "x": 31.21, "y": -58.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav 1", "x": -9.26, "y": -70.31, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Destroyed Progen Freighter", "x": 12.49, "y": 61.48, "z": -0.05, "note": null}
+{"type": "nav-point", "name": "Altair Way 1", "x": 103.11, "y": -22.15, "z": 0.0, "note": null}
+{"type": "class-specific-gate", "name": "Gate to Altair", "x": 130.62, "y": -34.08, "z": 0.0, "note": "Only for Progen Privateer (PP)"}
+{"type": "class-specific-gate", "name": "Gate to Mars", "x": -60.53, "y": 46.49, "z": 0.0, "note": "Only for Progen Privateer (PP)"}
+{"type": "station", "name": "Arx Bursa under construction", "x": -36.61, "y": -76.02, "z": -0.08, "note": null}

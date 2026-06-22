@@ -1,0 +1,15 @@
+{"type": "hidden-nav-point", "name": "Ancient Security System", "x": -33.91, "y": 45.23, "z": 0.04, "note": null}
+{"type": "nav-point", "name": "Amah´s Ship", "x": -33.93, "y": 45.22, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Kuiper", "x": -101.33, "y": 10.13, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Kuiper 1", "x": -84.27, "y": -39.2, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Kuiper 2", "x": -58.93, "y": -30.93, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Kuiper 3", "x": -34.93, "y": -17.87, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Kuiper 4", "x": -16.0, "y": 1.6, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Kuiper 5", "x": 1.07, "y": 16.8, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Kuiper 6", "x": 22.13, "y": 28.8, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Kuiper 7", "x": 42.93, "y": 40.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Kuiper 8", "x": 67.2, "y": 43.73, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Kuiper Junction", "x": -89.6, "y": -16.27, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Resource Field 1", "x": -104.53, "y": -46.93, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Resource Field 2", "x": 92.53, "y": 45.6, "z": 0.0, "note": null}
+{"type": "gate", "name": "Appian Gate", "x": -121.6, "y": 42.4, "z": 0.0, "note": null}

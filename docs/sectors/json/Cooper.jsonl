@@ -1,0 +1,41 @@
+{"type": "hidden-nav-point", "name": "Old Booney", "x": -191.32, "y": -99.69, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Data Link RS 8", "x": 100.35, "y": 90.34, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Data Link RS 7", "x": 100.38, "y": 50.29, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Data Link RS 6", "x": 80.09, "y": 19.59, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Data Link RS 5", "x": 29.63, "y": -0.18, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Data Link RS 4", "x": -30.19, "y": -0.18, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Data Link RS 3", "x": -80.14, "y": 20.11, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Data Link RS 2", "x": -100.95, "y": 49.77, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Data Link RS 1", "x": -99.9, "y": 89.82, "z": 0.0, "note": null}
+{"type": "planet", "name": "Cooper", "x": -0.44, "y": 100.88, "z": 0.0, "note": null}
+{"type": "object", "name": "Bran´s View", "x": -23.67, "y": 66.67, "z": 0.0, "note": null}
+{"type": "object", "name": "Faith", "x": 177.33, "y": -30.87, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "RS 3", "x": -80.19, "y": 20.11, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "RS 4", "x": -30.24, "y": -0.18, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "RS 5", "x": 29.58, "y": -0.18, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "RS 6", "x": 80.04, "y": 19.59, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "RS 7", "x": 100.33, "y": 50.29, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "RS 8", "x": 100.3, "y": 90.34, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Tada-O Gate Complex", "x": -202.45, "y": -85.64, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Tada-O Nav 1", "x": -198.66, "y": -32.34, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Tada-O Nav 2", "x": -202.66, "y": -62.46, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Ten-Gu Observation Nav 1", "x": -222.93, "y": -84.73, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Ten-Gu Observation Nav 2", "x": -231.89, "y": -112.87, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Ten-Gu Observation Nav 3", "x": -155.21, "y": -109.42, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Wreckage of Alliance 7", "x": 159.62, "y": 67.54, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "RS 2", "x": -101.0, "y": 49.77, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "RS 1", "x": -99.95, "y": 89.82, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Research Nav (Very Danger!)", "x": -47.78, "y": -42.91, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Research Field 3 - Destroyed -", "x": -4.5, "y": -120.13, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Research Field 2", "x": -19.97, "y": -75.85, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Research Field 1", "x": -73.4, "y": -78.41, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Misery Point", "x": 94.38, "y": -32.19, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Inner Ring 4", "x": 63.88, "y": 75.22, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Inner Ring 3", "x": 24.93, "y": 35.18, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Inner Ring 2", "x": -50.98, "y": 42.39, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Inner Ring 1", "x": -66.17, "y": 81.94, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Hulk of Research Ship Tet", "x": -203.13, "y": -132.31, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Hulk of Fast Big Ship 1", "x": -195.64, "y": 29.56, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Destroyed Research Lab", "x": -220.53, "y": -14.0, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Grissom", "x": -159.35, "y": -15.7, "z": 0.0, "note": null}
+{"type": "gate", "name": "Tada-O Gate", "x": -191.19, "y": -103.16, "z": 1.2, "note": null}
