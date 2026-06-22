@@ -14,6 +14,13 @@
 set -uo pipefail
 
 export DISPLAY="${DISPLAY:-:0}"
+# xdotool/import authenticate to the X server with the MIT-MAGIC-COOKIE in
+# XAUTHORITY. A caller env that sets DISPLAY but not XAUTHORITY (e.g. a detached
+# background task) makes every xdotool call die with "Invalid MIT-MAGIC-COOKIE-1
+# key" / "Can't open display: (null)" -- which silently breaks the EULA/login
+# clicks while the earlier docker steps still pass. Default it to the user's
+# cookie so the skill works regardless of how it was launched.
+export XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 
