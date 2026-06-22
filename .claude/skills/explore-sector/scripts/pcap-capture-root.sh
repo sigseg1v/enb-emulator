@@ -24,7 +24,17 @@
 # they are readable/deletable without root.
 set -uo pipefail
 
-action="${1:-}"; sector="${2:-}"; outdir="${3:-}"; pname="${4:-}"
+# Positional layout differs per subcommand: the {start,relabel} pair carries a
+# <sector> before <outdir>, while {stop,status} take <outdir> as their only arg.
+# Parse per-action -- a fixed outdir=$3 read the outdir as empty for stop/status,
+# which made worker_ready()'s `status` probe always fail and silently disabled all
+# capture (the captures/ dir stayed empty).
+action="${1:-}"
+case "$action" in
+    start|relabel) sector="${2:-}"; outdir="${3:-}"; pname="${4:-}" ;;
+    stop|status)   sector="";       outdir="${2:-}"; pname="" ;;
+    *)             sector="${2:-}"; outdir="${3:-}"; pname="${4:-}" ;;
+esac
 
 die() { echo "[pcap-root][ERR] $*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || die "must run as root (via sudo)"
