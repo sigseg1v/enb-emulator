@@ -11,6 +11,35 @@ Skill lives at `.claude/skills/explore-sector/` (Freya/MIT). Built on the
 `login-to-client` (Phase AU) `lib.sh` (window discovery, XTEST click, screenshot,
 cmd channel). Authoritative node lists come from `docs/sectors/json/<S>.jsonl`.
 
+## NO-PROGRESS WATCHDOG (owner ask, 2026-06-21 night) -- 10-min stall drop
+`drive.py` now tracks `last_progress_ts` (wall-clock of the last visit/skip). If
+`NOPROG_SECS` (default 600s = 10 min) pass with NO nav discovered or visited, the main
+loop calls `investigate_stall`: print a WARNING, dump the visit order + the visible
+unvisited navs + a screenshot (`state/stuck-<sector>.png`), and -- the owner's threshold
+for "you can drop and skip" -- SKIP the single most-contested unvisited nav (max warp
+attempts), then reset the timer and continue. Self-healing (unlike `escalate_stuck`,
+which HALTS): a dead-zone tail costs at most one 10-min window per leftover nav instead
+of grinding forever. This is what the 73-min farthest-first AdrielPrime baseline needed
+and never had (it ground 20/23 for >50 min on 2-3 radiation dead-zone markers).
+Env: `ENB_NOPROG_SECS`.
+
+## HYBRID NAV ORDER (owner ask, 2026-06-21 night) -- farthest-first then nearest
+The old `sweep_round` targeted the FARTHEST unvisited nav every round. Early on this
+is great (one long crossing bags every nav within `ENROUTE_K` 5k of the warp line for
+free), but LATE in the run it degenerates into an end-to-end zigzag between opposite
+sector clusters. Measured on AdrielPrime farthest-first: warp-target path = 3465 units,
+**11 cross-sector relocations/repositions, 23 slow (>10s) warp-gaps, ~69 min to 20/23**
+with a dead-zone radiation tail. A nearest-neighbour cleanup of the same node set = 1179
+units (~3x shorter).
+**The rule (owner):** farthest-first until **>=50%** of the sector's navs are done (pick
+up many for free along the long crossings), then SWITCH to nearest-unvisited for the
+scattered remainder. Implemented in `sweep_round`: `nearest_phase = done/total >= 0.5`;
+target order = `navs` (nearest) when in that phase, else `reversed(navs)` (farthest).
+`relocate_far` stays farthest (its job is to jump to a fresh cluster). En-route pickup
+widened to `ENROUTE_K=5.0` ("if actively warping on a segment and within 5k mark it
+visited"). Re-run AdrielPrime from scratch to compare wall-clock against the 69-min
+farthest-first baseline.
+
 ## SECTOR-VERIFY GUARD (owner ask, 2026-06-21 night) -- `read-sector.sh` + drive.py
 
 Root cause of this session's false-completes: a wreck's **Request Tow can cross

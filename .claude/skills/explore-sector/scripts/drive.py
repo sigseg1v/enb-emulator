@@ -35,10 +35,12 @@
 # Per round:
 #   1. Batch-enumerate the in-range nav cycle (W + D-walk + montage OCR) in distance
 #      order; dedup to the authoritative node names.
-#   2. Pick the NEAREST unvisited, non-death-zone nav as the target; select it (W then
-#      D to it, verifying by NAME -- never by click-count, which drifts).
+#   2. Pick the target non-death-zone unvisited nav: FARTHEST while <50% of the sector
+#      is done (long crossings bag many navs en-route for free), then NEAREST once >=50%
+#      is done (scattered remainder, avoids the late-run zigzag). Select it (W then D to
+#      it, verifying by NAME -- never by click-count, which drifts).
 #   3. Any in-range node already within 2k is recorded visited (the warp poll credits
-#      it on the first poll); en-route nodes within 2k are bagged in transit.
+#      it on the first poll); en-route nodes within ENROUTE_K (5k) are bagged in transit.
 #   4. Warp to the target (CLICK the warp orb), poll the panel distance until <=2k;
 #      re-warp if speed drops to 000 while still far.
 #   5. If nothing unvisited is in range, every nav within scanner range is visited ->
@@ -68,6 +70,14 @@ NEXT_KEY = os.environ.get("ENB_NAV_NEXT", "d")
 PREV_KEY = os.environ.get("ENB_NAV_PREV", "c")
 ENUM_SETTLE = os.environ.get("ENB_ENUM_SETTLE", "0.13")   # per-key HUD repaint wait (batch walk)
 VISIT_K = float(os.environ.get("ENB_VISIT_K", "2.0"))
+# En-route pickup threshold (owner, 2026-06-21: "if you are actively warping on a
+# segment and within 5k just mark it visited so we don't miss"). While in warp transit
+# the ship blows PAST other navs at high speed, so a poll may only ever read a passing
+# nav at ~3-5k -- waiting for the 2k target threshold misses navs we clearly flew
+# through. So a NON-TARGET nav seen within ENROUTE_K during the warp poll loop is
+# credited as visited. The TARGET still has to be reached at VISIT_K / MINAPPROACH_K --
+# this wider band is only for opportunistic en-route nodes, never for "arrived".
+ENROUTE_K = float(os.environ.get("ENB_ENROUTE_K", "5.0"))
 # A nav we approach but cannot physically get within VISIT_K of (its centre sits
 # inside a planet/station, or warp parks just short) counts as visited only once we
 # are THIS close and have clearly stopped closing. Anything farther that stops
@@ -124,6 +134,14 @@ EXIT_STUCK = 43            # no visit/skip progress for STUCK_ROUNDS rounds: a b
 # a target the cycle keeps landing on but never reaches). Deliberately generous so a
 # genuinely slow long-range map-click chase is never mistaken for stuck.
 STUCK_ROUNDS = int(os.environ.get("ENB_STUCK_ROUNDS", "8"))
+# Wall-clock no-progress watchdog (owner ask, 2026-06-21): if more than this many
+# seconds pass with NO nav discovered or visited, print a WARNING, investigate (dump
+# the visit order, the visible/unvisited navs and a screenshot), and -- because that is
+# the threshold the owner set for "you can drop and skip" -- skip the single most-
+# contested unvisited nav so the run advances instead of grinding a dead-zone forever.
+# The timer resets on any real progress (a visit/skip) AND each time the watchdog skips
+# one, so each stalled nav costs at most one window, never the whole run.
+NOPROG_SECS = int(os.environ.get("ENB_NOPROG_SECS", "600"))
 
 
 class HangDetected(Exception):
@@ -732,13 +750,17 @@ def sweep_round(sector):
     target, select it by NAME (W then a verified D-walk onto it -- never by D-count,
     which drifts), and warp to it.
 
-    FARTHEST-FIRST (owner algorithm, 2026-06-21): the cycle is distance-ordered
-    nearest-first, so we walk it BACKWARDS and target the farthest unvisited nav we can
-    see. Flying to the farthest sweeps the whole visible span in a single warp, and the
-    en-route pickup in warp_to bags every nearer nav within 2k along the way -- so one
-    long hop covers what many short hops would, and navs that enter scanner range as we
-    cross the sector join `visible` for the next round. We NEVER target a visited node
-    (owner: 'never ever warp to a node already on the visited list directly').
+    HYBRID ORDER (owner algorithm, 2026-06-21): the cycle is distance-ordered
+    nearest-first. For the FIRST HALF of the sector we walk it BACKWARDS and target the
+    farthest unvisited nav we can see -- flying to the farthest sweeps the whole visible
+    span in a single warp, and the en-route pickup in warp_to bags every nearer nav
+    within ENROUTE_K along the way, so one long hop covers what many short hops would and
+    navs that enter scanner range as we cross the sector join `visible` for free. Once
+    >=50% of the sector's navs are done the remainder is scattered, so we SWITCH to
+    nearest-unvisited: late in the run farthest-first degenerates into an end-to-end
+    zigzag (measured on AdrielPrime: pure farthest-first = 3465 units of warp path;
+    nearest-first cleanup = 1179). We NEVER target a visited node (owner: 'never ever
+    warp to a node already on the visited list directly').
 
     Returns {status,...}: 'warped' (with key/name/reached) / 'fled' / 'done' / 'blind'.
     """
@@ -757,8 +779,15 @@ def sweep_round(sector):
     mark_visible(sector, navs)          # everything in scanner range now joins "visible"
     st, by = ledger(sector)             # re-read: the revealed flags just changed
 
+    total = len(navdata.load(sector))
+    done_n = sum(1 for n in st["nodes"] if n.get("visited") or n.get("skipped"))
+    nearest_phase = total > 0 and done_n / total >= 0.5
+    order = navs if nearest_phase else list(reversed(navs))
+    print(f"  order: {'nearest-first' if nearest_phase else 'farthest-first'} "
+          f"({done_n}/{total} done)", flush=True)
+
     target = None
-    for nv in reversed(navs):           # reversed == farthest-first
+    for nv in order:                    # farthest-first <50% done, then nearest-first
         k = nv["key"]
         if is_done_node(by, k):
             continue
@@ -875,22 +904,26 @@ def _warp_to_impl(sector, want_key, want_name):
         blanks = 0
         k = key(name)
         print(f"  poll {p:02d} {name:28} {dist:.2f}k", flush=True)
-        # en-route pickup: any KNOWN nav we pass within visit range on the way. The
+        # en-route pickup: any KNOWN nav we pass within ENROUTE_K (5k) on the way. We
+        # are actively warping here (this is the warp poll loop), and the ship blows
+        # PAST off-path navs fast, so the closest poll to a passing nav may only read
+        # ~3-5k -- crediting only at the 2k target threshold misses navs we clearly
+        # flew through (owner: "within 5k just mark it visited so we don't miss"). The
         # in-flight read is name-fast (retry_low=False), so the name can marquee-blip
         # to a low-confidence read at the exact poll we are closest -- and the target
         # cycle flips off the node next poll, so that single blip would PERMANENTLY
         # cost us the credit (the bug that froze the Nav Freya cluster at 25/47).
         # When we are within range but the name is low-confidence, confirm it with one
         # retried read before deciding; only credit a clean (ratio>=0.7) match.
-        if (dist is not None and dist <= VISIT_K
+        if (dist is not None and dist <= ENROUTE_K
                 and k != want_key and k not in seen_enroute):
             if ratio < 0.7:
                 cname, cratio, cdist = read_matched(sector, retry_low=True)
-                if cname and cratio >= 0.7 and cdist is not None and cdist <= VISIT_K:
+                if cname and cratio >= 0.7 and cdist is not None and cdist <= ENROUTE_K:
                     name, ratio, dist, k = cname, cratio, cdist, key(cname)
             if k and ratio >= 0.7 and k != want_key and k not in seen_enroute:
                 seen_enroute.add(k)
-                visit(sector, name, dist, "en-route")
+                visit(sector, name, dist, f"en-route <{ENROUTE_K:g}k")
         # reached the wanted nav (possibly resolved by the confirm read just above)
         if k == want_key and dist is not None and dist <= VISIT_K:
             visit(sector, want_name, dist, "warp")
@@ -995,6 +1028,52 @@ def escalate_stuck(sector, rounds):
     log(sector, "stuck-escalate",
         f"no progress {rounds} rounds; {len(leftover)} unresolved; shot {shot}")
     sys.exit(EXIT_STUCK)
+
+
+def investigate_stall(sector, attempts, stall_secs):
+    """Wall-clock no-progress watchdog (owner ask, 2026-06-21). We have gone
+    `stall_secs` with NO nav discovered or visited. Print a WARNING, INVESTIGATE
+    (the order we visited in, the navs currently visible-but-unvisited, and a
+    screenshot), decide whether we are actually stalled, and if so DROP+SKIP the
+    single most-contested unvisited nav so the run advances instead of grinding a
+    scanner dead-zone forever. Returns the skipped node name, or None if there was
+    nothing left to skip (caller then lets the normal done/escalation path run).
+
+    Unlike escalate_stuck (which HALTS for the operator), this is self-healing: the
+    owner set 10 min as the point at which a stuck nav may simply be dropped. Each
+    call skips at most one nav and the caller resets the timer, so a dead-zone tail
+    costs one window per nav, never the whole run."""
+    st = state.read(sector)
+    visited = [n["name"] for n in st["nodes"] if n["visited"]]
+    unvisited = [n for n in st["nodes"]
+                 if not n["visited"] and not n.get("skipped")]
+    shown = [n for n in unvisited if not n["hidden"]]
+    shot = dump_stuck_shot(sector)
+    mins = stall_secs / 60.0
+    print(f"  !! WARNING: no nav discovered/visited for {mins:.1f} min "
+          f"(threshold {NOPROG_SECS/60:g} min) -- investigating stall", flush=True)
+    print(f"     visit order ({len(visited)}): "
+          f"{' -> '.join(visited) if visited else '(none)'}", flush=True)
+    print(f"     unvisited shown ({len(shown)}): "
+          f"{', '.join(n['name'] for n in shown) if shown else '(none)'}", flush=True)
+    print(f"     screenshot: {shot}", flush=True)
+    log(sector, "stall-investigate",
+        f"{mins:.1f}min no progress; {len(shown)} shown unvisited; shot {shot}")
+    if not unvisited:
+        print("     nothing unvisited left to drop -- not stalled, deferring to "
+              "normal completion", flush=True)
+        return None
+    # The contested nav is the one we have thrown the most warps at without reaching;
+    # tie-break / no-attempt fallback = the first remaining shown nav (else any).
+    pool = shown or unvisited
+    victim = max(pool, key=lambda n: attempts.get(key(n["name"]), 0))
+    tries = attempts.get(key(victim["name"]), 0)
+    skip_node(sector, victim["name"],
+              f"no-progress watchdog: stalled {mins:.1f}min, "
+              f"targeted {tries}x without reaching {VISIT_K}k -- dropped")
+    print(f"     STALLED -> dropping {victim['name']} "
+          f"(attempted {tries}x); resuming", flush=True)
+    return victim["name"]
 
 
 def open_map():
@@ -1384,6 +1463,7 @@ def main():
     blind_streak = 0          # consecutive rounds the panel read nothing (HUD/hang)
     last_progress = -1        # visited+skipped seen at the previous round
     stuck_rounds = 0          # consecutive rounds with zero progress (LLM-escalation)
+    last_progress_ts = time.time()   # wall-clock of last visit/skip (no-progress watchdog)
     relocs = 0                # cross-sector relocations spent extending scanner range
     for rnd in range(max_rounds):
         st, by = ledger(sector)
@@ -1406,8 +1486,19 @@ def main():
             flee_streak = 0
             relocs = 0
             stuck_rounds = 0
+            last_progress_ts = time.time()
         else:
             stuck_rounds += 1
+            # Wall-clock watchdog: 10 min with no nav discovered/visited -> investigate
+            # and drop the most-contested nav so the run advances (owner: "you can drop
+            # and skip but only for 10m since last progress"). This advances `progress`,
+            # so it also clears the round-based STUCK_ROUNDS escalation below.
+            if time.time() - last_progress_ts >= NOPROG_SECS:
+                if investigate_stall(sector, attempts, time.time() - last_progress_ts):
+                    last_progress_ts = time.time()
+                    stuck_rounds = 0
+                    last_progress = -1   # force the next round to see the skip as progress
+                    continue
             if stuck_rounds >= STUCK_ROUNDS:
                 escalate_stuck(sector, stuck_rounds)
         last_progress = progress

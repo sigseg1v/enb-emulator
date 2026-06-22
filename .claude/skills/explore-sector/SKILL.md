@@ -42,6 +42,18 @@ the window with `xdotool windowactivate --sync` and send them with `xdotool key`
 
 - **Prerequisite: already in space.** Run the `login-to-client` skill until it
   prints `INGAME inspace=true state=space`. This skill does not log in.
+- **Sector identity comes from the MAP TITLE, never from nav labels.** The
+  authoritative current-sector name is the white title at the TOP-CENTRE of the
+  open map (`read-sector.sh` -- opens/normalises the map, OCRs the title box
+  `333 246 327 32`, resolves it via `navdata.py identify`; prints `SECTOR <CamelCase>`).
+  Do NOT infer the sector from the W/D/C nav-label OCR: a **Request Tow can silently
+  carry the ship to a DIFFERENT sector** (a Freya wreck towed us to AdrielPrime), and
+  `navdata`'s fuzzy match will then force the foreign nav names onto the closest
+  in-sector names at garbage ratios -- so the driver flies the WRONG sector while
+  believing it is on track and corrupts that ledger. `drive.py` calls `verify_sector()`
+  at drive-start and post-tow and ABORTS (`EXIT_STUCK`) on a confirmed mismatch. Always
+  confirm the sector with `read-sector.sh` before trusting any nav reads, especially
+  after a wreck/tow/gate.
 - **Warp is a CLICK on the warp orb, NEVER the Q key.** Engage warp by clicking the
   round warp orb at the bottom-centre of the HUD (window-rel `(633,868)`; `warp.sh`
   does this + verifies engagement). Do NOT press `Q`: keystrokes need keyboard focus,
@@ -49,16 +61,34 @@ the window with `xdotool windowactivate --sync` and send them with `xdotool key`
   and the ship just sits there looking like the warp "didn't take". The map opens by
   CLICKING the 3rd bottom-left round HUD button `(132,870)`, not the `M` key, for the
   same reason. (Mouse clicks are XTEST at absolute root coords and do NOT need focus.)
+- **The warp orb is a TOGGLE -- only click it at a CONFIRMED speed `0`.** Clicking the
+  orb while the ship is already moving CANCELS the warp. So a click is only ever safe
+  when the speed readout is a solid `0`; clicking on a warp that is merely still
+  spinning up (or whose speed digit blinked a noisy read) stops it dead, and the ship
+  "keeps cancelling warp halfway". `warp.sh` enforces this: it samples the speed N
+  times (`ENB_WARP_SPEED_SAMPLES`, default 3) and clicks ONLY when every read is `0`,
+  biasing toward "moving" -- a single positive read means do not click; a `?`/mixed
+  read waits rather than risk a cancelling click. Never click the orb to "make sure"
+  a warp took -- read the speed first.
 - **Nav selection is the W/D/C keys, not the map.** `drive.py` batch-enumerates the
   nav cycle with `enum_fast.py` (W-seed then a D-walk, one Xlib grab + one tesseract
-  montage pass over the whole cycle), picks the nearest unvisited nav, re-selects it
-  by NAME (W then D to it -- never by raw count), and warps. The map is NO LONGER the
-  primary selector; it is the demoted SEVERELY-STUCK fallback only (see below).
+  montage pass over the whole cycle), picks the target by the HYBRID order below,
+  re-selects it by NAME (W then D to it -- never by raw count), and warps. The map is
+  NO LONGER the primary selector; it is the demoted SEVERELY-STUCK fallback only.
+- **Target order is HYBRID: farthest-first, then nearest after 50% (owner, 2026-06-21).**
+  While fewer than half the sector's navs are done, target the FARTHEST unvisited nav --
+  one long crossing bags every nav within `ENROUTE_K` (5k) of the warp line for FREE
+  (en-route pickup). Once `>=50%` are done, SWITCH to NEAREST-unvisited: late in the run
+  farthest-first degenerates into an end-to-end zigzag between opposite clusters
+  (measured on AdrielPrime: 3465 units of warp path / 11 cross-sector repositions vs
+  1179 units nearest-neighbour). `relocate_far` always uses farthest (its job is to jump
+  to a fresh cluster). While actively warping a segment, any nav within 5k is marked
+  visited so we don't miss it.
 - **ALWAYS BE WARPING.** The ship should be in warp essentially all the time -- the
   only acceptable dead time is the few seconds to pick the next target plus the ~5s
-  warp engage. After every arrival, immediately confirm you are warping (green speed
-  readout left of the orb is a 3-digit number > `000`); if it reads `000`, pick the
-  next target and GO -- do not sit. `drive.py` enforces this: it warps to the FIRST
+  warp engage. After every arrival, immediately confirm you are warping (the green
+  speed readout left of the orb reads `> 0`; warp speed is **2000** by default, higher
+  on many ships); if it reads `0`, pick the next target and GO -- do not sit. `drive.py` enforces this: it warps to the FIRST
   fresh nav the cycle lands on, and it logs a `warp-gap <secs>` line for the time from
   speed-`000` to the next warp press. **Target gap is < 10s**; gaps over 10s print
   `<<SLOW >10s` so they can be tuned. Engage-confirm waits (~5s, `ENB_WARP_ENGAGE`)
@@ -127,6 +157,15 @@ the window with `xdotool windowactivate --sync` and send them with `xdotool key`
   single re-read is NOT enough (it can return `0.0` twice in a row) -- that false
   flee-looped a whole run to a standstill in a gas field. `drive.py` does all this
   automatically (`read_shield_robust` -> `shield_guard`/`flee`).
+- **Radiation sectors: shield 0 is NOT a threat -- flee fast, do not wait to regen.**
+  Some sectors (e.g. AdrielPrime) have ENVIRONMENTAL radiation that pins the shield to
+  0% everywhere, but it does NOT kill the ship and it cannot be out-run. The old flee
+  (fly to a "safe" spot, then WAIT up to 30s for the shield to regen) wedges forever
+  there -- the regen never comes, so the run makes zero progress (it stuck AdrielPrime
+  at 3/23). `flee()` therefore just warps to the NEAREST unvisited (non-danger) nav and
+  returns immediately -- no recovery wait -- and the survey keeps progressing right
+  through the radiation. The `<=8%` absolute and 10-pt-drop triggers are unchanged;
+  only the response (react fast, don't block) changed.
 - **The NAV CYCLE (W/D/C) is clean; the MAP MARKERS near a planet are not.** The W/D
   nav cycle lists the real navs in distance order from any normal position -- it filters
   to NAVS, so the gas-cloud junk never enters it. The pollution problem is specifically
@@ -150,6 +189,14 @@ the window with `xdotool windowactivate --sync` and send them with `xdotool key`
   of a reachable pocket -- proven on AdrielPrime: 5 navs 39-88k from their nearest
   visited neighbour). Those are legit unfindable in screen-only mode; skip them and
   move on. Do NOT grind relocations for navs that are not on the map.
+- **10-min no-progress watchdog (owner, 2026-06-21).** `drive.py` tracks the wall-clock
+  time since the last nav was discovered/visited. If it passes `ENB_NOPROG_SECS` (default
+  600s) with zero progress, it prints a WARNING, INVESTIGATES (dumps the visit order, the
+  visible-but-unvisited navs, and a screenshot to `state/stuck-<sector>.png`), and then
+  DROPS+SKIPS the single most-contested unvisited nav so the run advances, resetting the
+  timer. This is self-healing (it does NOT halt like the round-based `escalate_stuck`): a
+  scanner dead-zone tail costs at most one 10-min window per leftover nav. The owner's
+  rule: you may drop+skip a stalled nav, but only after 10 min with no progress.
 - **Visited everything in scanner range -> the sector is DONE -- but confirm it is
   truly out of range, not just out of THIS pocket.** When every nav the target panel
   can cycle to is visited, the remainder is a hidden nav that never revealed or a
@@ -220,10 +267,11 @@ the window with `xdotool windowactivate --sync` and send them with `xdotool key`
 | `scripts/open-map.sh [out]` | (FALLBACK) ensure the sector map is open (toggle only if closed), click "+" to maximize, center on ship, zoom all the way out, screenshot, and crop to the large map body. Prints `FULL <png>` and `MAP <crop> <X0> <Y0>` so `winx = X0 + cropx`. Used only by the severely-stuck map fallback. |
 | `scripts/detect-nodes.py <full.png> [l t w h]` | find the nav-node markers on the map body and print `NODE <wx> <wy> <colour> <pixels>` centroids to click. An AID -- validate each by clicking + `read-navname.sh` and cross-ref `navdata.py list`. |
 | `scripts/read-navname.sh [out]` | after clicking a node, OCR the bottom "Dest: <nav>" strip (tesseract) and print `NAVNAME <name>` (prefix stripped). The reliable selected-nav read. |
+| `scripts/read-sector.sh` | **AUTHORITATIVE sector identity.** Open/normalise the map and OCR the white sector-name TITLE at the map's top-centre (box `333 246 327 32`, `ENB_SECTOR_BOX`), resolve it via `navdata.py identify`. Prints `TITLE <raw>` + `SECTOR <CamelCase>`. Use this -- NOT nav-label matching -- to know what sector the ship is in (a tow can cross sectors). `drive.py verify_sector` calls it to abort on a mismatch. |
 | `scripts/map-shot.sh [out]` | screenshot + crop WITHOUT toggling/zooming the map. Prints `FULL <png>` and crop origin `<X0> <Y0>`. Use for a quick re-shot when the map is already set up. |
 | `scripts/click-map.sh <wx> <wy>` | left-click at window-relative coords (same frame as a full screenshot). Used to select a node on the map, or click the gate icon. |
 | `scripts/warp.sh` | **CLICK the round warp orb** at the bottom-centre of the HUD (window-rel `(633,868)`, `ENB_WARP_BTN`) to warp to the selected nav, then verify it engaged by reading the green speed readout. Prints `WARP <speed>` (>0 == warping, 0 == never engaged). **NOT the Q key** -- Q is silently dropped whenever the WINE window lacks keyboard focus (it usually does, under XTEST). |
-| `scripts/read-speed.sh` | read the green warp-speed readout (3 digits left of the warp orb, box `578 618 852 874`): `SPEED <n>` (`000` == stopped) or `SPEED ?`. A coarse engaged/stopped check only -- the readout misreads `000` mid-warp, so for ground-truth "am I moving" trust the TARGET distance CLOSING (`read-target.sh`), not this. |
+| `scripts/read-speed.sh` | read the green warp-speed readout left of the warp orb (box `578 618 852 874`): `SPEED <n>` (`0` == stopped) or `SPEED ?`. The readout is VARIABLE-WIDTH (parked `000`; warp speed is `2000` by default, 4+ digits on faster ships). It is NOT a 7-segment font (it has a curved `2`); the reliable read is green-isolate -> invert -> upscale -> add a white border -> tesseract `--psm 8` digit-whitelist (the white border is mandatory -- without it tesseract drops the leading/trailing digit and a 4-digit `2000` mis-reads). Validated live: `000`->0, `2000`->2000. This is now a TRUSTWORTHY moving/stopped signal -- `warp.sh` gates its toggle clicks on it. |
 | `scripts/drive.py <S> [--max-rounds N]` | autonomous per-sector driver (Always-Be-Warping): batch-enumerate the nav cycle via `enum_fast.py` (`enum_navs`), pick the nearest unvisited nav, re-select it by NAME with W/D (`select_named`, never by raw count), warp (CLICK the orb), record arrival + en-route hits; logs a `warp-gap` per warp (000 -> next warp, target <10s). When the cycle is dry but shown navs remain, relocates to a far NON-planet nav (bounded), then tries the map fallback, before skipping the unreachable/hidden leftovers and completing. Best-of-N shield guard while stopped. Resumable via the ledger. Nav-key env: `ENB_NAV_SEED=w`, `ENB_NAV_NEXT=d`, `ENB_NAV_PREV=c`, `ENB_ENUM_SETTLE=0.13`. |
 | `scripts/read-target.sh [shot]` | OCR the bottom-RIGHT selected-target panel: `TARGET <name>` + `DIST <k>` (k == JSON-coord distance; `<=2.0k` == visited). Used to verify the W/D selection landed + read its distance. |
 | `scripts/shield.sh [shot]` | read shield level: `SHIELD <pct>` from the blue HUD bar fill (no hover). |
@@ -260,19 +308,23 @@ you need to step in by hand (a wedged run, a gate route, an unidentified sector)
 
 ### 1. Identify the sector and open the ledger
 
-Take a screenshot of the 3D view (`map-shot.sh` just shots+crops; it does NOT
-press any key). Read the sector name from the in-space HUD / the nav labels you
-hover (step 2), then seed the ledger:
+Read the sector name from the **map title** -- the authoritative signal
+(`read-sector.sh`; see the sector-identity hard rule). Only fall back to matching
+nav labels if the title is somehow unreadable. Then seed the ledger:
 
 ```bash
 S=.claude/skills/explore-sector/scripts
-python3 $S/navdata.py identify "GETCo Sector Headquarters" "GDI Mandela"  # nav labels -> sector
+bash $S/read-sector.sh                               # -> SECTOR <CamelCase> (authoritative)
+# fallback only if the title won't read:
+# python3 $S/navdata.py identify "GETCo Sector Headquarters" "GDI Mandela"
 python3 $S/state.py init Equatorial                 # create/refresh ledger
 bash $S/logaction.sh Equatorial sector-enter "ledger seeded"
 ```
 
-`navdata.py identify` takes nav labels you read off the screen (hover tooltips,
-the target panel) and returns the sector whose node set matches best.
+`read-sector.sh` OCRs the map's top-centre title and resolves it to a canonical
+sector. `navdata.py identify` (the fallback) takes nav labels you read off the
+screen and returns the sector whose node set matches best -- but a tow can make
+those labels foreign, so prefer the title.
 
 ### 2a. Open the sector map and read ALL in-range nodes (the completeness view)
 
@@ -368,8 +420,8 @@ you across the sector, revealing other beacons in range along the way:
    `logaction.sh <S> warp "<from> -> <node>, dist <d>"`.
 4. Capture frames every ~3s through the warp tunnel until you arrive (the station/
    node fills the view and `Dist` drops to ~0); note any new green beacons that
-   appeared in range during the flight. Movement ground-truth is the target `Dist`
-   CLOSING, not the green speed readout (which can misread `000` mid-warp).
+   appeared in range during the flight. Both signals are reliable: the green speed
+   readout (`read-speed.sh`, `> 0` == warping) and the target `Dist` CLOSING.
 
 Mark the node you arrived at as visited:
 
