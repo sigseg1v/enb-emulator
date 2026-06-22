@@ -28,6 +28,7 @@
 #   skipped <Sector>              -- list the skipped (unreachable) nodes
 #   complete <Sector>             -- mark complete IFF every node is visited or skipped
 #   summary                       -- one line per sector we have a ledger for
+import datetime
 import json
 import math
 import os
@@ -37,6 +38,34 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 STATE_DIR = os.path.join(HERE, "..", "state")
 sys.path.insert(0, HERE)
 import navdata  # noqa: E402
+
+
+def _now():
+    """Local-time ISO-8601 timestamp (with offset), seconds resolution."""
+    return datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _elapsed(started, finished):
+    """Whole seconds between two ISO-8601 strings, or None if either is unparseable."""
+    try:
+        a = datetime.datetime.fromisoformat(started)
+        b = datetime.datetime.fromisoformat(finished)
+    except (TypeError, ValueError):
+        return None
+    return int((b - a).total_seconds())
+
+
+def _fmt_dur(secs):
+    """'1h23m' / '23m' / '45s' for a second count (or '?' for None)."""
+    if secs is None:
+        return "?"
+    h, rem = divmod(secs, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h{m:02d}m"
+    if m:
+        return f"{m}m{s:02d}s"
+    return f"{s}s"
 
 
 def path(sector):
@@ -92,12 +121,17 @@ def cmd_init(args):
             "skip_reason": p.get("skip_reason", ""),
         })
     # danger zones (places we were wrecked) are permanent -- never wipe them.
+    # `started` is the first-touch timestamp: preserve it across re-inits so a
+    # resume does not reset the clock; only stamp it the very first time.
     dangers = []
+    started = _now()
     if os.path.exists(path(sector)):
         with open(path(sector)) as f:
-            dangers = json.load(f).get("dangers", [])
+            prior_st = json.load(f)
+        dangers = prior_st.get("dangers", [])
+        started = prior_st.get("started", started)
     st = {"sector": sector, "status": "in-progress", "nodes": nodes,
-          "dangers": dangers}
+          "dangers": dangers, "started": started}
     write(st)
     _print_status(st)
 
@@ -113,7 +147,12 @@ def _counts(st):
 def _print_status(st):
     total, visited, skipped, _ = _counts(st)
     tail = f", {skipped} skipped" if skipped else ""
-    print(f"{st['sector']}: {visited}/{total} visited{tail}  status={st['status']}")
+    # elapsed so far: against `finished` if complete, else against now.
+    end = st.get("finished") or _now()
+    dur = _elapsed(st.get("started"), end)
+    dtail = f"  elapsed={_fmt_dur(dur)}" if dur is not None else ""
+    print(f"{st['sector']}: {visited}/{total} visited{tail}  "
+          f"status={st['status']}{dtail}")
     # "left" == unresolved: neither visited nor skipped.
     left = [n for n in st["nodes"] if not n["visited"] and not n.get("skipped")]
     if left:
@@ -221,9 +260,14 @@ def cmd_complete(args):
         _print_status(st)
         sys.exit(1)
     st["status"] = "complete"
+    st["finished"] = _now()
+    secs = _elapsed(st.get("started"), st["finished"])
+    if secs is not None:
+        st["elapsed_seconds"] = secs
     write(st)
     tail = f" ({skipped} unreachable, skipped)" if skipped else ""
-    print(f"{st['sector']}: COMPLETE ({visited}/{total} visited{tail})")
+    print(f"{st['sector']}: COMPLETE ({visited}/{total} visited{tail}) "
+          f"in {_fmt_dur(secs)}")
 
 
 def cmd_summary(_args):
@@ -237,7 +281,11 @@ def cmd_summary(_args):
             st = json.load(fh)
         total, visited, skipped, _ = _counts(st)
         tail = f" (+{skipped} skipped)" if skipped else ""
-        print(f"{st['sector']:24} {visited:3}/{total:<3} {st['status']}{tail}")
+        end = st.get("finished") or _now()
+        dur = _elapsed(st.get("started"), end)
+        dtail = f"  {_fmt_dur(dur)}" if dur is not None else ""
+        print(f"{st['sector']:24} {visited:3}/{total:<3} "
+              f"{st['status']}{tail}{dtail}")
 
 
 def main():
