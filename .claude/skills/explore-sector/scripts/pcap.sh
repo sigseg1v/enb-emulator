@@ -24,6 +24,9 @@ set -uo pipefail
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUTDIR="${ENB_PCAP_DIR:-$SKILL_DIR/../state/captures}"
 WORKER="${ENB_PCAP_WORKER:-/usr/local/sbin/freya-pcap-capture}"
+# Which proxy to capture: empty/"freya" == the dockerized FreyaProxy container;
+# anything else (e.g. "Net7Proxy.exe") is captured as a host process under WINE.
+PROXY_NAME="${ENB_EXPLORE_PROXY_NAME:-}"
 mkdir -p "$OUTDIR"; OUTDIR="$(cd "$OUTDIR" && pwd)"
 
 action="${1:-}"; sector="${2:-}"
@@ -41,7 +44,7 @@ case "$action" in
             exit 0
         fi
         sudo -n "$WORKER" stop "$OUTDIR" >/dev/null 2>&1 || true   # rotate: close prev sector's file
-        out="$(sudo -n "$WORKER" start "$sector" "$OUTDIR" 2>/dev/null | tail -1)"
+        out="$(sudo -n "$WORKER" start "$sector" "$OUTDIR" "$PROXY_NAME" 2>/dev/null | tail -1)"
         if [ -n "$out" ] && [ -e "$out" ]; then
             mark "$sector" pcap-start "capture -> $(basename "$out")"
             echo "[pcap] capturing '$sector' -> $out"
@@ -62,7 +65,7 @@ case "$action" in
             mark "$sector" pcap-relabel "capture -> $(basename "${out:-?}")"
             echo "[pcap] capture relabelled '$sector' -> ${out:-?}"
         else
-            out="$(sudo -n "$WORKER" start "$sector" "$OUTDIR" 2>/dev/null | tail -1)"
+            out="$(sudo -n "$WORKER" start "$sector" "$OUTDIR" "$PROXY_NAME" 2>/dev/null | tail -1)"
             if [ -n "$out" ] && [ -e "$out" ]; then
                 mark "$sector" pcap-start "capture -> $(basename "$out")"
                 echo "[pcap] capturing '$sector' -> $out"

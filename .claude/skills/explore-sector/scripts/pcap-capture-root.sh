@@ -24,7 +24,7 @@
 # they are readable/deletable without root.
 set -uo pipefail
 
-action="${1:-}"; sector="${2:-}"; outdir="${3:-}"
+action="${1:-}"; sector="${2:-}"; outdir="${3:-}"; pname="${4:-}"
 
 die() { echo "[pcap-root][ERR] $*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || die "must run as root (via sudo)"
@@ -37,11 +37,33 @@ valid_dir() { case "$1" in /*) [ -d "$1" ];; *) return 1;; esac; }
 # filename-safe sector token: keep alnum/_/- , collapse everything else to '_'.
 safe_token() { printf '%s' "$1" | tr -c 'A-Za-z0-9_-' '_' | sed 's/__*/_/g; s/^_//; s/_$//'; }
 
-proxy_pid() {
-    local cid
-    cid="$(docker ps -q --filter 'label=com.docker.compose.service=proxy' 2>/dev/null | head -1)"
-    [ -n "$cid" ] || return 1
-    docker inspect -f '{{.State.Pid}}' "$cid" 2>/dev/null
+# Resolve the PID whose network namespace we capture. Default (empty / "freya")
+# is our dockerized FreyaProxy container. Any other value is treated as a HOST
+# process name (e.g. "Net7Proxy.exe" running under WINE): such a process lives in
+# the host netns, and `nsenter -t <pid> -n` still works (it enters the host netns)
+# while scoping the capture to what that process sees, including loopback.
+target_pid() {
+    local name="${1:-}" cid
+    case "$name" in
+        ""|freya|Freya|FREYA|proxy|FreyaProxy)
+            cid="$(docker ps -q --filter 'label=com.docker.compose.service=proxy' 2>/dev/null | head -1)"
+            [ -n "$cid" ] || return 1
+            docker inspect -f '{{.State.Pid}}' "$cid" 2>/dev/null
+            ;;
+        *)
+            # Host process by EXACT comm name (pgrep -x), e.g. "Net7Proxy.exe"
+            # under WINE. -x (not -f) is deliberate: -f matches the whole command
+            # line, so it would match THIS worker's own argv (which carries the
+            # name) and any process merely mentioning it. comm is capped at 15
+            # chars; for a longer name, fall back to -f excluding our own pid/ppid.
+            local p
+            p="$(pgrep -x -- "$name" 2>/dev/null | head -1)"
+            if [ -z "$p" ] && [ "${#name}" -gt 15 ]; then
+                p="$(pgrep -f -- "$name" 2>/dev/null | grep -vxF -e "$$" -e "$PPID" | head -1)"
+            fi
+            [ -n "$p" ] && echo "$p"
+            ;;
+    esac
 }
 
 case "$action" in
@@ -52,8 +74,8 @@ case "$action" in
         if [ -f "$pidf" ] && kill -0 "$(cat "$pidf" 2>/dev/null)" 2>/dev/null; then
             die "a capture is already running (pid $(cat "$pidf")); stop it first"
         fi
-        pid="$(proxy_pid)" || die "proxy container not running (no com.docker.compose.service=proxy)"
-        [ -n "$pid" ] && [ "$pid" != 0 ] || die "could not resolve proxy container PID"
+        pid="$(target_pid "$pname")" || die "capture target not found (${pname:-dockerized freya proxy})"
+        [ -n "$pid" ] && [ "$pid" != 0 ] || die "could not resolve PID for capture target '${pname:-freya}'"
         ts="$(date -u +%Y%m%dT%H%M%SZ)"
         out="$outdir/$(safe_token "$sector")__${ts}.pcap"
         # setsid: new session detached from sudo's pty (their sudoers sets use_pty,
@@ -113,6 +135,6 @@ case "$action" in
         fi
         ;;
     *)
-        die "usage: $(basename "$0") {start <sector> <outdir>|stop <outdir>|relabel <sector> <outdir>|status <outdir>}"
+        die "usage: $(basename "$0") {start <sector> <outdir> [proxy-name]|stop <outdir>|relabel <sector> <outdir>|status <outdir>}"
         ;;
 esac

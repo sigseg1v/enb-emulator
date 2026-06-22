@@ -526,6 +526,24 @@ blocking the survey.
   and a SCOPED NOPASSWD sudoers rule for that one binary (NOT a blanket nsenter
   grant). After that the survey captures unattended. Control it by hand with
   `scripts/pcap.sh {start|rotate|ensure|stop|status} [sector]`.
+- **Which proxy to capture (`ENB_EXPLORE_PROXY_NAME`):** unset / `freya` (default)
+  captures our dockerized FreyaProxy container (nsenter into its netns). Set it to
+  a host process name -- e.g. `ENB_EXPLORE_PROXY_NAME=Net7Proxy.exe` -- to capture
+  the real proxy running under WINE instead (resolved by exact `comm` via
+  `pgrep -x`; that process is in the host netns, so the capture sees its loopback
+  client leg + its server leg).
+
+### Manual client (`ENB_EXPLORE_MANUAL_CLIENT=1`)
+
+Set `ENB_EXPLORE_MANUAL_CLIENT=1` when YOU launch and own the client + proxy
+yourself (e.g. a real client paired with `Net7Proxy.exe` under WINE). The survey
+then never launches or relaunches the client: `run-sector.sh` will NOT kill the
+stack or call login-to-client on a hard hang -- it halts and asks you to relaunch
+and re-run (the ledger persists, so the re-run resumes where it left off) instead
+of bouncing your manual session. Typically paired with `ENB_EXPLORE_PROXY_NAME`
+to capture your manually-launched proxy. (`drive.py` itself never launches the
+client -- it requires the game already in space -- so this only gates the
+auto-relogin path.)
 
 ### Locked gates -> reroute
 

@@ -24,6 +24,12 @@ LOGIN_DIR="$SKILL_DIR/../../login-to-client/scripts"
 EXIT_HANG=42
 EXIT_STUCK=43
 MAX_RELOGIN="${ENB_MAX_RELOGIN:-4}"
+# Manual-client mode: the operator launches (and owns) the client + proxy
+# themselves (e.g. a real client + Net7Proxy.exe under WINE). We then never
+# launch or relaunch the client -- on a hard hang we cannot relogin a client we
+# do not own, so we halt for the operator to relaunch and re-run, rather than
+# bouncing the stack out from under their manual session.
+MANUAL_CLIENT="${ENB_EXPLORE_MANUAL_CLIENT:-0}"
 
 sector="${1:?usage: run-sector.sh <Sector> [drive.py args...]}"; shift || true
 
@@ -50,6 +56,13 @@ while :; do
     fi
     if [ "$rc" -ne "$EXIT_HANG" ]; then
         exit "$rc"
+    fi
+    if [ "$MANUAL_CLIENT" = 1 ]; then
+        echo "[run-sector] $sector hard-hung and ENB_EXPLORE_MANUAL_CLIENT=1 -- not" \
+             "auto-relaunching a client we do not own. Relaunch the client (and your" \
+             "proxy) yourself, then re-run: run-sector.sh $sector  to resume (the" \
+             "ledger persists, so it continues where it left off)." >&2
+        exit "$EXIT_HANG"
     fi
     relogins=$((relogins + 1))
     if [ "$relogins" -gt "$MAX_RELOGIN" ]; then
