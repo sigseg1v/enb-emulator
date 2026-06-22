@@ -46,7 +46,7 @@ fi
 if sudo -u "$RUNAS" sudo -n "$DST" status /tmp >/dev/null 2>&1; then
     echo "OK -- '$RUNAS' can run the capture worker without a password."
     echo "Capture is now enabled. The survey will create one .pcap per sector under"
-    echo "  $SKILL_DIR/../state/captures/"
+    echo "  \${ENB_EXPLORE_WORKDIR:-$SKILL_DIR/../state}/captures/  (or \$ENB_PCAP_DIR)"
 else
     echo "WARN -- passwordless check did not pass; inspect $SUDOERS" >&2
 fi

@@ -22,7 +22,7 @@ read -r l t w h <<< "${ENB_NAVNAME_BOX:-105 758 580 20}"
 scale="${ENB_NAVNAME_SCALE:-4}"
 
 full="$(explore_shot "")" || { elog "screenshot failed"; exit 1; }
-crop="$WORKDIR/$(basename "${full%.png}")-navname.png"
+crop="$SCRATCH/$(basename "${full%.png}")-navname.png"
 out="${1:-$crop}"
 
 # Crop the strip, scale up, grayscale + contrast-boost so the light text on the

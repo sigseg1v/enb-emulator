@@ -33,10 +33,11 @@ read -r _ FULL <<< "$(bash "$SKILL_DIR/open-map.sh" 2>/dev/null | grep '^FULL')"
 [ -n "${FULL:-}" ] && [ -s "$FULL" ] || { full="$(explore_shot "")" || { echo "FAIL no shot"; exit 1; }; FULL="$full"; }
 
 # Crop the title box, isolate the bright text, upscale, OCR.
-raw="$(python3 - "$FULL" "$l" "$t" "$w" "$h" <<'PY'
+raw="$(python3 - "$FULL" "$l" "$t" "$w" "$h" "$SCRATCH/.sectorname_bw.png" <<'PY'
 import sys, subprocess
 from PIL import Image
 src,l,t,w,h = sys.argv[1], *map(int, sys.argv[2:6])
+bw = sys.argv[6]
 im = Image.open(src).convert("RGB").crop((l,t,l+w,t+h))
 px = im.load(); W,H = im.size
 o = Image.new("L",(W,H),255); op=o.load()
@@ -45,8 +46,8 @@ for y in range(H):
         r,g,b = px[x,y]
         if r>120 and g>120 and b>120: op[x,y]=0
 o = o.resize((W*4,H*4))
-o.save("/tmp/.sectorname_bw.png")
-out = subprocess.run(["tesseract","/tmp/.sectorname_bw.png","-","--psm","7"],
+o.save(bw)
+out = subprocess.run(["tesseract",bw,"-","--psm","7"],
                      capture_output=True, text=True).stdout
 print(out.strip())
 PY

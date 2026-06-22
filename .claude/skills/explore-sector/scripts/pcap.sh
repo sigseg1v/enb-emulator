@@ -22,7 +22,10 @@
 # the survey. Run scripts/pcap-install.sh ONCE (with sudo) to enable it.
 set -uo pipefail
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUTDIR="${ENB_PCAP_DIR:-$SKILL_DIR/../state/captures}"
+# pcaps live under the survey work root (ENB_EXPLORE_WORKDIR) in captures/, alongside
+# the ledgers + action log so one folder holds a whole survey. ENB_PCAP_DIR still wins
+# if set explicitly. Default work root: the skill's own state/ dir.
+OUTDIR="${ENB_PCAP_DIR:-${ENB_EXPLORE_WORKDIR:-$SKILL_DIR/../state}/captures}"
 WORKER="${ENB_PCAP_WORKER:-/usr/local/sbin/freya-pcap-capture}"
 # Which proxy to capture: empty/"freya" == the dockerized FreyaProxy container;
 # anything else (e.g. "Net7Proxy.exe") is captured as a host process under WINE.

@@ -21,8 +21,13 @@
 set -uo pipefail
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOGIN_DIR="$SKILL_DIR/../../login-to-client/scripts"
+# Survey work root (ledgers + action log + pcaps + stuck shots); override per survey
+# with ENB_EXPLORE_WORKDIR (inherited by drive.py/state.py/logaction/pcap). Used here
+# only to point operators at the right stuck-shot path.
+WORKDIR="${ENB_EXPLORE_WORKDIR:-$SKILL_DIR/../state}"
 EXIT_HANG=42
 EXIT_STUCK=43
+EXIT_KILL=44     # deadman: drive.py killed the client on no-progress; do NOT relogin
 MAX_RELOGIN="${ENB_MAX_RELOGIN:-4}"
 # Manual-client mode: the operator launches (and owns) the client + proxy
 # themselves (e.g. a real client + Net7Proxy.exe under WINE). We then never
@@ -31,7 +36,16 @@ MAX_RELOGIN="${ENB_MAX_RELOGIN:-4}"
 # bouncing the stack out from under their manual session.
 MANUAL_CLIENT="${ENB_EXPLORE_MANUAL_CLIENT:-0}"
 
-sector="${1:?usage: run-sector.sh <Sector> [drive.py args...]}"; shift || true
+# Sector is OPTIONAL: omit it (or pass "auto") and drive.py reads the current
+# sector off the map title. Pass a name to target one specific sector. We keep a
+# resolved label only for the human-facing log lines below; drive.py is the one
+# that actually identifies + verifies the sector each invocation. Only consume $1
+# as the sector when it is a real name -- a leading flag (e.g. --max-rounds) or
+# "auto" means auto-detect, and the flag must pass through to drive.py untouched.
+sector="auto"
+if [ "$#" -gt 0 ] && [ "${1#-}" = "$1" ] && [ "$1" != "auto" ]; then
+    sector="$1"; shift
+fi
 
 relogin() {
     echo "[run-sector] hard hang -> kill + relogin ..." >&2
@@ -51,8 +65,13 @@ while :; do
     rc=$?
     if [ "$rc" -eq "$EXIT_STUCK" ]; then
         echo "[run-sector] $sector STUCK (no progress) -- halting for operator/LLM; " \
-             "see state/stuck-$sector.png. NOT relogin-resuming." >&2
+             "see $WORKDIR/scratch/stuck-$sector.png. NOT relogin-resuming." >&2
         exit "$EXIT_STUCK"
+    fi
+    if [ "$rc" -eq "$EXIT_KILL" ]; then
+        echo "[run-sector] $sector hit ENB_EXPLORE_KILL_NO_PROGRESS -- drive.py killed " \
+             "the client and is stopping the run. NOT relogin-resuming." >&2
+        exit "$EXIT_KILL"
     fi
     if [ "$rc" -ne "$EXIT_HANG" ]; then
         exit "$rc"

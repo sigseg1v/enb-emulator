@@ -43,7 +43,7 @@ else
     L=$(( nl < dl ? nl : dl )); T=$(( nt < dt ? nt : dt ))
     R=$(( nl+nw > dl+dw ? nl+nw : dl+dw )); B=$(( nt+nh > dt+dh ? nt+nh : dt+dh ))
     rw=$((R - L)); rh=$((B - T))
-    full="$WORKDIR/tgt-region.png"
+    full="$SCRATCH/tgt-region.png"
     if ! timeout -k 2 8 import -window root -crop "${rw}x${rh}+$((gx+L))+$((gy+T))" \
             +repage "$full" 2>/dev/null || [ ! -s "$full" ]; then
         pkill -9 import 2>/dev/null
@@ -51,7 +51,7 @@ else
     fi
     ox=$L; oy=$T
 fi
-base="$WORKDIR/$(basename "${full%.png}")"
+base="$SCRATCH/$(basename "${full%.png}")"
 
 ocr_box() {  # <l> <t> <w> <h> <out> <psm> [whitelist] -> stdout: cleaned OCR line
     local l="$1" t="$2" w="$3" h="$4" out="$5" psm="$6" wl="${7:-}"

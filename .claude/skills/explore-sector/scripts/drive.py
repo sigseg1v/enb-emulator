@@ -57,6 +57,14 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# Survey work root: per-sector ledgers, the action log, pcaps and stuck shots all live
+# here so a whole survey is one folder (resume by pointing WORKDIR at it again). Mirror
+# of state.py's STATE_DIR -- keep the two in sync. Override with ENB_EXPLORE_WORKDIR.
+WORKDIR = os.environ.get("ENB_EXPLORE_WORKDIR") or os.path.join(HERE, "..", "state")
+# Every transient image we OCR (or dump for the operator to eyeball) goes under a
+# nested scratch/ so the work root holds only durable artifacts (ledgers, pcaps,
+# logs) and the throwaway PNGs are one `rm -rf scratch` away. Owner, 2026-06-22.
+SCRATCH = os.path.join(WORKDIR, "scratch")
 sys.path.insert(0, HERE)
 import navdata  # noqa: E402
 import state    # noqa: E402
@@ -69,7 +77,7 @@ SEED_KEY = os.environ.get("ENB_NAV_SEED", "w")
 NEXT_KEY = os.environ.get("ENB_NAV_NEXT", "d")
 PREV_KEY = os.environ.get("ENB_NAV_PREV", "c")
 ENUM_SETTLE = os.environ.get("ENB_ENUM_SETTLE", "0.13")   # per-key HUD repaint wait (batch walk)
-VISIT_K = float(os.environ.get("ENB_VISIT_K", "2.0"))
+VISIT_K = float(os.environ.get("ENB_VISIT_K", "8.0"))
 # En-route pickup threshold (owner, 2026-06-21: "if you are actively warping on a
 # segment and within 5k just mark it visited so we don't miss"). While in warp transit
 # the ship blows PAST other navs at high speed, so a poll may only ever read a passing
@@ -88,11 +96,18 @@ MINAPPROACH_K = float(os.environ.get("ENB_MINAPPROACH_K", "6.0"))
 REWARP_MAX = int(os.environ.get("ENB_REWARP_MAX", "3"))   # re-engage tries on a mid-transit stall
 WARP_POLLS = int(os.environ.get("ENB_WARP_POLLS", "90"))
 # In-flight warp-poll cadence. Each poll already costs ~0.5-1s (screenshot crop +
-# two tesseract reads), so the extra fixed sleep on top is what we trim. 0.5s keeps
-# the distance trace responsive without busy-spinning the OCR. Speed-confirm reads
-# (the toggle-cancel guard) deliberately stay at a full 1s gap -- they need real
-# time-separation to tell "spinning up" from "stopped".
-POLL_SLEEP = float(os.environ.get("ENB_POLL_SLEEP", "0.5"))
+# two tesseract reads), so the extra fixed sleep on top is what sets the period.
+# 2s polls the distance trace while warping without busy-spinning the OCR (owner,
+# 2026-06-22: poll distance every ~2s while warping). Speed-confirm reads (the
+# toggle-cancel guard) are a SEPARATE hardcoded 1s gap below -- they need real
+# time-separation to tell "spinning up" from "stopped" and are not on this knob.
+POLL_SLEEP = float(os.environ.get("ENB_POLL_SLEEP", "2.0"))
+# Minimum distance drop between polls to count as "clearly warping". The distance OCR
+# jitters by a few tenths of a k; a tiny apparent decrease must NOT be read as motion
+# (that jitter was resetting the stall watch forever, parking the ship at 000). When
+# really in warp the distance falls by many k per poll, so a 2k floor clears easily and
+# filters noise. Below it we do not trust distance -- we read the authoritative speed.
+CLOSE_MARGIN = float(os.environ.get("ENB_CLOSE_MARGIN", "2.0"))
 MATCH_MIN = 0.55           # below this, treat the OCR as garbage / non-nav
 CYCLE_MAX = 40             # safety cap on a single cycle traversal
 MAX_ATTEMPTS = int(os.environ.get("ENB_MAX_ATTEMPTS", "2"))   # warps before skip
@@ -128,6 +143,9 @@ EXIT_HANG = 42             # drive.py exits with this when it detects a hard cli
 EXIT_STUCK = 43            # no visit/skip progress for STUCK_ROUNDS rounds: a bad state
                            # the fast scripts cannot resolve -> hand off to the operator/
                            # LLM (run-sector.sh HALTS instead of relogin-resuming).
+EXIT_KILL = 44             # ENB_EXPLORE_KILL_NO_PROGRESS deadman switch fired: drive.py
+                           # killed the client and the whole run must STOP (no relogin,
+                           # no next sector). Terminal -- run-sector.sh / survey.sh bail.
 # How many consecutive rounds with zero visit+skip progress before we stop spinning
 # and escalate. The per-round logic already terminates the ordinary "nothing left in
 # range" cases; this catches an UNFORESEEN spin (warp toggle-cancel, OCR going bad,
@@ -142,6 +160,33 @@ STUCK_ROUNDS = int(os.environ.get("ENB_STUCK_ROUNDS", "8"))
 # The timer resets on any real progress (a visit/skip) AND each time the watchdog skips
 # one, so each stalled nav costs at most one window, never the whole run.
 NOPROG_SECS = int(os.environ.get("ENB_NOPROG_SECS", "600"))
+
+# Hard deadman switch (owner ask). OFF by default (0 / unset). Set it to a number of
+# SECONDS via ENB_EXPLORE_KILL_NO_PROGRESS and, if that long passes with NO progress
+# (no nav visited or skipped) -- i.e. after the softer NOPROG_SECS investigate+drop has
+# ALREADY failed to advance the run -- drive.py KILLS the client and STOPS the whole
+# survey (exit EXIT_KILL). Distinct from the hang path (relogin) and the stuck path
+# (halt for re-route): this is terminal teardown. The timer is the SAME signal the soft
+# watchdog uses (last_progress_ts, reset on any real progress), so it measures genuine
+# no-progress wall-clock, not time-since-launch.
+KILL_NO_PROGRESS = int(os.environ.get("ENB_EXPLORE_KILL_NO_PROGRESS", "0") or "0")
+
+
+def kill_client():
+    """Terminate the WINE client.exe (the deadman switch). Uses login-to-client's
+    canonical kill so it tears down the same way a fresh login would. Best-effort:
+    a pkill fallback covers a missing/renamed kill script."""
+    killer = os.path.join(HERE, "..", "..", "login-to-client", "scripts", "00-kill.sh")
+    try:
+        if os.path.exists(killer):
+            subprocess.run(["bash", killer], timeout=60)
+            return
+    except Exception:
+        pass
+    try:
+        subprocess.run(["pkill", "-9", "-f", "client.exe"], timeout=20)
+    except Exception:
+        pass
 
 
 class HangDetected(Exception):
@@ -785,13 +830,13 @@ def sweep_round(sector):
 
     total = len(navdata.load(sector))
     done_n = sum(1 for n in st["nodes"] if n.get("visited") or n.get("skipped"))
-    nearest_phase = total > 0 and done_n / total >= 0.5
+    nearest_phase = total > 0 and done_n / total >= 0.2
     order = navs if nearest_phase else list(reversed(navs))
     print(f"  order: {'nearest-first' if nearest_phase else 'farthest-first'} "
           f"({done_n}/{total} done)", flush=True)
 
     target = None
-    for nv in order:                    # farthest-first <50% done, then nearest-first
+    for nv in order:                    # farthest-first <20% done, then nearest-first
         k = nv["key"]
         if is_done_node(by, k):
             continue
@@ -886,7 +931,6 @@ def _warp_to_impl(sector, want_key, want_name):
     wanted nav and genuinely cannot close further."""
     warp(sector)
     prev = 1e9
-    stall = 0
     blanks = 0
     rewarps = 0
     seen_enroute = set()
@@ -932,34 +976,27 @@ def _warp_to_impl(sector, want_key, want_name):
         if k == want_key and dist is not None and dist <= VISIT_K:
             visit(sector, want_name, dist, "warp")
             return True
-        # distance closing -> we are warping; reset the stall watch
-        if dist < prev - 0.5:
-            stall = 0
+        # distance clearly closing -> we are warping; nothing to do but keep polling
+        if dist < prev - CLOSE_MARGIN:
             prev = dist
             time.sleep(POLL_SLEEP)
             continue
-        # distance not closing this poll; only a few of these before we confirm
-        stall += 1
+        # NOT clearly closing -> do not trust the distance OCR (it jitters). Consult the
+        # authoritative speed readout RIGHT NOW instead of waiting for a noise-resettable
+        # counter -- that wait was what let the ship sit at 000 forever. The warp orb is a
+        # TOGGLE: a re-warp click while the ship is still moving CANCELS the warp ("keeps
+        # stopping halfway"), so one 000 read is not enough to justify a re-click -- a
+        # single noisy/blind read would cancel a live warp. Require TWO consecutive
+        # non-positive reads, and treat any positive read in between as "still moving".
         prev = min(prev, dist)
-        if stall < 3:
-            time.sleep(POLL_SLEEP)
-            continue
-        # suspected stall -- confirm against the authoritative speed readout. The
-        # warp orb is a TOGGLE: a re-warp click while the ship is still moving
-        # CANCELS the warp ("keeps stopping halfway"). So one 000 read is not enough
-        # to justify a re-click -- a single noisy/blind read would cancel a live
-        # warp. Require TWO consecutive non-positive reads, and treat any positive
-        # read in between as "still moving, do not click".
         spd = read_speed()
         if spd and spd > 0:
-            stall = 0          # still moving (the distance OCR was just noisy)
-            time.sleep(1)
+            time.sleep(POLL_SLEEP)   # still moving (the distance OCR was just noisy)
             continue
         time.sleep(1)
         spd2 = read_speed()
         if spd2 and spd2 > 0:
-            stall = 0          # moving on the confirm read -- do NOT re-warp
-            time.sleep(1)
+            time.sleep(POLL_SLEEP)   # moving on the confirm read -- do NOT re-warp
             continue
         if spd is None and spd2 is None:
             # both reads blind (panel obscured / mid-present), not a confirmed stop;
@@ -991,7 +1028,6 @@ def _warp_to_impl(sector, want_key, want_name):
                   flush=True)
             log(sector, "re-warp", f"{name} stalled at {dist:.2f}k, speed 000")
             warp(sector)
-            stall = 0
             prev = 1e9
             time.sleep(1)
             continue
@@ -1003,10 +1039,11 @@ def _warp_to_impl(sector, want_key, want_name):
 
 
 def dump_stuck_shot(sector):
-    """Grab the full client window to state/stuck-<sector>.png so the operator/LLM can
+    """Grab the full client window to scratch/stuck-<sector>.png so the operator/LLM can
     SEE the bad state on hand-off. Root-crop with a timeout (an `import -window <id>`
     can wedge the X server -- the documented trap), killing a hung import."""
-    path = os.path.join(HERE, "state", f"stuck-{sector}.png")
+    os.makedirs(SCRATCH, exist_ok=True)
+    path = os.path.join(SCRATCH, f"stuck-{sector}.png")
     sh("bash", "-c",
        f'. "{os.path.join(HERE, "lib.sh")}"; id="$(client_win)" || exit 1; '
        f'read -r x y w h <<< "$(win_abs "$id")"; '
@@ -1364,7 +1401,7 @@ GATE_LEAVE = os.environ.get("ENB_GATE_LEAVE", "0") == "1"
 def completed_sectors():
     """Sector names whose ledger is marked complete -- our 'already visited sectors'."""
     done = set()
-    sd = os.path.join(HERE, "state")
+    sd = WORKDIR
     if not os.path.isdir(sd):
         return done
     import json
@@ -1432,12 +1469,32 @@ def leave_via_gate(sector):
 
 
 def main():
-    if len(sys.argv) < 2:
-        sys.exit("usage: drive.py <Sector> [--max-rounds N]")
-    sector = sys.argv[1]
     max_rounds = 60
     if "--max-rounds" in sys.argv:
         max_rounds = int(sys.argv[sys.argv.index("--max-rounds") + 1])
+
+    # The sector is OPTIONAL. Omit it (or pass "auto"/"-") and we read the CURRENT
+    # sector straight off the map title: read-sector.sh OCRs the title and resolves
+    # it to a canonical navdata name -- the same ground truth verify_sector already
+    # trusts. An explicit name is still honoured (and cross-checked by verify_sector)
+    # for a targeted single-sector run or to override a doubtful OCR. This is what
+    # lets a gate crossing flow straight into the next sector with no hand-typed name.
+    sector = None
+    if len(sys.argv) >= 2:
+        a = sys.argv[1]
+        if not a.startswith("-") and a != "auto":
+            sector = a
+
+    # Map open up front: required both to read the title (auto-detect) and to fly.
+    open_map()
+    if sector is None:
+        sector = actual_sector()
+        if sector is None:
+            print("AUTO-DETECT FAILED: could not read the map title to identify the "
+                  "current sector. Re-run with an explicit name: drive.py <Sector>.",
+                  flush=True)
+            sys.exit(EXIT_STUCK)
+        print(f"auto-detected current sector from map title: {sector}", flush=True)
 
     # Refuse sectors that contain a Gravity Well. A gravity well terminates warp
     # mid-flight (server PlayerClass.cpp:1806) and slows the ship -- a screen-only
@@ -1457,9 +1514,9 @@ def main():
     if not os.path.exists(state.path(sector)):
         sh("python3", os.path.join(HERE, "state.py"), "init", sector)
     log(sector, "drive-start", f"autonomous sweep, threshold {VISIT_K}k")
-    open_map()
     # GROUND TRUTH before flying a single warp: confirm the ship is actually in the
-    # sector we were told to drive. A prior tow may have left it elsewhere.
+    # sector we are driving. A prior tow may have left it elsewhere. (In auto-detect
+    # mode this re-reads the title, so a tow that lands mid-init is still caught.)
     verify_sector(sector, "drive-start")
     # Ensure a per-sector packet capture is running and labelled for THIS sector
     # (relabels a char-select/gate placeholder, or starts one if none is running).
@@ -1474,7 +1531,26 @@ def main():
     stuck_rounds = 0          # consecutive rounds with zero progress (LLM-escalation)
     last_progress_ts = time.time()   # wall-clock of last visit/skip (no-progress watchdog)
     relocs = 0                # cross-sector relocations spent extending scanner range
-    for rnd in range(max_rounds):
+    rnd = -1
+    while True:
+        rnd += 1
+        # Hard deadman switch (ENB_EXPLORE_KILL_NO_PROGRESS). When armed it is the SOLE
+        # no-progress terminator: the round cap and the round-based escalate/blind exits
+        # are suppressed below so the run gets its full wall-clock window to recover, and
+        # only after KILL_NO_PROGRESS seconds with no visit/skip do we tear the client
+        # down and STOP the whole survey (the wrappers do not relogin/continue on this).
+        if KILL_NO_PROGRESS and time.time() - last_progress_ts >= KILL_NO_PROGRESS:
+            stall = int(time.time() - last_progress_ts)
+            log(sector, "kill-no-progress",
+                f"no progress {stall}s >= ENB_EXPLORE_KILL_NO_PROGRESS="
+                f"{KILL_NO_PROGRESS}s; killing client and stopping")
+            print(f"KILL {sector}: no progress for {stall}s >= "
+                  f"ENB_EXPLORE_KILL_NO_PROGRESS={KILL_NO_PROGRESS}s; killing client.exe "
+                  f"and stopping the run.", flush=True)
+            kill_client()
+            sys.exit(EXIT_KILL)
+        if not KILL_NO_PROGRESS and rnd >= max_rounds:
+            break
         st, by = ledger(sector)
         total = len(st["nodes"])
         visited = sum(1 for n in st["nodes"] if n["visited"])
@@ -1508,7 +1584,11 @@ def main():
                     stuck_rounds = 0
                     last_progress = -1   # force the next round to see the skip as progress
                     continue
-            if stuck_rounds >= STUCK_ROUNDS:
+            # The round-based escalate halts for operator/LLM re-route -- but if the
+            # deadman is armed, the operator has opted into "keep trying, then kill", so
+            # we do NOT bail early here; the wall-clock kill at the top of the loop owns
+            # termination instead.
+            if stuck_rounds >= STUCK_ROUNDS and not KILL_NO_PROGRESS:
                 escalate_stuck(sector, stuck_rounds)
         last_progress = progress
 
@@ -1543,13 +1623,15 @@ def main():
                     log(sector, "blind-recover", f"map-click reached {got} from empty pocket")
                     blind_streak = 0
                     continue
-            if blind_streak >= 5:
+            if blind_streak >= 5 and not KILL_NO_PROGRESS:
                 print(f"  blind {blind_streak} rounds and map-click could not recover; "
                       f"stopping WITHOUT marking complete -- needs attention",
                       flush=True)
                 log(sector, "blind-stop",
                     f"panel blank {blind_streak} rounds, no map recovery; not completing")
                 break
+            # Deadman armed: keep retrying map-click recovery every round rather than
+            # giving up here; the wall-clock kill at the loop top bounds the spin.
             continue
         blind_streak = 0
 
@@ -1638,10 +1720,12 @@ def main():
         print(f"COMPLETE {sector} {visited}/{total} visited; "
               f"skipped({len(skipped)}): {skipped}", flush=True)
         # owner algorithm step 9: sector done -> find a gate and leave it, preferring a
-        # gate to a sector we have not visited yet. Gated behind ENB_GATE_LEAVE until a
-        # live crossing is validated -- auto-crossing lands us in a NEW sector while the
-        # per-sector wrapper still thinks it is driving THIS one, so the master loop must
-        # re-identify + re-init before driving on. Enable once that hand-off is wired.
+        # gate to a sector we have not visited yet. Still gated behind ENB_GATE_LEAVE
+        # because a crossing lands us in a NEW sector -- drive.py drives exactly one
+        # sector and exits. The cross-gate hand-off (re-detect the new sector off the
+        # map title, re-init its ledger, drive on) lives in survey.sh, which sets
+        # ENB_GATE_LEAVE=1 and loops. A bare `drive.py <S>` leaves GATE_LEAVE off so a
+        # one-off run does not silently fly out of the sector you asked for.
         if GATE_LEAVE:
             leave_via_gate(sector)
     else:

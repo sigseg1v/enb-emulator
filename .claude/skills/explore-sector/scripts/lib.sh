@@ -19,6 +19,11 @@ LOGIN_LIB="$REPO_ROOT/.claude/skills/login-to-client/scripts/lib.sh"
 
 WORKDIR="${ENB_EXPLORE_WORKDIR:-/tmp/enbexplore}"
 mkdir -p "$WORKDIR"
+# Every transient PNG we OCR (full client shots and their crops) lands here, so the
+# work root keeps only durable artifacts (ledgers, pcaps, logs) and the throwaway
+# images are one `rm -rf scratch` away. Owner, 2026-06-22. Mirrors drive.py SCRATCH.
+SCRATCH="$WORKDIR/scratch"
+mkdir -p "$SCRATCH"
 
 # Map overlay crop, window-relative (left top width height). The client renders a
 # fixed 1280x960, so this is stable. Overridable via env if the UI ever moves.
@@ -85,8 +90,8 @@ explore_shot() {
     local out="${1:-}"
     if [ -z "$out" ]; then
         local n=1
-        while [ -e "$WORKDIR/shot-$n.png" ]; do n=$((n + 1)); done
-        out="$WORKDIR/shot-$n.png"
+        while [ -e "$SCRATCH/shot-$n.png" ]; do n=$((n + 1)); done
+        out="$SCRATCH/shot-$n.png"
     fi
     shot "$out" && echo "$out"
 }

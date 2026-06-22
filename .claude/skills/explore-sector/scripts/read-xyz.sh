@@ -26,7 +26,7 @@ read -r l t w h <<< "${ENB_XYZ_BOX:-34 250 130 48}"
 scale="${ENB_XYZ_SCALE:-5}"
 
 full="$(explore_shot "")" || { elog "screenshot failed"; exit 1; }
-crop="$WORKDIR/$(basename "${full%.png}")-xyz.png"
+crop="$SCRATCH/$(basename "${full%.png}")-xyz.png"
 out="${1:-$crop}"
 
 # Classify the readout colour from the raw crop (before grayscale) so we can tell a

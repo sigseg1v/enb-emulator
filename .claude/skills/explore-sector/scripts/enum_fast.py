@@ -53,6 +53,10 @@ from Xlib import X, display
 from PIL import Image, ImageOps
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# Scratch (the OCR montage) goes under the survey work root so one folder holds
+# everything; override with ENB_EXPLORE_WORKDIR. Default: the skill's state/ dir.
+WORKDIR = os.environ.get("ENB_EXPLORE_WORKDIR") or os.path.join(HERE, "..", "state")
+SCRATCH = os.path.join(WORKDIR, "scratch")  # transient OCR images, mirrors drive.py/lib.sh
 sys.path.insert(0, HERE)
 import navdata  # noqa: E402  -- in-process match (avoids 30 python cold starts)
 
@@ -141,7 +145,7 @@ def montage_ocr(frames, save_path=None):
     canvas = Image.new("L", (cw, stride * len(frames)), 255)
     for i, fr in enumerate(frames):
         canvas.paste(fr, (0, i * stride))
-    path = save_path or os.path.join(HERE, "state", "enum-montage.png")
+    path = save_path or os.path.join(SCRATCH, "enum-montage.png")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     canvas.save(path)
     # TSV gives per-word boxes (top,height,conf,text) so we can bucket by row and be

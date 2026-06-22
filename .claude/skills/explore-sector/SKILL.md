@@ -75,15 +75,16 @@ the window with `xdotool windowactivate --sync` and send them with `xdotool key`
   montage pass over the whole cycle), picks the target by the HYBRID order below,
   re-selects it by NAME (W then D to it -- never by raw count), and warps. The map is
   NO LONGER the primary selector; it is the demoted SEVERELY-STUCK fallback only.
-- **Target order is HYBRID: farthest-first, then nearest after 50% (owner, 2026-06-21).**
-  While fewer than half the sector's navs are done, target the FARTHEST unvisited nav --
+- **Target order is HYBRID: farthest-first, then nearest after 20% (owner: 50%->20% 2026-06-22).**
+  While fewer than 20% of the sector's navs are done, target the FARTHEST unvisited nav --
   one long crossing bags every nav within `ENROUTE_K` (5k) of the warp line for FREE
-  (en-route pickup). Once `>=50%` are done, SWITCH to NEAREST-unvisited: late in the run
+  (en-route pickup). Once `>=20%` are done, SWITCH to NEAREST-unvisited: late in the run
   farthest-first degenerates into an end-to-end zigzag between opposite clusters
   (measured on AdrielPrime: 3465 units of warp path / 11 cross-sector repositions vs
   1179 units nearest-neighbour). `relocate_far` always uses farthest (its job is to jump
-  to a fresh cluster). While actively warping a segment, any nav within 5k is marked
-  visited so we don't miss it.
+  to a fresh cluster). A nav counts as visited once within `VISIT_K` (8k; owner 2026-06-22),
+  and while actively warping a segment any nav within 5k is marked visited so we don't miss it.
+  In-flight distance is polled every `POLL_SLEEP` (2s) during warp.
 - **ALWAYS BE WARPING.** The ship should be in warp essentially all the time -- the
   only acceptable dead time is the few seconds to pick the next target plus the ~5s
   warp engage. After every arrival, immediately confirm you are warping (the green
@@ -272,7 +273,9 @@ the window with `xdotool windowactivate --sync` and send them with `xdotool key`
 | `scripts/click-map.sh <wx> <wy>` | left-click at window-relative coords (same frame as a full screenshot). Used to select a node on the map, or click the gate icon. |
 | `scripts/warp.sh` | **CLICK the round warp orb** at the bottom-centre of the HUD (window-rel `(633,868)`, `ENB_WARP_BTN`) to warp to the selected nav, then verify it engaged by reading the green speed readout. Prints `WARP <speed>` (>0 == warping, 0 == never engaged). **NOT the Q key** -- Q is silently dropped whenever the WINE window lacks keyboard focus (it usually does, under XTEST). |
 | `scripts/read-speed.sh` | read the green warp-speed readout left of the warp orb (box `578 618 852 874`): `SPEED <n>` (`0` == stopped) or `SPEED ?`. The readout is VARIABLE-WIDTH (parked `000`; warp speed is `2000` by default, 4+ digits on faster ships). It is NOT a 7-segment font (it has a curved `2`); the reliable read is green-isolate -> invert -> upscale -> add a white border -> tesseract `--psm 8` digit-whitelist (the white border is mandatory -- without it tesseract drops the leading/trailing digit and a 4-digit `2000` mis-reads). Validated live: `000`->0, `2000`->2000. This is now a TRUSTWORTHY moving/stopped signal -- `warp.sh` gates its toggle clicks on it. |
-| `scripts/drive.py <S> [--max-rounds N]` | autonomous per-sector driver (Always-Be-Warping): batch-enumerate the nav cycle via `enum_fast.py` (`enum_navs`), pick the nearest unvisited nav, re-select it by NAME with W/D (`select_named`, never by raw count), warp (CLICK the orb), record arrival + en-route hits; logs a `warp-gap` per warp (000 -> next warp, target <10s). When the cycle is dry but shown navs remain, relocates to a far NON-planet nav (bounded), then tries the map fallback, before skipping the unreachable/hidden leftovers and completing. Best-of-N shield guard while stopped. Resumable via the ledger. Nav-key env: `ENB_NAV_SEED=w`, `ENB_NAV_NEXT=d`, `ENB_NAV_PREV=c`, `ENB_ENUM_SETTLE=0.13`. |
+| `scripts/survey.sh [S] [drive args]` | **TOP-LEVEL chain.** Detect current sector -> `run-sector.sh` -> cross a gate on completion (`ENB_GATE_LEAVE=1`) -> re-detect -> repeat, with NO typed sector names. Refuses gravity wells, stops when arriving repeatedly in already-complete sectors (`ENB_SURVEY_STALE_MAX`) or after `ENB_SURVEY_MAX` crossings, HALTs (never spins) on stuck/refused/non-moving-gate. |
+| `scripts/run-sector.sh [S] [drive args]` | drive ONE sector to completion with auto hang-recovery (relogin + resume on `EXIT_HANG=42`); passes other exits through. Sector OPTIONAL (auto-detect when omitted). `ENB_EXPLORE_MANUAL_CLIENT=1` halts instead of relaunching a client you own. |
+| `scripts/drive.py [S] [--max-rounds N]` | autonomous per-sector driver (Always-Be-Warping): batch-enumerate the nav cycle via `enum_fast.py` (`enum_navs`), pick the nearest unvisited nav, re-select it by NAME with W/D (`select_named`, never by raw count), warp (CLICK the orb), record arrival + en-route hits; logs a `warp-gap` per warp (000 -> next warp, target <10s). When the cycle is dry but shown navs remain, relocates to a far NON-planet nav (bounded), then tries the map fallback, before skipping the unreachable/hidden leftovers and completing. Best-of-N shield guard while stopped. Resumable via the ledger. Nav-key env: `ENB_NAV_SEED=w`, `ENB_NAV_NEXT=d`, `ENB_NAV_PREV=c`, `ENB_ENUM_SETTLE=0.13`. |
 | `scripts/read-target.sh [shot]` | OCR the bottom-RIGHT selected-target panel: `TARGET <name>` + `DIST <k>` (k == JSON-coord distance; `<=2.0k` == visited). Used to verify the W/D selection landed + read its distance. |
 | `scripts/shield.sh [shot]` | read shield level: `SHIELD <pct>` from the blue HUD bar fill (no hover). |
 | `scripts/gate.sh` | click the use-gate icon (needs `ENB_GATE_ICON="x y"`, calibrated once). |
@@ -288,14 +291,57 @@ the window with `xdotool windowactivate --sync` and send them with `xdotool key`
 Runtime output (ledgers + `actions.log`) lives in `state/` and is **gitignored**
 -- it is per-playthrough progress, not source.
 
-## The normal path: just run `drive.py`
+## The normal path: chain whole sectors with `survey.sh` (no typed names)
 
-For a sector that is already identified, the whole sweep is autonomous:
+The sector argument is OPTIONAL everywhere now -- omit it and the driver reads the
+CURRENT sector straight off the map title (`read-sector.sh`, the same ground truth
+`verify_sector` trusts). So the unattended path is just:
 
 ```bash
 S=.claude/skills/explore-sector/scripts
-python3 $S/state.py init <Sector>
-python3 $S/drive.py <Sector>
+bash $S/survey.sh            # detect -> drive -> cross a gate -> re-detect -> repeat
+```
+
+`survey.sh` is the cross-gate hand-off the per-sector loop never wired up: it
+detects where the ship is, drives that sector (`run-sector.sh`, which auto-recovers
+client hangs), lets `drive.py` cross a gate on completion (`ENB_GATE_LEAVE=1`, which
+`survey.sh` sets), then re-detects the new sector and continues. It refuses
+gravity-well sectors, stops when it keeps arriving in already-complete sectors (the
+reachable graph is exhausted) or after `ENB_SURVEY_MAX` crossings, and HALTS (does
+not spin) on a stuck run, a refused well, or a gate that did not move the ship.
+
+**Work directory (`ENB_EXPLORE_WORKDIR`).** Everything persistent for a survey lives
+under ONE root: the per-sector ledgers (`<Sector>.json`, the finished-vs-remaining
+truth), the timestamped `actions.log`, and the pcaps (`captures/`). Every transient
+PNG we OCR -- the full client `shot-N.png` grabs, their crops, and the stuck shots
+(`stuck-<Sector>.png`) -- goes in a nested `scratch/` subfolder so the root stays
+durable-only and the throwaway images are one `rm -rf scratch` away. Default is the
+skill's own `state/` dir; set
+`ENB_EXPLORE_WORKDIR=/path` to park a whole survey wherever you want. It is inherited
+by `survey.sh` -> `run-sector.sh` -> `drive.py`/`state.py`/`logaction.sh`/`pcap.sh`, so
+set it once. **Resume** a survey by pointing it at the same folder again -- completed
+sectors are detected from the ledgers there and skipped. (`ENB_PCAP_DIR` still
+overrides just the pcap location if you want captures elsewhere.)
+
+**Deadman switch (`ENB_EXPLORE_KILL_NO_PROGRESS`).** OFF by default. Set it to a
+number of SECONDS and, if that long passes with NO progress (no nav visited or
+skipped), `drive.py` KILLS the client (`login-to-client/scripts/00-kill.sh`) and
+STOPS the whole run -- `run-sector.sh`/`survey.sh` exit 44 and do NOT relogin or
+continue. When armed it is the SOLE no-progress terminator: the per-sector round cap
+and the round-based escalate/blind early-exits are suppressed so the run gets its
+full window to recover first. Use it for truly unattended sweeps:
+
+```bash
+ENB_EXPLORE_KILL_NO_PROGRESS=1800 bash $S/survey.sh   # 30 min no progress -> kill + stop
+```
+
+For one specific sector (auto-detected + auto-recovered, no chaining):
+
+```bash
+bash $S/run-sector.sh                 # drive whatever sector the ship is in
+bash $S/run-sector.sh <Sector>        # (optional) target one named sector
+python3 $S/drive.py                   # one pass, auto-detect, no hang recovery
+python3 $S/drive.py <Sector>          # one pass, explicit sector
 ```
 
 `drive.py` batch-enumerates the nav cycle (W-seed + D-walk via `enum_fast.py`),

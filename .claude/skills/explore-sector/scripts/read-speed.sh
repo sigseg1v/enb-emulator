@@ -44,7 +44,7 @@ else
     full="$(explore_shot "")" || { elog "screenshot failed"; echo "SPEED ?"; exit 1; }
 fi
 
-ENB_SPEED_BOX="${ENB_SPEED_BOX:-578 618 852 874}" python3 - "$full" <<'PY'
+ENB_SPEED_BOX="${ENB_SPEED_BOX:-578 618 852 874}" ENB_SPEED_OCR_PNG="$SCRATCH/.speed_ocr.png" python3 - "$full" <<'PY'
 import os, sys, subprocess
 import numpy as np
 from PIL import Image, ImageOps
@@ -69,10 +69,11 @@ SCALE = 12
 img = Image.fromarray(np.where(sub, 0, 255).astype("uint8"), "L")
 img = img.resize((img.width * SCALE, img.height * SCALE), Image.LANCZOS)
 img = ImageOps.expand(img, border=SCALE * 3, fill=255)
-img.save("/tmp/.speed_ocr.png")
+ocr_png = os.environ.get("ENB_SPEED_OCR_PNG", "/tmp/.speed_ocr.png")
+img.save(ocr_png)
 
 out = subprocess.run(
-    ["tesseract", "/tmp/.speed_ocr.png", "-", "--psm", "8",
+    ["tesseract", ocr_png, "-", "--psm", "8",
      "-c", "tessedit_char_whitelist=0123456789"],
     capture_output=True, text=True).stdout
 digits = "".join(ch for ch in out if ch.isdigit())

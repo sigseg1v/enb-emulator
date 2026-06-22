@@ -15,7 +15,9 @@
 #   logaction.sh Equatorial enter-gate "Sector Gate to Earth"
 set -uo pipefail
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG="$SKILL_DIR/../state/actions.log"
+# Single work root (ledgers + this log + pcaps + stuck shots); override per survey
+# with ENB_EXPLORE_WORKDIR. Default: the skill's own state/ dir.
+LOG="${ENB_EXPLORE_WORKDIR:-$SKILL_DIR/../state}/actions.log"
 mkdir -p "$(dirname "$LOG")"
 
 [ "$#" -ge 2 ] || { echo "usage: logaction.sh <sector> <action> [detail...]" >&2; exit 2; }

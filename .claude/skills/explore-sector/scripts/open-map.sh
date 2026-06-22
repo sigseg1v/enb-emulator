@@ -70,7 +70,7 @@ click_btn_win() {
 # center coord; detect its blue pixels in a small box. Prints "open"/"closed".
 map_is_open() {
     local id="$1" cx="$2" cy="$3" tmp
-    tmp="$WORKDIR/.mapprobe.png"
+    tmp="$SCRATCH/.mapprobe.png"
     shot "$tmp" >/dev/null 2>&1 || { echo closed; return; }
     python3 - "$tmp" "$cx" "$cy" <<'PY'
 import sys, numpy as np
@@ -90,7 +90,7 @@ PY
 # top-left (~window-rel (34,250)-(110,295)). Detect its blue text pixels.
 xyz_is_on() {
     local id="$1" tmp
-    tmp="$WORKDIR/.xyzprobe.png"
+    tmp="$SCRATCH/.xyzprobe.png"
     shot "$tmp" >/dev/null 2>&1 || { echo off; return; }
     python3 - "$tmp" <<'PY'
 import sys, numpy as np
@@ -140,7 +140,7 @@ g="$(win_abs "$id")"; read -r gx gy gw gh <<< "$g"
 xdotool mousemove $((gx + 1000)) $((gy + 550)); sleep 0.4
 
 full="$(explore_shot "${1:-}")" || { elog "screenshot failed"; exit 1; }
-crop="$WORKDIR/$(basename "${full%.png}")-map.png"
+crop="$SCRATCH/$(basename "${full%.png}")-map.png"
 MAP_CROP="${ENB_MAP_CROP:-22 222 738 564}"
 read -r cpath x0 y0 <<< "$(crop_map "$full" "$crop")"
 echo "FULL $full"

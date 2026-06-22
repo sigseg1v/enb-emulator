@@ -13,7 +13,7 @@ set -uo pipefail
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; . "$SKILL_DIR/lib.sh"
 
 full="$(explore_shot "${1:-}")" || { elog "screenshot failed"; exit 1; }
-crop="$WORKDIR/$(basename "${full%.png}")-map.png"
+crop="$SCRATCH/$(basename "${full%.png}")-map.png"
 read -r cpath x0 y0 <<< "$(crop_map "$full" "$crop")"
 echo "FULL $full"
 echo "MAP $cpath $x0 $y0"

@@ -31,7 +31,7 @@
 # Pass a screenshot path as $1 to just snapshot the frame for calibration.
 set -uo pipefail
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; . "$SKILL_DIR/lib.sh"
-DBG="$SKILL_DIR/../state/shielddbg"; mkdir -p "$DBG"
+DBG="${ENB_EXPLORE_WORKDIR:-$SKILL_DIR/../state}/shielddbg"; mkdir -p "$DBG"
 
 if [ -n "${1:-}" ]; then
     full="$1"

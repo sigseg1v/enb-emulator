@@ -33,10 +33,10 @@ fi
 
 [ -x "$(command -v tesseract)" ] || { echo "ALIVE"; elog "no tesseract"; exit 0; }
 
-tsv="$WORKDIR/wreck-ocr"
+tsv="$SCRATCH/wreck-ocr"
 # Upscale + grayscale for steadier OCR of the dialog text over the starfield.
-convert "$full" -colorspace Gray -normalize -resize 150% "$WORKDIR/wreck-pre.png" 2>/dev/null
-tesseract "$WORKDIR/wreck-pre.png" "$tsv" tsv 2>/dev/null || { echo "ALIVE"; exit 0; }
+convert "$full" -colorspace Gray -normalize -resize 150% "$SCRATCH/wreck-pre.png" 2>/dev/null
+tesseract "$SCRATCH/wreck-pre.png" "$tsv" tsv 2>/dev/null || { echo "ALIVE"; exit 0; }
 
 # tsv columns: level page block par line word left top width height conf text
 # Find a "tow" token with decent confidence; scale boxes back from the 150% image.

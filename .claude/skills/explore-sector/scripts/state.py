@@ -35,7 +35,11 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-STATE_DIR = os.path.join(HERE, "..", "state")
+# All persistent work (per-sector ledgers, the action log, pcaps, stuck shots) lives
+# under one root so a whole survey can be parked in a chosen folder. Override it with
+# ENB_EXPLORE_WORKDIR; default is the skill's own state/ dir. The ledgers here are the
+# finished-vs-remaining truth -- point WORKDIR at the same folder to resume a survey.
+STATE_DIR = os.environ.get("ENB_EXPLORE_WORKDIR") or os.path.join(HERE, "..", "state")
 sys.path.insert(0, HERE)
 import navdata  # noqa: E402
 
