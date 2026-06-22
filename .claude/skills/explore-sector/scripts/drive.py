@@ -170,14 +170,18 @@ def log(sector, action, detail):
 
 
 def ensure_focus():
-    """Give the client window keyboard focus so the nav keys land in it. windowactivate
-    --sync is the focus path that proved reliable for W/D/C here (Xlib SetInputFocus
-    BadMatch'd on the reparented WINE window). Focus is silently stolen on this desktop,
-    so a cycle-walk re-asserts it once up front; the root-crop screenshots the walk uses
-    do not steal it back."""
+    """Give the client window keyboard X INPUT FOCUS so the nav keys land in it.
+    `windowactivate` alone is NOT enough on this Cinnamon desktop: when nemo-desktop
+    (the file-manager desktop window) steals X input focus, `windowactivate --sync`
+    raises/activates the client but does NOT move the X input focus off nemo-desktop,
+    so every W/D/C keystroke silently goes to the desktop and the nav cycle never
+    targets anything (XTEST *clicks* still land because they follow the pointer, which
+    is why warp/gate clicks worked while keys did nothing). `windowfocus` sets the X
+    input focus directly and DOES recover it -- verified live 2026-06-22. Do both:
+    activate (raise) then focus (input)."""
     sh("bash", "-c",
        f'. "{os.path.join(HERE, "lib.sh")}"; id="$(client_win)" || exit 1; '
-       f'xdotool windowactivate --sync "$id"')
+       f'xdotool windowactivate "$id" 2>/dev/null; xdotool windowfocus "$id"')
 
 
 def tap(ch):

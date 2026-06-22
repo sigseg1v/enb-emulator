@@ -40,6 +40,47 @@ widened to `ENROUTE_K=5.0` ("if actively warping on a segment and within 5k mark
 visited"). Re-run AdrielPrime from scratch to compare wall-clock against the 69-min
 farthest-first baseline.
 
+## SECTOR GRAPH (ground truth) + SURVEY STATUS (2026-06-22)
+Gate adjacency is **only** knowable by crossing -- gate DISPLAY names do NOT match
+destinations ("System Gate to Sol" in Margesi lands in Equatorial). A trap bit me:
+the gate-graph filter `type=="gate"` SILENTLY DROPS every `class-specific-gate`,
+which made the reachable cluster look CLOSED when it was not. Scan gates **by name**
+(`"Gate"`/`"Accelerator"` in the nav name), never by `type`.
+
+Verified crossings (from->gate-name->to), all class-specific gates included:
+- AdrielPrime --"Sector Gate to Margesi"--> Margesi
+- AdrielPrime --"System Gate to Aragoth"--> Freya
+- Margesi     --"System Gate to Sol"--> Equatorial
+- Equatorial  --"Accelerator to Earth"--> **Earth** (FRESH; safe non-Freya route!)
+- (Equatorial --"System Gate to Proxima Centauri"--> Margesi; loops)
+
+So the {AdrielPrime,Margesi,Equatorial} loop opens into the fresh map via
+Equatorial's "Accelerator to Earth" -- Freya is NOT the only door. **Earth is a hub**:
+onward gates to Asteroid Belt Alpha, High Earth, Luna (all fresh).
+
+Survey status:
+- DONE: AdrielPrime, Margesi, Equatorial, Freya.
+- IN-PROGRESS: **Earth 22/38 visited, 3 skipped, 1 danger zone (Nav Group Shrine** at
+  approx (-22,38) -- wrecked there twice). A wreck's tow dumps the ship at AdrielPrime
+  (home), 3 gates from Earth, so each Earth wreck costs an AP->Margesi->Equatorial->Earth
+  re-route. Auto-relogin recovery is broken (enbmod `enb.self()` channel never returns
+  this session), so hostile-sector recovery is LLM-in-the-loop.
+
+## FOCUS-STEAL BUG: keys land nowhere while clicks work (fixed 2026-06-22)
+Symptom: the W/D/C nav cycle reads a STALE target forever (e.g. "ECS Falcon") and
+never locks a nav, yet warp/gate/undock CLICKS still work. Root cause: `nemo-desktop`
+(the Cinnamon file-manager desktop window) stole the X INPUT FOCUS. XTEST *clicks*
+follow the pointer so they still land on the client; XTEST *keys* follow the X input
+focus, so every keystroke silently went to the desktop. `ensure_focus` used only
+`xdotool windowactivate --sync`, which raises/activates the client but does NOT move
+the X input focus off nemo-desktop. Fix: `ensure_focus` now also runs
+`xdotool windowfocus "$id"` (sets X input focus directly -- verified live to recover
+it). Diagnostic: `xdotool getwindowfocus` != the client win id -> focus was stolen.
+NOTE: a frozen client (HUNG) presents the SAME "keys do nothing" symptom -- ALWAYS run
+`hangcheck.sh` (frozen-framebuffer test) FIRST; if HUNG it is not a focus problem, it
+is a client wedge needing kill+relogin. The 2026-06-22 Earth recovery hit BOTH: the
+client wedged during the tow/multi-gate reroute (0 changed pixels across 1s = HUNG).
+
 ## SECTOR-VERIFY GUARD (owner ask, 2026-06-21 night) -- `read-sector.sh` + drive.py
 
 Root cause of this session's false-completes: a wreck's **Request Tow can cross
