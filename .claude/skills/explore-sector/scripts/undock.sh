@@ -156,49 +156,72 @@ if rd and gr:
 PY
 }
 
-press() { local k="$1" n="$2" i; for ((i=0;i<n;i++)); do xdotool key "$k" 2>/dev/null; sleep 0.10; done; }
+# --- locomotion + aiming helpers ---------------------------------------------
+# turn <Left|Right> <count>: rotate the avatar via the arrow keys (focus-based, so
+# raise/activate first). walk_forward <secs>: the ONLY forward move that lands here
+# -- hold the right mouse button at window centre.
+turn() {
+    local k="$1" n="$2" i
+    xdotool windowactivate "$WID" 2>/dev/null
+    for ((i=0;i<n;i++)); do xdotool key "$k" 2>/dev/null; sleep 0.08; done
+}
+walk_forward() {
+    local secs="$1" g gx gy gw gh
+    g="$(win_abs "$WID")" || return 1
+    read -r gx gy gw gh <<< "$g"
+    xdotool windowactivate "$WID" 2>/dev/null
+    xdotool mousemove $((gx + gw/2)) $((gy + gh/2)) 2>/dev/null
+    xdotool mousedown 3; sleep "$secs"; xdotool mouseup 3
+}
+
+WALK_SECS="${ENB_UNDOCK_WALK_SECS:-7}"        # owner 2026-06-23: ~7s burst is best
+CENTER_X="${ENB_UNDOCK_CENTER_X:-640}"        # 1280-wide client; hull aim point
+APPROACH_MAX="${ENB_UNDOCK_APPROACH_MAX:-9}"  # walk/centre/board iterations
 
 xdotool windowactivate "$WID" 2>/dev/null; xdotool windowraise "$WID" 2>/dev/null; sleep 0.4
 
-# Rotate RIGHT until the ship appears, then click and verify. Bounded to a bit
-# more than a full turn. One LEFT correction is allowed if we overshoot it.
-total=0; corrected=0
-while [ "$total" -lt 110 ]; do
-    # CHECK WARP SPEED EVERY ITERATION: a warp-speed readout (e.g. "000") present at
-    # all means we are OUTSIDE/in-space -- undocked, DONE (owner rule). This catches
-    # both "the tow dropped us straight into space" (no docking at all) and "a hull
-    # click just launched us": either way the moment digits appear we stop rotating.
-    # Without this top-of-loop recheck a transient blank speed at respawn started a
-    # rotate we could never abort, which spun a full turn and crashed the drive.
+# ACQUIRE: rotate RIGHT in batches until the green+red nav-light pair is in view.
+# Bounded to a bit more than a full turn. (Recheck in_space each batch: a tow may
+# have dropped us straight into space, or a respawn blanked the speed transiently.)
+acquired=""; turned=0
+while [ "$turned" -lt 130 ]; do
     if in_space; then echo "UNDOCKED"; elog "in space (warp-speed readout present)"; exit 0; fi
     shot="$(explore_shot "")" || { echo "FAILED"; exit 1; }
+    [ -n "$(find_ship "$shot")" ] && { acquired=1; break; }
+    turn Right 10; turned=$((turned + 10))
+done
+[ -n "$acquired" ] || { echo "FAILED"; elog "ship never came into view in a full turn"; exit 1; }
+
+# APPROACH: centre the hull, board if in range, else walk a burst and repeat.
+lost=0
+for ((a=0; a<APPROACH_MAX; a++)); do
+    if in_space; then echo "UNDOCKED"; elog "boarded ship -> in space"; exit 0; fi
+    shot="$(explore_shot "")" || { echo "FAILED"; exit 1; }
     coord="$(find_ship "$shot")"
-    if [ -n "$coord" ]; then
-        set -- $coord; sx="$1"; sy="$2"
-        elog "ship at ($sx,$sy) -- clicking hull"
-        bash "$SKILL_DIR/click-map.sh" "$sx" "$sy" >/dev/null 2>&1
-        sleep 3
-        if in_space; then echo "UNDOCKED"; elog "launched into space"; exit 0; fi
-        # click didn't take: maybe slightly off / overshot. nudge a touch right.
-        press Right 5; total=$((total+5)); continue
+    if [ -z "$coord" ]; then
+        # lost it (walked past / turned off it): nudge right to reacquire, widen
+        # the nudge after a few misses.
+        lost=$((lost + 1))
+        if [ "$lost" -ge 3 ]; then turn Right 10; lost=0; else turn Right 4; fi
+        continue
     fi
-    press Right 10; total=$((total+10))
+    lost=0
+    set -- $coord; sx="$1"; sy="$2"
+    err=$((sx - CENTER_X)); aerr=${err#-}
+    if [ "$aerr" -gt 120 ]; then
+        steps=$((aerr / 30)); [ "$steps" -lt 2 ] && steps=2; [ "$steps" -gt 12 ] && steps=12
+        if [ "$err" -gt 0 ]; then turn Right "$steps"; else turn Left "$steps"; fi
+        continue
+    fi
+    # centred: clicking the hull boards the ship once we are in range.
+    elog "ship centred at ($sx,$sy) -- clicking hull"
+    bash "$SKILL_DIR/click-map.sh" "$sx" "$sy" >/dev/null 2>&1
+    sleep 3
+    if in_space; then echo "UNDOCKED"; elog "boarded ship -> in space"; exit 0; fi
+    # not in range yet: close the distance and try again.
+    elog "not in range -- walking forward ${WALK_SECS}s"
+    walk_forward "$WALK_SECS"
 done
 
-# Last resort: a finer sweep with a left bias in case lossy presses skipped it.
-if [ "$corrected" -eq 0 ]; then
-    corrected=1
-    for ((j=0;j<14;j++)); do
-        press Left 5
-        shot="$(explore_shot "")" || break
-        coord="$(find_ship "$shot")"
-        if [ -n "$coord" ]; then
-            set -- $coord
-            bash "$SKILL_DIR/click-map.sh" "$1" "$2" >/dev/null 2>&1
-            sleep 3
-            in_space && { echo "UNDOCKED"; exit 0; }
-        fi
-    done
-fi
-
-echo "FAILED"; elog "could not find/launch ship after full sweep"; exit 1
+if in_space; then echo "UNDOCKED"; exit 0; fi
+echo "FAILED"; elog "could not board ship after approach budget"; exit 1
