@@ -563,12 +563,23 @@ def handle_wreck(sector):
     # the <<Distress label to clear -- towing the ship back to its station (docked).
     log(sector, "tow-clicked", f"requesting tow {_loc_str()}")
     try:
-        sh("bash", os.path.join(HERE, "rescue.sh"), "rescue",
-           timeout=300, env={"ENB_RESCUE_SECTOR": sector})
+        rr = sh("bash", os.path.join(HERE, "rescue.sh"), "rescue",
+                timeout=300, env={"ENB_RESCUE_SECTOR": sector})
     except subprocess.TimeoutExpired:
         print("  ## rescue.sh timed out -- aborting drive for operator handoff",
               flush=True)
         log(sector, "tow-timeout", "rescue.sh exceeded 300s; aborting")
+        sys.exit(EXIT_HANG)
+    # HONOR the recovery result. rescue.sh exits 3 / prints STILL-WRECKED when it
+    # opened the dialog but could not confirm the tow cleared the wreck. Proceeding
+    # to undock here would fly a DESTROYED ship (undock's in_space() reads the 000
+    # speed of a wrecked-in-space hull as "in space" and false-passes), so we must
+    # NOT treat a failed tow as recovered -- bail for operator handoff instead.
+    rlast = next((l.strip() for l in reversed(rr.stdout.splitlines()) if l.strip()), "")
+    if rr.returncode == 3 or rlast == "STILL-WRECKED":
+        print("  ## tow did NOT recover the ship (rescue.sh STILL-WRECKED) -- "
+              "aborting drive for operator handoff", flush=True)
+        log(sector, "tow-failed", "rescue.sh reported STILL-WRECKED; aborting")
         sys.exit(EXIT_HANG)
     log(sector, "tow-done", "respawned at last station")
     # A tow drops us DOCKED in a station bay (no warp cluster) -- OR sometimes straight
