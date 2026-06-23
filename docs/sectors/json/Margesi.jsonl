@@ -1,0 +1,32 @@
+{"type": "hidden-nav-point", "name": "GDI William Wallace", "x": 90.99, "y": 18.61, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "ECS Starfire", "x": 56.36, "y": 28.5, "z": -5.5, "note": null}
+{"type": "hidden-nav-point", "name": "GDI John Young", "x": 52.4, "y": 20.4, "z": -5.91, "note": null}
+{"type": "hidden-nav-point", "name": "ECS Falcon", "x": 77.25, "y": 25.71, "z": -3.5, "note": null}
+{"type": "planet", "name": "Margesi", "x": -178.03, "y": 129.62, "z": 0.0, "note": null}
+{"type": "moon", "name": "Lock Shiel", "x": 7.67, "y": 5.24, "z": 0.0, "note": null}
+{"type": "moon", "name": "Loch Kaele", "x": 175.87, "y": 180.0, "z": 28.38, "note": null}
+{"type": "moon", "name": "Loch Mar", "x": -148.0, "y": -105.87, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Abadoned Mining Station", "x": -14.3, "y": -4.38, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Sol Approach 2", "x": 108.09, "y": -65.78, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Sol Approach 1", "x": 74.84, "y": -62.16, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Shipyard Beltway 9", "x": -82.43, "y": 42.72, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Shipyard Beltway 8", "x": -83.0, "y": 10.67, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Shipyard Beltway 7", "x": -78.06, "y": -20.15, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Shipyard Beltway 6", "x": -71.2, "y": -55.2, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Shipyard Beltway 5", "x": -49.6, "y": -78.13, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Shipyard Beltway 4", "x": -14.4, "y": -79.73, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Shipyard Beltway 3", "x": 17.07, "y": -63.73, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Shipyard Beltway 2", "x": 43.73, "y": -41.6, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Shipyard Beltway 15", "x": 60.62, "y": 73.31, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Shipyard Beltway 14", "x": 45.25, "y": 102.25, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Shipyard Beltway 13", "x": 16.0, "y": 116.43, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Shipyard Beltway 12", "x": -15.92, "y": 115.79, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Shipyard Beltway 11", "x": -49.07, "y": 103.57, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Shipyard Beltway 10", "x": -72.9, "y": 74.98, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Shipyard Beltway 1", "x": 60.27, "y": -3.81, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Adriel Approach 3", "x": 53.07, "y": -129.15, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Adriel Approach 2", "x": 24.79, "y": -117.97, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Adriel Approach 1", "x": -3.5, "y": -104.25, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Adriel Prime", "x": 89.44, "y": -141.83, "z": 0.0, "note": null}
+{"type": "class-specific-gate", "name": "System Gate to Sol", "x": 142.69, "y": -71.96, "z": 0.0, "note": "Only for Terran Scout (TS)"}
+{"type": "station", "name": "Margesi Station", "x": 76.8, "y": 28.53, "z": 0.0, "note": null}

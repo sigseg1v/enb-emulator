@@ -1,0 +1,33 @@
+{"type": "hidden-nav-point", "name": "Lansing Pocket", "x": -31.78, "y": 49.71, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Lansing Pocket 2", "x": 35.67, "y": 82.43, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Lansing Pocket 3", "x": -17.24, "y": 12.71, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Lansing Pocket 4", "x": -32.9, "y": 83.2, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Shepherd Kavi", "x": -3.55, "y": 25.08, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Voltoi Observation Post A", "x": -52.32, "y": 2.56, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "1505 Master Controller", "x": 94.78, "y": 116.23, "z": 0.0, "note": null}
+{"type": "object", "name": "Anci", "x": -34.98, "y": 19.82, "z": 0.0, "note": null}
+{"type": "object", "name": "Vio", "x": 36.41, "y": 62.16, "z": 1.23, "note": null}
+{"type": "nav-point", "name": "Research Station Beta", "x": 74.38, "y": 32.86, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Research Station Gamma", "x": 64.68, "y": 14.94, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Sector Gate Under Construction", "x": 19.3, "y": 21.63, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Voltoi Experimentation Path -Danger-", "x": 8.24, "y": 86.94, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Voltoi Observation Post B", "x": -26.31, "y": 2.08, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Voltoi Research I", "x": -69.9, "y": 78.14, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Voltoi Research II", "x": -64.66, "y": 90.3, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Voltoi Research III", "x": -48.15, "y": 91.04, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Voltoi Research Station Nav I", "x": 53.6, "y": 32.61, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Voltoi Research Station Nav II -CAUTION-", "x": 37.06, "y": 24.18, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Research Station Alpha", "x": 63.8, "y": 46.67, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Research Probe Frozen Whisper", "x": -29.49, "y": 49.58, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Path to Voltoi Research Area", "x": -57.33, "y": 67.64, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Outer Field Nav 4", "x": -39.62, "y": 8.3, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Outer Field Nav 3", "x": -51.47, "y": 14.16, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Outer Field Nav 2", "x": -55.74, "y": 33.7, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Outer Field Nav 1", "x": -50.12, "y": 50.34, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Glass Spire Point", "x": -63.55, "y": 50.18, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Experimentation Center Beta", "x": 37.06, "y": 97.31, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Experimentation Center Alpha", "x": 14.22, "y": 100.86, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Cairn View", "x": -64.29, "y": 15.51, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Cairn Rock", "x": -69.66, "y": 15.87, "z": 0.0, "note": null}
+{"type": "gate", "name": "Vishao´s Gate", "x": 0.84, "y": 67.62, "z": 0.0, "note": null}
+{"type": "station", "name": "Antares 1 [Under Construction]", "x": 0.69, "y": 20.03, "z": 0.0, "note": null}

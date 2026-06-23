@@ -1,0 +1,12 @@
+{"type": "hidden-nav-point", "name": "Progen Hulk", "x": 11.84, "y": 5.68, "z": 3.35, "note": null}
+{"type": "hidden-nav-point", "name": "Progen Hulk", "x": 9.44, "y": 6.05, "z": 3.21, "note": null}
+{"type": "nav-point", "name": "Alien Force Wall 2", "x": 13.23, "y": 8.08, "z": 4.91, "note": null}
+{"type": "nav-point", "name": "Ancient Ruins", "x": 18.77, "y": 14.51, "z": 1.48, "note": null}
+{"type": "nav-point", "name": "Fumar Trench", "x": -3.31, "y": 15.28, "z": 3.51, "note": null}
+{"type": "nav-point", "name": "Sabura Compound", "x": 19.29, "y": -9.35, "z": 1.52, "note": null}
+{"type": "nav-point", "name": "Vale of Fumar", "x": -0.36, "y": -5.46, "z": 3.64, "note": null}
+{"type": "nav-point", "name": "Vale of Fumar (End-Point)", "x": 8.94, "y": -13.62, "z": 3.64, "note": null}
+{"type": "nav-point", "name": "Vale of Fumar (Mid-Point)", "x": -0.47, "y": -19.5, "z": 3.64, "note": null}
+{"type": "gate", "name": "Launchpad to Endriago Sector", "x": -19.92, "y": -9.35, "z": 4.5, "note": null}
+{"type": "gate", "name": "Wormhole - To Moon Risco", "x": 15.38, "y": 9.62, "z": 2.41, "note": null}
+{"type": "station", "name": "Porvenir Mons", "x": -10.0, "y": 0.91, "z": 0.6, "note": null}

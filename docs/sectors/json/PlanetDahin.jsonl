@@ -1,0 +1,11 @@
+{"type": "hidden-nav-point", "name": "Cenovar Firedancer", "x": -15.21, "y": -18.04, "z": 1.71, "note": null}
+{"type": "hidden-nav-point", "name": "Dahin Nav 1", "x": 19.71, "y": -9.51, "z": 3.27, "note": null}
+{"type": "hidden-nav-point", "name": "Dahin Nav 2", "x": 18.75, "y": -19.24, "z": 1.2, "note": null}
+{"type": "hidden-nav-point", "name": "Dahin Nav 3", "x": 12.05, "y": -19.38, "z": 1.2, "note": null}
+{"type": "hidden-nav-point", "name": "Landing Pad", "x": 19.21, "y": -9.02, "z": 1.2, "note": null}
+{"type": "nav-point", "name": "Defunct Weather Station", "x": -15.98, "y": 3.79, "z": 3.1, "note": null}
+{"type": "nav-point", "name": "Fallen Moon Fragment", "x": -15.1, "y": -18.14, "z": 1.2, "note": null}
+{"type": "nav-point", "name": "Observation Tower", "x": 6.83, "y": -0.59, "z": 2.7, "note": null}
+{"type": "nav-point", "name": "Weather Station", "x": -8.56, "y": 19.78, "z": 2.3, "note": null}
+{"type": "gate", "name": "Gate to Dahin Upper Orbit", "x": 19.57, "y": -4.14, "z": 3.61, "note": null}
+{"type": "station", "name": "Tokai Saikutsu", "x": 15.05, "y": -18.58, "z": 3.5, "note": null}

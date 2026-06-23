@@ -1,0 +1,29 @@
+{"type": "hidden-object", "name": "A771", "x": 94.19, "y": -59.99, "z": -3.4, "note": null}
+{"type": "hidden-nav-point", "name": "Hou´jeu Byeon", "x": -19.78, "y": 4.23, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Strange Ship", "x": -19.67, "y": -16.75, "z": -6.0, "note": null}
+{"type": "planet", "name": "Ishuan", "x": 17.06, "y": -6.81, "z": 0.0, "note": null}
+{"type": "moon", "name": "Barn´s Lookout", "x": 9.07, "y": -48.84, "z": -1.0, "note": null}
+{"type": "moon", "name": "Centar", "x": 51.04, "y": 34.26, "z": 5.0, "note": null}
+{"type": "moon", "name": "Centus", "x": -66.16, "y": 38.24, "z": 3.0, "note": null}
+{"type": "moon", "name": "Hadean", "x": 69.58, "y": -88.63, "z": -8.0, "note": null}
+{"type": "nav-point", "name": "Yokan Beacon", "x": 22.46, "y": -81.63, "z": -5.5, "note": null}
+{"type": "nav-point", "name": "Traders Run 6", "x": 47.47, "y": -66.2, "z": -4.0, "note": null}
+{"type": "nav-point", "name": "Traders Run 5", "x": 60.48, "y": -46.11, "z": -3.5, "note": null}
+{"type": "nav-point", "name": "Traders Run 4", "x": 73.23, "y": -24.95, "z": -3.0, "note": null}
+{"type": "nav-point", "name": "Traders Run 3", "x": 82.75, "y": -1.33, "z": -2.5, "note": null}
+{"type": "nav-point", "name": "Sundari Manufacturing Facility", "x": 9.92, "y": 45.84, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nishino Weapons Factory", "x": -21.83, "y": 3.87, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Menorb Beacon", "x": -26.88, "y": 24.82, "z": 3.0, "note": null}
+{"type": "nav-point", "name": "Lost Wreckage", "x": -28.44, "y": 87.7, "z": 1.5, "note": null}
+{"type": "nav-point", "name": "Little Rock", "x": -17.87, "y": -13.07, "z": -6.0, "note": null}
+{"type": "nav-point", "name": "Ishuan Beacon", "x": 83.3, "y": -45.19, "z": 0.5, "note": null}
+{"type": "nav-point", "name": "Ganymede Beacon", "x": 88.32, "y": 23.74, "z": -1.0, "note": null}
+{"type": "nav-point", "name": "Castor Skyway 4", "x": -2.58, "y": 25.08, "z": 2.0, "note": null}
+{"type": "nav-point", "name": "Castor Skyway 3", "x": 22.27, "y": 23.04, "z": 1.0, "note": null}
+{"type": "nav-point", "name": "Castor Skyway 2", "x": 44.7, "y": 13.36, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Castor Skyway 1", "x": 60.5, "y": -6.52, "z": -1.0, "note": null}
+{"type": "nav-point", "name": "Above Hadean", "x": 70.58, "y": -86.47, "z": 1.93, "note": null}
+{"type": "gate", "name": "Gate to Capella System", "x": -0.39, "y": -92.1, "z": -6.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Menorb", "x": -49.08, "y": 8.88, "z": 6.0, "note": null}
+{"type": "class-specific-gate", "name": "Gate to Sol", "x": 91.49, "y": 46.33, "z": -1.5, "note": "Only for Jenquai Seeker (JS)"}
+{"type": "station", "name": "Ishuan Station", "x": 94.39, "y": -60.41, "z": 2.57, "note": null}

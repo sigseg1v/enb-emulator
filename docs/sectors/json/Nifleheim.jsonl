@@ -1,0 +1,27 @@
+{"type": "planet", "name": "Modi", "x": 25.12, "y": 58.81, "z": -68.64, "note": null}
+{"type": "moon", "name": "Modi´s Blade", "x": -95.92, "y": 92.36, "z": 0.0, "note": null}
+{"type": "moon", "name": "Modi´s Eye", "x": -78.85, "y": 43.63, "z": 5.76, "note": null}
+{"type": "moon", "name": "Modi´s Fist", "x": -28.35, "y": 140.0, "z": -4.84, "note": null}
+{"type": "nav-point", "name": "Wreckage of Pax Theseus", "x": 132.02, "y": 60.27, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Vindis Shipyard", "x": 154.21, "y": 179.94, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Vindis Checkpoint Beta", "x": 81.7, "y": -8.91, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Vindis Approach 3", "x": 143.68, "y": 143.08, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Vindis Approach 2", "x": 130.93, "y": 98.85, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Vindis 8 (Security Code R)", "x": 2.71, "y": -36.91, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Vindis 7 (Security Code R)", "x": -37.73, "y": -42.84, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Vindis 6 (Security Code R)", "x": -76.08, "y": -42.25, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Nifleheim Waypoint", "x": -187.8, "y": 105.11, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Nifleheim Cloud 9", "x": -255.69, "y": 8.79, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Nifleheim Cloud 8", "x": -241.22, "y": 47.85, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Nifleheim Cloud 7", "x": -194.93, "y": 59.93, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Nifleheim Cloud 6", "x": -147.59, "y": 61.94, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Nifleheim Cloud 5", "x": -124.54, "y": 95.83, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Nifleheim Cloud 4", "x": -151.34, "y": 132.08, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Nifleheim Cloud 3", "x": -191.42, "y": 153.65, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Nifleheim Cloud 2", "x": -132.56, "y": 200.23, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Nifleheim Cloud 11", "x": -246.98, "y": 138.03, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Nifleheim Cloud 10", "x": -233.37, "y": 168.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Nifleheim Cloud 1", "x": -179.24, "y": 199.78, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Far Point Zen", "x": 259.34, "y": -111.81, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Einherjar Research Platform", "x": -245.26, "y": -34.13, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Freya", "x": -214.21, "y": 194.28, "z": 0.0, "note": null}

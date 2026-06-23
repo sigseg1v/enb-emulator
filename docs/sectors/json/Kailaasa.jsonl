@@ -1,0 +1,22 @@
+{"type": "hidden-nav-point", "name": "ComLink", "x": -125.01, "y": 298.38, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Sha´ha´dem Satellite", "x": -172.58, "y": 24.63, "z": -0.62, "note": null}
+{"type": "planet", "name": "Kailaasa", "x": 227.52, "y": 227.18, "z": 25.49, "note": null}
+{"type": "moon", "name": "Shakti", "x": -124.92, "y": -74.6, "z": 0.0, "note": null}
+{"type": "moon", "name": "Uma", "x": -42.26, "y": 289.1, "z": -0.67, "note": null}
+{"type": "nav-point", "name": "TransCom Monitor", "x": -122.5, "y": 298.9, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Paren´s Run", "x": -43.4, "y": 62.92, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Paren´s Beacon", "x": 8.48, "y": 126.49, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Paren Ship Yard", "x": 99.95, "y": 150.28, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav P14", "x": -162.89, "y": -102.93, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav P13", "x": -78.18, "y": -117.37, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav P12", "x": 19.35, "y": -119.07, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav P11", "x": 116.19, "y": -119.07, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav P10", "x": 226.77, "y": -111.8, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Kailaasa 3", "x": -98.18, "y": -0.67, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Kailaasa 2", "x": -5.16, "y": -0.97, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Kailaasa 1", "x": 89.95, "y": -1.32, "z": 0.0, "note": null}
+{"type": "wormhole-exit", "name": "Maeldun´s Weft", "x": 38.0, "y": 194.51, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Dahin", "x": -174.57, "y": 26.27, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Yokan", "x": 187.93, "y": 1.15, "z": 0.0, "note": null}
+{"type": "class-specific-gate", "name": "Gate to Sol System", "x": -174.57, "y": -25.42, "z": 0.0, "note": "Only for Jenquai Explorer (JE)"}
+{"type": "station", "name": "Paren Station", "x": 28.65, "y": 190.22, "z": 0.0, "note": null}

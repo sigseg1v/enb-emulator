@@ -1,0 +1,22 @@
+{"type": "hidden-nav-point", "name": "Unborn Mazzaroth Soul", "x": -300.13, "y": 0.76, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Warpost 3", "x": -299.66, "y": -18.97, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Warpost 2", "x": -299.26, "y": 19.54, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Warpost 1", "x": -277.99, "y": 0.74, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Reapers Field", "x": -225.39, "y": 0.51, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Offal Refuge", "x": -107.24, "y": 28.67, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Mazzaroth Womb", "x": -96.04, "y": 67.02, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Hunter´s Respite 2", "x": -224.4, "y": -34.32, "z": 1.66, "note": null}
+{"type": "nav-point", "name": "Hunter´s Respite 1", "x": -222.33, "y": 35.76, "z": -1.47, "note": null}
+{"type": "nav-point", "name": "Hive Cluster 7", "x": -253.76, "y": 0.74, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Hive Cluster 6", "x": -183.03, "y": 0.25, "z": 1.28, "note": null}
+{"type": "nav-point", "name": "Hive Cluster 5", "x": -155.61, "y": 9.32, "z": -1.56, "note": null}
+{"type": "nav-point", "name": "Hive Cluster 4", "x": -155.33, "y": -20.03, "z": -1.0, "note": null}
+{"type": "nav-point", "name": "Hive Cluster 3", "x": -129.61, "y": -0.25, "z": 1.28, "note": null}
+{"type": "nav-point", "name": "Hive Cluster 2", "x": -81.63, "y": 0.25, "z": -1.85, "note": null}
+{"type": "nav-point", "name": "Hive Cluster 1", "x": -43.05, "y": 0.25, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Harvest Cluster 2", "x": -154.77, "y": 39.82, "z": 1.85, "note": null}
+{"type": "nav-point", "name": "Harvest Cluster 1", "x": -82.32, "y": -33.87, "z": 1.85, "note": null}
+{"type": "nav-point", "name": "Frenzy Field", "x": -154.78, "y": -50.14, "z": 0.14, "note": null}
+{"type": "nav-point", "name": "Deep Field 2", "x": -221.25, "y": -50.76, "z": 0.15, "note": null}
+{"type": "nav-point", "name": "Deep Field 1", "x": -223.06, "y": 50.33, "z": 1.31, "note": null}
+{"type": "special-nav-point", "name": "Mazzaroth Mealstrom", "x": -5.35, "y": 0.1, "z": 0.0, "note": "To Swooping Eagle - Sirius System"}

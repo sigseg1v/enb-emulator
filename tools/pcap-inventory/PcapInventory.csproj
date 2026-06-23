@@ -9,6 +9,6 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../cli-client/src/CliClient.Core/CliClient.Core.csproj" />
+    <ProjectReference Include="../../freya/cli-client/src/CliClient.Core/CliClient.Core.csproj" />
   </ItemGroup>
 </Project>

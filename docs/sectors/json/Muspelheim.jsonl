@@ -1,0 +1,29 @@
+{"type": "hidden-nav-point", "name": "Net-7 Muspel Beacon", "x": 163.15, "y": -64.8, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Surti Fragment", "x": 27.04, "y": -96.35, "z": 0.0, "note": null}
+{"type": "planet", "name": "Muspelheim", "x": -98.12, "y": 75.72, "z": 0.0, "note": null}
+{"type": "moon", "name": "Surti Alpha", "x": 175.76, "y": 51.41, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Surti Alpha 4", "x": 129.49, "y": 47.79, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Surti Alpha 3", "x": 176.71, "y": 0.4, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Surti Alpha 2", "x": 137.01, "y": 8.85, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Surti Alpha 1", "x": 104.43, "y": -13.71, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Muspelheim 6", "x": 150.61, "y": -57.81, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Muspelheim 5", "x": 111.31, "y": -73.17, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Muspelheim 4", "x": 70.61, "y": -73.09, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Muspelheim 3", "x": 38.99, "y": -99.81, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Muspelheim 2", "x": 1.27, "y": -109.24, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Muspelheim 1", "x": -39.23, "y": -109.79, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Modi Path 3", "x": 50.27, "y": 22.58, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Modi Path 2", "x": 33.9, "y": -12.9, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Modi Path 1", "x": 69.97, "y": -32.77, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Modi Mining Station (Abandoned)", "x": 57.09, "y": 26.68, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Jormund Path 3", "x": -47.48, "y": -15.21, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Jormund Path 2", "x": -20.73, "y": -44.18, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Jormund Path 1", "x": 10.49, "y": -69.96, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Jormund Mining Station (Abandoned)", "x": -54.58, "y": -7.36, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid MP-298", "x": 170.46, "y": -111.96, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid MP-297", "x": 186.74, "y": -103.22, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid MP-125", "x": 1.29, "y": 52.25, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid MP-124", "x": -11.62, "y": 47.89, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Aragoth Prime", "x": -74.38, "y": -111.58, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Odin´s Belt", "x": 154.13, "y": -84.27, "z": 0.0, "note": null}
+{"type": "factioned-gate", "name": "Pirate Gate to Smuggler´s Run", "x": 63.72, "y": 48.13, "z": 0.0, "note": null}

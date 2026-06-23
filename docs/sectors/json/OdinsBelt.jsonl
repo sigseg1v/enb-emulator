@@ -1,0 +1,21 @@
+{"type": "hidden-object", "name": "Hodr", "x": 63.49, "y": 12.3, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Vidar", "x": 17.95, "y": -49.0, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Vali", "x": 31.2, "y": -18.86, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Nanna", "x": 23.1, "y": 32.63, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Idun", "x": -8.98, "y": -19.5, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Hel", "x": -28.74, "y": -38.69, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Gunnlod", "x": -53.23, "y": -7.23, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Grid", "x": -11.31, "y": 60.02, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Forseti", "x": -10.58, "y": 10.18, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Bragi", "x": 32.84, "y": 3.99, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Balder´s Tear", "x": -46.79, "y": 29.2, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Beltway 1", "x": 9.86, "y": -15.79, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Beltway 2", "x": -37.29, "y": -1.08, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Beltway 3", "x": -4.89, "y": 29.94, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Odin´s Belt 1", "x": 54.75, "y": 35.3, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Odin´s Belt 2", "x": 51.95, "y": -13.4, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Odin´s Belt 3", "x": 12.74, "y": -41.22, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Odin´s Belt 4", "x": -34.48, "y": -49.51, "z": 0.0, "note": null}
+{"type": "gate", "name": "Gate to Gallina System", "x": 51.55, "y": -47.81, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Muspelheim", "x": 23.32, "y": 66.12, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Odin Rex", "x": -56.85, "y": -56.26, "z": 0.0, "note": null}

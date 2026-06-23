@@ -1,0 +1,37 @@
+{"type": "hidden-nav-point", "name": "Drake Graveyard Fandrel", "x": -29.38, "y": -41.21, "z": 1.24, "note": null}
+{"type": "hidden-nav-point", "name": "Drake Graveyard Volstagg", "x": 53.2, "y": 21.38, "z": -2.05, "note": null}
+{"type": "hidden-nav-point", "name": "Pax Enigmus", "x": -0.04, "y": 144.06, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Pax Urmanus", "x": -0.34, "y": -94.17, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Progen Outpost Frigga", "x": 16.05, "y": -126.34, "z": 0.0, "note": null}
+{"type": "moon", "name": "Jotunheim", "x": 0.0, "y": 0.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Jotunheim Spinward 2", "x": -70.88, "y": -29.14, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Jotunheim Spinward 3", "x": -72.46, "y": 29.14, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Jotunheim Spinward 4", "x": -42.53, "y": 67.73, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Jotunheim 1", "x": 1.27, "y": -99.25, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Jotunheim 2", "x": 44.89, "y": -72.46, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Jotunheim 3", "x": 70.88, "y": -29.93, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Jotunheim 4", "x": 72.46, "y": 29.93, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Jotunheim 5", "x": 42.53, "y": 68.52, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Jotunheim 6", "x": 0.79, "y": 96.88, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid ML-1740-2", "x": 138.48, "y": -106.86, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid ML-1740-1", "x": -116.19, "y": 94.36, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Chavez Camp 1", "x": -150.41, "y": 27.35, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Chavez Camp 2", "x": 149.95, "y": -30.18, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Deep Jotunheim 1", "x": 98.45, "y": 0.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Deep Jotunheim 2", "x": 133.11, "y": -0.79, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Deep Jotunheim Spinward 1", "x": -100.03, "y": -0.79, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Deep Jotunheim Spinward 2", "x": -131.48, "y": -1.46, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Free Spacer Void Moot", "x": 72.56, "y": -57.39, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Jotunheim Ring Entry Point 1", "x": -0.14, "y": -63.39, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Jotunheim Ring Entry Point 2", "x": 62.02, "y": -3.8, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Jotunheim Ring Entry Point 3", "x": -0.23, "y": 66.01, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Jotunheim Ring Entry Point 4", "x": -62.9, "y": -2.61, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Jotunheim Spinward 1", "x": -44.11, "y": -74.03, "z": 0.0, "note": null}
+{"type": "gate", "name": "Jumpgate 1 to Inner Jotunheim", "x": 152.81, "y": -30.28, "z": 0.0, "note": null}
+{"type": "gate", "name": "Jumpgate 1 to Outer Jotunheim", "x": -0.3, "y": -35.3, "z": 0.0, "note": null}
+{"type": "gate", "name": "Jumpgate 2 to Inner Jotunheim", "x": -154.44, "y": 27.04, "z": 0.0, "note": null}
+{"type": "gate", "name": "Jumpgate 2 to Outer Jotunheim", "x": -1.76, "y": 41.26, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Freya", "x": 4.99, "y": 139.45, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Odin Rex", "x": 1.27, "y": -148.97, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Ragnarok", "x": -4.86, "y": 139.34, "z": 0.0, "note": null}
+{"type": "station", "name": "Arx Ymir", "x": -13.78, "y": 125.03, "z": 0.0, "note": null}

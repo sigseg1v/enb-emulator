@@ -14,6 +14,13 @@
 set -uo pipefail
 
 export DISPLAY="${DISPLAY:-:0}"
+# xdotool/import authenticate to the X server with the MIT-MAGIC-COOKIE in
+# XAUTHORITY. A caller env that sets DISPLAY but not XAUTHORITY (e.g. a detached
+# background task) makes every xdotool call die with "Invalid MIT-MAGIC-COOKIE-1
+# key" / "Can't open display: (null)" -- which silently breaks the EULA/login
+# clicks while the earlier docker steps still pass. Default it to the user's
+# cookie so the skill works regardless of how it was launched.
+export XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 
@@ -83,7 +90,20 @@ win_by_class() {
     return 1
 }
 
-client_win()   { win_by_class 'client.exe'; }
+# Resolve the client window id, RETRYING briefly. Scene transitions (dock -> concourse,
+# undock, gate crossing) momentarily unmap/remap the WINE window, so a single search can
+# transiently miss it and return empty -- and an empty id flowing into a screenshot is
+# exactly what triggers the interactive `import` X-grab lockup (see shot_win). Retrying
+# for ~1.5s rides out the transition instead of conceding "no window" on a blink. A
+# genuinely dead/closed client still fails after the retries.
+client_win() {
+    local i id
+    for i in 1 2 3 4 5 6; do
+        id="$(win_by_class 'client.exe')" && { printf '%s\n' "$id"; return 0; }
+        sleep 0.25
+    done
+    return 1
+}
 launcher_win() {
     # Avalonia reports WM_CLASS "FreyaLauncher"; fall back to the title.
     local id; id="$(win_by_class 'FreyaLauncher')" && { echo "$id"; return 0; }
@@ -113,19 +133,31 @@ raise_win() {
 
 # ---- input ------------------------------------------------------------------
 # Click at window-relative (relx,rely) using absolute XTEST. Raises first.
+#
+# We do NOT use `xdotool mousemove --sync`: --sync waits for a MotionNotify that the
+# WINE client never confirms here, so it blocked ~15s PER CLICK (the whole reason a
+# nav-cycle crawled at ~10s/nav). Plain mousemove lands in ~3ms. --sync was meant to
+# beat a pointer-warping VM, but the cure for THAT is pausing the VM (see the
+# login-to-client "QEMU/KVM pointer warp" note), not blocking on every click. We
+# instead move, verify the pointer actually landed (cheap XQueryPointer), retry once
+# if a stray warp bumped it, then click.
 click_win() {
-    local id="$1" rx="$2" ry="$3" g x y
+    local id="$1" rx="$2" ry="$3" g x y loc px py
     local gx gy gw gh
-    raise_win "$id"; sleep 0.25
+    raise_win "$id"
     g="$(win_abs "$id")" || { err "click_win: no geometry for $id"; return 1; }
     read -r gx gy gw gh <<< "$g"
     x=$(( gx + rx ))
     y=$(( gy + ry ))
     log "click ($rx,$ry) -> abs ($x,$y) on win $id"
-    xdotool mousemove --sync "$x" "$y" 2>/dev/null
-    sleep 0.15
+    xdotool mousemove "$x" "$y" 2>/dev/null
+    # verify the pointer landed; one cheap retry covers a stray warp.
+    loc="$(xdotool getmouselocation --shell 2>/dev/null)"; eval "$loc" 2>/dev/null
+    px="${X:-}"; py="${Y:-}"
+    if [ "$px" != "$x" ] || [ "$py" != "$y" ]; then
+        xdotool mousemove "$x" "$y" 2>/dev/null
+    fi
     xdotool click 1
-    sleep 0.20
 }
 
 click_abs() { xdotool mousemove --sync "$1" "$2"; sleep 0.12; xdotool click 1; sleep 0.15; }
@@ -139,7 +171,20 @@ send_key()  { xdotool key "$1"; }
 shot() { local out="$1"; [ -x "$SHOTSH" ] || { err "no screenshot.sh"; return 1; }; "$SHOTSH" "$out" >/dev/null 2>&1; }
 
 # Screenshot an arbitrary window id (e.g. the launcher) -> path.
-shot_win() { import -window "$1" "$2" >/dev/null 2>&1; }
+# HARD GUARD: never run `import -window` with an EMPTY id. ImageMagick then drops into
+# interactive region-select mode -- it XGrabServer's the display, shows a "+" crosshair,
+# and FREEZES the entire desktop (nothing renders) until you click or it is killed. An
+# empty id means the caller's window lookup (client_win) failed; that is a bug, so
+# refuse it rather than lock the screen. Also bound the capture with a timeout and reap
+# any lingering `import` (it is what holds the grab) so a window destroyed mid-grab
+# cannot wedge X either.
+shot_win() {
+    local id="$1" out="$2"
+    [ -n "$id" ] || { err "shot_win: empty window id -- refusing (would interactive-grab X)"; return 1; }
+    timeout -k 2 10 import -window "$id" "$out" >/dev/null 2>&1 && return 0
+    pkill -9 import 2>/dev/null
+    return 1
+}
 
 # ---- waiting ----------------------------------------------------------------
 # Poll a command until it succeeds or timeout (seconds). Usage:
@@ -181,8 +226,20 @@ is_screen() {
     shot_win "$w" "$p" || return 1
     detect match "$p" "$REFS/$name.png" "$x" "$y" "$tol" >/dev/null 2>&1
 }
-on_login()      { is_screen login_field 165 228 "${1:-22}"; }
-on_charselect() { is_screen charselect_frame 70 50 "${1:-22}"; }
+# tol 12, NOT 22: the login_field crop at (165,228) is only a 90x24 opaque-UI
+# region, and an IN-SPACE frame's chat panel scores MAD ~18 there -- under 22 it
+# false-matched as "login" while genuinely in space (which made read-sector's
+# in-space gate refuse valid sectors). A real login screen scores ~3-4 against its
+# own ref (cf. charselect_frame at 3.68), so 12 cleanly separates real login (~4)
+# from in-space (~18) and from char-select (~37).
+on_login()      { is_screen login_field 165 228 "${1:-12}"; }
+# tol 12, NOT 22 (owner, 2026-06-22): same false-positive class as on_login. A real
+# char-select scores MAD ~3.68 against charselect_frame, but an IN-SPACE frame scores
+# ~20.9 at (70,50) -- under the old tol 22 that read as char-select, so detect_sector's
+# recovery ran 07-charselect-enter on a client that was actually in space and
+# blind-clicked the HUD ("still on character-select" loop). 12 cleanly separates real
+# char-select (~4) from in-space (~21).
+on_charselect() { is_screen charselect_frame 70 50 "${1:-12}"; }
 
 # Convenience: capture a fresh client shot to $WORKDIR/cur.png and echo path.
 cur_shot() { local p="$WORKDIR/cur.png"; shot "$p" && echo "$p"; }

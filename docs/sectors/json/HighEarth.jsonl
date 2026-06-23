@@ -1,0 +1,25 @@
+{"type": "hidden-nav-point", "name": "Caithan Solar Array", "x": 5.89, "y": -13.58, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Crispen Solar Array", "x": 10.17, "y": -13.62, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "ECS Balor", "x": -75.76, "y": -41.21, "z": 1.99, "note": null}
+{"type": "hidden-nav-point", "name": "ECS Connla", "x": -2.36, "y": -31.63, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "ECS Lugh", "x": -9.12, "y": -30.66, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Volatile Ship", "x": -85.08, "y": -39.68, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Waste Disposal Station", "x": -69.1, "y": -42.86, "z": 0.0, "note": null}
+{"type": "planet", "name": "Earth", "x": -60.0, "y": 25.0, "z": -35.0, "note": null}
+{"type": "nav-point", "name": "Solar Array", "x": 8.04, "y": -27.23, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Salvage Station 9", "x": -58.58, "y": -66.12, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Salvage Station 8", "x": -48.9, "y": -70.13, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Salvage Station 7", "x": -41.16, "y": -69.02, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Salvage Station 6", "x": -36.87, "y": -63.36, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Salvage Station 5", "x": -41.57, "y": -57.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Salvage Station 4", "x": -50.01, "y": -56.17, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Salvage Station 3", "x": -58.58, "y": -57.69, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Salvage Station 2", "x": -65.99, "y": -61.77, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Salvage Station 1", "x": -75.76, "y": -41.21, "z": -0.99, "note": null}
+{"type": "nav-point", "name": "EarthCorps Sector Command", "x": -4.78, "y": -28.34, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Earth Beltway 3", "x": -27.16, "y": -23.7, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Earth Beltway 2", "x": -45.76, "y": -34.96, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Earth Beltway 1", "x": -65.21, "y": -23.66, "z": 0.0, "note": null}
+{"type": "class-specific-gate", "name": "Gate to Tau Ceti System", "x": -69.41, "y": -76.1, "z": 0.0, "note": "Only for Terran Trader (TT)"}
+{"type": "class-specific-gate", "name": "Sector Gate to Earth", "x": -22.97, "y": -16.54, "z": 0.0, "note": "Only for Terran Trader (TT)"}
+{"type": "station", "name": "Loki Station", "x": -72.8, "y": -22.13, "z": 0.0, "note": null}

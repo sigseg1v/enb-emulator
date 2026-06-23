@@ -1,0 +1,21 @@
+{"type": "hidden-nav-point", "name": "Melted Artifact", "x": -26.15, "y": -47.47, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Solar Array", "x": -16.12, "y": -139.56, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Warning! Severe Radiation damage beyond this point!", "x": -40.45, "y": -206.57, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Warning! Severe Radiation damage beyond this point!", "x": 20.61, "y": -1.58, "z": 0.0, "note": null}
+{"type": "planet", "name": "Mercury", "x": 128.3, "y": -138.16, "z": 0.0, "note": null}
+{"type": "object", "name": "Clarke Docks", "x": -88.61, "y": -414.88, "z": 0.0, "note": null}
+{"type": "object", "name": "Helios Major", "x": 82.99, "y": 78.62, "z": 10.0, "note": null}
+{"type": "nav-point", "name": "Red Dragon Bouy", "x": 50.65, "y": -20.61, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Star Clipper 6", "x": -131.77, "y": 97.69, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Star Clipper 5", "x": -115.7, "y": 48.67, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Star Clipper 4", "x": -102.86, "y": -4.35, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Star Clipper 3", "x": -98.33, "y": -58.23, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Star Clipper 2", "x": -112.39, "y": -109.2, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Star Clipper 1", "x": -131.73, "y": -160.17, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Mercury 4", "x": -75.85, "y": -205.27, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Mercury 3", "x": -34.95, "y": -223.49, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Mercury 2", "x": 4.83, "y": -249.01, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Mercury 1", "x": 46.38, "y": -272.16, "z": 0.0, "note": null}
+{"type": "gate", "name": "Accelerator to Venus", "x": -146.8, "y": 142.18, "z": 0.0, "note": null}
+{"type": "gate", "name": "Accelerator to Pluto", "x": 87.94, "y": -293.54, "z": 0.0, "note": null}
+{"type": "station", "name": "StarClipper Station", "x": -132.08, "y": -204.07, "z": 0.0, "note": null}

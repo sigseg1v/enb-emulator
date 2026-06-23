@@ -1,0 +1,38 @@
+{"type": "hidden-nav-point", "name": "Asteroid ED5611", "x": -108.24, "y": 17.96, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Asteroid ED5612", "x": -90.08, "y": 20.38, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Asteroid ED5613", "x": -105.92, "y": 59.58, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Asteroid EN4121", "x": -3.16, "y": 67.43, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Asteroid EN4122", "x": 13.44, "y": 63.86, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Asteroid EN4123", "x": 32.65, "y": 61.73, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Asteroid EN4124", "x": 38.6, "y": 44.68, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Asteroid EN4125", "x": 40.9, "y": 30.35, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Asteroid EN4126", "x": 42.83, "y": 9.27, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Terran Group Shrine", "x": -22.12, "y": 42.61, "z": 0.0, "note": null}
+{"type": "planet", "name": "Earth", "x": -39.33, "y": -102.69, "z": -5.0, "note": null}
+{"type": "nav-point", "name": "Infinity Way 2", "x": -70.72, "y": 26.06, "z": 3.0, "note": null}
+{"type": "nav-point", "name": "InterSol Asteroid Belt 1", "x": -12.87, "y": 50.84, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "InterSol Asteroid Belt 2", "x": -30.03, "y": 61.52, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "InterSol Luna 1", "x": 9.29, "y": 34.01, "z": 1.0, "note": null}
+{"type": "nav-point", "name": "InterSol Luna 2", "x": 7.66, "y": 42.02, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Equator 1", "x": 36.0, "y": 36.04, "z": -2.0, "note": null}
+{"type": "nav-point", "name": "Nav Group Shrine", "x": -22.12, "y": 37.61, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav High Earth 1", "x": 28.94, "y": 1.08, "z": 1.0, "note": null}
+{"type": "nav-point", "name": "Nav High Earth 2", "x": 33.98, "y": -4.05, "z": 2.0, "note": null}
+{"type": "nav-point", "name": "System Express 1", "x": -45.37, "y": 35.3, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "System Express 2", "x": -45.1, "y": 49.74, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Infinity Way 1", "x": -44.42, "y": 24.88, "z": 2.0, "note": null}
+{"type": "nav-point", "name": "Infinity Campus", "x": -92.5, "y": 37.5, "z": 5.0, "note": null}
+{"type": "nav-point", "name": "GETCo Campus", "x": -92.53, "y": 2.03, "z": -5.0, "note": null}
+{"type": "nav-point", "name": "GETCo 2", "x": -70.01, "y": 9.0, "z": -3.0, "note": null}
+{"type": "nav-point", "name": "GETCo 1", "x": -47.5, "y": 12.79, "z": -2.0, "note": null}
+{"type": "nav-point", "name": "Earth Station 3", "x": -4.13, "y": 24.99, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Earth Station 2", "x": 34.99, "y": 15.24, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Earth Station 1", "x": 24.94, "y": 30.14, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Corporate Park", "x": -20.0, "y": 20.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid ED5615", "x": -67.35, "y": 67.54, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid ED5614", "x": -86.51, "y": 66.08, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Asteroid Belt Alpha", "x": -45.41, "y": 65.16, "z": 0.0, "note": null}
+{"type": "class-specific-gate", "name": "Accelerator to Equatorial Earth", "x": 50.4, "y": 39.31, "z": -2.0, "note": "Only for Terran Scout (TS)"}
+{"type": "class-specific-gate", "name": "Sector Gate to High Earth", "x": 41.48, "y": -11.55, "z": 3.0, "note": "Only for Terran Trader (TT)"}
+{"type": "class-specific-gate", "name": "Sector Gate to Luna", "x": 5.36, "y": 52.72, "z": 2.5, "note": "Only for Terran Enforcer (TE)"}
+{"type": "station", "name": "Earth Station", "x": 16.0, "y": 14.93, "z": -0.88, "note": null}

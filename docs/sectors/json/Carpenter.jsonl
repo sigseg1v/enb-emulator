@@ -1,0 +1,23 @@
+{"type": "hidden-nav-point", "name": "Chavez Hideout", "x": -101.19, "y": -2.84, "z": 0.0, "note": null}
+{"type": "planet", "name": "Carpenter", "x": 132.22, "y": -0.45, "z": 0.0, "note": null}
+{"type": "moon", "name": "Aurora 7", "x": -137.37, "y": 0.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Orsini 2", "x": -10.74, "y": -79.92, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Orsini 1", "x": -40.12, "y": 106.26, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Carpenter 8", "x": -104.86, "y": -112.23, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Carpenter 7", "x": -80.7, "y": -75.48, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Carpenter 6", "x": -44.45, "y": -52.83, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Carpenter 5", "x": -19.28, "y": -15.58, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Carpenter 4", "x": -23.31, "y": 30.74, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Carpenter 3", "x": -62.07, "y": 55.41, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Carpenter 2", "x": -82.21, "y": 89.13, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Carpenter 1", "x": -116.94, "y": 116.82, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "LaGrange 5 point", "x": 0.0, "y": -125.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "LaGrange 4 point", "x": 0.0, "y": 125.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid ML-4520-1", "x": 109.65, "y": 131.73, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Arena Entry Point", "x": -139.02, "y": 82.33, "z": 0.0, "note": null}
+{"type": "wormhole-exit", "name": "Yamuna`s Weft", "x": -69.4, "y": 33.86, "z": 0.0, "note": null}
+{"type": "gate", "name": "Gate to Tau Ceti System", "x": 13.8, "y": 11.34, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Glenn", "x": -138.93, "y": 138.61, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Shepard", "x": -136.03, "y": -137.66, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Slayton", "x": -109.27, "y": 66.81, "z": 0.0, "note": null}
+{"type": "station", "name": "Orsini Mining Platform", "x": 26.58, "y": -89.03, "z": 0.0, "note": null}

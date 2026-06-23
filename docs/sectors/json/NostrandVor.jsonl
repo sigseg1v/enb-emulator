@@ -1,0 +1,18 @@
+{"type": "landable-planet", "name": "Nostrand Vor", "x": 0.87, "y": -0.38, "z": -10.0, "note": null}
+{"type": "nav-point", "name": "Nostrand Vor Way 3", "x": -96.27, "y": 23.2, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nostrand Vor Way 2", "x": -96.26, "y": 48.27, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nostrand Vor Way 1", "x": -97.93, "y": 72.48, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Crossdock Beta holding nav 3", "x": 41.6, "y": 135.07, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Crossdock Beta holding nav 2", "x": -5.14, "y": 134.92, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Crossdock Beta holding nav 1", "x": -54.67, "y": 136.4, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Crossdock Beta holding nav", "x": -97.33, "y": 136.93, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Crossdock Beta", "x": 86.4, "y": 134.53, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Crossdock Alpha way 1", "x": -97.33, "y": -77.07, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Crossdock Alpha way", "x": -97.33, "y": -38.39, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Crossdock Alpha holding nav 3", "x": 24.8, "y": -111.87, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Crossdock Alpha holding nav 2", "x": -14.93, "y": -110.4, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Crossdock Alpha holding nav 1", "x": -51.16, "y": -110.46, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Crossdock Alpha holding nav", "x": -93.86, "y": -108.4, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Crossdock Alpha", "x": 70.72, "y": -104.06, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Central Routing", "x": -96.53, "y": -10.67, "z": 0.0, "note": null}
+{"type": "gate", "name": "System Gate to Altair III", "x": -99.47, "y": 101.97, "z": 0.0, "note": null}

@@ -1,0 +1,22 @@
+{"type": "hidden-nav-point", "name": "Captain Ching Shih", "x": 94.13, "y": 167.2, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Trin", "x": 30.25, "y": 120.79, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Peat", "x": -31.14, "y": 67.61, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Markham", "x": 30.54, "y": 70.58, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Lono", "x": -34.42, "y": 117.88, "z": 0.27, "note": null}
+{"type": "nav-point", "name": "Krakow", "x": -73.8, "y": 100.31, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Kassina Reward", "x": -0.17, "y": -43.32, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Jyn", "x": -31.67, "y": 97.67, "z": 0.05, "note": null}
+{"type": "nav-point", "name": "Ekobi Maru", "x": 43.98, "y": 79.62, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "ECS Colossus", "x": -1.17, "y": 142.63, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "EarthCorps Warning Beacon Zeta", "x": -47.29, "y": 77.13, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "EarthCorps Warning Beacon Theta", "x": -80.58, "y": 57.47, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "EarthCorps Warning Beacon Gamma", "x": -46.89, "y": 123.15, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "EarthCorps Warning Beacon Eta", "x": -59.59, "y": 64.43, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "EarthCorps Warning Beacon Epsilon", "x": -41.23, "y": 94.82, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "EarthCorps Warning Beacon Delta", "x": -41.57, "y": 107.82, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "EarthCorps Warning Beacon Beta", "x": -61.77, "y": 134.26, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "EarthCorps Warning Beacon Alpha", "x": -80.08, "y": 142.34, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Astis", "x": 34.56, "y": 94.0, "z": 0.0, "note": null}
+{"type": "gate", "name": "Accelerator to Pluto and Charon", "x": 51.17, "y": 85.21, "z": 0.0, "note": null}
+{"type": "gate", "name": "Gate to Aragoth System", "x": 0.0, "y": 129.7, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Saturn", "x": -0.09, "y": 60.6, "z": 0.0, "note": null}

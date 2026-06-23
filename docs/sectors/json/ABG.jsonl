@@ -1,0 +1,39 @@
+{"type": "hidden-nav-point", "name": "Spectral Portent", "x": 114.07, "y": -182.37, "z": -0.17, "note": null}
+{"type": "hidden-nav-point", "name": "Humanoid Monstrosity", "x": 119.04, "y": -186.44, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Energy Revenant", "x": 115.6, "y": -184.14, "z": -0.79, "note": null}
+{"type": "hidden-nav-point", "name": "Dog Dragon", "x": 115.54, "y": -185.96, "z": -0.73, "note": null}
+{"type": "hidden-nav-point", "name": "Asteroid Marin33", "x": 24.18, "y": -141.3, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Asteroid Marin32", "x": 37.91, "y": -137.14, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Asteroid Marin31", "x": 54.12, "y": -127.72, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Thern´s Field", "x": 38.87, "y": -70.12, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Saturn Gamma Navway 6", "x": 118.44, "y": -60.39, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Saturn Gamma Navway 5", "x": 145.64, "y": -52.79, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Saturn Gamma Navway 4", "x": 172.68, "y": -47.98, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Saturn Gamma Navway 3", "x": 207.62, "y": -46.03, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Saturn Gamma Navway 2", "x": 247.19, "y": -66.25, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Saturn Gamma Navway 1", "x": 284.2, "y": -84.01, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Saturn Beta Junction", "x": 94.01, "y": -67.32, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Onorom Checkpoint", "x": 154.04, "y": -158.17, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nort´s Field", "x": 65.6, "y": -2.07, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Vela", "x": 59.6, "y": -26.04, "z": 2.0, "note": null}
+{"type": "nav-point", "name": "Nav Comm", "x": 135.53, "y": -12.36, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Mutation Viability Field Lab", "x": 117.11, "y": -185.26, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid Marin34", "x": 1.96, "y": -144.39, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Beta Gamma Beltway 1", "x": -28.13, "y": -2.68, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Beta Gamma Beltway 2", "x": -22.28, "y": -20.32, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Beta Gamma Beltway 3", "x": -11.06, "y": -32.36, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Beta Gamma Beltway 4", "x": 13.84, "y": -43.22, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Beta Gamma Beltway 5", "x": 39.44, "y": -58.99, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Beta Gamma Beltway 6", "x": 69.99, "y": -70.58, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Cent´s Field", "x": 103.53, "y": -41.21, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Comm Junction 1", "x": 121.56, "y": -26.93, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Easten´s Field", "x": 289.91, "y": -53.83, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Mars Junction", "x": 69.99, "y": -91.74, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Mier´s Path", "x": -33.09, "y": -30.8, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Mier´s Perch", "x": -36.79, "y": -61.54, "z": 0.0, "note": null}
+{"type": "gate", "name": "Gate to Onorom Prison", "x": 149.91, "y": -74.97, "z": 0.0, "note": null}
+{"type": "gate", "name": "Onorom Exit Gate", "x": 164.73, "y": -134.82, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Asteroid Belt Beta", "x": -25.66, "y": 15.19, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Mars", "x": 69.94, "y": -114.95, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Saturn", "x": 334.22, "y": -83.42, "z": 0.0, "note": null}
+{"type": "station", "name": "Detention Center Onorom", "x": 150.35, "y": -176.76, "z": 0.89, "note": null}

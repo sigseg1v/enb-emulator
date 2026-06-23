@@ -1,0 +1,47 @@
+{"type": "planet", "name": "Freya", "x": 0.0, "y": 86.72, "z": 0.16, "note": null}
+{"type": "moon", "name": "Brisings", "x": -52.4, "y": 7.71, "z": -1.56, "note": null}
+{"type": "moon", "name": "Falk", "x": 165.17, "y": -90.24, "z": 0.0, "note": null}
+{"type": "moon", "name": "Folkvang", "x": -90.29, "y": 87.57, "z": 2.28, "note": null}
+{"type": "moon", "name": "Seidr", "x": 90.29, "y": 103.38, "z": -1.2, "note": null}
+{"type": "nav-point", "name": "Freya Field 4", "x": -28.25, "y": 10.44, "z": 1.06, "note": null}
+{"type": "nav-point", "name": "Freya Planetary 1", "x": 100.05, "y": 34.91, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Freya Planetary 2", "x": 70.06, "y": 57.41, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Gaius Wreck", "x": -69.0, "y": 80.61, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Listening Post Gladius", "x": 30.23, "y": 118.56, "z": -0.8, "note": null}
+{"type": "nav-point", "name": "Nav Freya 1", "x": 176.44, "y": 80.37, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Freya 2", "x": 164.72, "y": 35.85, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Freya 3", "x": 122.55, "y": 13.36, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Freya 4", "x": 100.99, "y": -26.01, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Freya 5", "x": 58.81, "y": -47.1, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Freya 6", "x": 25.56, "y": -66.31, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Gateway 1", "x": -77.09, "y": -108.02, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Gateway 2", "x": -38.66, "y": -105.21, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Gateway 3", "x": -4.92, "y": -90.68, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nifleheim Cloud 1", "x": 146.28, "y": -19.71, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nifleheim Cloud 2", "x": 180.72, "y": -50.7, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nifleheim Cloud 3", "x": 206.64, "y": -86.34, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nishara Maru", "x": 42.88, "y": 76.15, "z": 1.5, "note": null}
+{"type": "nav-point", "name": "Asteroid FP-X16", "x": 26.18, "y": -52.17, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid FP-X17", "x": 29.13, "y": -35.5, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid FP-X18", "x": 23.68, "y": -19.77, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid FP-X19", "x": 8.99, "y": -11.8, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid FP-X20", "x": -5.27, "y": -7.6, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid FP-X21", "x": -18.7, "y": -4.25, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid FP-X23", "x": -17.02, "y": 19.46, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid FP-X24", "x": -11.35, "y": 33.51, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid FP-X25", "x": -1.29, "y": 43.58, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid ML-1750-1", "x": -72.22, "y": -24.31, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid RF-100", "x": 227.45, "y": 60.64, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid RF-101", "x": 233.21, "y": 54.04, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid RF-102", "x": 229.21, "y": 45.53, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid RF-103", "x": 221.28, "y": 46.45, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid RF-104", "x": 220.28, "y": 54.46, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Freya Field 1", "x": -97.69, "y": -92.12, "z": -0.3, "note": null}
+{"type": "nav-point", "name": "Freya Field 2", "x": -12.42, "y": -76.62, "z": 0.79, "note": null}
+{"type": "nav-point", "name": "Freya Field 3", "x": 75.23, "y": -66.13, "z": 0.0, "note": null}
+{"type": "gate", "name": "Akeron´s Gate to Sol System", "x": -115.84, "y": -116.54, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Jotunheim", "x": -3.48, "y": -48.56, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Nifleheim Cloud", "x": 239.03, "y": -115.24, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Ragnarok", "x": 197.34, "y": 117.13, "z": 0.05, "note": null}
+{"type": "gate", "name": "System Gate to Alpha Centauri", "x": 36.39, "y": -97.31, "z": 0.0, "note": null}
+{"type": "gate", "name": "System Gate to Proxima Centauri", "x": 42.52, "y": -94.9, "z": 0.0, "note": null}

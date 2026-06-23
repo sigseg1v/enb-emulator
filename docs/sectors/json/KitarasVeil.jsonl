@@ -1,0 +1,28 @@
+{"type": "hidden-nav-point", "name": "Mordana Listening Post", "x": -0.51, "y": 72.14, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Mordana Tabernacle", "x": 62.57, "y": 83.39, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "The Veil Trader", "x": 35.16, "y": -65.14, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Wuli", "x": 29.62, "y": 64.87, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Veil Trader´s Beacon", "x": 35.16, "y": -59.82, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Uli", "x": -30.4, "y": 60.38, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Tishan", "x": -19.87, "y": -20.14, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Tazeron", "x": 1.95, "y": -32.25, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Rioh", "x": -59.72, "y": -9.33, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Rakio", "x": 40.01, "y": 15.25, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Qial", "x": -7.8, "y": 6.37, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Numi", "x": 24.89, "y": -24.68, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Noila", "x": -9.61, "y": 45.02, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav KV 6", "x": 41.03, "y": 60.23, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav KV 5", "x": -43.16, "y": 54.47, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav KV 4", "x": 0.16, "y": 34.69, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav KV 3", "x": 49.11, "y": -13.08, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav KV 2", "x": -48.31, "y": -13.37, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav KV 1", "x": -0.53, "y": -12.42, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Motish", "x": -57.57, "y": 15.01, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Lilo", "x": -59.7, "y": 49.04, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Kitai", "x": 25.39, "y": -4.84, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Jushai", "x": 69.93, "y": 20.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Fushi", "x": 60.57, "y": -39.81, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Disa", "x": 59.86, "y": 50.45, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Aiko", "x": -59.89, "y": -60.18, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Dahin", "x": -0.01, "y": -60.22, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Vishao´s Cove", "x": 75.04, "y": -51.55, "z": 0.0, "note": null}

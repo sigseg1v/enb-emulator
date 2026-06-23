@@ -1,0 +1,16 @@
+{"type": "object", "name": "Ceres", "x": -50.36, "y": 150.62, "z": 0.0, "note": null}
+{"type": "object", "name": "Thule", "x": 15.74, "y": -150.22, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Ceres 1", "x": -46.94, "y": -4.36, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Ceres 2", "x": -94.8, "y": -0.94, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Ceres 3", "x": -139.24, "y": 16.15, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Ceres 4", "x": -158.62, "y": 59.46, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Ceres 5", "x": -148.36, "y": 106.18, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Ceres 6", "x": -107.34, "y": 128.97, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Eris", "x": 66.09, "y": 66.23, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Thule 1", "x": 47.27, "y": -7.14, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Thule 2", "x": 90.76, "y": -22.95, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Thule 3", "x": 124.36, "y": -55.57, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Thule 4", "x": 138.2, "y": -99.06, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Thule 5", "x": 114.48, "y": -135.63, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Thule 6", "x": 67.04, "y": -143.53, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Venus", "x": 0.04, "y": -0.06, "z": 0.0, "note": null}

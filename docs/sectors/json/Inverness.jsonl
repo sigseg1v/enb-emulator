@@ -1,0 +1,24 @@
+{"type": "hidden-object", "name": "Haster´s End", "x": -202.88, "y": -125.82, "z": 0.0, "note": null}
+{"type": "hidden-object", "name": "Haster´s Point", "x": -202.13, "y": -90.4, "z": 0.0, "note": null}
+{"type": "hidden-object", "name": "Nessie", "x": 92.46, "y": 48.02, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Dragon´s Path 1", "x": 115.79, "y": 50.55, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Dragon´s Path 2", "x": 148.12, "y": 71.93, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Dragon´s Path 3", "x": 174.72, "y": 102.19, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "EarthCorps Weapons Inspector", "x": -90.14, "y": -45.25, "z": 0.4, "note": null}
+{"type": "landable-planet", "name": "Inverness", "x": -137.87, "y": 108.43, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Sunside 2", "x": -186.19, "y": -19.12, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Sunside 1", "x": -136.08, "y": -32.15, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Inverness 9", "x": 66.66, "y": 32.19, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Inverness 8", "x": 19.86, "y": 36.12, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Inverness 7", "x": 14.35, "y": -10.84, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Inverness 6", "x": 106.43, "y": -104.72, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Inverness 5", "x": 63.52, "y": -124.54, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Inverness 4", "x": 18.57, "y": -105.66, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Inverness 3", "x": 10.2, "y": -58.51, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Inverness 2", "x": -24.74, "y": -87.63, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Inverness 1", "x": -69.52, "y": -81.48, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Bai Leung Dragon Lair Dock", "x": 238.36, "y": 179.22, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to 61 Cygni System", "x": 103.68, "y": -154.03, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Arduinne", "x": 19.86, "y": 83.85, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to New Edinburgh", "x": -91.37, "y": -43.54, "z": 0.0, "note": null}
+{"type": "factioned-gate", "name": "Pirate Gate to Smuggler´s Run", "x": 299.32, "y": 245.11, "z": 0.0, "note": "Red Dragon Faction"}

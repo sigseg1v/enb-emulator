@@ -1,0 +1,48 @@
+{"type": "attention", "name": "Gravity Shear & EM Radiation", "x": -40.0, "y": 350.0, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Probe Ship Data Core", "x": -505.14, "y": -123.32, "z": -0.33, "note": null}
+{"type": "hidden-nav-point", "name": "PAX Aprender", "x": -30.22, "y": 392.26, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Hyperia Gate Staging Area", "x": -188.53, "y": 380.85, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "ECS Sierpe Anomaly", "x": -83.63, "y": 56.32, "z": -0.14, "note": null}
+{"type": "hidden-nav-point", "name": "Distress Beacon", "x": -81.77, "y": 56.33, "z": 0.34, "note": null}
+{"type": "hidden-nav-point", "name": "Consummo", "x": -39.37, "y": 39.76, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Chief Engineer´s Log", "x": -82.58, "y": 57.39, "z": -0.09, "note": null}
+{"type": "hidden-nav-point", "name": "Anomaly", "x": -500.82, "y": -123.2, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Arrojar Array", "x": -40.0, "y": 40.0, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Asteroid Lamos2521", "x": -65.47, "y": 76.34, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Asteroid Lamos2522", "x": -64.87, "y": 106.08, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Captain´s Log", "x": -85.35, "y": 56.8, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Asteroid Lamos2526", "x": -133.71, "y": 177.45, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Asteroid Lamos2523", "x": -70.58, "y": 134.02, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Asteroid Lamos2525", "x": -108.13, "y": 168.27, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Asteroid Lamos2524", "x": -86.8, "y": 152.91, "z": 0.0, "note": null}
+{"type": "planet", "name": "Lagarto", "x": -21.25, "y": -88.61, "z": 0.0, "note": null}
+{"type": "moon", "name": "Guijo", "x": -41.85, "y": -37.06, "z": 2.0, "note": null}
+{"type": "landable-moon", "name": "Risco", "x": -61.77, "y": -54.06, "z": -1.5, "note": null}
+{"type": "nav-point", "name": "Way of the Rogue Progen", "x": 68.48, "y": 10.95, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Ruins of the ECS Sierpe", "x": -84.1, "y": 56.73, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Rogue Progen Outpost", "x": 84.56, "y": 16.68, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Peto", "x": -39.86, "y": 39.34, "z": 0.07, "note": null}
+{"type": "nav-point", "name": "PAX Decima Gemina", "x": 141.33, "y": 289.87, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Observatory Oreja Side", "x": 20.0, "y": 5.19, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Observatory Ojo Side", "x": -9.68, "y": 20.19, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Lagarto Moons", "x": -60.95, "y": -35.39, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Lagarto Gates", "x": -84.31, "y": -0.44, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Lagarto Center", "x": -44.19, "y": -0.4, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Hyperia 2", "x": -141.16, "y": 379.89, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Deneb Path 2", "x": 80.54, "y": 208.99, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Arrojar Array Command Ship", "x": -37.16, "y": 41.83, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Fetum", "x": -39.45, "y": 39.21, "z": 0.03, "note": null}
+{"type": "nav-point", "name": "Adapto", "x": -39.18, "y": 39.47, "z": 0.06, "note": null}
+{"type": "nav-point", "name": "Destroyed Probe Ship", "x": -505.22, "y": -123.27, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Lagarto Observatory", "x": 4.33, "y": 2.07, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Deneb Path 1", "x": -7.58, "y": 160.64, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Hyperia 1", "x": -92.84, "y": 382.12, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Deneb Path 3", "x": 52.69, "y": 302.62, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Hyperia Office", "x": -187.77, "y": 373.42, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Kenlz", "x": 69.04, "y": 29.35, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Deneb Path 4", "x": -53.9, "y": 310.46, "z": 0.0, "note": null}
+{"type": "gate", "name": "Accelerator to Inner Lagarto", "x": -40.15, "y": 377.53, "z": 0.0, "note": null}
+{"type": "gate", "name": "Appian Gate", "x": -40.0, "y": 400.0, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Aragoth System", "x": -99.25, "y": 15.86, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Endriago", "x": -95.15, "y": -24.48, "z": 0.0, "note": null}
+{"type": "class-specific-gate", "name": "System Gate to Sol", "x": 25.66, "y": -23.87, "z": 0.0, "note": "Only for Progen Sentinel (PS)"}

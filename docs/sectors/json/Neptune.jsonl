@@ -1,0 +1,17 @@
+{"type": "hidden-nav-point", "name": "Abadoned Mining Station", "x": 56.0, "y": 51.56, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Ancient Progen Wreckage", "x": -64.73, "y": 74.81, "z": -1.31, "note": null}
+{"type": "hidden-nav-point", "name": "High Security Prison", "x": 7.25, "y": -65.55, "z": -3.0, "note": null}
+{"type": "hidden-nav-point", "name": "Uranus Gate", "x": 37.87, "y": -38.4, "z": 0.0, "note": null}
+{"type": "planet", "name": "Neptune", "x": 0.0, "y": 70.0, "z": 10.0, "note": null}
+{"type": "nav-point", "name": "Neptune Nav 9", "x": -30.0, "y": -33.5, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Neptune Nav 8", "x": -34.0, "y": -3.5, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Neptune Nav 7", "x": -49.0, "y": 45.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Neptune Nav 6", "x": -35.0, "y": 30.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Neptune Nav 5", "x": -3.0, "y": 25.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Neptune Nav 4", "x": 49.0, "y": 45.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Neptune Nav 3", "x": 29.0, "y": 30.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Neptune Nav 2", "x": 27.0, "y": 0.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Neptune Nav 10", "x": -9.0, "y": -49.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Neptune Nav 1", "x": 25.5, "y": -28.0, "z": 0.0, "note": null}
+{"type": "gate", "name": "Accelerator to Uranus", "x": 40.0, "y": -40.0, "z": -4.0, "note": null}
+{"type": "station", "name": "TAS Support Cruiser Theresa", "x": 6.5, "y": -36.0, "z": 0.0, "note": null}

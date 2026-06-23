@@ -1,0 +1,27 @@
+{"type": "hidden-object", "name": "Ragnarok", "x": 200.0, "y": 165.0, "z": 145.0, "note": null}
+{"type": "hidden-nav-point", "name": "Infiniti-Orsini Ragnarok Scoop", "x": 99.28, "y": 100.75, "z": 0.0, "note": null}
+{"type": "moon", "name": "Calamity", "x": 1.68, "y": -0.4, "z": -4.63, "note": null}
+{"type": "moon", "name": "Dolor", "x": -21.13, "y": 119.97, "z": -2.0, "note": null}
+{"type": "moon", "name": "Smerte", "x": 96.06, "y": -114.64, "z": 3.03, "note": null}
+{"type": "nav-point", "name": "Rassmussen Camp", "x": 91.6, "y": -109.94, "z": 3.36, "note": null}
+{"type": "nav-point", "name": "Ragnarok´s Terminal", "x": 92.77, "y": 94.89, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Ragnarok´s Path", "x": 42.93, "y": 53.11, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Ragnarok´s Mistake", "x": 62.87, "y": 74.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Net-7 Relay", "x": -39.54, "y": -87.86, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Ragnarok 5", "x": -75.57, "y": 45.8, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Ragnarok 4", "x": -77.68, "y": 6.41, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Ragnarok 3", "x": -45.25, "y": -30.43, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Ragnarok 2", "x": 6.54, "y": -57.05, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Ragnarok 1", "x": -39.7, "y": -75.53, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Herlinsson Camp", "x": -0.22, "y": -67.79, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Farthen Camp", "x": -65.04, "y": -54.17, "z": 3.36, "note": null}
+{"type": "nav-point", "name": "Dolor´s Bluff", "x": -15.43, "y": 100.24, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Dolor Chasm 3", "x": -52.05, "y": 139.32, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Dolor Chasm 2", "x": -70.09, "y": 120.13, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Dolor Chasm 1", "x": -78.81, "y": 91.04, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Calamity´s Downfall", "x": 21.09, "y": 32.23, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Calamity´s Bargain", "x": -7.86, "y": 65.93, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Freya and Akeron´s Gate", "x": -49.9, "y": -127.57, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Jotunheim", "x": -116.41, "y": 43.37, "z": 0.0, "note": null}
+{"type": "station", "name": "Trader´s Fort", "x": 49.25, "y": -58.96, "z": 0.0, "note": null}
+{"type": "factioned-station", "name": "Chavez Capital Ship", "x": -17.68, "y": 142.69, "z": 0.0, "note": null}

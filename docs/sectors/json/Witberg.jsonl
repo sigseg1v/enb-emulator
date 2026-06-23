@@ -1,0 +1,28 @@
+{"type": "hidden-nav-point", "name": "V'rix Oracle", "x": 197.17, "y": 85.05, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Leeroy Junkbins", "x": 208.35, "y": 74.6, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Ezekial Garrett", "x": 65.36, "y": 20.89, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "The Indigo Homestead", "x": 3.05, "y": 127.3, "z": 0.2, "note": null}
+{"type": "planet", "name": "Witberg", "x": 12.85, "y": -10.8, "z": 0.0, "note": null}
+{"type": "moon", "name": "Othman", "x": -31.4, "y": 119.27, "z": 4.95, "note": null}
+{"type": "nav-point", "name": "ACBN Relay", "x": 77.0, "y": 11.48, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Bogeril Camp", "x": 222.63, "y": 13.97, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Net 7 Affiliate Beacon", "x": -6.08, "y": 99.92, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Witberg 5", "x": 142.48, "y": 69.09, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Witberg 4", "x": 107.05, "y": 42.73, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Witberg 3", "x": 74.96, "y": 10.78, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Witberg 2", "x": 82.23, "y": -50.51, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Witberg 1", "x": 113.98, "y": -75.81, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav ACBN 2", "x": 12.62, "y": 70.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav ACBN 1", "x": 43.79, "y": 40.91, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "ECS Deutschland", "x": 57.96, "y": -25.81, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Bogeril Negotiation Vessel", "x": 210.03, "y": 60.63, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Bogeril Marker 6", "x": 227.5, "y": -35.67, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Bogeril Marker 5", "x": 221.46, "y": -17.57, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Bogeril Marker 4", "x": 214.6, "y": -1.84, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Bogeril Marker 3", "x": 210.44, "y": 22.12, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Bogeril Marker 2", "x": 196.36, "y": 31.51, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Bogeril Marker 1", "x": 182.29, "y": 41.83, "z": 0.0, "note": null}
+{"type": "wormhole-exit", "name": "Zephram's Warp", "x": 75.0, "y": 70.0, "z": 0.0, "note": null}
+{"type": "gate", "name": "Gate to Aragoth System", "x": 174.02, "y": 97.28, "z": 0.0, "note": null}
+{"type": "gate", "name": "Gate to Zweihander", "x": 147.49, "y": -100.95, "z": 0.0, "note": null}
+{"type": "factioned-gate", "name": "Sector Gate to der Todesengel", "x": 231.29, "y": -8.96, "z": 0.0, "note": "Bogeril Faction"}

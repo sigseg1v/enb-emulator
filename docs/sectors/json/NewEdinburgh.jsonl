@@ -1,0 +1,22 @@
+{"type": "hidden-object", "name": "Loch Brae", "x": 21.35, "y": -50.83, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Hulk of Sartis 6", "x": -78.3, "y": 65.54, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Red Dragon Stronghold", "x": -244.75, "y": 4.97, "z": -0.4, "note": null}
+{"type": "planet", "name": "New Edinburgh", "x": -123.06, "y": -14.59, "z": 0.0, "note": null}
+{"type": "moon", "name": "Loch Ness", "x": -243.0, "y": -56.9, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Obsolete Nav 2", "x": -168.29, "y": 31.3, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Obsolete Nav 1", "x": -120.15, "y": 42.13, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Edinburgh 9", "x": 33.95, "y": -109.95, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Edinburgh 8", "x": 68.6, "y": -82.58, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Edinburgh 7", "x": 66.88, "y": -45.56, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Edinburgh 6", "x": 62.09, "y": -0.95, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Edinburgh 5", "x": 68.78, "y": 39.6, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Edinburgh 4", "x": 21.91, "y": 8.04, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Edinburgh 3", "x": -21.97, "y": 37.68, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Edinburgh 2", "x": -25.91, "y": -13.96, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Edinburgh 1", "x": -44.93, "y": -57.65, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "InfinityCorp Construction Yard", "x": -21.46, "y": 85.77, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Danger! Greks", "x": 21.66, "y": -12.46, "z": 0.0, "note": null}
+{"type": "gate", "name": "Gate to Beta Hydri System", "x": 108.25, "y": -3.71, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Inverness", "x": 92.04, "y": 74.51, "z": 0.0, "note": null}
+{"type": "class-specific-gate", "name": "Gate to High Earth", "x": -117.28, "y": -108.72, "z": 0.0, "note": "Only for Terran Trader (TT)"}
+{"type": "station", "name": "Somerled Station", "x": -63.77, "y": -99.23, "z": 0.0, "note": null}

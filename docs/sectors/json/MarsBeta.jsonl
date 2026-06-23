@@ -1,0 +1,31 @@
+{"type": "hidden-nav-point", "name": "Derelict Reclaimer", "x": -52.41, "y": 134.67, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Wrecked Spaceship", "x": -313.8, "y": -205.17, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Ringway C", "x": -81.25, "y": -2.37, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Ringway B", "x": -120.39, "y": 0.57, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Ringway A", "x": -103.71, "y": -29.48, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Psionic Emitter 4", "x": 111.22, "y": 6.94, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Psionic Emitter 3", "x": 62.19, "y": 18.94, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Psionic Emitter 2", "x": 16.86, "y": -10.08, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Psionic Emitter 1", "x": -27.0, "y": -16.32, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Oubliette", "x": -251.27, "y": -209.72, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Equinox", "x": -62.46, "y": -43.05, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Darkside 2", "x": -94.41, "y": -131.87, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Darkside 1", "x": -57.34, "y": -93.84, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Brightside 6", "x": -305.11, "y": -200.92, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Brightside 5", "x": -256.64, "y": -180.08, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Brightside 4", "x": -231.03, "y": -141.12, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Brightside 3", "x": -201.52, "y": -106.34, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Brightside 2", "x": -175.62, "y": -69.02, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Brightside 1", "x": -148.75, "y": -27.44, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Debris Area Zeta", "x": -188.2, "y": 61.56, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Debris Area Gamma", "x": -43.0, "y": 124.99, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Debris Area Eta", "x": -238.5, "y": 90.09, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Debris Area Epsilon", "x": -155.73, "y": 23.61, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Debris Area Beta", "x": -50.0, "y": 71.19, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Debris Area Alpha", "x": -91.43, "y": 36.78, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Crystal Path 02", "x": -167.73, "y": 195.2, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Crystal Path 01", "x": -155.96, "y": 157.73, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Crystal Field", "x": -178.4, "y": 234.93, "z": 0.0, "note": null}
+{"type": "class-specific-gate", "name": "Gate to Gallina", "x": -6.48, "y": -114.74, "z": 0.0, "note": "Only for Progen Sentinel (PS)"}
+{"type": "class-specific-gate", "name": "Gate to Mars", "x": -96.27, "y": -175.47, "z": 0.0, "note": "Only for Progen Sentinel (PS)"}
+{"type": "station", "name": "Arx Prima", "x": -101.09, "y": -9.98, "z": -2.28, "note": null}

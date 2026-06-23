@@ -1,0 +1,45 @@
+{"type": "hidden-nav-point", "name": "Araxia Hunting Grounds", "x": 27.0, "y": 35.0, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Dzurai Hunting Grounds", "x": 1.0, "y": 20.0, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Kraken Hunting Grounds", "x": -25.0, "y": 35.0, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Mars Back Listening Satellite", "x": 1.64, "y": -63.5, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Progen Group Shrine", "x": -39.88, "y": 103.12, "z": 0.0, "note": null}
+{"type": "planet", "name": "Mars", "x": 0.23, "y": -57.63, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Menace Way", "x": 1.0, "y": 110.0, "z": 0.1, "note": null}
+{"type": "nav-point", "name": "Missile Trial", "x": -65.58, "y": 118.47, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Group Shrine", "x": -39.88, "y": 100.12, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Progen Capital Ship", "x": 61.83, "y": 107.7, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Remus", "x": -129.0, "y": 1.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Remus Back", "x": -123.0, "y": -34.0, "z": -2.0, "note": null}
+{"type": "nav-point", "name": "Remus Way 1", "x": -37.0, "y": 81.0, "z": 1.0, "note": null}
+{"type": "nav-point", "name": "Remus Way 2", "x": -75.0, "y": 51.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Remus Way 3", "x": -92.0, "y": 10.1, "z": 2.5, "note": null}
+{"type": "nav-point", "name": "Remus Way 4", "x": -91.0, "y": -32.0, "z": 2.5, "note": null}
+{"type": "nav-point", "name": "Romulus", "x": 130.0, "y": 1.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Romulus Back", "x": 125.0, "y": -34.0, "z": -2.0, "note": null}
+{"type": "nav-point", "name": "Romulus Way 1", "x": 39.0, "y": 81.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Romulus Way 2", "x": 77.0, "y": 51.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Romulus Way 3", "x": 94.0, "y": 10.1, "z": 2.5, "note": null}
+{"type": "nav-point", "name": "Romulus Way 4", "x": 94.0, "y": -32.0, "z": -2.5, "note": null}
+{"type": "nav-point", "name": "Alpha Beta 1", "x": -119.0, "y": 126.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Alpha Beta 2", "x": -82.0, "y": 96.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid Belt Way 1", "x": 123.99, "y": 120.16, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid Belt Way 2", "x": 82.0, "y": 100.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid Remus 557", "x": -83.43, "y": 58.06, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid Remus 558", "x": -96.99, "y": 65.81, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid Remus 559", "x": -110.74, "y": 72.2, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid Remus 560", "x": -122.17, "y": 83.24, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid Romulus 577", "x": 86.31, "y": 57.94, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid Romulus 578", "x": 99.26, "y": 66.43, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid Romulus 579", "x": 109.93, "y": 75.76, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Asteroid Romulus 580", "x": 120.78, "y": 83.5, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Construction Site", "x": 50.0, "y": 100.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Hunting Grounds", "x": 1.0, "y": 50.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Magister Prime", "x": 1.0, "y": 74.0, "z": 0.1, "note": null}
+{"type": "nav-point", "name": "Magister Remus", "x": -18.0, "y": 90.0, "z": 0.1, "note": null}
+{"type": "nav-point", "name": "Magister Romulus", "x": 20.0, "y": 90.0, "z": 0.1, "note": null}
+{"type": "nav-point", "name": "Menace Trial", "x": 0.0, "y": 124.0, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Asteroid Belt Gamma", "x": 135.0, "y": 140.0, "z": 0.0, "note": null}
+{"type": "class-specific-gate", "name": "Gate to Mars Alpha", "x": -127.59, "y": 141.79, "z": 0.0, "note": "Only for Progen Warrior (PW)"}
+{"type": "class-specific-gate", "name": "Gate to Mars Beta", "x": -120.61, "y": 140.72, "z": 0.0, "note": "Only for Progen Sentinel (PS)"}
+{"type": "class-specific-gate", "name": "Gate to Mars Gamma", "x": -127.39, "y": 135.36, "z": 0.0, "note": "Only for Progen Privateer (PP)"}
+{"type": "station", "name": "Arx Magister", "x": 1.0, "y": 90.0, "z": 0.0, "note": null}

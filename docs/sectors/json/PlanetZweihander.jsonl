@@ -1,0 +1,11 @@
+{"type": "hidden-nav-point", "name": "SAM", "x": -17.44, "y": -12.08, "z": 0.51, "note": null}
+{"type": "nav-point", "name": "EarthCorps Research Station", "x": 16.9, "y": 3.72, "z": 1.8, "note": null}
+{"type": "nav-point", "name": "ECS Titan", "x": 15.03, "y": 18.75, "z": 0.6, "note": null}
+{"type": "nav-point", "name": "Meteorological Tower", "x": 14.84, "y": 8.93, "z": 2.5, "note": null}
+{"type": "nav-point", "name": "Nav Jagerstadt 1", "x": -12.35, "y": 13.24, "z": 2.5, "note": null}
+{"type": "nav-point", "name": "Nav Jagerstadt 2", "x": -9.55, "y": 9.93, "z": 2.2, "note": null}
+{"type": "nav-point", "name": "Nav Jagerstadt 3", "x": -7.09, "y": 6.33, "z": 1.9, "note": null}
+{"type": "nav-point", "name": "Nav Jagerstadt 4", "x": -4.37, "y": 2.8, "z": 1.6, "note": null}
+{"type": "nav-point", "name": "Nav Jagerstadt 5", "x": -2.72, "y": -0.58, "z": 1.4, "note": null}
+{"type": "gate", "name": "Escape Velocity Accelerator", "x": -16.96, "y": 17.55, "z": 4.75, "note": null}
+{"type": "station", "name": "Jagerstadt", "x": -9.93, "y": -11.12, "z": 1.0, "note": null}

@@ -1,0 +1,29 @@
+{"type": "hidden-object", "name": "Moon Fragment", "x": -212.13, "y": 204.67, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Hattori Hanzo", "x": -210.18, "y": 206.27, "z": 3.85, "note": null}
+{"type": "planet", "name": "Fenris", "x": 96.22, "y": 99.82, "z": 0.43, "note": null}
+{"type": "moon", "name": "Fenris Prime", "x": -99.12, "y": -99.85, "z": 0.0, "note": null}
+{"type": "object", "name": "Gleipnir", "x": 42.67, "y": 42.97, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Akara´s Satellite", "x": 132.82, "y": -115.43, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Observer Relay 7", "x": 8.97, "y": 98.6, "z": 0.88, "note": null}
+{"type": "nav-point", "name": "Observer Relay 6", "x": -25.26, "y": 66.14, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Observer Relay 5", "x": -25.38, "y": 20.52, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Observer Relay 4", "x": -24.47, "y": -25.22, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Observer Relay 3", "x": 21.61, "y": -25.49, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Observer Relay 2", "x": 64.46, "y": -24.73, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Observer Relay 1", "x": 98.49, "y": 9.27, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Fenris 9", "x": -23.63, "y": 145.44, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Fenris 8", "x": -75.74, "y": 145.44, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Fenris 7", "x": -127.8, "y": 125.36, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Fenris 6", "x": -126.92, "y": 85.51, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Fenris 5", "x": -119.59, "y": 46.54, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Fenris 4", "x": -91.61, "y": -10.74, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Fenris 3", "x": -38.14, "y": -65.39, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Fenris 2", "x": -10.01, "y": -98.08, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Fenris 11", "x": 88.89, "y": 147.19, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Fenris 10", "x": 31.02, "y": 144.7, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Fenris 1", "x": 38.05, "y": -98.5, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Derelict Nav Point", "x": 139.28, "y": 119.06, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Akara´s Tear", "x": 128.39, "y": -112.37, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to The Valkyrie Twins", "x": -92.68, "y": 85.09, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Varen´s Girdle", "x": 80.3, "y": -80.71, "z": 0.0, "note": null}
+{"type": "station", "name": "Fenris Prime Observatory", "x": -80.81, "y": -70.3, "z": 0.55, "note": null}

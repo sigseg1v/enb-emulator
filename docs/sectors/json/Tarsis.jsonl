@@ -1,0 +1,30 @@
+{"type": "hidden-nav-point", "name": "Lancearate Malthas", "x": -59.66, "y": -41.34, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Tarsis Defense 1", "x": -74.96, "y": -44.02, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Tarsis Defense 2", "x": 38.25, "y": -113.21, "z": 0.0, "note": null}
+{"type": "planet", "name": "Tarsis", "x": -152.29, "y": -321.55, "z": 100.0, "note": null}
+{"type": "moon", "name": "Brattus", "x": 29.18, "y": -25.93, "z": 6.15, "note": null}
+{"type": "moon", "name": "Leviticus", "x": -58.56, "y": 103.54, "z": 3.0, "note": null}
+{"type": "nav-point", "name": "Tarsis Resource Belt", "x": 86.09, "y": -111.05, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Shang Lo Lan", "x": 109.16, "y": 77.06, "z": -1.91, "note": null}
+{"type": "nav-point", "name": "Red Dragon Hideout", "x": 109.84, "y": 35.88, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Red Dragon Camp", "x": 134.19, "y": -18.56, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Pax Veritas", "x": -26.8, "y": -18.72, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Octavius´ Rise", "x": 102.77, "y": 32.97, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Tarsis 4", "x": 28.46, "y": -119.38, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Tarsis 3", "x": 3.35, "y": -100.84, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Tarsis 2", "x": -32.78, "y": -78.21, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Tarsis 1", "x": -60.33, "y": -38.0, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Promethicus 3", "x": -48.32, "y": 52.84, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Promethicus 2", "x": -36.99, "y": 16.02, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Promethicus 1", "x": -44.45, "y": -18.22, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Primus Gate 2", "x": 104.67, "y": -144.03, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Primus Gate 1", "x": 65.37, "y": -133.73, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Brattus 1", "x": 19.57, "y": -58.16, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Ide´s Rock", "x": 111.04, "y": -51.07, "z": 0.6, "note": null}
+{"type": "nav-point", "name": "Cimber´s Threat", "x": 122.85, "y": 55.43, "z": -0.51, "note": null}
+{"type": "nav-point", "name": "Cassius´ Will", "x": 109.38, "y": 6.39, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Casca´s Vault", "x": 111.93, "y": -22.94, "z": 0.36, "note": null}
+{"type": "nav-point", "name": "Brutus´ Hand", "x": 102.36, "y": -79.59, "z": -0.51, "note": null}
+{"type": "gate", "name": "Sector Gate to Primus", "x": 118.39, "y": -151.62, "z": 0.0, "note": null}
+{"type": "class-specific-gate", "name": "System Gate to Sol", "x": -93.26, "y": -9.63, "z": 0.0, "note": "Only for Progen Warrior (PW)"}
+{"type": "station", "name": "Arx Tiberius", "x": -76.58, "y": -65.74, "z": 18.35, "note": null}

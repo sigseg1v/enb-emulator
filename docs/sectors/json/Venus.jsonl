@@ -1,0 +1,30 @@
+{"type": "hidden-nav-point", "name": "Abandoned Nav 1", "x": 103.86, "y": -15.0, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Abandoned Nav 2", "x": 101.09, "y": -22.24, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Abandoned Nav 3", "x": 95.59, "y": -27.14, "z": 0.06, "note": null}
+{"type": "hidden-nav-point", "name": "ECS Amazon", "x": 46.73, "y": -33.62, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Himitsu Maru", "x": 54.98, "y": -17.66, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Pax Ayopa", "x": 34.61, "y": -19.31, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Venus Foreman", "x": 116.63, "y": 28.99, "z": 0.0, "note": null}
+{"type": "hidden-nav-point", "name": "Chavez Research Facility", "x": 41.31, "y": -99.38, "z": 0.0, "note": null}
+{"type": "hidden-gate", "name": "High Atmosphere Accelerator", "x": 105.09, "y": -7.89, "z": 0.0, "note": null}
+{"type": "planet", "name": "Venus", "x": 81.59, "y": -8.03, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Venus Highport 5", "x": 40.85, "y": -44.08, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Venus Highport 4", "x": 32.78, "y": -67.2, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Venus Highport 3", "x": 14.25, "y": -82.98, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Venus Highport 2", "x": -7.41, "y": -93.63, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Venus Highport 1", "x": -30.71, "y": -101.7, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Mercury 3", "x": 5.54, "y": 78.12, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Mercury 2", "x": -14.73, "y": 91.89, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Mercury 1", "x": -34.71, "y": 105.05, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Commerce Lane 4", "x": 24.91, "y": 65.62, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Commerce Lane 3", "x": 24.2, "y": 41.93, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Commerce Lane 2", "x": 24.44, "y": 17.76, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Commerce Lane 1", "x": 24.1, "y": -5.8, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Ceres 3", "x": 44.78, "y": 29.57, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Ceres 2", "x": 69.2, "y": 29.74, "z": 0.0, "note": null}
+{"type": "nav-point", "name": "Nav Ceres 1", "x": 93.44, "y": 29.74, "z": 0.0, "note": null}
+{"type": "wormhole-exit", "name": "Vineri Stamen", "x": 0.0, "y": 0.0, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Asteroid Belt Beta", "x": -51.69, "y": -111.9, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Mercury", "x": -55.13, "y": 117.61, "z": 0.0, "note": null}
+{"type": "gate", "name": "Sector Gate to Ceres", "x": 116.31, "y": 34.04, "z": 0.0, "note": null}
+{"type": "station", "name": "Venera Highport", "x": 45.44, "y": -22.25, "z": 0.0, "note": null}
