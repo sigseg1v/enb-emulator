@@ -132,6 +132,16 @@ CLOSE_MARGIN = float(os.environ.get("ENB_CLOSE_MARGIN", "2.0"))
 # font misreads "000" as "9"), so distance-not-closing -- NOT the speed readout -- is
 # the authoritative stall signal. At POLL_SLEEP=2s this is ~8s before the first re-warp.
 STALL_POLLS = int(os.environ.get("ENB_STALL_POLLS", "4"))
+# A WRECK freezes the ship in place (speed 000, distance frozen) while the W/D/C nav
+# cycle STILL flips target names -- so the per-target `best`/`flat` stall window keeps
+# resetting (best_k changes every poll) and NEVER fires. That is exactly how a dead
+# hull spun the survey for 89 polls at a frozen 35.05k. So we check the wreck on a
+# signal the target-flip cannot mask: the ship "isn't moving". "Not moving" = the
+# ABSOLUTE distance (tracked independent of which node the HUD is targeting) has not
+# improved for FROZEN_POLLS polls, OR the speed readout is a confirmed 0. rescue.sh's
+# detect is fast + ALIVE-cheap, so firing it liberally on a frozen ship is safe; the
+# real defect was never firing it at all.
+FROZEN_POLLS = int(os.environ.get("ENB_FROZEN_POLLS", "4"))
 MATCH_MIN = 0.55           # below this, treat the OCR as garbage / non-nav
 CYCLE_MAX = 40             # safety cap on a single cycle traversal
 MAX_ATTEMPTS = int(os.environ.get("ENB_MAX_ATTEMPTS", "2"))   # warps before skip
@@ -218,8 +228,13 @@ class HangDetected(Exception):
     from inside the drive -- main() exits EXIT_HANG so the wrapper re-logs-in."""
 
 
-def sh(*args, timeout=120):
-    return subprocess.run(args, cwd=HERE, capture_output=True, text=True, timeout=timeout)
+def sh(*args, timeout=120, env=None):
+    runenv = None
+    if env:
+        runenv = dict(os.environ)
+        runenv.update(env)
+    return subprocess.run(args, cwd=HERE, capture_output=True, text=True,
+                          timeout=timeout, env=runenv)
 
 
 def client_hung():
@@ -512,27 +527,26 @@ def in_danger(xyz, zones, radius=DANGER_RADIUS):
 
 
 def check_wreck():
-    """Return (winx, winy) of the Request-Tow button if wrecked, else None."""
-    r = sh("bash", os.path.join(HERE, "wreck.sh"))
-    for line in r.stdout.splitlines():
-        if line.startswith("WRECKED"):
-            parts = line.split()
-            if len(parts) >= 3:
-                return int(parts[1]), int(parts[2])
-            return (None, None)
-    return None
+    """True if the ship is WRECKED. Authoritative, deterministic detector: rescue.sh
+    fuzzy-matches the amber "<<Distress" HUD label, the one wreck signal that is
+    independent of every other UI element (map/comm open or not). The OLD wreck.sh
+    OCR'd the whole screen for the word "Tow"/"Request Tow" -- which the real death
+    UI NEVER shows (it shows "<<Distress" + a comm option "I need a tow") -- so it
+    returned ALIVE on a wrecked ship and the survey spun 89 polls on a dead hull."""
+    r = sh("bash", os.path.join(HERE, "rescue.sh"), "detect")
+    return r.stdout.strip().splitlines()[-1:] == ["WRECKED"]
 
 
 def handle_wreck(sector):
     """We were destroyed. Record the death location + a permanent danger zone (never
-    conclude a warp within DANGER_RADIUS of it), Request Tow back to station, and
-    wait to respawn. Returns True if it handled a wreck."""
-    btn = check_wreck()
-    if btn is None:
+    conclude a warp within DANGER_RADIUS of it), run the deterministic tow-recovery
+    state machine (rescue.sh: close map if open -> click "I need a tow" -> wait for
+    <<Distress to clear), then undock. Returns True if it handled a wreck."""
+    if not check_wreck():
         return False
     loc = _dest["xyz"]
     where = _dest["name"] or "unknown location"
-    print(f"  ## WRECKED near {where} {loc} -- recording danger zone + Request Tow",
+    print(f"  ## WRECKED near {where} {loc} -- recording danger zone + tow recovery",
           flush=True)
     # wreck DETECTED: record time (logaction stamps it) + location.
     log(sector, "wreck-detected", f"destroyed near {where} {loc}")
@@ -544,17 +558,18 @@ def handle_wreck(sector):
         if _dest["name"]:
             skip_node(sector, _dest["name"],
                       f"death zone -- wrecked here; warp past only")
-    # click Request Tow (OCR-located, or ENB_TOW_BTN-pinned)
-    bx, by = btn
-    if bx is not None:
-        # TOW clicked: record time (logaction stamps it) + location.
-        log(sector, "tow-clicked", f"Request Tow at ({bx},{by}) {_loc_str()}")
-        sh("bash", os.path.join(HERE, "click-map.sh"), str(bx), str(by))
-    # wait to respawn at the station, then re-open the map
-    for _ in range(40):
-        time.sleep(2)
-        if check_wreck() is None:
-            break
+    # Run the deterministic recovery state machine. It closes an occluding map ONCE
+    # (only if open), fuzzy-locates and clicks "I need a tow", and waits (bounded) for
+    # the <<Distress label to clear -- towing the ship back to its station (docked).
+    log(sector, "tow-clicked", f"requesting tow {_loc_str()}")
+    try:
+        sh("bash", os.path.join(HERE, "rescue.sh"), "rescue",
+           timeout=300, env={"ENB_RESCUE_SECTOR": sector})
+    except subprocess.TimeoutExpired:
+        print("  ## rescue.sh timed out -- aborting drive for operator handoff",
+              flush=True)
+        log(sector, "tow-timeout", "rescue.sh exceeded 300s; aborting")
+        sys.exit(EXIT_HANG)
     log(sector, "tow-done", "respawned at last station")
     # A tow drops us DOCKED in a station bay (no warp cluster) -- OR sometimes straight
     # back into space. We must launch back into space or the whole sweep wedges
@@ -946,7 +961,16 @@ def relocate_far(sector):
     # reveals/visits new navs EN ROUTE. That is reposition-to-extend-range via the cycle
     # -- the fast, screen-only alternative to the slow map-click probe -- NOT re-exploring
     # a visited node as a destination. Planets are skipped (far edge + barren).
-    cand = [nv for nv in navs if by.get(nv["key"], {}).get("type") != "planet"]
+    # Exclude PLANETS (far + barren), DEATH-SKIPPED navs, and anything inside a known
+    # danger zone. The reposition-toward-visited fallback below otherwise picks the
+    # FARTHEST candidate as a waypoint, and a far death-zone nav (Krakow on AkeronsGate)
+    # would drag the healthy ship straight back into the spot that already wrecked it.
+    # A skipped nav carries skipped=True; a danger zone is a recorded death circle.
+    zones = danger_zones(sector)
+    cand = [nv for nv in navs
+            if by.get(nv["key"], {}).get("type") != "planet"
+            and not by.get(nv["key"], {}).get("skipped")
+            and not in_danger(node_xyz(by, nv["key"]), zones)]
     if not cand:
         return False
     unvis = [nv for nv in cand if not is_done_node(by, nv["key"])]
@@ -994,6 +1018,12 @@ def _warp_to_impl(sector, want_key, want_name):
     blanks = 0
     rewarps = 0
     seen_enroute = set()
+    # ABSOLUTE movement tracker (target-flip-independent) -- see FROZEN_POLLS. This is
+    # the wreck/not-moving signal that the per-target `best` cannot give us, because a
+    # wreck keeps flipping the targeted node (so best_k changes and best resets) while
+    # the ship sits dead in place.
+    min_any = 1e9    # lowest distance seen this warp toward ANY node
+    frozen = 0       # consecutive polls with no absolute improvement on min_any
     for p in range(WARP_POLLS):
         name, ratio, dist = read_matched(sector, retry_low=False)
         if dist is None or not name:
@@ -1030,6 +1060,22 @@ def _warp_to_impl(sector, want_key, want_name):
         print(f"  poll {p:02d} {name:28} {dist:8.2f}k  best={best:8.2f} "
               f"flat={flat}/{STALL_POLLS} rw={rewarps}/{REWARP_MAX} spd={spd_s} {on_target}",
               flush=True)
+        # WRECK / not-moving check -- EVERY poll the ship isn't moving (owner: "check
+        # every time the ship isn't moving distance or speed"). Track ABSOLUTE distance
+        # so a wreck's target-name flipping cannot mask a frozen hull (the per-target
+        # `best` resets on every flip and never stalls). If the absolute distance has
+        # not improved for FROZEN_POLLS, OR the speed reads a confirmed 0, and we are
+        # NOT simply arriving (dist still > VISIT_K), run the deterministic wreck
+        # detector. handle_wreck returns False fast when ALIVE, so this is cheap.
+        if dist < min_any - CLOSE_MARGIN:
+            min_any = dist
+            frozen = 0
+        else:
+            frozen += 1
+        not_moving = (spd == 0) or (frozen >= FROZEN_POLLS)
+        if not_moving and dist > VISIT_K:
+            if handle_wreck(sector):
+                return False
         # en-route pickup: any KNOWN nav we pass within ENROUTE_K (12k) on the way. We
         # are actively warping here (this is the warp poll loop), and the ship blows
         # PAST off-path navs fast, so the closest poll to a passing nav may only read

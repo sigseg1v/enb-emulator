@@ -54,6 +54,62 @@ in_space() {
 
 if in_space; then echo "IN-SPACE"; elog "already in space"; exit 0; fi
 
+# --- "Exit Starbase" button (the post-TOW concourse launch path) --------------
+# A Request-Tow does NOT drop us on the hangar catwalk -- it drops us in the
+# station CONCOURSE (avatar standing, ship parked behind), whose HUD carries an
+# "Exit Starbase" button (blue up-arrow + label, top-centre). That button, NOT a
+# hull click, launches from here -- so the rotate-and-click-hull sweep below can
+# never undock a towed ship (it stranded the automated wreck recovery). Fuzzy-OCR
+# the label and click it. Prints "x y" window-rel if found, nothing otherwise.
+exit_starbase_xy() {
+    python3 - "$1" <<'PY'
+import sys, subprocess, re
+from PIL import Image
+im = Image.open(sys.argv[1]).convert("RGB")
+g = im.convert("L").resize((im.width*2, im.height*2)); g.save("/tmp/_exitocr.png")
+out = subprocess.run(["tesseract","/tmp/_exitocr.png","stdout","tsv"],
+                     capture_output=True, text=True).stdout
+def lev(s,t):
+    if s==t: return 0
+    if not s or not t: return len(s or t)
+    prev=list(range(len(t)+1))
+    for i,cs in enumerate(s,1):
+        cur=[i]
+        for j,ct in enumerate(t,1):
+            cur.append(min(prev[j]+1,cur[-1]+1,prev[j-1]+(cs!=ct)))
+        prev=cur
+    return prev[-1]
+lines={}
+for ln in out.splitlines()[1:]:
+    f=ln.split("\t")
+    if len(f)<12: continue
+    try: conf=float(f[10])
+    except ValueError: continue
+    word=re.sub(r'[^A-Za-z]','',f[11])
+    if conf<=0 or not word: continue
+    key=(f[2],f[4],f[5]); l,t,w,h=(int(f[i]) for i in (6,7,8,9))
+    lines.setdefault(key,[]).append((l,t,w,h,word.lower()))
+for words in lines.values():
+    norm=[w for *_,w in words]
+    if any(lev(n,"starbase")/max(len(n),8)<=0.34 for n in norm):
+        xs=[l+w/2 for l,t,w,h,_ in words]; ys=[t+h/2 for l,t,w,h,_ in words]
+        print(int(sum(xs)/len(xs)/2), int(sum(ys)/len(ys)/2)); sys.exit(0)
+sys.exit(1)
+PY
+}
+
+xdotool windowactivate "$WID" 2>/dev/null; xdotool windowraise "$WID" 2>/dev/null; sleep 0.4
+for _try in 1 2 3; do
+    shot="$(explore_shot "")" || break
+    xy="$(exit_starbase_xy "$shot" || true)"
+    [ -z "$xy" ] && break          # not the concourse layout -> fall through to hangar sweep
+    set -- $xy
+    elog "Exit Starbase button at ($1,$2) -- clicking to launch"
+    bash "$SKILL_DIR/click-map.sh" "$1" "$2" >/dev/null 2>&1
+    sleep 6
+    if in_space; then echo "UNDOCKED"; elog "launched via Exit Starbase"; exit 0; fi
+done
+
 # --- find the ship hull in a screenshot (right half, clear of chat) ----------
 # Prints "x y" window-relative if a ship is detected, nothing otherwise.
 find_ship() {
