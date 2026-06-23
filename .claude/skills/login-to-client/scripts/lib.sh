@@ -90,7 +90,20 @@ win_by_class() {
     return 1
 }
 
-client_win()   { win_by_class 'client.exe'; }
+# Resolve the client window id, RETRYING briefly. Scene transitions (dock -> concourse,
+# undock, gate crossing) momentarily unmap/remap the WINE window, so a single search can
+# transiently miss it and return empty -- and an empty id flowing into a screenshot is
+# exactly what triggers the interactive `import` X-grab lockup (see shot_win). Retrying
+# for ~1.5s rides out the transition instead of conceding "no window" on a blink. A
+# genuinely dead/closed client still fails after the retries.
+client_win() {
+    local i id
+    for i in 1 2 3 4 5 6; do
+        id="$(win_by_class 'client.exe')" && { printf '%s\n' "$id"; return 0; }
+        sleep 0.25
+    done
+    return 1
+}
 launcher_win() {
     # Avalonia reports WM_CLASS "FreyaLauncher"; fall back to the title.
     local id; id="$(win_by_class 'FreyaLauncher')" && { echo "$id"; return 0; }
@@ -158,7 +171,20 @@ send_key()  { xdotool key "$1"; }
 shot() { local out="$1"; [ -x "$SHOTSH" ] || { err "no screenshot.sh"; return 1; }; "$SHOTSH" "$out" >/dev/null 2>&1; }
 
 # Screenshot an arbitrary window id (e.g. the launcher) -> path.
-shot_win() { import -window "$1" "$2" >/dev/null 2>&1; }
+# HARD GUARD: never run `import -window` with an EMPTY id. ImageMagick then drops into
+# interactive region-select mode -- it XGrabServer's the display, shows a "+" crosshair,
+# and FREEZES the entire desktop (nothing renders) until you click or it is killed. An
+# empty id means the caller's window lookup (client_win) failed; that is a bug, so
+# refuse it rather than lock the screen. Also bound the capture with a timeout and reap
+# any lingering `import` (it is what holds the grab) so a window destroyed mid-grab
+# cannot wedge X either.
+shot_win() {
+    local id="$1" out="$2"
+    [ -n "$id" ] || { err "shot_win: empty window id -- refusing (would interactive-grab X)"; return 1; }
+    timeout -k 2 10 import -window "$id" "$out" >/dev/null 2>&1 && return 0
+    pkill -9 import 2>/dev/null
+    return 1
+}
 
 # ---- waiting ----------------------------------------------------------------
 # Poll a command until it succeeds or timeout (seconds). Usage:
