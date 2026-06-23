@@ -623,6 +623,19 @@ static HRESULT WINAPI hk_Present(IDirect3DDevice8* dev, const RECT* src, const R
         logf("overlay: Present hook FIRED -- D3D8 present path live");
     }
     g_present_n.fetch_add(1, std::memory_order_relaxed);
+    // Never touch the device while it is not in a drawable state. On alt-tab out
+    // of fullscreen-exclusive D3D8 the device becomes D3DERR_DEVICELOST; sampling
+    // the backbuffer or issuing our 2D draws then is invalid and a crash vector.
+    // D3DERR_DEVICENOTRESET means the game is about to Reset() -- drop our cached
+    // GPU objects so ensure_caches rebuilds them cleanly afterward. Either way we
+    // still forward the real Present so the game's own lost-device recovery runs
+    // unchanged.
+    HRESULT coop = dev->TestCooperativeLevel();
+    if (coop != D3D_OK) {
+        if (coop == D3DERR_DEVICENOTRESET)
+            release_caches();
+        return real_Present(dev, src, dst, wnd, dirty);
+    }
     sample_screen(dev);
     draw_frame(dev);
     return real_Present(dev, src, dst, wnd, dirty);
