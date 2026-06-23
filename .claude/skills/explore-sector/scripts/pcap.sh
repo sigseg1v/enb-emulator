@@ -34,6 +34,23 @@ mkdir -p "$OUTDIR"; OUTDIR="$(cd "$OUTDIR" && pwd)"
 
 action="${1:-}"; sector="${2:-}"
 
+# Capture is for the LIVE reference server ONLY -- NEVER for a local freya run
+# (owner rule, 2026-06-22). explore-live.sh forces ENB_PCAP=0 the moment it
+# detects the docker proxy, but that downgrade only matters if THIS script
+# honours it: drive.py calls `pcap.sh ensure <sector>` unconditionally, so the
+# gate has to live here, at the single chokepoint every capture-starting action
+# passes through. With ENB_PCAP=0 the start/rotate/ensure actions no-op (exit 0,
+# no tcpdump ever spawns); `stop` still runs so a capture left over from a prior
+# live run can always be torn down.
+if [ "${ENB_PCAP:-1}" = 0 ]; then
+    case "$action" in
+        start|rotate|ensure)
+            echo "[pcap] disabled (ENB_PCAP=0) -- not capturing '$sector' (local freya run)" >&2
+            exit 0
+            ;;
+    esac
+fi
+
 # True only if the passwordless worker is actually callable (installed + sudoers).
 worker_ready() { [ -x "$WORKER" ] && sudo -n "$WORKER" status "$OUTDIR" >/dev/null 2>&1; }
 
