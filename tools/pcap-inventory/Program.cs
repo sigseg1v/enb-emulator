@@ -61,8 +61,12 @@ var relationships = new Dictionary<int, (int reaction, bool attacking)>();
 var world = new SectorWorld();
 var reassemblers = new Dictionary<string, SectorStreamReassembler>();
 
+var readDatagrams = PcapReader.IsClassicPcap(inputPath)
+    ? PcapReader.Read(inputPath)
+    : PcapNgReader.Read(inputPath);
+
 int datagrams = 0, frames = 0;
-foreach (var dg in PcapNgReader.Read(inputPath))
+foreach (var dg in readDatagrams)
 {
     datagrams++;
     if (!reassemblers.TryGetValue(dg.FlowKey, out var ra))

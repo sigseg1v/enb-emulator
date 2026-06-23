@@ -5,7 +5,7 @@
 #
 # undock.sh -- launch the ship back into space when it is DOCKED at a station.
 #
-# Owner-taught method (2026-06-21), validated live:
+# Owner-taught method (2026-06-21, extended 2026-06-23), validated live:
 #
 #  * DOCKED DETECTION: the bottom-centre warp cluster (warp dial + speed digits +
 #    the green/red/blue bars + the 1..6 action circles) is HIDDEN while docked and
@@ -14,20 +14,31 @@
 #
 #  * STATION LAYOUT: you zone into a T-shaped hangar at one of 3 random catwalk
 #    positions/orientations. The station EXIT DOOR is at the top-middle of the T
-#    (DO NOT GO THERE). Your SHIP is always parked at the bottom-right of the T.
-#    To leave you face the ship and LEFT-CLICK its hull.
+#    (DO NOT GO THERE). Your SHIP is parked on the hangar deck. You may zone in on
+#    the FAR arm of the T, too far to board from a standing position -- so seeing
+#    the ship is not enough, we have to WALK to it (see APPROACH below).
 #
 #  * FINDING THE SHIP: avatar turns with the Left/Right arrow keys (keyboard, sent
-#    to the activated client window -- this is the one place we use keys, the warp
-#    orb etc. are still clicks). We ROTATE RIGHT in fixed batches until the ship
-#    comes into view on the RIGHT HALF of the screen, CLEAR of the chat overlay in
-#    the upper-left. The ship is unmistakable: a hull flanked by a GREEN and a RED
-#    nav light with a bright cyan/white engine plume below it. If we rotate past it
-#    (it slides off to the left), we nudge LEFT to bring it back; fine steps of 5.
+#    to the activated client window -- the warp orb etc. are still clicks). We
+#    ROTATE RIGHT in fixed batches until the ship comes into view, CLEAR of the
+#    chat overlay in the upper-left. The ship is unmistakable: a hull flanked by a
+#    GREEN and a RED nav light. The detection is colour-only: a saturated green
+#    blob + a saturated red blob, roughly level and wingtip-spaced apart -- a pair
+#    the station's white light-strips never produce. The hull is their midpoint.
 #
-#  * LAUNCH: click the hull centre (between the nav lights, above the plume) -- NOT
-#    the engine glow, NOT the chat box. Then re-check the warp-speed OCR; digits
-#    back == we are in space == undocked.
+#  * APPROACH (the piece that makes a FAR ship reachable): rotating alone never
+#    closes distance. There is NO keyboard walk that lands under XTEST here; the
+#    one forward-move input that works is HOLDING THE RIGHT MOUSE BUTTON at screen
+#    centre (~7s bursts -- owner, 2026-06-23). So we loop: re-detect the ship, TURN
+#    to centre the hull (~1 arrow key per 30px of horizontal error), CLICK the hull
+#    (boards it once we are in range), and if that did not undock, WALK FORWARD one
+#    burst and repeat. Re-detecting every iteration self-corrects an overshoot (the
+#    ship slides off-centre as we move); if it leaves view entirely we rotate to
+#    reacquire.
+#
+#  * LAUNCH: clicking the hull centre (between the nav lights) while in range boards
+#    the ship and drops us into space. Then the warp-speed OCR reads digits == we
+#    are in space == undocked.
 #
 # Prints "UNDOCKED" on success, "IN-SPACE" if already in space, "FAILED" otherwise.
 set -uo pipefail
@@ -118,12 +129,15 @@ import sys
 from PIL import Image
 im = Image.open(sys.argv[1]).convert("RGB"); w, h = im.size
 px = im.load()
-# Chat overlay lives in the upper-left; ignore it entirely. Search the right
-# portion and upper 2/3 where the parked ship sits.
-x0 = int(w*0.40); y1 = int(h*0.70)
+# Scan the whole frame (upper ~72%). As we walk toward the ship it can sit centre
+# or even LEFT of us, so we cannot restrict to the right half (the old bug that
+# made a far ship unreachable). Exclude only the chat overlay box in the upper-left,
+# whose text can flash saturated colours.
+y1 = int(h*0.72)
 reds=[]; greens=[]
 for y in range(0, y1, 3):
-    for x in range(x0, w, 3):
+    for x in range(0, w, 3):
+        if y < int(h*0.20) and x < int(w*0.45): continue
         r,g,b = px[x,y]
         if max(r,g,b) < 70: continue
         if r>150 and r>g+50 and r>b+50: reds.append((x,y))
