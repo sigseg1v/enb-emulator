@@ -621,6 +621,10 @@ bool ObjectManager::CheckNavRanges(Player *player)
     bool unexplored_navs = false;
 	bool object_effect;
     float scan_range = (float)player->ShipIndex()->CurrentStats.GetScanRange();
+    // Proximity reveal radius is 50% wider than raw radar/scan range -- matches
+    // the live reference server's observed nav-discovery distance while flying
+    // through a sector (PB-22 reveal, owner live comparison 2026-06-23).
+    const float reveal_scale = 1.5f;
 
     for (itrOList = m_StaticSectorList.begin(); itrOList < m_StaticSectorList.end(); ++itrOList) 
     {
@@ -638,8 +642,8 @@ bool ObjectManager::CheckNavRanges(Player *player)
 				range = obj->RangeFrom(player->Position());
                 if (hidden)
                 {
-                    if ( (obj->AppearsInRadar() && range < (obj->RadarRange() + scan_range) ) || //if this is a minimap object, uncover as '?' at 'RadarRange + scanrange'
-                         (range < (obj->Signature())) ) //if it's not minimap, uncover when it's in visual range
+                    if ( (obj->AppearsInRadar() && range < (obj->RadarRange() + scan_range) * reveal_scale ) || //if this is a minimap object, uncover as '?' at 1.5x 'RadarRange + scanrange'
+                         (range < (obj->Signature()) * reveal_scale) ) //if it's not minimap, uncover at 1.5x visual range
                     {               
                         //object is exposed
                         obj->SetEIndex(player->ExposedNavList());

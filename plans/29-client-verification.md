@@ -2533,6 +2533,27 @@ moot; the SOLVED block above is the truth):**
   entry gate -- investigate there rather than reverting this.
 - **Setup**: `just rebuild server` (done) then `just play-local`, fresh char.
 
+### [ ] CV-PB22b -- nav proximity reveal radius widened 1.5x (PB-22)
+
+- **What changed**: `CheckNavRanges` (server/src/ObjectManager.cpp:613) now
+  reveals a hidden nav at 1.5x the prior proximity -- both the radar branch
+  `(RadarRange + scan_range) * 1.5f` and the visual branch `Signature() * 1.5f`
+  (new `reveal_scale = 1.5f` constant). Builds on CV-PB22's proximity reveal.
+- **Primary source**: owner live comparison (2026-06-23) -- the prior
+  `RadarRange + scan_range` revealed navs noticeably later than the live
+  reference server; 1.5x brings discovery distance in line with live.
+- **Why the real client is needed**: the CLI cannot fly a ship across a sector
+  to observe at what distance a "?" node pops; only the real client confirms
+  navs now reveal at the wider, live-matching range (and that nothing reveals
+  the entire sector at once -- the CV-PB22 entry-gate behaviour is unchanged).
+- **What to verify (real client)**:
+  1. **Fresh char, never-visited sector**: still NO "?" nodes at entry for navs
+     you have never been near (the 1.5x only changes the *fly-by* reveal radius,
+     not the entry gate).
+  2. **Fly toward a nav**: the "?" node should now appear ~50% farther out than
+     before, matching how early it appears on the live server.
+- **Setup**: `just rebuild server` then `just play-local`, fresh char.
+
 ### [ ] CV-PB32 -- Swooping Eagle "Default" lvl-0 crash-mob (PB-32)
 
 - **What changed**: (1) NULL-data guards in `server/src/MOBClass.cpp`
