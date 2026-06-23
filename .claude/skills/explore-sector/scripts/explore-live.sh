@@ -83,14 +83,23 @@ if ! CLIENT_WIN="$(client_win)"; then
 fi
 note "client.exe window: $CLIENT_WIN"
 
-# The proxy must be running -- the live client talks through it, and the capture
-# scopes to it. pgrep -x matches the exact comm name the pcap worker resolves.
-if ! pgrep -x -- "$ENB_EXPLORE_PROXY_NAME" >/dev/null 2>&1; then
-    die "proxy '$ENB_EXPLORE_PROXY_NAME' is not running. Start it (the client
-       connects through it); without it the client is not online and the
-       capture has nothing to record."
+# The proxy must be running -- the client talks through it. WHICH proxy is up
+# also decides the run mode and whether we capture:
+#   * WINE Net7Proxy.exe running  -> LIVE run against the real reference server;
+#     capture is the point, keep ENB_PCAP as configured.
+#   * docker 'net7proxy' running (no WINE proxy) -> LOCAL run against our own
+#     freya stack. Owner rule (2026-06-22): NEVER pcap a local freya run --
+#     capture is for the live server only. Force ENB_PCAP=0 and point the proxy
+#     name at the docker proxy so the rest of the survey is unaffected.
+if pgrep -x -- "$ENB_EXPLORE_PROXY_NAME" >/dev/null 2>&1; then
+    note "proxy running (LIVE): $ENB_EXPLORE_PROXY_NAME -- capture stays ENB_PCAP=$ENB_PCAP"
+elif pgrep -x net7proxy >/dev/null 2>&1 || pgrep -f '/app/net7proxy' >/dev/null 2>&1; then
+    export ENB_EXPLORE_PROXY_NAME=net7proxy ENB_PCAP=0
+    note "WINE proxy down but docker net7proxy is up -> LOCAL freya run: capture disabled (ENB_PCAP=0)"
+else
+    die "no proxy running (neither WINE '$ENB_EXPLORE_PROXY_NAME' nor docker
+       net7proxy). Start the proxy the client connects through, then re-run."
 fi
-note "proxy running: $ENB_EXPLORE_PROXY_NAME"
 
 # Capture is the POINT of a live survey, so a broken capture is a hard stop here
 # rather than a silent empty captures/ dir discovered hours later.
