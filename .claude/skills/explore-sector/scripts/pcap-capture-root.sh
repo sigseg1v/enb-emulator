@@ -86,6 +86,23 @@ case "$action" in
         fi
         pid="$(target_pid "$pname")" || die "capture target not found (${pname:-dockerized freya proxy})"
         [ -n "$pid" ] && [ "$pid" != 0 ] || die "could not resolve PID for capture target '${pname:-freya}'"
+        # Scope the capture. A DOCKERIZED proxy lives in an ISOLATED netns, so a broad
+        # "udp or tcp" there already yields just the proxy's two legs. A HOST WINE proxy
+        # (Net7Proxy.exe) shares the HOST netns, so the same broad filter would sweep up
+        # ALL host traffic (ssh, vpn, dns, https) and bury the game packets. For a host
+        # proxy we therefore scope to the proxy<->server conversation by reading the
+        # server address off the proxy's OWN command line (/ADDRESS:<ip>) at runtime --
+        # the IP is never written to any committed file. Falls back to the broad filter
+        # if the proxy exposes no address (older invocations / different launch form).
+        filter="udp or tcp"
+        case "$pname" in
+            ""|freya|Freya|FREYA|proxy|FreyaProxy) : ;;   # isolated container netns
+            *)
+                saddr="$(tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null \
+                         | sed -n 's#^/ADDRESS:\([0-9.][0-9.]*\)$#\1#p' | head -1)"
+                [ -n "$saddr" ] && filter="host $saddr"
+                ;;
+        esac
         ts="$(date -u +%Y%m%dT%H%M%SZ)"
         out="$outdir/$(safe_token "$sector")__${ts}.pcap"
         # setsid: new session detached from sudo's pty (their sudoers sets use_pty,
@@ -96,7 +113,7 @@ case "$action" in
         setsid sh -c '
             echo $$ > "'"$pidf"'"
             exec nsenter -t '"$pid"' -n \
-                 tcpdump -i any -nn -s0 -U -Z "'"$owner"'" -w "'"$out"'" "udp or tcp"
+                 tcpdump -i any -nn -s0 -U -Z "'"$owner"'" -w "'"$out"'" "'"$filter"'"
         ' </dev/null >/dev/null 2>&1 &
         # give the inner shell a moment to write the pidfile + tcpdump to open the file
         for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$out" ] || [ -f "$pidf" ] && break; sleep 0.2; done

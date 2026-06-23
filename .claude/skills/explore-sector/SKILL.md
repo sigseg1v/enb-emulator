@@ -19,6 +19,42 @@ the things the scripts can't do alone: reading a sector name, deciding a gate
 route, and -- only when the ship is SEVERELY stuck -- looking at a map screenshot
 to pick a marker by hand (the demoted fallback, below).
 
+## Quick start: "explore live" (the reliable entry point)
+
+When the owner says **"explore live"**, run ONE command:
+
+```bash
+bash .claude/skills/explore-sector/scripts/explore-live.sh
+```
+
+This is the unattended-safe path against a client the OWNER launched. It does
+NOT start our docker stack and never launches/kills the client (beyond the opt-in
+no-progress deadman). It expects the live client + `Net7Proxy.exe` already running
+under WINE, with the client sitting at the **character-select** screen -- the
+survey enters the character itself from there.
+
+`explore-live.sh` is just a thin, reliable wrapper around `survey.sh`:
+
+1. **Loads config from a gitignored `.env`** in the skill folder (next to this
+   file), so there are NO long inline env strings to remember and nothing to
+   re-export per run. Copy `.env.example` to `.env` once and fill it in
+   (character name + a persistent workdir outside the repo). The `.env` holds
+   only the values that vary per machine; every coordinate/threshold knob keeps
+   its baked-in default.
+2. **Forces the live-mode invariants**: `ENB_EXPLORE_MANUAL_CLIENT=1` (never
+   touch our stack), `ENB_EXPLORE_PROXY_NAME=Net7Proxy.exe` and `ENB_PCAP=1`
+   (capture the WINE proxy, one file per sector starting at the entry handshake).
+3. **Preflights and FAILS LOUD (exit 2) before driving anything** if a
+   precondition that has silently broken runs before is missing: no `.env`, no
+   character name / workdir, workdir not writable, X unreachable, no `client.exe`
+   window, the proxy not running, or (with `ENB_PCAP=1`) the capture worker not
+   installed. Each failure prints the exact fix.
+
+Then it hands off to `survey.sh`, which detects the sector, drives it, crosses a
+gate, and repeats. Resume a survey by re-running the same command (the workdir's
+ledgers mark completed sectors as done). The detailed per-sector mechanics below
+are unchanged -- `explore-live.sh` only removes the env/dir juggling.
+
 ## How navigation works: the W / D / C nav keys (PRIMARY method)
 
 The game has built-in keybinds that target nav nodes directly -- no map click, no
@@ -264,6 +300,7 @@ the window with `xdotool windowactivate --sync` and send them with `xdotool key`
 
 | script | what it does |
 |---|---|
+| `scripts/explore-live.sh [S] [drive args]` | **"explore live" entry point.** Loads the gitignored `.env`, forces live-mode invariants (manual client, WINE proxy, pcap), preflights every precondition (`.env`, char name, workdir, X, client window, proxy, capture worker) and exits 2 with the fix if one fails, then execs `survey.sh`. Use this for a live survey; no inline env needed. |
 | `scripts/enum_fast.py [--count N] [--sector S]` | **PRIMARY nav reader.** Drives the W/D nav-key cycle in ONE process holding ONE X connection: W-seed then a D-walk, grabbing only the name box via Xlib XGetImage (~0.6ms each), then OCRs every frame in a SINGLE tesseract montage pass. Prints `<rank>\t<raw>\t<canon>\t<ratio>` per slot in increasing-distance order. `drive.py` wraps it (`enum_navs`) and dedups by canonical name. |
 | `scripts/open-map.sh [out]` | (FALLBACK) ensure the sector map is open (toggle only if closed), click "+" to maximize, center on ship, zoom all the way out, screenshot, and crop to the large map body. Prints `FULL <png>` and `MAP <crop> <X0> <Y0>` so `winx = X0 + cropx`. Used only by the severely-stuck map fallback. |
 | `scripts/detect-nodes.py <full.png> [l t w h]` | find the nav-node markers on the map body and print `NODE <wx> <wy> <colour> <pixels>` centroids to click. An AID -- validate each by clicking + `read-navname.sh` and cross-ref `navdata.py list`. |

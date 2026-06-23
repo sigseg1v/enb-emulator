@@ -34,13 +34,16 @@
 #
 # Per round:
 #   1. Batch-enumerate the in-range nav cycle (W + D-walk + montage OCR) in distance
-#      order; dedup to the authoritative node names.
-#   2. Pick the target non-death-zone unvisited nav: FARTHEST while <50% of the sector
+#      order, with each nav's panel DISTANCE read in the same walk; dedup to the
+#      authoritative node names.
+#   2. Any enumerated nav already within ENROUTE_K (12k) is recorded visited right away
+#      -- no warp trip for a node we are already sitting next to. This is what keeps the
+#      ship moving instead of sitting minutes re-targeting near/unreachable navs.
+#   3. Pick the target non-death-zone unvisited nav: FARTHEST while <50% of the sector
 #      is done (long crossings bag many navs en-route for free), then NEAREST once >=50%
 #      is done (scattered remainder, avoids the late-run zigzag). Select it (W then D to
-#      it, verifying by NAME -- never by click-count, which drifts).
-#   3. Any in-range node already within 2k is recorded visited (the warp poll credits
-#      it on the first poll); en-route nodes within ENROUTE_K (5k) are bagged in transit.
+#      it, verifying by NAME -- never by click-count, which drifts). En-route nodes
+#      within ENROUTE_K are also bagged during the warp poll loop.
 #   4. Warp to the target (CLICK the warp orb), poll the panel distance until <=2k;
 #      re-warp if speed drops to 000 while still far.
 #   5. If nothing unvisited is in range, every nav within scanner range is visited ->
@@ -76,16 +79,26 @@ import gravity_wells  # noqa: E402
 SEED_KEY = os.environ.get("ENB_NAV_SEED", "w")
 NEXT_KEY = os.environ.get("ENB_NAV_NEXT", "d")
 PREV_KEY = os.environ.get("ENB_NAV_PREV", "c")
-ENUM_SETTLE = os.environ.get("ENB_ENUM_SETTLE", "0.13")   # per-key HUD repaint wait (batch walk)
+# Batch-enumeration capture tuning. enum_fast.py BURST-grabs the name+dist boxes
+# ENUM_BURST times spaced ENUM_GAP apart per slot (no blocking per-key settle), then
+# advances. The burst WINDOW (burst x gap) must span the HUD repaint (~0.13s) so the
+# next nav has drawn before the next D fires; oversampling + consecutive-dedup then
+# folds any stale frame away. burst*gap ~= 0.16s/slot, faster than the old
+# settle-then-grab-once which stalled re-grabbing on slow repaints.
+ENUM_GAP = os.environ.get("ENB_ENUM_GAP", "0.02")        # seconds between burst grabs
+ENUM_BURST = os.environ.get("ENB_ENUM_BURST", "8")       # name+dist grabs per slot
 VISIT_K = float(os.environ.get("ENB_VISIT_K", "8.0"))
-# En-route pickup threshold (owner, 2026-06-21: "if you are actively warping on a
-# segment and within 5k just mark it visited so we don't miss"). While in warp transit
-# the ship blows PAST other navs at high speed, so a poll may only ever read a passing
-# nav at ~3-5k -- waiting for the 2k target threshold misses navs we clearly flew
-# through. So a NON-TARGET nav seen within ENROUTE_K during the warp poll loop is
-# credited as visited. The TARGET still has to be reached at VISIT_K / MINAPPROACH_K --
-# this wider band is only for opportunistic en-route nodes, never for "arrived".
-ENROUTE_K = float(os.environ.get("ENB_ENROUTE_K", "5.0"))
+# En-route pickup threshold (owner, 2026-06-22: "consider visited already because it's
+# within 8k"). While in warp transit the ship blows PAST other navs at high speed, so a
+# poll may only ever read a passing nav at several k -- waiting for the 2k target
+# threshold misses navs we clearly flew through. So a NON-TARGET nav seen within
+# ENROUTE_K during the warp poll loop -- OR read within ENROUTE_K straight off the batch
+# enumeration -- is credited as visited (no warp trip needed for one already this close).
+# The TARGET still has to be reached at VISIT_K / MINAPPROACH_K; this band is only for
+# opportunistic already-near nodes. Owner 2026-06-23: widened to 1.5x the old 8k -- the
+# range-based discovery missed too many "?" navs the ship clearly flew past, so the
+# en-route discover/bag radius is now 12k (independent of VISIT_K, which stays 8k).
+ENROUTE_K = float(os.environ.get("ENB_ENROUTE_K", "12.0"))
 # A nav we approach but cannot physically get within VISIT_K of (its centre sits
 # inside a planet/station, or warp parks just short) counts as visited only once we
 # are THIS close and have clearly stopped closing. Anything farther that stops
@@ -93,7 +106,13 @@ ENROUTE_K = float(os.environ.get("ENB_ENROUTE_K", "5.0"))
 # "min-approach" visit at ANY distance, so a dropped warp at 200k got recorded as
 # done. Hard cap so that can never happen again.
 MINAPPROACH_K = float(os.environ.get("ENB_MINAPPROACH_K", "6.0"))
-REWARP_MAX = int(os.environ.get("ENB_REWARP_MAX", "3"))   # re-engage tries on a mid-transit stall
+# Re-engage tries on a mid-transit stall. A re-warp recovers a TOGGLE-cancelled warp
+# (one re-click re-engages), but when the ship is far and a re-warp moves it zero (the
+# orb does nothing at that range -- the distance reads identical across re-warps), more
+# clicks only burn ~12s each sitting still. So 1: confirm-and-give-up fast, then the
+# caller's attempt counter routes the nav to the map-click path. Owner, 2026-06-22:
+# "sitting minutes without warp is extremely dangerous" -- this bounds the worst flail.
+REWARP_MAX = int(os.environ.get("ENB_REWARP_MAX", "1"))
 WARP_POLLS = int(os.environ.get("ENB_WARP_POLLS", "90"))
 # In-flight warp-poll cadence. Each poll already costs ~0.5-1s (screenshot crop +
 # two tesseract reads), so the extra fixed sleep on top is what sets the period.
@@ -108,6 +127,11 @@ POLL_SLEEP = float(os.environ.get("ENB_POLL_SLEEP", "2.0"))
 # really in warp the distance falls by many k per poll, so a 2k floor clears easily and
 # filters noise. Below it we do not trust distance -- we read the authoritative speed.
 CLOSE_MARGIN = float(os.environ.get("ENB_CLOSE_MARGIN", "2.0"))
+# Polls of NO distance progress (no CLOSE_MARGIN drop) before we treat the warp as not
+# engaging and act (re-warp, then skip). The speed OCR is unreliable (octagonal-zero
+# font misreads "000" as "9"), so distance-not-closing -- NOT the speed readout -- is
+# the authoritative stall signal. At POLL_SLEEP=2s this is ~8s before the first re-warp.
+STALL_POLLS = int(os.environ.get("ENB_STALL_POLLS", "4"))
 MATCH_MIN = 0.55           # below this, treat the OCR as garbage / non-nav
 CYCLE_MAX = 40             # safety cap on a single cycle traversal
 MAX_ATTEMPTS = int(os.environ.get("ENB_MAX_ATTEMPTS", "2"))   # warps before skip
@@ -740,8 +764,10 @@ def enum_navs(sector, save_montage=None):
     """Fast batch-enumerate the in-range nav cycle: enum_fast.py presses W then walks
     D, grabbing the target-name box off the root window via Xlib (~0.6ms/grab) and
     OCRing every frame in ONE tesseract pass. Returns the ordered, DEDUPED in-range
-    nav list [{rank,key,name,ratio}] nearest-first, keeping the nearest (first)
-    occurrence of each canonical nav. [] == nothing matched (empty pocket / blank HUD).
+    nav list [{rank,key,name,ratio,dist}] nearest-first, keeping the nearest (first)
+    occurrence of each canonical nav. `dist` is the panel distance in k (float) read in
+    the same walk, or None if it did not OCR. [] == nothing matched (empty pocket /
+    blank HUD).
 
     The cycle only ever holds navs IN SCANNER RANGE (<= the sector's total), so walking
     total+slack always laps the in-range subset; the dedup collapses the wrap and any
@@ -749,7 +775,8 @@ def enum_navs(sector, save_montage=None):
     total = len(navdata.load(sector))
     count = max(8, min(CYCLE_MAX, total + 4))
     args = ["python3", os.path.join(HERE, "enum_fast.py"),
-            "--sector", sector, "--count", str(count), "--settle", ENUM_SETTLE]
+            "--sector", sector, "--count", str(count),
+            "--gap", ENUM_GAP, "--burst", ENUM_BURST]
     if save_montage:
         args += ["--save-montage", save_montage]
     r = sh(*args)
@@ -765,11 +792,17 @@ def enum_navs(sector, save_montage=None):
             ratio = 0.0
         if not canon or ratio < MATCH_MIN:
             continue
+        dist = None
+        if len(p) >= 5 and p[4].strip():
+            try:
+                dist = float(p[4])
+            except ValueError:
+                dist = None
         k = key(canon)
         if k in seen:                 # dedup -> keep the nearest (first) occurrence
             continue
         seen.add(k)
-        out.append({"rank": rank, "key": k, "name": canon, "ratio": ratio})
+        out.append({"rank": rank, "key": k, "name": canon, "ratio": ratio, "dist": dist})
         rank += 1
     return out
 
@@ -828,6 +861,21 @@ def sweep_round(sector):
     mark_visible(sector, navs)          # everything in scanner range now joins "visible"
     st, by = ledger(sector)             # re-read: the revealed flags just changed
 
+    # Credit every enumerated nav already within ENROUTE_K (12k) as visited right now --
+    # we are sitting next to it, no warp trip needed (owner: "consider visited already
+    # because it's within 8k"). This is the main defence against the dangerous sit: it
+    # bags the near cluster from one enumeration so done% jumps and we stop re-targeting
+    # near/unreachable navs round after round. Done before target selection so an
+    # already-near nav is never chosen as a warp target.
+    near = 0
+    for nv in navs:
+        if (nv.get("dist") is not None and nv["dist"] <= ENROUTE_K
+                and not is_done_node(by, nv["key"])):
+            if visit(sector, nv["name"], nv["dist"], f"enum within {ENROUTE_K:g}k"):
+                near += 1
+    if near:
+        st, by = ledger(sector)         # re-read: the visited flags just changed
+
     total = len(navdata.load(sector))
     done_n = sum(1 for n in st["nodes"] if n.get("visited") or n.get("skipped"))
     nearest_phase = total > 0 and done_n / total >= 0.2
@@ -835,13 +883,19 @@ def sweep_round(sector):
     print(f"  order: {'nearest-first' if nearest_phase else 'farthest-first'} "
           f"({done_n}/{total} done)", flush=True)
 
+    # Pick the next unvisited nav in order and WARP to it -- there is NO max warp
+    # range in this game (owner, 2026-06-22): you can warp 2k or 800k, so distance
+    # is NOT a reason to pass over a target. (The old MAX_TARGET_K two-pass cap was
+    # built on the false premise that far navs can't be warped and only flailed; the
+    # real sit bug was read-speed misreading a parked "000" as "?", which made
+    # warp.sh never click the orb -- fixed in read-speed.sh.) Just take the next one.
     target = None
     for nv in order:                    # farthest-first <20% done, then nearest-first
         k = nv["key"]
         if is_done_node(by, k):
             continue
         if in_danger(node_xyz(by, k), zones):
-            # death-zone nav: never sit on it, only ever warp past -- skip it as a target.
+            # death-zone nav: never sit on it, only warp past -- skip it as a target.
             skip_node(sector, nv["name"],
                       f"within {DANGER_RADIUS} of a death zone -- warp past only")
             st, by = ledger(sector)
@@ -921,16 +975,22 @@ def _warp_to_impl(sector, want_key, want_name):
     """Warp to the currently-selected node and poll to arrival. Records the node and
     any en-route node within 2k. Returns True if the wanted node was reached.
 
-    Movement is judged by the green WARP SPEED readout, not distance alone: the old
-    code declared a "min-approach" visit whenever distance stopped dropping for a
-    few polls -- which, when warp never engaged (a dropped Q keypress), recorded
-    navs 100-200k away as visited. Now: distance closing == warping; distance NOT
-    closing is confirmed against speed. Speed 000 (stopped) far from any nav means
-    the warp was dropped, so we RE-WARP (always be warping), bounded by REWARP_MAX;
-    a stop is only a visit when we are within VISIT_K, or within MINAPPROACH_K of the
-    wanted nav and genuinely cannot close further."""
+    PROGRESS IS JUDGED BY DISTANCE OVER A WINDOW, never by the speed readout. The
+    green WARP SPEED font renders digits as octagons and tesseract misreads a
+    dead-stopped "000" as "9", so a speed-gated re-warp once spun forever at an
+    84k target the ship was parked in front of. Distance, by contrast, reads
+    cleanly in this panel. Rule: every poll, if the distance has dropped by at
+    least CLOSE_MARGIN below the best seen so far, we are closing == warping (reset
+    the stall window). If it has NOT improved for STALL_POLLS consecutive polls we
+    are not effectively warping -> classify (reached / parked / wrecked) and, if
+    still far, RE-WARP (bounded by REWARP_MAX) then give up. This is inherently
+    safe against the warp-orb TOGGLE-cancel: a live warp makes the distance fall,
+    so we only ever re-click when it is genuinely flat. Every poll prints its full
+    decision state so a stuck run is never a black box."""
     warp(sector)
-    prev = 1e9
+    best = 1e9       # lowest distance-to-target seen so far (the progress baseline)
+    best_k = None    # the node `best`/`flat` belong to (the HUD target auto-flips)
+    flat = 0         # consecutive polls with no CLOSE_MARGIN improvement on `best`
     blanks = 0
     rewarps = 0
     seen_enroute = set()
@@ -942,6 +1002,7 @@ def _warp_to_impl(sector, want_key, want_name):
             # destroyed mid-warp (wreck screen), the panel is briefly blank, or the
             # CLIENT HARD-HUNG (frozen frame). Check the hang first -- it is the one
             # that never recovers and must trigger a kill+relogin.
+            print(f"  poll {p:02d} <unreadable panel> blanks={blanks}/5", flush=True)
             if blanks >= 5:
                 if client_hung():
                     raise HangDetected()
@@ -951,8 +1012,25 @@ def _warp_to_impl(sector, want_key, want_name):
             continue
         blanks = 0
         k = key(name)
-        print(f"  poll {p:02d} {name:28} {dist:.2f}k", flush=True)
-        # en-route pickup: any KNOWN nav we pass within ENROUTE_K (5k) on the way. We
+        # The HUD target auto-flips as the ship flies -- the client re-locks the
+        # nearest nav on arrival / while crossing a field -- so consecutive polls
+        # can report DIFFERENT nodes. `best`/`flat` measure progress toward ONE
+        # node, so when the targeted node changes we restart the stall window for
+        # the new node. Without this, a far node (the Kailaasa gate at 54k) is
+        # judged against a near node's stale 5k baseline and reads as an instant
+        # STALL even while genuinely closing -- which stranded the Yokan gate-leave
+        # (gate closing 54k->38k counted as "no progress" and gave up).
+        if k != best_k:
+            best = 1e9
+            flat = 0
+            best_k = k
+        spd = read_speed()
+        spd_s = f"{spd:g}" if spd is not None else "?"
+        on_target = "->TGT" if k == want_key else ""
+        print(f"  poll {p:02d} {name:28} {dist:8.2f}k  best={best:8.2f} "
+              f"flat={flat}/{STALL_POLLS} rw={rewarps}/{REWARP_MAX} spd={spd_s} {on_target}",
+              flush=True)
+        # en-route pickup: any KNOWN nav we pass within ENROUTE_K (12k) on the way. We
         # are actively warping here (this is the warp poll loop), and the ship blows
         # PAST off-path navs fast, so the closest poll to a passing nav may only read
         # ~3-5k -- crediting only at the 2k target threshold misses navs we clearly
@@ -976,60 +1054,51 @@ def _warp_to_impl(sector, want_key, want_name):
         if k == want_key and dist is not None and dist <= VISIT_K:
             visit(sector, want_name, dist, "warp")
             return True
-        # distance clearly closing -> we are warping; nothing to do but keep polling
-        if dist < prev - CLOSE_MARGIN:
-            prev = dist
+        # distance dropped by CLOSE_MARGIN below the best seen -> we are closing ==
+        # warping. Reset the stall window and keep polling. (A live warp makes the
+        # distance fall poll-on-poll, so this is the common case while in transit.)
+        if dist <= best - CLOSE_MARGIN:
+            best = dist
+            flat = 0
             time.sleep(POLL_SLEEP)
             continue
-        # NOT clearly closing -> do not trust the distance OCR (it jitters). Consult the
-        # authoritative speed readout RIGHT NOW instead of waiting for a noise-resettable
-        # counter -- that wait was what let the ship sit at 000 forever. The warp orb is a
-        # TOGGLE: a re-warp click while the ship is still moving CANCELS the warp ("keeps
-        # stopping halfway"), so one 000 read is not enough to justify a re-click -- a
-        # single noisy/blind read would cancel a live warp. Require TWO consecutive
-        # non-positive reads, and treat any positive read in between as "still moving".
-        prev = min(prev, dist)
-        spd = read_speed()
-        if spd and spd > 0:
-            time.sleep(POLL_SLEEP)   # still moving (the distance OCR was just noisy)
+        # no improvement this poll. Distance OCR jitters by tenths of a k, so a single
+        # flat poll proves nothing -- accumulate. Only after STALL_POLLS consecutive
+        # non-improving polls do we conclude the warp is not engaging and act. This is
+        # what makes a re-warp safe: if we were really warping the distance WOULD have
+        # dropped within the window, so we never re-click (cancel) a live warp.
+        flat += 1
+        if flat < STALL_POLLS:
+            time.sleep(POLL_SLEEP)
             continue
-        time.sleep(1)
-        spd2 = read_speed()
-        if spd2 and spd2 > 0:
-            time.sleep(POLL_SLEEP)   # moving on the confirm read -- do NOT re-warp
-            continue
-        if spd is None and spd2 is None:
-            # both reads blind (panel obscured / mid-present), not a confirmed stop;
-            # wait it out rather than risk a cancelling click while possibly moving.
-            time.sleep(1)
-            continue
-        # speed 000: the ship is stopped. Per the owner rule, a stop while warping
-        # means ONE of two things -- we REACHED the destination (within 2k / can't
-        # close further) or we WRECKED. Classify in that order.
+        # Not closing for STALL_POLLS polls -> classify. Reached / parked / wrecked,
+        # then (still far + alive) re-warp, then give up.
         if k == want_key and dist <= MINAPPROACH_K:
-            print(f"  min-approach {name} {dist:.2f}k (stopped, cannot close)", flush=True)
+            print(f"  min-approach {name} {dist:.2f}k (cannot close further)", flush=True)
             visit(sector, want_name, dist, "min-approach")
             return True
         if dist <= VISIT_K:
             print(f"  parked at {name} {dist:.2f}k (not target); re-enumerate", flush=True)
             return False
-        # stopped while still FAR from the target. Not "reached", so per the rule the
-        # other possibility is a WRECK -- check for the death panel QUICKLY before
-        # doing anything else. handle_wreck() is a cheap OCR that returns False fast
-        # when alive; blindly re-warping a wrecked ship just burns polls (it stranded
-        # the run at Nishara Maru). If wrecked, it tows + undocks and we bail the warp.
+        # stopped while still FAR from the target. Not "reached", so the other
+        # possibility is a WRECK -- check the death panel QUICKLY before re-warping.
+        # handle_wreck() is a cheap OCR that returns False fast when alive; blindly
+        # re-warping a wrecked ship just burns polls (it stranded the run at Nishara
+        # Maru). If wrecked, it tows + undocks and we bail the warp.
         if handle_wreck(sector):
             return False
-        # alive but stopped far -> the warp dropped / was terminated (toggle cancel,
-        # never engaged). Re-warp.
+        # alive but not closing -> the warp dropped / never engaged (toggle cancel, a
+        # missed Q keypress). Re-warp, reset the window, and give the warp a moment to
+        # spin up before we start judging progress again.
         if rewarps < REWARP_MAX:
             rewarps += 1
-            print(f"  STOPPED at {dist:.2f}k (speed 000) -> re-warp {rewarps}/{REWARP_MAX}",
-                  flush=True)
-            log(sector, "re-warp", f"{name} stalled at {dist:.2f}k, speed 000")
+            print(f"  STALL at {dist:.2f}k (no progress {STALL_POLLS} polls) "
+                  f"-> re-warp {rewarps}/{REWARP_MAX}", flush=True)
+            log(sector, "re-warp", f"{name} not closing at {dist:.2f}k")
             warp(sector)
-            prev = 1e9
-            time.sleep(1)
+            best = 1e9
+            flat = 0
+            time.sleep(2)
             continue
         print(f"  STALL: {name} stuck at {dist:.2f}k after {REWARP_MAX} re-warps; giving up",
               flush=True)
@@ -1121,11 +1190,16 @@ def open_map():
     sh("bash", os.path.join(HERE, "open-map.sh"))
 
 
+NOT_IN_SPACE = "__NOT_IN_SPACE__"
+
+
 def actual_sector():
     """Read the AUTHORITATIVE current sector off the map's top-centre title via
-    read-sector.sh. Returns the canonical navdata sector name (e.g. 'AdrielPrime')
-    or None if it could not be read/matched. This is ground truth: nav-label OCR
-    can be force-matched onto the wrong sector, but the map title cannot."""
+    read-sector.sh. Returns the canonical navdata sector name (e.g. 'AdrielPrime'),
+    NOT_IN_SPACE if the client is on character-select/login (no game, no map), or
+    None if it is in space but the title could not be read/matched. This is ground
+    truth: nav-label OCR can be force-matched onto the wrong sector, but the map
+    title cannot, and read-sector.sh refuses to OCR a non-game screen."""
     try:
         r = sh("bash", os.path.join(HERE, "read-sector.sh"), timeout=90)
     except subprocess.TimeoutExpired:
@@ -1133,6 +1207,8 @@ def actual_sector():
     for ln in r.stdout.splitlines():
         if ln.startswith("SECTOR "):
             return ln.split(None, 1)[1].strip()
+        if ln.startswith("FAIL not-in-space"):
+            return NOT_IN_SPACE
     return None
 
 
@@ -1142,9 +1218,20 @@ def verify_sector(expected, where):
     Prime), after which fuzzy nav matching force-maps foreign nav names onto the
     closest in-sector names and the driver flies the wrong sector reading garbage.
     Reads the map title; if it names a different sector, ABORT for operator/wrapper
-    re-route rather than corrupt the ledger. A None read (title unreadable) is
-    tolerated -- we do not halt a good run on one bad OCR."""
+    re-route rather than corrupt the ledger. A None read (in space, but one bad
+    title OCR) is tolerated -- we do not halt a good run on one bad OCR. But a
+    NOT_IN_SPACE read (character-select/login screen) is NEVER tolerated: the whole
+    'clicking random shit all over the screen' bug was the driver flying a non-game
+    screen because a garbage OCR fuzzy-matched to a real sector. If we are not in
+    space, REFUSE to drive -- HALT for the wrapper to re-enter the game."""
     got = actual_sector()
+    if got == NOT_IN_SPACE:
+        print(f"  ## NOT IN SPACE ({where}): client is on character-select/login, "
+              f"not in {expected}. Refusing to drive a non-game screen. HALT.",
+              flush=True)
+        log(expected, "sector-verify-not-in-space",
+            f"{where}: client not in space; aborting EXIT_STUCK")
+        sys.exit(EXIT_STUCK)
     if got is None:
         print(f"  sector-verify ({where}): map title unreadable; continuing "
               f"(assuming {expected})", flush=True)
@@ -1418,54 +1505,121 @@ def completed_sectors():
     return done
 
 
-def pick_gate(sector):
-    """Choose the best gate to leave by. Prefer a gate whose label names a sector we
-    have NOT completed yet (owner: 'prefer a gate to a sector we have not visited').
-    The gate's DISPLAY label is not the destination's navdata file name (gate.sh notes
-    this), so this is a soft heuristic: we match the completed-sector names loosely
-    against the gate label and de-prioritise any gate that names one. Returns the gate
-    node dict, or None if the sector has no usable gate."""
+def pick_gates(sector):
+    """Return ALL usable gates ordered best-first. Prefer a gate whose label names a
+    sector we have NOT completed yet (owner: 'prefer a gate to a sector we have not
+    visited'). The gate's DISPLAY label is not the destination's navdata file name
+    (gate.sh notes this), so this is a soft heuristic: we match the completed-sector
+    names loosely against the gate label and de-prioritise any gate that names one.
+    Returns [] if the sector has no usable gate. leave_via_gate walks this list in
+    order so one unreachable/locked gate falls through to the next instead of halting."""
     st = state.read(sector)
     gates = [n for n in st["nodes"] if n.get("type") in GATE_TYPES]
-    if not gates:
-        return None
     done = {navdata.norm(s) for s in completed_sectors() if s}
     def to_visited(n):
         label = navdata.norm(n["name"])
         return any(d and d in label for d in done)
     # gates that do NOT obviously lead somewhere we've finished come first.
     gates.sort(key=to_visited)
-    return gates[0]
+    return gates
+
+
+def approach_gate(sector, gkey, gname):
+    """Park the ship as close as possible to gate `gname`, returning True once parked.
+
+    A gate can be FAR (out of scanner range) at sector-completion time -- the W/D name
+    cycle only holds in-range navs, so select_named cannot lock a 100k+ gate (this is
+    exactly what halted the Yokan run on 'Gate to Castor System' at 120k). So: try the
+    cheap name-cycle select first; if the gate is not in range, fall back to MAP-CLICK
+    navigation (the same mechanism map_click_reach uses for far navs) -- identify the
+    markers drawn on the map, click the gate's marker and warp to it, or reposition
+    toward its world coords to drag it into range, then retry the select."""
+    _, by = ledger(sector)
+    sel, _ = select_named(sector, gkey)
+    if sel is not None:
+        _dest["name"] = gname
+        _dest["xyz"] = node_xyz(by, gkey)
+        return warp_to(sector, gkey, gname)
+    if not MAP_FALLBACK:
+        return False
+    gw = node_xyz(by, gkey)
+    used = set()
+    for _ in range(MAP_ROUNDS):
+        ident = identify_markers(sector)
+        if gkey in ident:                       # the gate is drawn -> click + warp to it
+            wx, wy, cname = ident[gkey]
+            click_map(wx, wy)
+            canon, _r = read_navname(sector)
+            if key(canon) == gkey and _map_warp(sector, by, gkey, gname, "gate map-click"):
+                return True
+        # gate not drawn (or its click drifted): reposition toward its world coords to
+        # bring it into range, then re-test the name cycle.
+        if gw is None:
+            return False
+        cand = []
+        for mk, (wx, wy, nm) in ident.items():
+            if mk in used:
+                continue
+            mw = node_xyz(by, mk)
+            if mw is not None:
+                cand.append((math.dist(mw, gw), mk, nm, wx, wy))
+        if not cand:
+            return False
+        cand.sort()                             # marker nearest the gate first
+        _d, mk, nm, wx, wy = cand[0]
+        used.add(mk)
+        click_map(wx, wy)
+        canon, _r = read_navname(sector)
+        if key(canon) != mk:                    # re-click drifted -- next round re-probes
+            continue
+        print(f"  gate-approach: repositioning toward {gname} via {nm}", flush=True)
+        _map_warp(sector, by, mk, nm, "toward gate")
+        sel, _ = select_named(sector, gkey)     # in range now?
+        if sel is not None:
+            _dest["name"] = gname
+            _dest["xyz"] = node_xyz(by, gkey)
+            return warp_to(sector, gkey, gname)
+    return False
 
 
 def leave_via_gate(sector):
-    """Cross a gate out of the finished sector. Selects the chosen gate, warps to it,
-    and clicks the use-gate icon (gate.sh). Returns the gate name on a clicked crossing,
-    else None. Detecting arrival + re-identifying the new sector is the caller's job
-    (the per-sector wrapper) -- this only performs the LEAVE."""
-    gate = pick_gate(sector)
-    if gate is None:
+    """Cross a gate out of the finished sector. Walks the usable gates best-first; for
+    each it parks the ship as close as possible (approach_gate, map-click for far
+    gates), then runs gate.sh which CONFIRMS the use-gate icon is on screen before it
+    rotates the capture + clicks. A gate whose icon never appears (locked / not usable
+    by this ship) returns exit 2, and we fall through to the next gate rather than
+    halting. Returns the gate name on a clicked crossing, else None. Detecting arrival
+    + re-identifying the new sector is the caller's job -- this only performs the LEAVE."""
+    gates = pick_gates(sector)
+    if not gates:
         print(f"  gate-leave: no usable gate in {sector}; cannot auto-leave", flush=True)
         log(sector, "gate-leave-none", "no usable gate node in sector")
         return None
-    gname = gate["name"]
-    gkey = key(gname)
-    print(f"  gate-leave: heading to {gname} ({gate['type']}) to leave {sector}",
+    for gate in gates:
+        gname = gate["name"]
+        gkey = key(gname)
+        print(f"  gate-leave: heading to {gname} ({gate['type']}) to leave {sector}",
+              flush=True)
+        if not approach_gate(sector, gkey, gname):
+            print(f"  gate-leave: could not reach {gname} -- trying next gate", flush=True)
+            log(sector, "gate-unreachable", f"could not park on gate {gname}")
+            continue
+        # gate.sh: confirm icon -> rotate capture -> click. exit 0 clicked, 2 no icon.
+        r = sh("bash", os.path.join(HERE, "gate.sh"), sector, gname)
+        if r.returncode == 0:
+            log(sector, "gate-left", f"clicked use-gate on {gname} to leave {sector}")
+            print(f"  gate-leave: clicked use-gate on {gname}", flush=True)
+            return gname
+        if r.returncode == 2:
+            print(f"  gate-leave: {gname} shows no use-gate icon (locked/unusable) "
+                  f"-- trying next gate", flush=True)
+            continue
+        print(f"  gate-leave: gate.sh error ({r.returncode}) on {gname} -- trying next",
+              flush=True)
+    print(f"  gate-leave: no crossable gate in {sector} (all unreachable/locked)",
           flush=True)
-    sel_name, _ = select_named(sector, gkey)
-    if sel_name is None:
-        print(f"  gate-leave: could not select {gname} -- aborting leave", flush=True)
-        log(sector, "gate-leave-fail", f"could not select gate {gname}")
-        return None
-    st, by = ledger(sector)
-    _dest["name"] = gname
-    _dest["xyz"] = node_xyz(by, gkey)
-    warp_to(sector, gkey, gname)        # park on the gate (credits it visited too)
-    # click the use-gate icon; gate.sh self-logs the crossing time + route.
-    sh("bash", os.path.join(HERE, "gate.sh"), sector, gname)
-    log(sector, "gate-left", f"clicked use-gate on {gname} to leave {sector}")
-    print(f"  gate-leave: clicked use-gate on {gname}", flush=True)
-    return gname
+    log(sector, "gate-leave-fail", "no crossable gate (all unreachable or locked)")
+    return None
 
 
 def main():

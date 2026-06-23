@@ -54,6 +54,52 @@ im = np.asarray(Image.open(sys.argv[1]).convert("RGB")).astype(int)
 box = im[T:B, L:R]
 r, g, b = box[:, :, 0], box[:, :, 1], box[:, :, 2]
 green = (g > 95) & (g - r > 25) & (g - b > 25)
+H, W = green.shape
+ys, xs = np.where(green)
+if len(xs) < 5:
+    print("SPEED ?")
+    sys.exit(0)
+
+# DENOISE by connected component (owner, 2026-06-22). The animated green nebula
+# bleeds a tendril into the box (a tall-thin blob hugging the LEFT edge) and the
+# warp-orb glow can clip the RIGHT edge; either one sits flush against the "000"
+# and tesseract then segments nothing and returns "?", so warp.sh -- which refuses
+# to click the orb unless it confirms a solid 000 -- never engages warp and the
+# ship SITS ("you just didn't press warp"). The speed digits are interior, digit
+# sized blobs; box-edge noise and sub-glyph specks are not. So label 8-connected
+# components and keep only digit-shaped ones (area >= 10, >= 6px tall, >= 3px wide)
+# that do NOT touch the left/right edge. This reads "000" parked through the
+# tendril; multi-digit warp speeds sit centred with margin and survive the filter.
+from collections import deque
+lab = np.zeros((H, W), int)
+keep = np.zeros((H, W), bool)
+cur = 0
+for sy in range(H):
+    for sx in range(W):
+        if green[sy, sx] and lab[sy, sx] == 0:
+            cur += 1
+            dq = deque([(sy, sx)])
+            lab[sy, sx] = cur
+            comp = []
+            while dq:
+                y, x = dq.popleft()
+                comp.append((y, x))
+                for dy in (-1, 0, 1):
+                    for dx in (-1, 0, 1):
+                        ny, nx = y + dy, x + dx
+                        if 0 <= ny < H and 0 <= nx < W and green[ny, nx] and lab[ny, nx] == 0:
+                            lab[ny, nx] = cur
+                            dq.append((ny, nx))
+            cxs = [p[1] for p in comp]
+            cys = [p[0] for p in comp]
+            area = len(comp)
+            h = max(cys) - min(cys) + 1
+            w = max(cxs) - min(cxs) + 1
+            touch_lr = min(cxs) == 0 or max(cxs) == W - 1
+            if area >= 10 and h >= 6 and w >= 3 and not touch_lr:
+                for y, x in comp:
+                    keep[y, x] = True
+green = keep
 ys, xs = np.where(green)
 if len(xs) < 5:
     print("SPEED ?")

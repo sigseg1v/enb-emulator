@@ -150,15 +150,42 @@ def cmd_identify(args):
     for s in all_sectors():
         fn = norm(s)
         title_score = 0
-        if title == fn:
-            title_score = 3
-        elif title.startswith(fn) or fn.startswith(title):
-            title_score = 2
+        # GUARD (owner, 2026-06-22): require >=3 title chars before any startswith
+        # scoring. A garbage map-title OCR (e.g. "; ”") norms to "" -- and
+        # `fn.startswith("")` is True for EVERY sector, so an empty title used to
+        # score every sector title=2 and return the alphabetically-first one
+        # ("Aba"). That bogus "ABA" is what the driver then "drove". An empty or
+        # 1-2 char title must match NOTHING here; only real node-label hits below
+        # can then carry it, otherwise identify reports no match and the caller
+        # refuses to drive.
+        if len(title) >= 3:
+            if title == fn:
+                title_score = 3
+            elif title.startswith(fn) or fn.startswith(title):
+                title_score = 2
         names = {norm(n.get("name")) for n in load(s)}
         label_score = len(labels & names)
         key = (title_score, label_score)
         if key > best_key:
             best, best_key = s, key
+    if (not best or best_key == (0, 0)) and len(title) >= 3:
+        # FUZZY TITLE FALLBACK (owner, 2026-06-22): map-title OCR is imperfect and
+        # exact/startswith above is unforgiving -- "Akeron`s Gate" came back as
+        # "Alserons Gate" (norm "alseronsgate" vs file "akeronsgate"), which the
+        # strict pass rejects even though they are 87% the same string. So when
+        # nothing matched exactly, score every sector by string similarity and
+        # take the CLOSEST one, accepting it only above a similarity floor (0.75)
+        # so a genuinely garbage read still matches nothing. This is nearest-by-
+        # character-distance gated by a 75% ratio -- both of the owner's asks.
+        import difflib
+        fz_best, fz_r = None, 0.0
+        for s in all_sectors():
+            r = difflib.SequenceMatcher(None, title, norm(s)).ratio()
+            if r > fz_r:
+                fz_best, fz_r = s, r
+        if fz_best and fz_r >= 0.75:
+            print(f"{fz_best}\ttitle=fuzzy({fz_r:.2f}) labels=0")
+            return
     if not best or best_key == (0, 0):
         sys.exit("identify: no sector matched the title or any of those labels")
     print(f"{best}\ttitle={best_key[0]} labels={best_key[1]}")

@@ -39,6 +39,17 @@ worker_ready() { [ -x "$WORKER" ] && sudo -n "$WORKER" status "$OUTDIR" >/dev/nu
 
 mark() { bash "$SKILL_DIR/logaction.sh" "$1" "$2" "$3" >/dev/null 2>&1 || true; }
 
+# Durable cap-file -> sector mapping so we always know which sector a .pcap belongs
+# to, independent of the filename rename (owner: "rename the cap OR keep a mapping
+# file"). One TSV row per start/relabel: <UTC>  <sector>  <cap-basename>. Append-only
+# (the last row for a cap basename is its current sector after any relabels).
+map_record() {
+    local sector="$1" cappath="$2" ts
+    [ -n "$cappath" ] || return 0
+    ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf '%s\t%s\t%s\n' "$ts" "$sector" "$(basename "$cappath")" >> "$OUTDIR/sector-map.tsv"
+}
+
 case "$action" in
     start|rotate)
         [ -n "$sector" ] || { echo "usage: pcap.sh $action <sector>" >&2; exit 2; }
@@ -50,6 +61,7 @@ case "$action" in
         out="$(sudo -n "$WORKER" start "$sector" "$OUTDIR" "$PROXY_NAME" 2>/dev/null | tail -1)"
         if [ -n "$out" ] && [ -e "$out" ]; then
             mark "$sector" pcap-start "capture -> $(basename "$out")"
+            map_record "$sector" "$out"
             echo "[pcap] capturing '$sector' -> $out"
         else
             echo "[pcap] WARN -- worker did not start a capture (proxy down? stack not up?)" >&2
@@ -66,11 +78,13 @@ case "$action" in
         if sudo -n "$WORKER" status "$OUTDIR" 2>/dev/null | grep -q '^running'; then
             out="$(sudo -n "$WORKER" relabel "$sector" "$OUTDIR" 2>/dev/null | tail -1)"
             mark "$sector" pcap-relabel "capture -> $(basename "${out:-?}")"
+            map_record "$sector" "${out:-}"
             echo "[pcap] capture relabelled '$sector' -> ${out:-?}"
         else
             out="$(sudo -n "$WORKER" start "$sector" "$OUTDIR" "$PROXY_NAME" 2>/dev/null | tail -1)"
             if [ -n "$out" ] && [ -e "$out" ]; then
                 mark "$sector" pcap-start "capture -> $(basename "$out")"
+                map_record "$sector" "$out"
                 echo "[pcap] capturing '$sector' -> $out"
             else
                 echo "[pcap] WARN -- could not start capture (proxy/stack down?)" >&2

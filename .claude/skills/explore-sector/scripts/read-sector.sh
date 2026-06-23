@@ -28,6 +28,16 @@ SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; . "$SKILL_DIR/lib.sh"
 
 read -r l t w h <<< "${ENB_SECTOR_BOX:-333 246 327 32}"
 
+# IN-SPACE GATE (owner, 2026-06-22). The sector title ONLY exists on the in-game map.
+# If the client is on character-select or the login screen we are NOT in space, so we
+# must NOT open the map or OCR a title: open-map.sh would click blindly on the wrong
+# screen, and navdata identify fuzzy-matches the resulting garbage to a real sector
+# name (it returned "ABA" off the char-select screen and the driver then "drove" a
+# non-game screen, clicking all over it). on_charselect/on_login are the established,
+# reliable, screen-only ref-image checks -- gate on them BEFORE touching the map.
+if on_charselect; then echo "FAIL not-in-space (character-select)"; exit 1; fi
+if on_login;      then echo "FAIL not-in-space (login screen)";    exit 1; fi
+
 # Make sure the map is open + normalised so the title is at the known box.
 read -r _ FULL <<< "$(bash "$SKILL_DIR/open-map.sh" 2>/dev/null | grep '^FULL')"
 [ -n "${FULL:-}" ] && [ -s "$FULL" ] || { full="$(explore_shot "")" || { echo "FAIL no shot"; exit 1; }; FULL="$full"; }

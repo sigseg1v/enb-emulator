@@ -200,8 +200,20 @@ is_screen() {
     shot_win "$w" "$p" || return 1
     detect match "$p" "$REFS/$name.png" "$x" "$y" "$tol" >/dev/null 2>&1
 }
-on_login()      { is_screen login_field 165 228 "${1:-22}"; }
-on_charselect() { is_screen charselect_frame 70 50 "${1:-22}"; }
+# tol 12, NOT 22: the login_field crop at (165,228) is only a 90x24 opaque-UI
+# region, and an IN-SPACE frame's chat panel scores MAD ~18 there -- under 22 it
+# false-matched as "login" while genuinely in space (which made read-sector's
+# in-space gate refuse valid sectors). A real login screen scores ~3-4 against its
+# own ref (cf. charselect_frame at 3.68), so 12 cleanly separates real login (~4)
+# from in-space (~18) and from char-select (~37).
+on_login()      { is_screen login_field 165 228 "${1:-12}"; }
+# tol 12, NOT 22 (owner, 2026-06-22): same false-positive class as on_login. A real
+# char-select scores MAD ~3.68 against charselect_frame, but an IN-SPACE frame scores
+# ~20.9 at (70,50) -- under the old tol 22 that read as char-select, so detect_sector's
+# recovery ran 07-charselect-enter on a client that was actually in space and
+# blind-clicked the HUD ("still on character-select" loop). 12 cleanly separates real
+# char-select (~4) from in-space (~21).
+on_charselect() { is_screen charselect_frame 70 50 "${1:-12}"; }
 
 # Convenience: capture a fresh client shot to $WORKDIR/cur.png and echo path.
 cur_shot() { local p="$WORKDIR/cur.png"; shot "$p" && echo "$p"; }

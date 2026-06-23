@@ -39,8 +39,84 @@ STALE_MAX="${ENB_SURVEY_STALE_MAX:-3}"     # consecutive already-done arrivals -
 # loop that handles the hand-off, so turn it on for the whole chain.
 export ENB_GATE_LEAVE="${ENB_GATE_LEAVE:-1}"
 
+# Per-sector packet capture targets the PROXY's network namespace. The default
+# (empty name) is the dockerized FreyaProxy container -- correct for a local-stack
+# survey. But in MANUAL_CLIENT mode the client the survey drives is connected
+# through a HOST WINE proxy (Net7Proxy.exe), NOT the docker proxy, so the worker
+# would look for a docker target, find none, and silently skip capture (the empty
+# captures/ dir). Point it at the WINE proxy by process name so the worker resolves
+# its PID and scopes the capture to the proxy<->server leg. Overridable if the proxy
+# binary is named differently.
+if [ "${ENB_EXPLORE_MANUAL_CLIENT:-0}" = 1 ]; then
+    export ENB_EXPLORE_PROXY_NAME="${ENB_EXPLORE_PROXY_NAME:-Net7Proxy.exe}"
+fi
+
+LOGIN_DIR="$SKILL_DIR/../../login-to-client/scripts"
+
+_read_sector() { bash "$SKILL_DIR/read-sector.sh" 2>/dev/null | awk '/^SECTOR /{print $2; exit}'; }
+
+# Read the current sector off the map title, RECOVERING the two states that make the
+# OCR fail (owner, 2026-06-22): (1) the client dropped to character-select (crash /
+# disconnect) -- there is no game and no map to read, so we re-enter by clicking the
+# first character + Enter (07, a no-op when not on char-select) and waiting in-game
+# (08); (2) we are in-game but the map is not open -- read-sector.sh -> open-map.sh
+# already opens it, so a second attempt after settling usually reads. Only after both
+# recoveries fail do we report empty (caller HALTs).
 detect_sector() {
-    bash "$SKILL_DIR/read-sector.sh" 2>/dev/null | awk '/^SECTOR /{print $2; exit}'
+    local want_diff="${1:-}"
+    local s i
+    # Just-crossed-a-gate case: the scene swap is NOT instant. For a few seconds after
+    # the use-gate click the map title still reads the OLD sector, then blanks for the
+    # load, then reads the NEW one. A single quick read here catches that stale OLD
+    # title, and the caller's `sector == prev` guard then mis-reports "gate crossing
+    # did not move the ship" and HALTS a crossing that actually worked (seen 2026-06-22:
+    # crossed Yokan->Ishuan but halted on a stale Yokan read). So when the caller tells
+    # us which sector we are LEAVING, poll for the title to actually CHANGE first. If it
+    # never changes we fall through to the normal read and the caller halts as before --
+    # so a genuinely-failed crossing is still caught, we just stop false-halting real ones.
+    if [ -n "$want_diff" ]; then
+        local tries="${ENB_CROSS_TRIES:-20}"
+        for i in $(seq 1 "$tries"); do
+            s="$(_read_sector)"
+            [ -n "$s" ] && [ "$s" != "$want_diff" ] && { echo "$s"; return 0; }
+            sleep 3
+        done
+    fi
+    s="$(_read_sector)"; [ -n "$s" ] && { echo "$s"; return 0; }
+    echo "[survey] sector OCR failed -- recovering (re-enter if at char-select, re-open map)" >&2
+    # 1) re-enter from character-select if that is where we are. 07 exits 0 as a
+    #    no-op when already in-game; a NON-ZERO exit means it WAS at char-select and
+    #    could not enter (OCR could not confirm the character name or the ENTER
+    #    button). In that case we must NOT fall through to read-sector.sh -- its
+    #    open-map step would click blindly on the char-select screen (the "clicking
+    #    random shit all over the place" bug). HALT for the operator instead.
+    local rc
+    bash "$LOGIN_DIR/07-charselect-enter.sh" >&2; rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "[survey] 07-charselect-enter bailed (rc=$rc) -- still at character-select, NOT map-clicking. HALT." >&2
+        return 1
+    fi
+    # 08-wait-ingame confirms in-game via the enbmod Lua channel -- which does NOT
+    # exist in screen-only manual-client mode (no mods injected). Running it there
+    # just burns its whole timeout printing a STUCK we ignore, so skip it in manual
+    # mode. The read-sector poll below IS our screen-only in-space signal: read-sector
+    # refuses char-select/login and only prints SECTOR once the map title actually
+    # reads, so a successful read == loaded into space. We just have to poll it long
+    # enough to outlast the load screen (a fresh scene load can take ~30-60s).
+    if [ "${ENB_EXPLORE_MANUAL_CLIENT:-0}" != 1 ]; then
+        bash "$LOGIN_DIR/08-wait-ingame.sh" >&2 || true
+    fi
+    # 2) poll read-sector.sh until the load screen clears and the map title reads.
+    #    read-sector.sh re-opens the map each call; during the load screen it returns
+    #    empty (no title) and we just retry. Each try is one read-sector call (a few
+    #    seconds) plus a 3s settle, so ~20 tries covers a ~60-90s scene load.
+    local i tries
+    tries="${ENB_LOAD_TRIES:-20}"
+    for i in $(seq 1 "$tries"); do
+        s="$(_read_sector)"; [ -n "$s" ] && { echo "$s"; return 0; }
+        sleep 3
+    done
+    return 1
 }
 # ledger status for a sector ("complete" | "in-progress" | "" if no ledger yet)
 status_of() {
@@ -51,7 +127,7 @@ status_of() {
 prev=""
 stale=0
 for i in $(seq 1 "$MAX_CROSSINGS"); do
-    sector="$(detect_sector)"
+    sector="$(detect_sector "$prev")"
     if [ -z "$sector" ]; then
         echo "[survey] could not read the current sector off the map title -- HALT." \
              "Open the map / confirm the client is in space, then re-run survey.sh." >&2
