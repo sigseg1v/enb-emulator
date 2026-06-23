@@ -218,7 +218,16 @@ def cmd_visit(args):
 
 def cmd_skip(args):
     reason = args[2] if len(args) > 2 else "unreachable (never popped on the map)"
-    _set(args[:2], skipped=True, skip_reason=reason)
+    # Never mark a nav we already reached as unreachable -- a visited nav is done,
+    # not skipped. Guards the ledger against the visited+skipped double-flag.
+    st = read(args[0])
+    n = find_node(st, args[1])
+    if n.get("visited"):
+        _print_status(st)
+        return
+    n.update(skipped=True, skip_reason=reason)
+    write(st)
+    _print_status(st)
 
 
 def cmd_skipped(args):

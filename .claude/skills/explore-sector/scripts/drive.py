@@ -677,6 +677,15 @@ def visit(sector, name, dist, how):
             if not n["visited"]:
                 n["visited"] = True
                 n["revealed"] = True
+                # A nav we physically reached is NOT unreachable: clear any earlier
+                # skip so a nav skipped by a stalled direct warp and then bagged
+                # en-route is not double-flagged (and never reported "never within
+                # {VISIT_K}k" when we just visited it at 1-5k). Without this the
+                # ledger counts the same nav as both visited and skipped.
+                if n.get("skipped"):
+                    n["skipped"] = False
+                    n["skip_reason"] = ""
+                    log(sector, "unskip", f"{n['name']} reached -- clearing prior skip")
                 state.write(st)
                 d = "?" if dist is None else f"{dist:.2f}"
                 log(sector, "visit", f"{n['name']} @{d}k ({how})")
@@ -852,7 +861,7 @@ def mark_visible(sector, navs):
     return changed
 
 
-def sweep_round(sector):
+def sweep_round(sector, deferred=frozenset()):
     """Batch-enumerate the in-range nav cycle (W + D-walk + montage OCR), record every
     matched nav as VISIBLE, pick the FARTHEST unvisited non-death-zone nav as the
     target, select it by NAME (W then a verified D-walk onto it -- never by D-count,
@@ -919,6 +928,12 @@ def sweep_round(sector):
     for nv in order:                    # farthest-first <20% done, then nearest-first
         k = nv["key"]
         if is_done_node(by, k):
+            continue
+        if k in deferred:
+            # direct warp already failed MAX_ATTEMPTS times -- stop re-targeting it,
+            # but leave it unvisited so en-route pickup / relocate / map-click can
+            # still reach it. If EVERY remaining nav is deferred, target stays None
+            # and we fall into the done-path, which relocates to a fresh pocket.
             continue
         if in_danger(node_xyz(by, k), zones):
             # death-zone nav: never sit on it, only warp past -- skip it as a target.
@@ -1736,6 +1751,7 @@ def main():
     sh("bash", os.path.join(HERE, "pcap.sh"), "ensure", sector)
 
     attempts = {}             # key -> warps attempted at it without reaching <=2k
+    deferred = set()          # keys we stop DIRECTLY targeting (still reachable en-route)
     flee_streak = 0           # consecutive flees with no new visit (wedge detector)
     blind_streak = 0          # consecutive rounds the panel read nothing (HUD/hang)
     last_progress = -1        # visited+skipped seen at the previous round
@@ -1807,7 +1823,7 @@ def main():
         # on its first slot (the warp we just finished left _shield["t"] >5s stale), so
         # a separate pre-check just doubled the shield OCR cost (== 000->warp dead time)
         # for no extra safety. Re-add force only if a sector proves too contested.
-        res = sweep_round(sector)
+        res = sweep_round(sector, deferred)
 
         if res["status"] == "blind":
             # The whole cycle read no nav. Two distinct causes:
@@ -1854,13 +1870,29 @@ def main():
             continue                        # can't explore this round; re-round
 
         if res["status"] == "warped":
-            if not res["reached"]:
+            if res["reached"]:
+                attempts.pop(res["key"], None)   # success wipes its failure history
+            else:
                 k = res["key"]
                 attempts[k] = attempts.get(k, 0) + 1
-                if attempts[k] >= MAX_ATTEMPTS:
-                    skip_node(sector, res["name"],
-                              f"targeted {attempts[k]}x, never within "
-                              f"{VISIT_K}k of the warp path")
+                if attempts[k] >= MAX_ATTEMPTS and k not in deferred:
+                    # Do NOT permanently skip here. A direct warp that did not close
+                    # within VISIT_K is NOT proof the nav is unreachable -- en-route
+                    # pickup (ENROUTE_K), a relocation, or the map-click fallback
+                    # routinely bag it minutes later. (Measured on Ishuan: Yokan
+                    # Beacon, Menorb Beacon, Sundari, Centar and Traders Run 4 were
+                    # all permanently skipped "never within 8.0k" by the old eager
+                    # rule, then visited en-route at 1-5k -- the ledger then carried
+                    # them as BOTH visited and skipped.) Just stop DIRECTLY
+                    # re-targeting it so one stubborn nav cannot eat the run; the real
+                    # skip happens only in the done-path below, after relocate +
+                    # map-fallback have all failed, with an honest reason.
+                    deferred.add(k)
+                    log(sector, "defer",
+                        f"{res['name']} not reached in {attempts[k]} direct warps -- "
+                        f"deferring direct re-targeting (en-route/relocate/map still active)")
+                    print(f"  DEFER {res['name']} (direct warp x{attempts[k]} did not "
+                          f"close; still reachable en-route/relocate/map)", flush=True)
         else:   # status == "done": no unvisited nav in scanner range from THIS pocket
             # STAY ON THE W/D/C CYCLE (owner). An empty pocket does NOT mean the sector
             # is done -- unvisited navs may simply be out of scanner range from here. The
