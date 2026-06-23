@@ -1064,6 +1064,20 @@ def _warp_to_impl(sector, want_key, want_name):
                     raise HangDetected()
                 if handle_wreck(sector):
                     return False
+                # Alive, not hung, not wrecked, yet the target panel has read blank
+                # for 5+ polls. A genuine in-flight warp keeps that panel readable
+                # AND moves the ship, so a CONFIRMED speed 0 here means we are parked,
+                # not warping: the warp never engaged (target under the ~2k floor) or
+                # a map-fallback pick left the map overlay covering the panel. Either
+                # way, burning the whole WARP_POLLS budget on blank reads is pure dead
+                # time -- abort and re-enumerate so the driver closes the map and picks
+                # a real target. (Observed live: map-fallback "Shipyard Beltway 2
+                # @0.00k" stalled 40+ blank polls. Only a definitive 0 aborts; an
+                # unreadable speed -> None -> we keep polling as before.)
+                if read_speed() == 0:
+                    print("  blank panel + parked (speed 0) -> abort warp, re-enumerate",
+                          flush=True)
+                    return False
             time.sleep(1)
             continue
         blanks = 0
