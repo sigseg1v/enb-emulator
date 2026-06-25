@@ -691,6 +691,8 @@ bool Connection::CheckTCPShutdownCycle() {
 // these explicit includes were redundant on Linux and unbuildable on Win32.
 #include <errno.h>
 
+#include "FreyaPacketTrace.h" // last-N packet ring, dumped on client disconnect
+
 namespace {
 
 // recv exactly n bytes or fail. Returns true iff exactly n bytes read.
@@ -864,6 +866,7 @@ void Connection::SendResponse(short opcode, unsigned char* data, size_t length,
 
     if (m_ServerType != CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY &&
         m_ServerType != CONNECTION_TYPE_GLOBAL_PROXY_TO_SERVER) {
+        FreyaPacketTraceRecord('S', (unsigned short)opcode, data, length);
         if (s2c_txdump_enabled())
             dump_client_tx((unsigned short)opcode, m_SendBuffer, total);
         m_CryptOut.RC4(m_SendBuffer, (int)total);
@@ -998,6 +1001,12 @@ void Connection::RunRecvThread() {
 
         short bytes = (short)payload_bytes;
 
+        if (m_ServerType != CONNECTION_TYPE_SECTOR_SERVER_TO_PROXY &&
+            m_ServerType != CONNECTION_TYPE_GLOBAL_PROXY_TO_SERVER) {
+            FreyaPacketTraceRecord('C', (unsigned short)opcode, m_RecvBuffer,
+                                   (std::size_t)payload_bytes);
+        }
+
         switch (m_ServerType) {
         case CONNECTION_TYPE_CLIENT_TO_GLOBAL_SERVER:
             ProcessGlobalServerOpcode(opcode, bytes);
@@ -1016,6 +1025,12 @@ void Connection::RunRecvThread() {
     }
 
     LogDebug("Connection thread exiting on port %d\n", m_TcpPort);
+    if (m_ServerType == CONNECTION_TYPE_CLIENT_TO_SECTOR_SERVER) {
+        LogMessage("Net7Proxy: client sector connection on port %d dropped -- dumping packet "
+                   "trace\n",
+                   m_TcpPort);
+        FreyaPacketTraceDump("client sector connection dropped");
+    }
     m_ConnectionActive = false;
     m_TcpThreadRunning = false;
 }
