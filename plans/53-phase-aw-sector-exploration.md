@@ -1342,3 +1342,27 @@ Continuing the Ishuan->Glenn survey. Three things happened:
     confirmation that the FULL autonomous concourse->board path lands in space is still
     pending the next live wreck-tow -- the function-ordering + detection halves are now
     each proven, but the end-to-end loop has not yet auto-boarded unaided.
+  - **LIVE TEST (same session, ~40 min later): the fixed undock STILL could not board
+    the concourse-hallway layout -- the autonomous concourse->ship navigation is the
+    real unsolved limitation, NOT the function-ordering/detection bugs (those are fixed).
+    Carpenter wreck #2, 2026-06-24.** The survey drove Carpenter to 6/23, took real
+    combat damage (shield 97%->0 was genuine fire, not a washout: best-of-5 maxed at 16%),
+    and WRECKED at Yamuna`s Weft -> tow -> docked. handle_wreck spawned the fixed
+    undock.sh; this time the loop DID execute (walk_forward walked, find_ship ran), but it
+    spent its whole budget wandering the concourse without the ship ever coming into view,
+    and aborted "could not undock after tow" -> run-sector exit 42 -> survey HALT. A
+    post-wreck NPC dialog ("that was one heck of an explosion! are you alright over there?")
+    was also overlaying the centre for part of the run -- undock.sh has NO handling for a
+    blocking conversation/comm dialog, so its centre walk/board clicks may have been eaten.
+    Manual screen-only recovery ALSO struggled: the concourse is maze-like and blind
+    walk_forward bursts wall-stick; without 3D depth perception from a screenshot I cannot
+    reliably navigate a corridor to the hangar either. NET: for a docked-but-alive client
+    in the CONCOURSE-HALLWAY layout, neither the autonomous loop nor my manual screen-only
+    driving is reliable -- this is the case to hand to the owner (walk the avatar into the
+    hangar, or relaunch). TODO for undock.sh: (a) detect + dismiss a blocking NPC/comm
+    dialog (find its close X / a safe dismiss) before the walk-scan each round; (b) the
+    concourse->hangar pathfinding needs a better signal than blind forward bursts.
+  - **Carpenter is a DEATH-ZONE sector for this ship** -- two skipped death zones already
+    (Sector Gate to Slayton, Yamuna`s Weft) and it wrecked the ship at 6/23. Re-grinding
+    it just re-wrecks; once recovered, the better route is to gate OUT to a safer sector
+    rather than keep surveying Carpenter with this hull.
