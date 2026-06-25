@@ -127,7 +127,7 @@ DWORD WINAPI worker(LPVOID) {
     enb::log_init();
     enb::logf("enbmod worker start (pid build, 32-bit)");
     SetUnhandledExceptionFilter(crash_filter); // log the faulting module on a "random close"
-    enb::mem::install_guard(); // VEH fault guard, before any game-memory reads
+    enb::mem::install_guard();                 // VEH fault guard, before any game-memory reads
 
     g_mod_dir = module_dir();
     g_init_path = g_mod_dir + "\\scripts\\init.lua";
