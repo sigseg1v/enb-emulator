@@ -14,8 +14,8 @@
 // Record one packet. dir: 'C' = FROM the client (client->server), 'S' = TO the
 // client (server->client). data/length is the opcode PAYLOAD (the opcode is
 // passed separately); only the first few bytes are retained.
-void FreyaPacketTraceRecord(char dir, unsigned short opcode,
-                            const unsigned char* data, std::size_t length);
+void FreyaPacketTraceRecord(char dir, unsigned short opcode, const unsigned char* data,
+                            std::size_t length);
 
 // Dump the retained packets (oldest first) to the proxy log.
 void FreyaPacketTraceDump(const char* reason);
