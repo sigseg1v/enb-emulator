@@ -235,7 +235,23 @@ SHOT="$WORKDIR/rescue.png"
 case "$CMD" in
 detect)
     shot_now "$SHOT" || { rlog "screenshot failed"; exit 1; }
-    is_wrecked "$SHOT"
+    # Composite wreck signal, identical to what the `rescue` path uses below: the
+    # amber "<<Distress" label is the primary tell, BUT the wreck auto-opens the
+    # Station-Mechanic comm dialog, which sits ON TOP of that HUD slot and HIDES the
+    # label -- so is_wrecked alone false-reports ALIVE on a freshly-wrecked ship whose
+    # dialog is up. That exact false-negative let drive.py's check_wreck() return
+    # False every poll while the hull sat destroyed, spinning the survey on STALL/DEFER
+    # (Swooping Eagle, 2026-06-24). So a wreck is ALSO confirmed when the tow dialog
+    # ("Toggle distress beacon" / "I need a tow") is on screen. Short-circuit: only pay
+    # for the full-screen tow_xy OCR when the cheap label crop reads ALIVE.
+    if [ "$(is_wrecked "$SHOT")" = WRECKED ]; then
+        echo "WRECKED"
+    elif tow_xy "$SHOT" >/dev/null 2>&1; then
+        rlog "tow dialog on screen (Distress label hidden behind it) -- WRECKED"
+        echo "WRECKED"
+    else
+        echo "ALIVE"
+    fi
     ;;
 tow-xy)
     shot_now "$SHOT" || { rlog "screenshot failed"; exit 1; }

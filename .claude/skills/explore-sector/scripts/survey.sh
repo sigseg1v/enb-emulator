@@ -32,7 +32,11 @@ WORKDIR="${ENB_EXPLORE_WORKDIR:-$SKILL_DIR/../state}"
 mkdir -p "$WORKDIR"
 
 EXIT_STUCK=43
-MAX_CROSSINGS="${ENB_SURVEY_MAX:-90}"      # hard cap on sectors driven this run
+MAX_CROSSINGS="${ENB_SURVEY_MAX:-300}"     # hard cap on sectors driven this run
+                                           # (galaxy is ~100+ sectors and a greedy
+                                           # destination-ranked walk revisits some, so
+                                           # a 90 cap stopped mid-galaxy; STALE_MAX and
+                                           # has-unexplored are the real exhaustion stop)
 STALE_MAX="${ENB_SURVEY_STALE_MAX:-3}"     # consecutive already-done arrivals -> stop
 
 # drive.py only auto-crosses a gate on completion when this is set; survey IS the
@@ -126,6 +130,18 @@ status_of() {
 
 prev=""
 stale=0
+samestuck=0
+CROSS_RETRY="${ENB_CROSS_RETRY:-3}"   # same-sector re-cross attempts that learn NOTHING new before HALT
+
+# Signature of gate_route's persistent memory (edges + fail/lock tallies). When a
+# crossing attempt fails to move the ship but DOES lock a dud gate or record an edge,
+# this string changes -- proof we are converging, not spinning. A sector with several
+# un-crossable gates (an arrival-only wormhole AND a class-specific gate this ship cannot
+# use, e.g. Kailaasa: Maeldun's Weft + Gate to Sol System) needs more failed attempts
+# than CROSS_RETRY just to lock each dud before it reaches the one crossable gate -- so we
+# only count a retry against the budget when it taught us NOTHING (same signature).
+state_sig() { cat "$WORKDIR/gate_edges.json" "$WORKDIR/gate_fails.json" 2>/dev/null | cksum; }
+last_sig="$(state_sig)"
 for i in $(seq 1 "$MAX_CROSSINGS"); do
     sector="$(detect_sector "$prev")"
     if [ -z "$sector" ]; then
@@ -143,19 +159,56 @@ for i in $(seq 1 "$MAX_CROSSINGS"); do
         exit 3
     fi
 
+    # Same sector as the one we just tried to leave: the gate.sh click reported success
+    # but the ship did not actually cross within the detect window. This happens
+    # intermittently (a slow wormhole load that outlasts the poll, or a use-gate click
+    # that missed) and an immediate HALT here means a single flaky crossing kills the
+    # whole unattended survey. So RE-DRIVE (the sector is already complete, so this goes
+    # straight back to gate-leave and re-attempts the crossing) up to CROSS_RETRY times
+    # before giving up. gate_route's pending crossing was left unresolved (from==current
+    # records no edge), so nothing false is learned by a non-crossing.
     if [ "$sector" = "$prev" ]; then
-        echo "[survey] gate crossing did not move the ship (still in $sector) -- HALT" \
-             "rather than spin. Cross a gate manually and re-run." >&2
-        exit "$EXIT_STUCK"
+        cur_sig="$(state_sig)"
+        if [ "$cur_sig" != "$last_sig" ]; then
+            # The last attempt failed to cross but updated gate memory (locked a dud or
+            # recorded an edge) -- we are converging on the crossable gate, not spinning.
+            # Reset the budget so a corner with multiple un-crossable gates does not HALT us.
+            samestuck=0
+            echo "[survey] still in $sector but the last attempt locked/learned a gate --" \
+                 "converging, retry budget reset." >&2
+        else
+            samestuck=$((samestuck + 1))
+            if [ "$samestuck" -gt "$CROSS_RETRY" ]; then
+                echo "[survey] gate crossing still stuck in $sector after $CROSS_RETRY" \
+                     "no-progress retries -- HALT rather than spin. Cross a gate manually and re-run." >&2
+                exit "$EXIT_STUCK"
+            fi
+            echo "[survey] gate crossing did not move the ship (still in $sector) and learned" \
+                 "nothing new -- re-attempting the crossing ($samestuck/$CROSS_RETRY)." >&2
+        fi
+    else
+        samestuck=0
     fi
 
     if [ "$(status_of "$sector")" = "complete" ]; then
-        stale=$((stale + 1))
-        echo "[survey] $sector already complete (arrival $stale/$STALE_MAX); crossing a gate onward." >&2
-        if [ "$stale" -ge "$STALE_MAX" ]; then
-            echo "[survey] $STALE_MAX consecutive already-complete arrivals -- the reachable" \
-                 "graph from here looks fully surveyed. Stopping." >&2
-            exit 0
+        # Arriving in a sector we already finished is only "stale" when EVERY gate out
+        # of it is a proven path to another already-surveyed sector (or locked). If an
+        # unexplored gate remains, crossing a completed sector is productive traversal
+        # toward fresh ground, NOT spinning -- gate_route routes by real destinations,
+        # so we keep going without burning the stale budget. The old code counted every
+        # completed arrival and stopped after 3, killing the survey while 4 unused gates
+        # to new sectors sat right there (the Yokan<->Ishuan bounce).
+        if python3 "$SKILL_DIR/gate_route.py" has-unexplored "$sector"; then
+            echo "[survey] $sector already complete but an unexplored gate remains -- crossing onward." >&2
+            stale=0
+        else
+            stale=$((stale + 1))
+            echo "[survey] $sector already complete and every gate leads to surveyed/locked space (dead $stale/$STALE_MAX); crossing a gate onward." >&2
+            if [ "$stale" -ge "$STALE_MAX" ]; then
+                echo "[survey] $STALE_MAX consecutive dead-end arrivals -- the reachable" \
+                     "graph from here looks fully surveyed. Stopping." >&2
+                exit 0
+            fi
         fi
     else
         stale=0
@@ -176,6 +229,7 @@ for i in $(seq 1 "$MAX_CROSSINGS"); do
         *)  echo "[survey] run-sector.sh exited $rc on $sector; HALT." >&2; exit "$rc" ;;
     esac
     prev="$sector"
+    last_sig="$(state_sig)"   # snapshot gate memory AFTER this attempt for the next same-sector check
 done
 
 echo "[survey] hit ENB_SURVEY_MAX=$MAX_CROSSINGS crossings; stopping." >&2
