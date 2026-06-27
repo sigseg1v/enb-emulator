@@ -63,7 +63,7 @@ per-sector file directly into psql.
 | Object | What happens |
 |---|---|
 | **Resources** | Source of truth. Each captured rock = exact-position single-rock harvestable (res_count=1, spawn_radius=0). Any EXISTING harvestable within 5k of the SAME ore type removed first (only that specific object). |
-| **Mobs** | Source of truth. Name (+asset/level) resolves to a `mob_base` template; captured mob inserted as a 1-mob spawn at exact position. Any EXISTING spawn within 5k of the SAME template removed first. Unresolved names skipped + reported (cannot synth a mob_base safely). |
+| **Mobs** | Source of truth. Captured mob inserted as a 1-mob spawn at exact position. Any EXISTING spawn within 5k of the SAME `base_asset_id` removed first. Name (+asset/level) resolves to a `mob_base` template by exact match, else a NEW template is SYNTHESIZED by cloning the nearest-level same-asset row (mob_id >= 900000). No mob is dropped. |
 | **Navs** | Insert only if a nav of that name does not already exist in the sector. Existing navs never touched. |
 | **Stations / gates / planets** | **Report-only.** Captures lack their child-row data (dock / cap-ship / stargate routing) so creating them would break them. |
 
@@ -91,26 +91,45 @@ per-sector file directly into psql.
   assignment + exclusions.
 - [x] **AX-5** `gen_sql.py` -- per-sector SQL (nav-if-absent, resource/mob
   delete-within-5k-then-insert, report-only stations/gates/planets).
+- [x] **AX-5b** mob `mob_base` synthesis (owner ask 2026-06-27: "for missing mob
+  base it should be there ... fill all rows"). Previously ~44 captured mob
+  instances across 8 names were skipped because no exact `mob_base` name match
+  existed (Craxel, Resource Hound/Hunter, The Wrangler, Rahu the Cultivator,
+  Starbase Guardian Turret, Hadean Hijacker, Bardon Nesrith). Verified the names
+  are fully parsed (not truncated) and confirmed real via the mediawiki enemy
+  scrape at `/data/dev/net7-db-scraper`. Fix: captured name -> exact `mob_base`
+  match, else SYNTHESIZE a clone of the nearest-level same-asset template
+  (`base_asset_id` is the model; `mob_base` has no hull/shield cols so a clone is
+  complete + valid -- no Default-mob crash since the row exists). Synth templates
+  `mob_id >= 900000` in `_mob_templates.sql` (loads first), deduped across sectors
+  by (name,asset,level). Mob 5k-replacement switched from template-match to
+  asset-match (consistent with resource ore-match). Result: 0 unresolved mobs,
+  all 8 names now spawn (43 spawn rows), 0 orphan `mob_spawn_group`, idempotent.
+  The decomp at `/data/dev/enb-emulator-decomp` was NOT needed (asset clone is
+  sufficient).
 - [x] **AX-6** `import.sh` orchestrator (+ `--apply`).
 - [x] **AX-7** generated artifacts: `db/postgres/capture_import/<id>_<name>.sql`
-  (12 sectors, 1204 objects) + `db/postgres/seed_captures.sql` wrapper.
+  (12 sectors, 1247 objects) + `db/postgres/capture_import/_mob_templates.sql`
+  (10 synth `mob_base` clones) + `db/postgres/seed_captures.sql` wrapper
+  (templates `\ir`'d first).
 - [x] **AX-8** gated `schema-init` wiring in docker-compose.yml (applies the
   wrapper once on a fresh boot, after base seeds).
-- [x] **AX-9** validated end-to-end: all 12 files execute clean + idempotently;
-  `\ir` wrapper applied to dev DB (per-sector counts 1020=14, 1910=190,
-  1920=204, 1925=183, 2005=222, 2010=8, 4015=70, 4025=97, 4030=7, 4120=65,
-  4515=40, 4520=104); loader join works (sector 1925 = 223 rows); zero orphan
-  `mob_spawn_group` rows (all templates resolve to `mob_base`).
-- [ ] **AX-10** commit (held for owner -- decoder + skill + generated SQL +
-  docker-compose). Captures stay OUT of git.
+- [x] **AX-9** validated end-to-end: all 12 files + `_mob_templates.sql` execute
+  clean + idempotently; `\ir` wrapper applied to dev DB; loader join works; zero
+  orphan `mob_spawn_group` rows (every spawn resolves to a `mob_base`, real or
+  synth); 10 synth templates, 1247 objects, 43 synth spawn rows; second apply is a
+  no-op (templates=10, objs=1247, synth_spawns=43, orphans=0).
+- [x] **AX-10** commit (decoder + skill + generated SQL + docker-compose +
+  plans). Captures stay OUT of git.
 
 ## Notes
 
-- Mob names genuinely absent from `mob_base` (correctly skipped + logged, no
-  close variant exists): Craxel, Resource Hound, Resource Hunter, The Wrangler,
-  Rahu the Cultivator, Starbase Guardian Turret, Hadean Hijacker, Bardon Nesrith
-  (~52 mob instances total). Synthesizing a `mob_base` would risk the documented
-  Default-mob crash, so they are deliberately not imported.
+- Mobs are NO LONGER skipped. The 8 names previously absent from `mob_base`
+  (Craxel, Resource Hound, Resource Hunter, The Wrangler, Rahu the Cultivator,
+  Starbase Guardian Turret, Hadean Hijacker, Bardon Nesrith) now import via
+  synthesized clone templates (mob_id >= 900000) -- see AX-5b. The clone is a
+  COMPLETE same-asset `mob_base` row, so it does NOT hit the Default-mob crash
+  (that comes from a missing/incomplete template, not a present one).
 - Final aggregate exclusions: before_first_marker 469, player 47,
   capture_unresolved_no_marker 4, drop_loot_or_deco 263, no_position 1.
 - No wire change, no server/proxy/login change -> no `plans/29` CV entry. This is

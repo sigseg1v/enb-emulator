@@ -4,6 +4,9 @@
 -- the work; this wrapper includes them. Regenerate with the skill;
 -- do not hand-edit. See the skill SKILL.md for the policy.
 
+-- synthetic mob_base clone templates (must load before the spawns)
+\ir capture_import/_mob_templates.sql
+
 \ir capture_import/1020_High_Earth.sql
 \ir capture_import/1910_Kailaasa.sql
 \ir capture_import/1920_Yokan.sql

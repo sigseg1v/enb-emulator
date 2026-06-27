@@ -56,7 +56,7 @@ it runs once); the prerequisite is that the base seeds have already run.
 | Object | What happens |
 |---|---|
 | **Resources** (asteroids, clouds, ...) | Source of truth. Each captured rock is inserted as an exact-position single-rock harvestable. Any EXISTING harvestable within 5k whose ore type matches is removed first (only that specific object). |
-| **Mobs** | Source of truth. Name (+asset/level) resolves to a `mob_base` template; the captured mob is inserted as a 1-mob spawn at its exact position. Any EXISTING mob spawn within 5k that spawns the SAME template is removed first. Unresolved names are skipped and reported. |
+| **Mobs** | Source of truth. The captured mob is inserted as a 1-mob spawn at its exact position. Any EXISTING mob spawn within 5k of the SAME `base_asset_id` (the physical model at that spot) is removed first. The captured name (+asset/level) resolves to a `mob_base` template: an exact name match is reused; otherwise a NEW template is **synthesized** by cloning the nearest-level same-asset `mob_base` row and overriding name/level/asset, so the captured mob always spawns with the right model and valid stats. (`mob_base` has no hull/shield columns -- those derive from level + modifiers, which the clone inherits.) A mob is skipped only if its asset has no sibling to clone (not observed in the corpus). |
 | **Navs** | Insert only if a nav of that name does not already exist in the sector. Existing navs are never touched. |
 | **Stations / gates / planets** | **Report-only.** The capture lacks their child-row data (dock / cap-ship / stargate routing), so creating them would break them. We only print what we saw. |
 
@@ -64,6 +64,14 @@ it runs once); the prerequisite is that the base seeds have already run.
 
 - Synthetic `sector_object_id`s start at `1000000` (above the max existing id and
   the Phase Y synth range), assigned deterministically by `(sector_id, gid)`.
+- Synthetic `mob_base.mob_id`s (clone templates) start at `900000` (above the max
+  real `mob_id`, below the object range). They live in their own
+  `capture_import/_mob_templates.sql`, deduped across sectors by
+  `(name, asset, level)`, and that file MUST load first (the wrapper and
+  `import.sh --apply` both order it ahead of the per-sector spawns). Existing
+  synth rows (`id >= 900000` / `>= 1000000`) are excluded when reading the live DB
+  for replacement + clone sources, so regeneration is deterministic regardless of
+  whether a prior import is already applied.
 - Each per-sector file first deletes **its own** prior synthetic rows
   (`sector_id = S AND sector_object_id >= 1000000`), so re-applying is a clean
   replace -- no accumulation.

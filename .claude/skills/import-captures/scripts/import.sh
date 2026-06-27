@@ -28,14 +28,19 @@ if [ "$APPLY" = 1 ]; then
     echo
     echo "== apply to running net7 DB =="
     shopt -s nullglob
-    files=("$SQL_OUT_DIR"/*.sql)
-    [ ${#files[@]} -gt 0 ] || die "no generated SQL to apply in $SQL_OUT_DIR"
-    for f in "${files[@]}"; do
-        echo "apply: $(basename "$f")"
+    apply_one() {
+        echo "apply: $(basename "$1")"
         docker exec -i "$PG_CONTAINER" psql -U net7 -d net7 -v ON_ERROR_STOP=1 \
-            < "$f" >/dev/null || die "apply failed on $(basename "$f")"
+            < "$1" >/dev/null || die "apply failed on $(basename "$1")"
+    }
+    # mob_base clone templates MUST load before the per-sector spawns reference them.
+    n=0
+    [ -f "$SQL_OUT_DIR/_mob_templates.sql" ] && { apply_one "$SQL_OUT_DIR/_mob_templates.sql"; n=$((n+1)); }
+    for f in "$SQL_OUT_DIR"/[0-9]*.sql; do
+        apply_one "$f"; n=$((n+1))
     done
-    echo "applied ${#files[@]} sector file(s)."
+    [ "$n" -gt 0 ] || die "no generated SQL to apply in $SQL_OUT_DIR"
+    echo "applied $n file(s)."
 fi
 echo
 echo "done. Generated SQL in $SQL_OUT_DIR (+ $(basename "$SQL_WRAPPER"))."

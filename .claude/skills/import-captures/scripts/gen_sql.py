@@ -47,17 +47,21 @@ REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
 OUT_DIR = os.path.join(REPO, "db", "postgres", "capture_import")
 WRAPPER = os.path.join(REPO, "db", "postgres", "seed_captures.sql")
 
-SYNTH_BASE = 1_000_000          # above max existing id (~200528) and Phase Y
+SYNTH_BASE = 1_000_000          # synthetic sector_object_id: above max existing (~200528) + Phase Y
+MOB_SYNTH_BASE = 900_000        # synthetic mob_base.mob_id: above max real (~2114), below SYNTH_BASE
 REPLACE_RADIUS = 5000.0         # "within 5k" replacement radius
 DEFAULT_RES_LEVEL = 1
 
 
 def pg(sql):
+    # \x1e record sep + \x1f field sep so text columns containing embedded
+    # newlines (e.g. mob_base.ai notes) do not split a row across lines.
     out = subprocess.run(
         ["docker", "exec", PG_CONTAINER, "psql", "-U", "net7", "-d", "net7",
-         "-tA", "-F", "\x1f", "-c", sql],
+         "-tA", "-R", "\x1e", "-F", "\x1f", "-c", sql],
         capture_output=True, text=True, check=True).stdout
-    return [line.split("\x1f") for line in out.splitlines() if line]
+    out = out.rstrip("\n")   # psql appends one trailing newline to the whole result
+    return [rec.split("\x1f") for rec in out.split("\x1e") if rec] if out else []
 
 
 def sql_str(s):
@@ -79,20 +83,36 @@ class DB:
     def __init__(self):
         self.valid = {int(r[0]) for r in pg("SELECT sector_id FROM sectors")}
 
-        # mob_base, indexed by lowercased name -> [(mob_id, level, asset)]
-        self.mob_by_name = collections.defaultdict(list)
-        for mid, name, lvl, asset in pg(
-                "SELECT mob_id, name, level, base_asset_id FROM mob_base"):
-            if not name:
-                continue
-            self.mob_by_name[name.strip().lower()].append(
-                (int(mid), int(lvl or 0), int(asset or 0)))
+        # full mob_base snapshot, in column order, so a captured mob with no
+        # name match can be resolved by CLONING the nearest-level same-asset
+        # template (a complete, valid row -- mob_base has no hull/shield columns;
+        # those derive from level + modifiers, all of which the clone inherits).
+        self.mob_cols = [r[0] for r in pg(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'mob_base' ORDER BY ordinal_position")]
+        self.mob_text_cols = {r[0] for r in pg(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'mob_base' AND data_type = 'text'")}
+        collist = ", ".join(self.mob_cols)
+        self.mob_full = {}                                   # mob_id -> {col: value-or-None}
+        self.mob_by_name = collections.defaultdict(list)     # lower(name) -> [(mob_id, level, asset)]
+        self.mob_by_asset = collections.defaultdict(list)    # asset -> [(mob_id, level)]
+        self.mob_asset = {}                                  # mob_id -> asset
+        for row in pg(f"SELECT {collist} FROM mob_base "
+                      f"WHERE mob_id < {MOB_SYNTH_BASE}"):
+            r = {c: (v if v != "" else None) for c, v in zip(self.mob_cols, row)}
+            mid = int(r["mob_id"]); lvl = int(r["level"] or 0)
+            asset = int(r["base_asset_id"] or 0)
+            self.mob_full[mid] = r
+            self.mob_asset[mid] = asset
+            self.mob_by_asset[asset].append((mid, lvl))
+            if r["name"]:
+                self.mob_by_name[r["name"].strip().lower()].append((mid, lvl, asset))
 
-        # template sets per spawn container id
-        sg = collections.defaultdict(set)
-        for spawn_group_id, mob_id in pg(
-                "SELECT spawn_group_id, mob_id FROM mob_spawn_group"):
-            sg[int(spawn_group_id)].add(int(mob_id))
+        # synthesized clone templates, deduped across sectors by (name, asset, level)
+        self.synth_key = {}                                  # (lname, asset, level) -> mob_id
+        self.synth_rows = []                                 # [{col: value}] to emit
+        self._next_mob = MOB_SYNTH_BASE
 
         # ore-type sets per harvestable container id
         rt = collections.defaultdict(set)
@@ -100,17 +120,26 @@ class DB:
                 "SELECT group_id, type FROM sector_objects_harvestable_restypes"):
             rt[int(group_id)].add(int(otype))
 
+        # template sets per mob spawn container -> existing asset per spawn
+        sg = collections.defaultdict(set)
+        for spawn_group_id, mob_id in pg(
+                "SELECT spawn_group_id, mob_id FROM mob_spawn_group"):
+            a = self.mob_asset.get(int(mob_id))
+            if a is not None:
+                sg[int(spawn_group_id)].add(a)
+
         # harvestable level per resource_id (for level derivation)
         hlevel = {}
         for rid, lvl in pg(
                 "SELECT resource_id, level FROM sector_objects_harvestable"):
             hlevel[int(rid)] = int(lvl or 0)
 
-        # existing objects, bucketed per sector
+        # existing objects, bucketed per sector. Mobs/resources carry the set of
+        # specific types present (mob = base_asset_id, resource = ore type) so
+        # the 5k replacement only ever targets the SAME physical object.
         self.nav_names = collections.defaultdict(set)        # sector -> {lower(name)}
-        self.exist_mobs = collections.defaultdict(list)      # sector -> [(id,x,y,z,tmplset)]
+        self.exist_mobs = collections.defaultdict(list)      # sector -> [(id,x,y,z,assetset)]
         self.exist_res = collections.defaultdict(list)       # sector -> [(id,x,y,z,oreset)]
-        # level histogram per (sector, oretype) and per oretype
         self.level_sec = collections.defaultdict(collections.Counter)
         self.level_glob = collections.defaultdict(collections.Counter)
         for sid, sec, typ, name, x, y, z in pg(
@@ -119,6 +148,8 @@ class DB:
             if not sec or not typ or x == "" or y == "" or z == "":
                 continue
             sid = int(sid); sec = int(sec); typ = int(typ)
+            if sid >= SYNTH_BASE:
+                continue   # our own prior import -- not "existing data" to replace
             pos = (float(x), float(y), float(z))
             if typ == 37 and name:
                 self.nav_names[sec].add(name.strip().lower())
@@ -133,21 +164,47 @@ class DB:
                         self.level_sec[(sec, ore)][lvl] += 1
                         self.level_glob[ore][lvl] += 1
 
-    def resolve_mob(self, name, asset, level):
-        """name(+asset/level) -> template mob_id, or None if unresolved."""
-        if not name:
-            return None
-        cands = self.mob_by_name.get(name.strip().lower())
+    def _synth_template(self, name, asset, level):
+        """Clone the nearest-level same-asset mob_base row into a new synthetic
+        template carrying the captured name/level/asset. Returns its mob_id, or
+        None if the asset has no sibling to clone. Deduped across sectors."""
+        cands = self.mob_by_asset.get(asset)
         if not cands:
             return None
-        if len(cands) == 1:
-            return cands[0][0]
-        # prefer exact asset match
-        by_asset = [c for c in cands if asset is not None and c[2] == asset]
-        pool = by_asset or cands
-        if level is not None:
-            pool = sorted(pool, key=lambda c: abs(c[1] - level))
-        return pool[0][0]
+        lname = name.strip().lower()
+        key = (lname, asset, level or 0)
+        if key in self.synth_key:
+            return self.synth_key[key]
+        src_id = min(cands, key=lambda c: abs(c[1] - (level or 0)))[0]
+        row = dict(self.mob_full[src_id])
+        new_id = self._next_mob; self._next_mob += 1
+        row["mob_id"] = new_id
+        row["name"] = name
+        row["level"] = level if level is not None else row["level"]
+        row["base_asset_id"] = asset
+        self.synth_key[key] = new_id
+        self.synth_rows.append(row)
+        return new_id
+
+    def resolve_mob(self, name, asset, level):
+        """Captured mob -> a valid mob_base template id. Exact name match first
+        (disambiguated by asset then nearest level); otherwise SYNTHESIZE a clone
+        from the nearest-level same-asset template so the captured name+level are
+        preserved and the spawn is always fillable. None only if there is no
+        same-asset sibling to clone (never observed in the capture corpus)."""
+        if name:
+            cands = self.mob_by_name.get(name.strip().lower())
+            if cands:
+                if len(cands) == 1:
+                    return cands[0][0]
+                by_asset = [c for c in cands if asset is not None and c[2] == asset]
+                pool = by_asset or cands
+                if level is not None:
+                    pool = sorted(pool, key=lambda c: abs(c[1] - level))
+                return pool[0][0]
+        if asset is None:
+            return None
+        return self._synth_template(name or "Mob", int(asset), level)
 
     def res_level(self, sec, ore):
         h = self.level_sec.get((sec, ore)) or self.level_glob.get(ore)
@@ -188,6 +245,49 @@ def emit_nav_points(oid, nav_type, signature, sec, expl=3000.0):
         "NULL) ON CONFLICT (sector_object_id) DO NOTHING;")
 
 
+def emit_mob_base(db, row):
+    """A full mob_base INSERT from a cloned row dict (text cols quoted, NULL
+    preserved, numerics emitted verbatim)."""
+    vals = []
+    for c in db.mob_cols:
+        v = row.get(c)
+        if c in db.mob_text_cols:
+            vals.append(sql_str(v if v is not None else ""))   # text cols are NOT NULL
+        elif v is None:
+            vals.append("NULL")
+        else:
+            vals.append(str(v))
+    cols = ", ".join(db.mob_cols)
+    return (f"INSERT INTO mob_base ({cols}) VALUES ({', '.join(vals)}) "
+            "ON CONFLICT (mob_id) DO NOTHING;")
+
+
+def write_mob_templates(db):
+    """Emit the synthetic clone templates (global, used across sectors) to their
+    own file, idempotent via a delete-our-own-synth-rows prelude. Returns the
+    filename, or None if nothing was synthesized."""
+    if not db.synth_rows:
+        return None
+    lines = [
+        "-- _mob_templates.sql -- GENERATED by .claude/skills/import-captures.",
+        "-- Synthetic mob_base templates for captured mobs whose exact name is",
+        "-- not in mob_base. Each is a clone of the nearest-level same-asset",
+        "-- template carrying the captured name/level/asset, so the captured mob",
+        "-- spawns with the right model + valid stats. Included FIRST so the",
+        "-- per-sector spawns can reference them.",
+        "BEGIN;",
+        f"DELETE FROM mob_base WHERE mob_id >= {MOB_SYNTH_BASE};",
+    ]
+    for row in db.synth_rows:
+        lines.append(emit_mob_base(db, row))
+    lines.append("COMMIT;")
+    lines.append("")
+    fn = "_mob_templates.sql"
+    with open(os.path.join(OUT_DIR, fn), "w") as fh:
+        fh.write("\n".join(lines))
+    return fn
+
+
 def main():
     db = DB()
     sfiles = sorted(glob.glob(os.path.join(WORK, "sectors", "*.json")),
@@ -200,14 +300,7 @@ def main():
         os.remove(f)
 
     next_id = SYNTH_BASE
-    wrapper_lines = [
-        "-- seed_captures.sql -- GENERATED by .claude/skills/import-captures.",
-        "-- Imports accurate captured object data (resources, mobs, navs) that",
-        "-- takes priority over the current emulator data. Per-sector files do",
-        "-- the work; this wrapper includes them. Regenerate with the skill;",
-        "-- do not hand-edit. See the skill SKILL.md for the policy.",
-        "",
-    ]
+    sector_includes = []
     report = []
 
     for path in sfiles:
@@ -226,7 +319,10 @@ def main():
         unresolved = collections.Counter()
 
         # ---- MOBS ----------------------------------------------------------
-        mob_pts = []   # (x,y,z, template) for replacement matching
+        # Replacement is keyed by base_asset_id (the physical model at the spot),
+        # not the template id: a captured mob replaces any existing mob of the
+        # same asset within 5k -- the same rule shape as resources (ore type).
+        mob_pts = []   # (x,y,z, asset) for replacement matching
         mob_rows = []  # (oid, template, rec)
         for m in s["mobs"]:
             tmpl = db.resolve_mob(m.get("name"), m.get("baseAsset"), m.get("level"))
@@ -236,7 +332,8 @@ def main():
                 continue
             oid = next_id; next_id += 1
             mob_rows.append((oid, tmpl, m))
-            mob_pts.append((m["x"], m["y"], m["z"], tmpl))
+            if m.get("baseAsset") is not None:
+                mob_pts.append((m["x"], m["y"], m["z"], int(m["baseAsset"])))
             n_mob += 1
         replace_ids |= near_ids(mob_pts, db.exist_mobs[sec])
         for oid, tmpl, m in mob_rows:
@@ -338,7 +435,7 @@ def main():
         fn = f"{sec}_{safe}.sql"
         with open(os.path.join(OUT_DIR, fn), "w") as fh:
             fh.write("\n".join(body))
-        wrapper_lines.append(f"\\ir capture_import/{fn}")
+        sector_includes.append(f"\\ir capture_import/{fn}")
 
         report.append(
             f"sector {sec:5d} {name:<16} navs+{n_nav} (skip {n_nav_skip} exist) "
@@ -350,11 +447,27 @@ def main():
         for nm, c in unresolved.most_common():
             report.append(f"        unresolved mob: {nm} x{c}")
 
+    templates_fn = write_mob_templates(db)
+
+    wrapper_lines = [
+        "-- seed_captures.sql -- GENERATED by .claude/skills/import-captures.",
+        "-- Imports accurate captured object data (resources, mobs, navs) that",
+        "-- takes priority over the current emulator data. Per-sector files do",
+        "-- the work; this wrapper includes them. Regenerate with the skill;",
+        "-- do not hand-edit. See the skill SKILL.md for the policy.",
+        "",
+    ]
+    if templates_fn:
+        wrapper_lines.append("-- synthetic mob_base clone templates (must load before the spawns)")
+        wrapper_lines.append(f"\\ir capture_import/{templates_fn}")
+        wrapper_lines.append("")
+    wrapper_lines.extend(sector_includes)
     with open(WRAPPER, "w") as fh:
         fh.write("\n".join(wrapper_lines) + "\n")
 
     print("\n".join(report))
-    print(f"\ngen_sql: {next_id - SYNTH_BASE} objects -> {OUT_DIR}")
+    print(f"\ngen_sql: {next_id - SYNTH_BASE} objects, "
+          f"{len(db.synth_rows)} synthetic mob_base templates -> {OUT_DIR}")
     print(f"         wrapper -> {WRAPPER}")
 
 

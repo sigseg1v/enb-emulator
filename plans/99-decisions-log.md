@@ -8353,5 +8353,31 @@ Key decisions:
   (`db/postgres/capture_import/` + `seed_captures.sql`). `.env` + local captures
   gitignored. Provenance of the captures is NOT disclosed in skill text or commits.
 - Alternatives rejected: importing stations/gates from captures (would break them,
-  missing child data); synthesizing `mob_base` for unresolved mob names (risks the
-  documented Default-mob crash) — those names are skipped + logged instead.
+  missing child data).
+
+## 2026-06-27 -- Synthesize `mob_base` clones instead of skipping unresolved mobs (Phase AX)
+
+SUPERSEDES the 2026-06-23 decision above to skip unresolved mob names. Owner
+direction: "for missing mob base it should be there ... build a mapping somehow
+that the skill can use to fill all rows." Re-verified the captured names are fully
+parsed (not a decoder truncation) and confirmed they are real mobs via the
+mediawiki enemy-page scrape. The earlier "synth risks the Default-mob crash"
+reasoning was wrong: that crash comes from a MISSING/incomplete template, not from
+a present one.
+
+- **Clone-by-asset synthesis.** A captured mob with no exact `mob_base` name match
+  now SYNTHESIZES a template by cloning the nearest-level row sharing the same
+  `base_asset_id` (physical model), overriding name/level/asset. `mob_base` has no
+  hull/shield columns -- those derive from level + modifiers -- so a same-asset
+  clone is a complete, valid template. All 8 previously-skipped names import.
+- **Synth id ranges.** Synth `mob_base.mob_id >= 900000` (above max real id 2114,
+  below the `sector_object_id >= 1000000` object range). Templates live in their own
+  `capture_import/_mob_templates.sql`, deduped across sectors by (name,asset,level),
+  loaded FIRST (wrapper + `import.sh --apply` both order it ahead of the spawns).
+  Existing synth rows excluded when reading the live DB, so regeneration is
+  deterministic whether or not a prior import is applied.
+- **5k mob replacement keys on `base_asset_id`**, not template id -- consistent with
+  the resource ore-type match (replace the physical thing at that spot).
+- The decomp was NOT needed; clone-by-asset is sufficient. Result: 0 unresolved
+  mobs across all 12 sectors, 10 synth templates, 43 synth spawn rows, 0 orphan
+  `mob_spawn_group`, idempotent.
