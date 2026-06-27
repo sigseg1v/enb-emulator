@@ -8325,3 +8325,33 @@ Pre-lint cleanup pass, removing code already superseded by a shipped replacement
   This is the one deletion candidate I deliberately did NOT remove despite the
   "kill mysql stuff" directive; flagging it for the owner to override if the
   intent was to drop the historical dumps too.
+
+## 2026-06-23 — Captured object data takes priority over current DB data (Phase AX)
+
+Per owner direction: the accurate packet captures are the source of truth for
+prospecting resources and mob positions, overriding whatever the current
+emulator data says. Built `.claude/skills/import-captures/` to decode the
+captures, dedup objects on `(sector, gid)` keeping latest position, and emit
+per-sector `.sql` that imports resources + mobs + missing navs.
+
+Key decisions:
+- **Sector assignment by in-stream marker, not filename.** A capture starts in
+  the previous sector and gates in, so an object's sector is the last `0x003A`
+  handoff before its frame. Marker-less captures (no gate crossing) resolve from
+  the filename prefix. Everything validated against the `sectors` table; instanced
+  `realid*10+1` ids folded back. This is the owner's "GREAT CARE, never write to
+  the wrong sector" requirement.
+- **Replace within 5k by specific object only.** Resources/mobs delete an existing
+  same-ore / same-template object within 5k of a captured one, then insert the
+  captured version. Navs insert only if absent by name. Stations/gates/planets are
+  report-only because the captures lack their child rows and creating them would
+  break them.
+- **Synth id base 1000000, idempotent per-sector files.** Above the Phase Y synth
+  range; each file deletes its own prior synth rows then re-inserts, so re-apply is
+  a clean replace. 5k-deletes target explicit existing-id lists (never over-delete).
+- **Captures never committed.** Only the generated `.sql` artifacts go in git
+  (`db/postgres/capture_import/` + `seed_captures.sql`). `.env` + local captures
+  gitignored. Provenance of the captures is NOT disclosed in skill text or commits.
+- Alternatives rejected: importing stations/gates from captures (would break them,
+  missing child data); synthesizing `mob_base` for unresolved mob names (risks the
+  documented Default-mob crash) — those names are skipped + logged instead.
