@@ -207,6 +207,19 @@ class DB:
             return None
         return self._synth_template(name or "Mob", int(asset), level)
 
+    def template_asset(self, mob_id, captured):
+        """Model asset id for a RESOLVED template -- the key the 5k mob
+        replacement must use. A capture can record a different model id for a
+        creature than our `mob_base` does (observed: captured "Scuttle Larva"
+        asset 1050 vs mob_base asset 1180), and `resolve_mob` matches the
+        template by NAME, so keying the replacement on the raw captured asset
+        misses the co-located existing spawn of the SAME creature. Real
+        templates carry their `mob_base` asset; synthesized clones (>=
+        MOB_SYNTH_BASE, absent from `mob_asset`) carry the captured asset they
+        were built from."""
+        a = self.mob_asset.get(int(mob_id))
+        return a if a is not None else captured
+
     def res_level(self, sec, ore):
         # Captures do not carry a resource level, so derive it: the most common
         # level among existing same-ore harvestables in this sector, else
@@ -406,6 +419,9 @@ def main():
         # Replacement is keyed by base_asset_id (the physical model at the spot),
         # not the template id: a captured mob replaces any existing mob of the
         # same asset within 5k -- the same rule shape as resources (ore type).
+        # The key is the RESOLVED template's asset, not the raw captured asset:
+        # see template_asset() (capture/mob_base model-id disagreement otherwise
+        # leaves a co-located base spawn of the same creature un-replaced).
         mob_pts = []   # (x,y,z, asset) for replacement matching
         mob_rows = []  # (oid, template, rec)
         for m in s["mobs"]:
@@ -416,8 +432,9 @@ def main():
                 continue
             oid = next_id; next_id += 1
             mob_rows.append((oid, tmpl, m))
-            if m.get("baseAsset") is not None:
-                mob_pts.append((m["x"], m["y"], m["z"], int(m["baseAsset"])))
+            ta = db.template_asset(tmpl, m.get("baseAsset"))
+            if ta is not None:
+                mob_pts.append((m["x"], m["y"], m["z"], int(ta)))
             n_mob += 1
         replace_ids |= near_ids(mob_pts, db.exist_mobs[sec])
         for oid, tmpl, m in mob_rows:

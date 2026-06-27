@@ -152,6 +152,22 @@ per-sector file directly into psql.
   Verified: fresh normal boot now removes all base dups, 1247 synth objects, 10
   synth templates, 0 orphans, no schema-init errors; guard refuses on a
   non-pristine DB with the replace blocks intact.
+- [x] **AX-13** mob 5k-replacement keyed on the RESOLVED template asset, not the
+  raw captured asset. In-game/DB verification (1020 High Earth) found ONE
+  surviving duplicate the AX-12 replaces missed: base spawn 4728 "Scuttle Larva
+  Spawn" (mob_id 1253, model asset 1180) sat 369u from the 4 captured "Scuttle
+  Larva". The capture records that creature's model as asset 1050, but our
+  `mob_base` carries 1180; `resolve_mob` matches the template by NAME, so keying
+  `near_ids` on the raw captured asset (1050) never matched base 4728's model
+  (1180) and the co-located base spawn survived. Siblings Scuttle Pupa
+  (asset 1181) / Relentless Drone (asset 1456) replaced fine because their
+  captured asset agreed with the DB. Fix: new `template_asset(mob_id, captured)`
+  returns the resolved template's `mob_base` asset (real template) or the
+  captured asset (synthesized clone, absent from `mob_asset`); the mob loop keys
+  replacement on it. Regenerated against pristine -> only 1020 changed
+  (replace 2 -> 3, +4728); all other sectors byte-identical. Post-apply
+  same-mob_id base-vs-synth dupe query returns ZERO across all 12 sectors;
+  base 4728 gone; 1247 synth objects intact.
 
 ## Notes
 
