@@ -8381,3 +8381,38 @@ a present one.
 - The decomp was NOT needed; clone-by-asset is sufficient. Result: 0 unresolved
   mobs across all 12 sectors, 10 synth templates, 43 synth spawn rows, 0 orphan
   `mob_spawn_group`, idempotent.
+
+## 2026-06-27 -- import-captures: global purge + pristine-DB regen guard
+
+Two robustness fixes after applying the full capture corpus "systematically and
+safely" (Phase AX-11/AX-12).
+
+1. **Global `_purge.sql`.** The per-sector files each delete only THEIR OWN prior
+   synth rows (`sector_id = S AND id >= 1000000`). When the captured object set
+   changes, a gid maps to a NEW synth id, so an old row can squat on an id a
+   *different*, earlier-applied sector block now tries to insert -- `ON CONFLICT
+   DO NOTHING` then silently drops the new row, and the squatter is deleted later
+   by its own sector file. Net: 246 synth rows silently vanished on a re-apply
+   over a different mapping. Fix: a global purge of the whole synth id range
+   (children before parents) that runs FIRST, in both the `seed_captures.sql`
+   wrapper and `import.sh --apply`. Every re-apply is now a clean replace.
+
+2. **Replace-block determinism + pristine guard.** HEAD (f42fe3cf) had shipped
+   per-sector files with ZERO 5k-replace blocks, so `seed_captures` left ~25
+   base-seed duplicate mobs/resources across 8 sectors (captured same-asset spawn
+   coexisting with the base spawn). Root cause: the replace blocks delete base
+   rows the import itself removes, so regenerating against a DB where the capture
+   import already ran finds nothing and emits empty replaces. This is a foot-gun:
+   `import.sh --apply` regenerates then applies, so a second run regenerates
+   against the now-non-pristine DB and silently drops the replaces.
+
+   Decision: make regeneration require a PRISTINE base DB and fail loud
+   otherwise, rather than try to make replacement DB-state-independent (which
+   would mean parsing the base seed SQL to reconstruct object positions/assets --
+   a large, fragile rewrite). `gen_sql.py` reads the committed replace-target ids
+   and exits non-zero if any are already deleted. A new `ENB_SKIP_CAPTURE_SEED=1`
+   schema-init env brings up base+Phase-Y with `seed_captures` skipped, the one
+   clean way to get a pristine DB to regenerate against (a plain `down -v` +
+   reboot re-applies the captures, which is circular). Regenerated -> 25 replace
+   blocks restored; fresh normal boot now removes all base dups; guard verified
+   to refuse on a non-pristine DB with the replace blocks left intact.

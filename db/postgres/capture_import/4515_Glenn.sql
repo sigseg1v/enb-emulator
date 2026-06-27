@@ -11,6 +11,15 @@ DELETE FROM sector_objects_harvestable WHERE resource_id IN (SELECT sector_objec
 DELETE FROM sector_nav_points WHERE sector_object_id IN (SELECT sector_object_id FROM sector_objects WHERE sector_id = 4515 AND sector_object_id >= 1000000);
 DELETE FROM sector_objects WHERE sector_id = 4515 AND sector_object_id >= 1000000;
 
+-- 2. capture-priority replace: remove existing mobs/resources within 5000 units of a captured object of the same specific type
+DELETE FROM mob_spawn_group WHERE spawn_group_id IN (12234, 12236, 13162, 13715);
+DELETE FROM sector_objects_mob WHERE mob_id IN (12234, 12236, 13162, 13715);
+DELETE FROM sector_objects_harvestable_restypes WHERE group_id IN (12234, 12236, 13162, 13715);
+DELETE FROM sector_objects_harvestable_oretypes WHERE resource_id IN (12234, 12236, 13162, 13715);
+DELETE FROM sector_objects_harvestable WHERE resource_id IN (12234, 12236, 13162, 13715);
+DELETE FROM sector_nav_points WHERE sector_object_id IN (12234, 12236, 13162, 13715);
+DELETE FROM sector_objects WHERE sector_object_id IN (12234, 12236, 13162, 13715);
+
 -- 3. inserts (parents first, then child rows)
 INSERT INTO sector_objects (sector_object_id, base_asset_id, h, s, v, type, scale, position_x, position_y, position_z, orientation_u, orientation_v, orientation_w, orientation_z, name, appears_in_radar, radar_range, sector_id, gate_to, sound_effect_id, sound_effect_range) VALUES (1001102, 0, 0.0, 0.0, 0.0, 0, 1.0, 31397.506, -96623.58, -1894.2174, 0.0, 0.0, 0.0, 0.0, 'Glenn Touring Craft', 0, 5000.0, 4515, NULL, NULL, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
 INSERT INTO sector_objects (sector_object_id, base_asset_id, h, s, v, type, scale, position_x, position_y, position_z, orientation_u, orientation_v, orientation_w, orientation_z, name, appears_in_radar, radar_range, sector_id, gate_to, sound_effect_id, sound_effect_range) VALUES (1001103, 0, 0.0, 0.0, 0.0, 0, 1.0, 34304.39, -90956.71, -472.42078, 0.0, 0.0, 0.0, 0.0, 'Glenn Touring Craft', 0, 5000.0, 4515, NULL, NULL, NULL) ON CONFLICT (sector_object_id) DO NOTHING;

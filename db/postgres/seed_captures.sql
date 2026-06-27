@@ -4,6 +4,9 @@
 -- the work; this wrapper includes them. Regenerate with the skill;
 -- do not hand-edit. See the skill SKILL.md for the policy.
 
+-- global purge of any prior synthetic rows (clean re-apply, see _purge.sql)
+\ir capture_import/_purge.sql
+
 -- synthetic mob_base clone templates (must load before the spawns)
 \ir capture_import/_mob_templates.sql
 

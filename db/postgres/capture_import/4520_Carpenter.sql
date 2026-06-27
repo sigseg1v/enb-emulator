@@ -11,6 +11,15 @@ DELETE FROM sector_objects_harvestable WHERE resource_id IN (SELECT sector_objec
 DELETE FROM sector_nav_points WHERE sector_object_id IN (SELECT sector_object_id FROM sector_objects WHERE sector_id = 4520 AND sector_object_id >= 1000000);
 DELETE FROM sector_objects WHERE sector_id = 4520 AND sector_object_id >= 1000000;
 
+-- 2. capture-priority replace: remove existing mobs/resources within 5000 units of a captured object of the same specific type
+DELETE FROM mob_spawn_group WHERE spawn_group_id IN (12152, 13624, 200114);
+DELETE FROM sector_objects_mob WHERE mob_id IN (12152, 13624, 200114);
+DELETE FROM sector_objects_harvestable_restypes WHERE group_id IN (12152, 13624, 200114);
+DELETE FROM sector_objects_harvestable_oretypes WHERE resource_id IN (12152, 13624, 200114);
+DELETE FROM sector_objects_harvestable WHERE resource_id IN (12152, 13624, 200114);
+DELETE FROM sector_nav_points WHERE sector_object_id IN (12152, 13624, 200114);
+DELETE FROM sector_objects WHERE sector_object_id IN (12152, 13624, 200114);
+
 -- 3. inserts (parents first, then child rows)
 INSERT INTO sector_objects (sector_object_id, base_asset_id, h, s, v, type, scale, position_x, position_y, position_z, orientation_u, orientation_v, orientation_w, orientation_z, name, appears_in_radar, radar_range, sector_id, gate_to, sound_effect_id, sound_effect_range) VALUES (1001142, 0, 0.0, 0.0, 0.0, 0, 1.0, -37460.137, 13201.419, -189.99988, 0.0, 0.0, 0.0, 0.0, 'Dai Lo Veteran Red Dragon', 0, 5000.0, 4520, NULL, NULL, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
 INSERT INTO sector_objects (sector_object_id, base_asset_id, h, s, v, type, scale, position_x, position_y, position_z, orientation_u, orientation_v, orientation_w, orientation_z, name, appears_in_radar, radar_range, sector_id, gate_to, sound_effect_id, sound_effect_range) VALUES (1001143, 0, 0.0, 0.0, 0.0, 0, 1.0, -52475.66, 10556.274, -168.95145, 0.0, 0.0, 0.0, 0.0, 'Dai Lo Veteran Red Dragon', 0, 5000.0, 4520, NULL, NULL, NULL) ON CONFLICT (sector_object_id) DO NOTHING;

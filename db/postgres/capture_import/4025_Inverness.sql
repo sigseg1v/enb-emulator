@@ -11,6 +11,15 @@ DELETE FROM sector_objects_harvestable WHERE resource_id IN (SELECT sector_objec
 DELETE FROM sector_nav_points WHERE sector_object_id IN (SELECT sector_object_id FROM sector_objects WHERE sector_id = 4025 AND sector_object_id >= 1000000);
 DELETE FROM sector_objects WHERE sector_id = 4025 AND sector_object_id >= 1000000;
 
+-- 2. capture-priority replace: remove existing mobs/resources within 5000 units of a captured object of the same specific type
+DELETE FROM mob_spawn_group WHERE spawn_group_id IN (5126, 200231);
+DELETE FROM sector_objects_mob WHERE mob_id IN (5126, 200231);
+DELETE FROM sector_objects_harvestable_restypes WHERE group_id IN (5126, 200231);
+DELETE FROM sector_objects_harvestable_oretypes WHERE resource_id IN (5126, 200231);
+DELETE FROM sector_objects_harvestable WHERE resource_id IN (5126, 200231);
+DELETE FROM sector_nav_points WHERE sector_object_id IN (5126, 200231);
+DELETE FROM sector_objects WHERE sector_object_id IN (5126, 200231);
+
 -- 3. inserts (parents first, then child rows)
 INSERT INTO sector_objects (sector_object_id, base_asset_id, h, s, v, type, scale, position_x, position_y, position_z, orientation_u, orientation_v, orientation_w, orientation_z, name, appears_in_radar, radar_range, sector_id, gate_to, sound_effect_id, sound_effect_range) VALUES (1000933, 0, 0.0, 0.0, 0.0, 0, 1.0, -26583.21, -79972.695, 119.69877, 0.0, 0.0, 0.0, 0.0, 'Misguided Belter Laborer', 0, 5000.0, 4025, NULL, NULL, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
 INSERT INTO sector_objects (sector_object_id, base_asset_id, h, s, v, type, scale, position_x, position_y, position_z, orientation_u, orientation_v, orientation_w, orientation_z, name, appears_in_radar, radar_range, sector_id, gate_to, sound_effect_id, sound_effect_range) VALUES (1000934, 0, 0.0, 0.0, 0.0, 0, 1.0, -20534.271, -79532.07, -1348.0979, 0.0, 0.0, 0.0, 0.0, 'Misguided Belter', 0, 5000.0, 4025, NULL, NULL, NULL) ON CONFLICT (sector_object_id) DO NOTHING;

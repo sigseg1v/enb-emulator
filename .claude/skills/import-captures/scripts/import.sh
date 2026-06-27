@@ -33,8 +33,12 @@ if [ "$APPLY" = 1 ]; then
         docker exec -i "$PG_CONTAINER" psql -U net7 -d net7 -v ON_ERROR_STOP=1 \
             < "$1" >/dev/null || die "apply failed on $(basename "$1")"
     }
-    # mob_base clone templates MUST load before the per-sector spawns reference them.
+    # 1) global purge of any prior synthetic rows FIRST -- a full re-apply over a
+    #    different prior id mapping is only a clean replace if the whole synth range
+    #    is cleared up front (per-sector self-deletes are sector-scoped; see _purge.sql).
+    # 2) then mob_base clone templates, which the per-sector spawns reference.
     n=0
+    [ -f "$SQL_OUT_DIR/_purge.sql" ] && { apply_one "$SQL_OUT_DIR/_purge.sql"; n=$((n+1)); }
     [ -f "$SQL_OUT_DIR/_mob_templates.sql" ] && { apply_one "$SQL_OUT_DIR/_mob_templates.sql"; n=$((n+1)); }
     for f in "$SQL_OUT_DIR"/[0-9]*.sql; do
         apply_one "$f"; n=$((n+1))

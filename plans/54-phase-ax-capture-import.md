@@ -71,14 +71,26 @@ per-sector file directly into psql.
 
 - Synthetic `sector_object_id`s start at `1000000` (above max existing id + the
   Phase Y synth range), assigned deterministically by `(sector_id, gid)`.
-- Each per-sector file first deletes ITS OWN prior synth rows
-  (`sector_id = S AND sector_object_id >= 1000000`) -> re-apply = clean replace.
+- A global `_purge.sql` clears the WHOLE synth id range (children before parents)
+  and runs FIRST, before `_mob_templates.sql` and the per-sector files. The
+  per-sector self-delete is sector-scoped, so a full re-apply over a DIFFERENT
+  prior id mapping left an old row squatting on an id an earlier sector block
+  tried to insert -> `ON CONFLICT DO NOTHING` silently dropped it (246 rows lost
+  before the purge existed). The up-front global purge makes every re-apply clean.
+- Each per-sector file ALSO deletes its own prior synth rows (kept for single-file
+  manual apply) -> re-apply = clean replace.
 - 5k-replacement deletes explicit existing-id lists computed against the live DB
-  at generation time (can never over-delete; worst case no-op). **Regenerate the
-  SQL whenever base seeds change**, or those id lists go stale.
+  at generation time (can never over-delete; worst case no-op). **REGENERATE ONLY
+  AGAINST A PRISTINE BASE DB** (base + Phase Y, `seed_captures` NOT applied): the
+  replace blocks delete base rows the import itself removes, so regenerating
+  against a captures-applied DB makes them come back EMPTY and the duplicates
+  resurrect. `gen_sql.py` reads the committed replace-target ids and REFUSES if
+  any are already deleted. Pristine DB: `docker compose down -v` then
+  `ENB_SKIP_CAPTURE_SEED=1 docker compose up -d schema-init`.
 - `schema-init` run order: schema -> base seeds (incl. Phase Y) ->
-  `seed_captures.sql` (gated, runs once) -> orphan-spawn cleanup ->
-  `sync_sequences.sql` (last). docker-compose.yml carries the gated apply block.
+  `seed_captures.sql` (gated, runs once; skipped when `ENB_SKIP_CAPTURE_SEED=1`)
+  -> orphan-spawn cleanup -> `sync_sequences.sql` (last). docker-compose.yml
+  carries the gated apply block.
 
 ## Items
 
@@ -121,6 +133,25 @@ per-sector file directly into psql.
   no-op (templates=10, objs=1247, synth_spawns=43, orphans=0).
 - [x] **AX-10** commit (decoder + skill + generated SQL + docker-compose +
   plans). Captures stay OUT of git.
+- [x] **AX-11** `_purge.sql` global synth-range purge (runs first in the wrapper
+  and in `import.sh --apply`). Fixes 246 silently-dropped synth rows on a
+  cross-mapping re-apply (per-sector self-deletes are sector-scoped; an old row
+  squatting on a reassigned id blocked the insert via ON CONFLICT DO NOTHING).
+- [x] **AX-12** replace-block determinism fix + pristine-DB guard. HEAD
+  (f42fe3cf) shipped a latent bug: its per-sector files had ZERO 5k-replace
+  blocks, so seed_captures left ~25 base-seed duplicate mobs/resources in 8
+  sectors (e.g. base "Scuttle Pupa Spawn"/"Relentless Drone Spawn" coexisting
+  with the captured same-asset spawn). Root cause: the replace blocks key on base
+  rows the import itself deletes, so regenerating against a captures-applied DB
+  produces empty replaces. Fixes: (1) `gen_sql.py` reads the committed
+  replace-target ids and REFUSES to regenerate if any are already deleted
+  (non-pristine DB); (2) new `ENB_SKIP_CAPTURE_SEED=1` schema-init escape hatch
+  brings up a pristine base+Phase-Y DB so the skill can recompute the replaces.
+  Regenerated against pristine -> 25 replace blocks across 8 sectors restored
+  (1020 +2, 1910 +1, 1920 +4, 1925 +4, 2005 +5, 4025 +2, 4515 +4, 4520 +3).
+  Verified: fresh normal boot now removes all base dups, 1247 synth objects, 10
+  synth templates, 0 orphans, no schema-init errors; guard refuses on a
+  non-pristine DB with the replace blocks intact.
 
 ## Notes
 
@@ -135,4 +166,5 @@ per-sector file directly into psql.
 - No wire change, no server/proxy/login change -> no `plans/29` CV entry. This is
   DB content tooling only.
 - The import was applied to the running DEV DB during AX-9 validation (idempotent;
-  reproduced by schema-init on a fresh boot). `just nuke-pg` reverts it.
+  reproduced by schema-init on a fresh boot). `docker compose down -v` + reboot
+  reverts it.

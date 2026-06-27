@@ -75,12 +75,43 @@ it runs once); the prerequisite is that the base seeds have already run.
 - Each per-sector file first deletes **its own** prior synthetic rows
   (`sector_id = S AND sector_object_id >= 1000000`), so re-applying is a clean
   replace -- no accumulation.
+- A global `_purge.sql` deletes the WHOLE synth id range (children before parents)
+  and runs FIRST (before `_mob_templates.sql` and the per-sector files). The
+  per-sector self-delete above is sector-scoped, so a full re-apply over a
+  DIFFERENT prior id mapping (the object set changed, so a gid now maps to a new
+  synth id) would otherwise leave an old row squatting on an id an
+  earlier-applied sector block tries to insert -- `ON CONFLICT DO NOTHING` then
+  silently drops it. The up-front global purge makes every re-apply a clean
+  replace across all sectors. (Observed: 246 synth rows silently dropped before
+  `_purge.sql` existed.)
 - The 5k-replacement deletes target **explicit existing ids** computed against the
   live DB at generation time, so they can never over-delete (worst case: no-op).
-  **Regenerate the SQL whenever the base seeds change**, or those id lists go
-  stale. Run order in `schema-init` is: schema -> base seeds (incl. Phase Y) ->
-  `seed_captures.sql` -> orphan-spawn cleanup -> `sync_sequences.sql` (last, so
-  the synthetic ids bump the identity sequences).
+
+  **REGENERATE ONLY AGAINST A PRISTINE BASE DB** (base + Phase Y seeds, with
+  `seed_captures.sql` NOT yet applied). This is a hard precondition: the replace
+  blocks delete base-seed rows the import itself removes, so on a DB where the
+  capture import already ran those base rows are gone, the replace queries return
+  nothing, and the replace blocks regenerate EMPTY -- silently resurrecting the
+  duplicates. `gen_sql.py` enforces this: it reads the committed replace-target
+  ids and **refuses** (non-zero exit) if any are already deleted. To get a
+  pristine DB:
+
+  ```bash
+  docker compose down -v
+  ENB_SKIP_CAPTURE_SEED=1 docker compose up -d schema-init   # base+Phase Y only
+  bash .claude/skills/import-captures/scripts/import.sh        # regenerate
+  bash .claude/skills/import-captures/scripts/import.sh --apply # (optional) apply now
+  ```
+
+  Note this also means `import.sh --apply` is a ONE-SHOT against a pristine DB:
+  re-running it (which regenerates first) will hit the guard and refuse, because
+  the first apply made the DB non-pristine. Re-apply the committed SQL via a fresh
+  boot or by piping `seed_captures.sql` into psql -- do not regenerate to re-apply.
+
+  Run order in `schema-init` is: schema -> base seeds (incl. Phase Y) ->
+  `seed_captures.sql` (gated; skipped when `ENB_SKIP_CAPTURE_SEED=1`) ->
+  orphan-spawn cleanup -> `sync_sequences.sql` (last, so the synthetic ids bump
+  the identity sequences).
 
 ## Rules baked in
 
