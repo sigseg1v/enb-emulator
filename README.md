@@ -20,6 +20,10 @@
 - added terraform/infra-as-code to make managing and spinning server up easier
 - to avoid confusion for users, the launcher/etc for this project is called Freya to indicate that it has undergone significant changes from Net7. All original and derivative Net7 code remains Net7 licensed.
 
+## A quick note
+
+There is no publicly-open server officially hosted for this project. It's not meant to compete with Net-7. Live Net-7 is significantly more true to the old-school experience and accurate/complete/stable, it's just closed source. If you just want to play E&B and aren't interested in development or customization of the game, play Net-7. The main purpose for this is that I wanted something that is more open for fans to experiment and play E&B on their own terms and make their own modifications.
+
 ## Quick Start
 
 1.  For Windows: install Earth & Beyond via publicly available `eandb_demo.exe`
@@ -263,7 +267,7 @@ auth traffic and launcher opcodes are automatically skipped.
 Run the client with these options:
 
 ```bash
-WINEDEBUG=+seh,+tid WINEPREFIX=/home/sigsegv/.wine-enb just play-local 2>&1 | tee /tmp/client-crash.log
+WINEDEBUG=+seh,+tid WINEPREFIX=~/.wine-enb just play-local 2>&1 | tee /tmp/client-crash.log
 ```
 
 then, reproduce the crash and inspect the stack or the stuck binary, plus the logs produced.
