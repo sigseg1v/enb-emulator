@@ -177,6 +177,36 @@ per-sector file directly into psql.
   unique names; exhaustive per-nav flight across all 12 sectors was NOT done
   (single-client CLI move/warp primitives make it impractical and it would only
   weakly sample what the DB cross-check proves exactly).
+- [x] **AX-14** nav misattribution fix: navs are now resolved AUTHORITATIVELY from
+  `docs/sectors/json/*.jsonl`, not the capture's in-stream sector marker. Root
+  cause: the old `(sector, gid)` dedup key let the SAME nav live in two sectors
+  when one gid appeared in two captures under conflicting markers -- 19 cross-sector
+  duplicate nav names (audited). Reused gids across captures (gid 100017 =
+  "Nav Arduinne 2" in one capture, a different nav in another) also meant a global
+  gid-only key would wrongly collapse unrelated objects. Fix in `aggregate.py`:
+  (1) a nav's sector is the jsonl-listed sector for its alphanumeric-normalized
+  name; a nav absent from every jsonl is DROPPED (61 such junk/variant navs
+  excluded as `nav_not_in_jsonl`); (2) two-level dedup -- collapse by gid WITHIN a
+  capture (session-stable, keeps the higher-confidence sector across a relabel
+  boundary), then globally key navs on `(sector, normalized-name)` and
+  mobs/resources on `(sector, gid)`. `gen_sql.py` gained a defensive jsonl
+  membership gate on nav emission (`n_nav_notjsonl`; never fires now that aggregate
+  enforces it). The constraint is documented in `SKILL.md` (pipeline step 2, Navs
+  policy row, Rules-baked-in). Verified post-apply against pristine: 161 imported
+  navs, ZERO violate jsonl membership, ZERO cross-sector imported-nav dups; the one
+  shared name "Arena Entry Point" is genuinely in both Slayton and Glenn jsonl
+  (correct ground truth, not a leak).
+- [x] **AX-15** mob/resource misattribution fix (same captures, same belief).
+  "If a nav was misattributed by believing the wrong sector, the mobs were too."
+  `aggregate.py` now relabels a whole marker-segment to the jsonl-corroborated
+  sector when the marker has ZERO nav support and another sector dominates
+  (>=3 navs, >3x the marker). Four segments relabeled: the Glenn capture's
+  instanced segment (marked New Edinburgh, 27 Glenn navs) and three
+  New-Edinburgh/Inverness captures mis-marked as the gated-from sector. The
+  conservative threshold leaves legitimately-mixed gate segments (e.g. the
+  Menorb<->Ishuan capture, where the marker has its own nav support) on their
+  marker. Mob/resource totals restored to full scale (381 mobs / 839 resources);
+  regenerated + applied clean (1244 synth rows, no SQL errors).
 
 ## Notes
 

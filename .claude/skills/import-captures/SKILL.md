@@ -36,17 +36,37 @@ it runs once); the prerequisite is that the base seeds have already run.
    in-stream sector-marker list.
 2. **aggregate.py** turns those into one de-duplicated object list **per sector**
    (`WORK/sectors/<id>.json`). The hard parts:
-   - **Sector assignment.** A capture starts in the PREVIOUS sector and gates into
-     the target. An object's sector is the last in-stream sector marker (`0x003A`
-     handoff) seen *before* that object was created -- never the filename. Markers
-     whose id is not a real sector are dropped; instanced sub-sector ids
-     (`realid*10+1`, e.g. `40151`) fold back to the real id; both are validated
-     against the `sectors` table.
-   - **Dedup.** Key is `(sector, gid)`. The same object seen many times / across
-     captures is kept once, with its **latest** position (captures ordered by
-     timestamp, newest wins) and non-null fields merged in. Removal opcodes are
-     ignored (we collect objects as they come into range), so an object that left
-     and re-entered range is still one object.
+   - **Nav sector = `docs/sectors/json/*.jsonl`, FULL STOP.** That file set is the
+     authoritative ground truth for which nav belongs to which sector. A nav is
+     resolved to the sector(s) whose jsonl lists its name (matched
+     alphanumeric-normalized -- drop case / punctuation / spaces, because the jsonl
+     uses curly apostrophes and accents the wire names render as bare ASCII).
+     **If a nav name is not in ANY sector's jsonl, that nav does not exist and is
+     dropped** -- never imported off the capture's marker. This is non-negotiable:
+     the in-stream sector markers are noisy around gate handoffs and the same gid
+     is reused across captures, so the marker is NOT trusted for navs.
+   - **Mob / resource sector assignment.** These have no name catalog, so they take
+     the marker of the segment they were created in (the last `0x003A` handoff
+     before their frame; markers whose id is not a real sector are dropped,
+     instanced `realid*10+1` ids fold back). BUT that marker is cross-checked
+     against the navs seen in the same segment (resolved via jsonl): if the marker
+     sector has ZERO nav corroboration and another sector clearly dominates the
+     segment's navs (>=3 navs and >3x the marker's support), the whole segment was
+     mis-marked and is **relabeled** to the dominant sector -- the mobs move with
+     it. This is deliberately conservative (a marker with ANY nav support is
+     trusted), so legitimately mixed gate segments keep their marker. It is the
+     correction for "if a nav was misattributed by believing the wrong sector, the
+     mobs from that same belief were too."
+   - **Dedup is two-level, because gids are session-scoped** (the same gid number is
+     reused for unrelated objects across captures). WITHIN one capture a gid is
+     stable, so objects are first collapsed by gid -- keeping the higher-confidence
+     sector when a gid spans a relabel boundary, so the same mob seen in both the
+     mis-marked and corrected segment lands in ONE sector. ACROSS captures, navs key
+     on `(sector, normalized-name)` (gid-free, so a nav can never duplicate into two
+     sectors) and mobs/resources on `(sector, gid)`. The kept record takes the
+     **latest** position (captures ordered by timestamp, newest wins) and non-null
+     fields merged in. Removal opcodes are ignored (we collect objects as they come
+     into range), so an object that left and re-entered range is still one object.
    - **Exclusions:** players (`gid >= 0x40000000` or `isAvatar`), and anything that
      is not an import target (loot / corpses / decorative objects). All counted.
 3. **gen_sql.py** writes the per-sector SQL following the policy below.
@@ -57,7 +77,7 @@ it runs once); the prerequisite is that the base seeds have already run.
 |---|---|
 | **Resources** (asteroids, clouds, ...) | Source of truth. Each captured rock is inserted as an exact-position single-rock harvestable. Any EXISTING harvestable within 5k whose ore type matches is removed first (only that specific object). |
 | **Mobs** | Source of truth. The captured mob is inserted as a 1-mob spawn at its exact position. Any EXISTING mob spawn within 5k of the SAME `base_asset_id` (the physical model at that spot) is removed first. The captured name (+asset/level) resolves to a `mob_base` template: an exact name match is reused; otherwise a NEW template is **synthesized** by cloning the nearest-level same-asset `mob_base` row and overriding name/level/asset, so the captured mob always spawns with the right model and valid stats. (`mob_base` has no hull/shield columns -- those derive from level + modifiers, which the clone inherits.) A mob is skipped only if its asset has no sibling to clone (not observed in the corpus). |
-| **Navs** | Insert only if a nav of that name does not already exist in the sector. Existing navs are never touched. |
+| **Navs** | Imported only if the name is listed for that sector in `docs/sectors/json/*.jsonl` (the authoritative membership source -- a nav absent from the jsonl does not exist and is dropped), AND a nav of that name does not already exist in the sector. Existing navs are never touched. gen_sql re-checks jsonl membership as a defensive gate (any drop here is a loud regression, since aggregate already enforced it). |
 | **Stations / gates / planets** | **Report-only.** The capture lacks their child-row data (dock / cap-ship / stargate routing), so creating them would break them. We only print what we saw. |
 
 ## How duplicates are prevented
@@ -116,6 +136,11 @@ it runs once); the prerequisite is that the base seeds have already run.
 ## Rules baked in
 
 - Captured data takes priority over current data; that is the whole point.
+- **`docs/sectors/json/*.jsonl` is the sole authority for nav-to-sector
+  membership.** A nav not in there does not exist; never attribute a nav to a
+  sector off the capture's in-stream marker. (Mobs/resources have no such catalog,
+  so they fall back to the marker-segment sector, conservatively relabeled by the
+  jsonl-resolved navs in that same segment.)
 - No SQL query is built by concatenating values -- every introspection query is a
   constant; resolution and spatial matching happen in Python. The generated
   `.sql` is a script artifact (literal values, quote-doubled), which is the one

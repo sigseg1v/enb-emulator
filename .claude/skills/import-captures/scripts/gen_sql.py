@@ -65,6 +65,34 @@ def pg(sql):
     return [rec.split("\x1f") for rec in out.split("\x1e") if rec] if out else []
 
 
+def norm(s):
+    """Alphanumeric-normalize a name (jsonl uses curly apostrophes / accents the
+    wire names render as bare ASCII)."""
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def load_nav_jsonl(norm2id):
+    """sector_id -> {norm(nav name)} from docs/sectors/json/<Sector>.jsonl -- THE
+    authoritative source of which nav belongs to which sector. A nav not listed
+    here does not exist in that sector and must not be imported into it."""
+    NAV_TYPES = {"nav-point", "hidden-nav-point", "special-nav-point"}
+    idx = collections.defaultdict(set)
+    jdir = os.path.join(REPO, "docs", "sectors", "json")
+    for path in sorted(glob.glob(os.path.join(jdir, "*.jsonl"))):
+        sid = norm2id.get(norm(os.path.basename(path)[:-6]))
+        if sid is None:
+            continue
+        with open(path) as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                o = json.loads(line)
+                if o.get("type") in NAV_TYPES and o.get("name"):
+                    idx[sid].add(norm(o["name"]))
+    return idx
+
+
 def sql_str(s):
     return "'" + str(s).replace("'", "''") + "'"
 
@@ -83,6 +111,15 @@ class DB:
 
     def __init__(self):
         self.valid = {int(r[0]) for r in pg("SELECT sector_id FROM sectors")}
+
+        # Authoritative nav membership: which nav names belong to which sector,
+        # straight from docs/sectors/json/*.jsonl. A captured nav whose name is not
+        # listed for the sector it was bucketed into does not belong there and is
+        # NOT imported. aggregate.py already resolves nav sectors from this same
+        # source; this is the defensive gate that makes the constraint impossible
+        # to bypass at SQL-generation time.
+        norm2id = {norm(r[1]): int(r[0]) for r in pg("SELECT sector_id, name FROM sectors") if r[1]}
+        self.nav_jsonl = load_nav_jsonl(norm2id)
 
         # full mob_base snapshot, in column order, so a captured mob with no
         # name match can be resolved by CLONING the nearest-level same-asset
@@ -412,7 +449,7 @@ def main():
         body = []
         replace_ids = set()
         inserts_obj, inserts_child = [], []
-        n_nav = n_nav_skip = n_res = n_mob = n_mob_skip = 0
+        n_nav = n_nav_skip = n_nav_notjsonl = n_res = n_mob = n_mob_skip = 0
         unresolved = collections.Counter()
 
         # ---- MOBS ----------------------------------------------------------
@@ -482,6 +519,12 @@ def main():
             nm = (nv.get("name") or "").strip()
             if not nm:
                 continue
+            if norm(nm) not in db.nav_jsonl.get(sec, set()):
+                # Not in this sector's authoritative jsonl -> it does not belong
+                # here. Should never fire (aggregate already enforced it); counted
+                # so a regression is loud rather than silent.
+                n_nav_notjsonl += 1
+                continue
             if nm.lower() in db.nav_names[sec]:
                 n_nav_skip += 1
                 continue
@@ -539,7 +582,8 @@ def main():
         sector_includes.append(f"\\ir capture_import/{fn}")
 
         report.append(
-            f"sector {sec:5d} {name:<16} navs+{n_nav} (skip {n_nav_skip} exist) "
+            f"sector {sec:5d} {name:<16} navs+{n_nav} (skip {n_nav_skip} exist"
+            f"{f', {n_nav_notjsonl} not-in-jsonl' if n_nav_notjsonl else ''}) "
             f"res+{n_res} mob+{n_mob} (skip {n_mob_skip} unresolved) "
             f"replace {len(replace_ids)} existing"
             + (f"  STATIONS={len(s['stations'])} GATES={len(s['gates'])} "
