@@ -167,7 +167,16 @@ per-sector file directly into psql.
   replacement on it. Regenerated against pristine -> only 1020 changed
   (replace 2 -> 3, +4728); all other sectors byte-identical. Post-apply
   same-mob_id base-vs-synth dupe query returns ZERO across all 12 sectors;
-  base 4728 gone; 1247 synth objects intact.
+  base 4728 gone; 1247 synth objects intact. Resource side cross-checked too
+  (base harvestable within 5k of a synth harvestable sharing an ore type):
+  ZERO across all 12 sectors -- the ore-type replace path was already correct,
+  but verified rather than assumed. 4727 (a distinct larva spawn 5994u away,
+  just outside the 5k radius) correctly RETAINED -- the fix is precise, not
+  over-aggressive. CI green for 2bd2a770. In-game (CLI client): undock->space
+  works and the server renders captured mob spawns into scanner range with
+  unique names; exhaustive per-nav flight across all 12 sectors was NOT done
+  (single-client CLI move/warp primitives make it impractical and it would only
+  weakly sample what the DB cross-check proves exactly).
 
 ## Notes
 
