@@ -208,6 +208,26 @@ per-sector file directly into psql.
   marker. Mob/resource totals restored to full scale (381 mobs / 839 resources);
   regenerated + applied clean (1244 synth rows, no SQL errors).
 
+- [x] **AX-16** baseline guardian turrets on every gate + starbase. The captures
+  show guardian turrets ringing gates/starbases (asset 14, level 66, template
+  `mob_base` 573), but a single fly-through only catches the 1-3 nearest the path,
+  and only in flown sectors. New `gen_turrets.py` extrapolates the captured ring to
+  the whole galaxy as BASELINE content (owner: "don't consider these extra mods,
+  build them in as baseline"). It reads every `sector_objects.type IN (11,12)` with
+  a position and rings each with evenly-spaced turrets (3/gate, 4/starbase) at a 3D
+  distance (~1980) inside the captured 1428-2500 band, elevated above the anchor
+  plane. Each is the standard 4-row mob spawn (parent + `sector_objects_mob` +
+  `mob_spawn_group` + `sector_nav_points`) backed by real `mob_base` 573; the
+  display name lives on `sector_objects.name` so one template backs both
+  "Gate"/"Starbase Guardian Turret". Synthetic ids in their own range
+  (`>= 2000000`), self-deleting first so re-apply is a clean replace; generator
+  aborts if template 573 is missing (Default-mob crash guard). Output committed as
+  `db/postgres/seed_turrets.sql`, wired into `schema-init` UNCONDITIONALLY (after
+  the capture block, before orphan cleanup + `sync_sequences`), independent of
+  `ENB_SKIP_CAPTURE_SEED`. Generated + applied clean against pristine: 987 turrets
+  (245 gates x3 + 63 starbases x4) across 108 sectors, 0 orphan refs. Documented in
+  `SKILL.md`; `import.sh` runs `gen_turrets.py` after `gen_sql.py`.
+
 ## Notes
 
 - Mobs are NO LONGER skipped. The 8 names previously absent from `mob_base`

@@ -133,6 +133,39 @@ it runs once); the prerequisite is that the base seeds have already run.
   orphan-spawn cleanup -> `sync_sequences.sql` (last, so the synthetic ids bump
   the identity sequences).
 
+## Baseline guardian turrets (`gen_turrets.py` -> `seed_turrets.sql`)
+
+The captures show guardian turrets ringing gates and starbases ("Gate Guardian
+Turret" / "Starbase Guardian Turret", asset 14, level 66, template `mob_base`
+573). A single fly-through only catches the 1-3 turrets nearest the flight path,
+and only in the handful of sectors we flew -- but the retail server placed a small
+ring around EVERY gate and starbase. `gen_turrets.py` extrapolates that captured
+pattern to the whole galaxy as **baseline content** (not an optional mod):
+
+- It reads every stargate (`sector_objects.type = 11`) and starbase (`type = 12`)
+  with a known position from the running net7 DB, and places an evenly-spaced ring
+  of guardian turrets around each (3 per gate, 4 per starbase), elevated above the
+  anchor plane. The ring radius/elevation give a 3D distance (~1980) squarely
+  inside the captured 1428-2500 band.
+- Each turret is a normal mob spawn (the same 4-row shape the capture import uses:
+  `sector_objects` parent + `sector_objects_mob` + `mob_spawn_group` +
+  `sector_nav_points`), backed by the real `mob_base` 573 template. The display
+  name ("Gate"/"Starbase Guardian Turret") lives on `sector_objects.name`, so one
+  template backs both names. The generator aborts if `mob_base` 573 is missing
+  (a spawn referencing a missing template spawns the NULL-data "Default" mob and
+  crashes the sector server).
+- Synthetic ids live in their OWN range (`sector_object_id >= 2000000`), clear of
+  the capture import (1000000) and Phase Y. `seed_turrets.sql` deletes its own
+  range first (children before parents), so re-applying is a clean replace.
+- `schema-init` applies `seed_turrets.sql` **unconditionally** on every boot
+  (after the capture block, before the orphan cleanup, before `sync_sequences`).
+  It is independent of `ENB_SKIP_CAPTURE_SEED`: it touches neither base rows nor
+  the capture import, so it is present even when regenerating against a pristine
+  base DB.
+
+Regenerate it with `import.sh` (it runs `gen_turrets.py` after `gen_sql.py`), or
+directly: `python3 .claude/skills/import-captures/scripts/gen_turrets.py`.
+
 ## Rules baked in
 
 - Captured data takes priority over current data; that is the whole point.

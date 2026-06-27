@@ -23,6 +23,11 @@ python3 "$SKILL_DIR/scripts/aggregate.py"
 echo
 echo "== generate SQL =="
 python3 "$SKILL_DIR/scripts/gen_sql.py"
+echo
+echo "== generate baseline turrets =="
+# Reads gate/starbase positions from the running net7 DB and writes the
+# committed db/postgres/seed_turrets.sql (independent of the capture import).
+python3 "$SKILL_DIR/scripts/gen_turrets.py"
 
 if [ "$APPLY" = 1 ]; then
     echo
