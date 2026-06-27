@@ -245,6 +245,21 @@ per-sector file directly into psql.
   only appears after the sector reloads (re-enter / server restart); a fresh boot
   has them immediately. Real-client visibility tracked as a CV check (the new
   shape matches the existing in-game turrets, which render).
+- [x] **AX-17** imported mob/resource radar signature fix. Two related defects in
+  `gen_sql.py`: (1) imported mobs got a `sector_nav_points` row with
+  `signature = 1000`, well below the dominant base-data value of 7000 (1220/1372
+  mobs), so imports were under-detectable; (2) imported RESOURCES got NO
+  `sector_nav_points` row at all, so their signature defaulted to 0 (the server
+  LEFT-JOINs that table onto every object and reads `signature` as the radar
+  detection radius -- `SectorContentSQL::ProcessDefaultObjectStats` ->
+  `ObjectManager`). Added `BASE_SIGNATURE = 7000.0`; mobs now use it and
+  resources get their own `nav_type 0` nav-point row at 7000. Regenerated all 11
+  per-sector files against a pristine throwaway DB (381 mob nav-points re-emitted
+  at 7000, 839 new resource nav-points added; verified all 1220 import nav-points
+  now read 7000, no schema.sql drift). Applied surgically to the live dev DB
+  (UPDATE 381 + INSERT 839). `SKILL.md` import-policy section documents the
+  nav-point/signature contract. DB content only -- no wire/server change, no
+  `plans/29` CV entry.
 
 ## Notes
 

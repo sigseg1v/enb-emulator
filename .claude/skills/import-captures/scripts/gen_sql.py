@@ -52,6 +52,12 @@ SYNTH_BASE = 1_000_000          # synthetic sector_object_id: above max existing
 MOB_SYNTH_BASE = 900_000        # synthetic mob_base.mob_id: above max real (~2114), below SYNTH_BASE
 REPLACE_RADIUS = 5000.0         # "within 5k" replacement radius
 DEFAULT_RES_LEVEL = 1
+BASE_SIGNATURE = 7000.0         # default radar signature for imported mobs/resources.
+                                # The server reads sector_nav_points.signature as an
+                                # object's detection radius; 7000 is the dominant base-data
+                                # value (1220/1372 mobs, 692/839 resources). The captures
+                                # almost never carry a real per-object signature, so we
+                                # match the base convention rather than under-signature them.
 
 
 def pg(sql):
@@ -491,7 +497,14 @@ def main():
                 "INSERT INTO mob_spawn_group (id, spawn_group_id, mob_id, "
                 f"group_index) VALUES ({oid}, {oid}, {tmpl}, 0) "
                 "ON CONFLICT (id) DO NOTHING;")
-            inserts_child.append(emit_nav_points(oid, 0, 1000.0, sec))
+            # nav_type 0 (not a nav node), but the row is REQUIRED: the server
+            # LEFT-JOINs sector_nav_points onto every sector_object and reads
+            # `signature` from it as the object's radar detection radius (see
+            # ObjectManager / ProcessDefaultObjectStats). No row -> signature 0
+            # -> the mob only pops in at bare scan range. Match the base-data
+            # convention (BASE_SIGNATURE) so imported mobs are as detectable as
+            # the existing ones.
+            inserts_child.append(emit_nav_points(oid, 0, BASE_SIGNATURE, sec))
 
         # ---- RESOURCES -----------------------------------------------------
         res_pts = []
@@ -519,6 +532,10 @@ def main():
             inserts_child.append(
                 "INSERT INTO sector_objects_harvestable_restypes (id, group_id, "
                 f"type) VALUES ({oid}, {oid}, {ore}) ON CONFLICT (id) DO NOTHING;")
+            # like mobs, a resource needs a sector_nav_points row to carry its
+            # radar signature (base-data harvestables all have one). nav_type 0
+            # (not a nav node); signature = BASE_SIGNATURE.
+            inserts_child.append(emit_nav_points(oid, 0, BASE_SIGNATURE, sec))
 
         # ---- NAVS (insert-if-absent by name) -------------------------------
         for nv in s["navs"]:

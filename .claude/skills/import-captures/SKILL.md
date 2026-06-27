@@ -80,6 +80,17 @@ it runs once); the prerequisite is that the base seeds have already run.
 | **Navs** | Imported only if the name is listed for that sector in `docs/sectors/json/*.jsonl` (the authoritative membership source -- a nav absent from the jsonl does not exist and is dropped), AND a nav of that name does not already exist in the sector. Existing navs are never touched. gen_sql re-checks jsonl membership as a defensive gate (any drop here is a loud regression, since aggregate already enforced it). |
 | **Stations / gates / planets** | **Report-only.** The capture lacks their child-row data (dock / cap-ship / stargate routing), so creating them would break them. We only print what we saw. |
 
+Every imported **mob and resource** also gets a `sector_nav_points` row with
+`nav_type = 0` (NOT a nav node -- `IsNav()` stays false, so it never shows on
+radar as a nav target) carrying `signature = BASE_SIGNATURE` (7000.0). The row
+is REQUIRED: the server LEFT-JOINs `sector_nav_points` onto every
+`sector_object` and reads `signature` as the object's radar detection radius
+(`SectorContentSQL::ProcessDefaultObjectStats` -> `ObjectManager`). With no row
+the signature defaults to 0 and the object only pops in at bare scan range. 7000
+is the dominant base-data value (1220/1372 mobs, 692/839 resources) and the
+captures almost never carry a real per-object signature, so we match the base
+convention rather than under-signature imports.
+
 ## How duplicates are prevented
 
 - Synthetic `sector_object_id`s start at `1000000` (above the max existing id and

@@ -19,18 +19,18 @@ INSERT INTO sector_objects (sector_object_id, base_asset_id, h, s, v, type, scal
 INSERT INTO sector_objects (sector_object_id, base_asset_id, h, s, v, type, scale, position_x, position_y, position_z, orientation_u, orientation_v, orientation_w, orientation_z, name, appears_in_radar, radar_range, sector_id, gate_to, sound_effect_id, sound_effect_range) VALUES (1001144, 0, 0.0, 0.0, 0.0, 0, 1.0, 69330.0, -154770.0, 1400.0, 0.0, 0.0, 0.0, 0.0, 'Gate Guardian Turret', 0, 5000.0, 4030, NULL, NULL, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
 INSERT INTO sector_objects_mob (mob_id, mob_count, mob_spawn_radius, respawn_time, delayed_spawn, group_aggro) VALUES (1001140, 1, 0, 90, 0, 0) ON CONFLICT DO NOTHING;
 INSERT INTO mob_spawn_group (id, spawn_group_id, mob_id, group_index) VALUES (1001140, 1001140, 704, 0) ON CONFLICT (id) DO NOTHING;
-INSERT INTO sector_nav_points (sector_object_id, nav_type, signature, is_huge, sector_id, base_xp, exploration_range, object_radius_patch) VALUES (1001140, 0, 1000.0, 0, 4030, 0, 3000.0, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
+INSERT INTO sector_nav_points (sector_object_id, nav_type, signature, is_huge, sector_id, base_xp, exploration_range, object_radius_patch) VALUES (1001140, 0, 7000.0, 0, 4030, 0, 3000.0, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
 INSERT INTO sector_objects_mob (mob_id, mob_count, mob_spawn_radius, respawn_time, delayed_spawn, group_aggro) VALUES (1001141, 1, 0, 90, 0, 0) ON CONFLICT DO NOTHING;
 INSERT INTO mob_spawn_group (id, spawn_group_id, mob_id, group_index) VALUES (1001141, 1001141, 704, 0) ON CONFLICT (id) DO NOTHING;
-INSERT INTO sector_nav_points (sector_object_id, nav_type, signature, is_huge, sector_id, base_xp, exploration_range, object_radius_patch) VALUES (1001141, 0, 1000.0, 0, 4030, 0, 3000.0, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
+INSERT INTO sector_nav_points (sector_object_id, nav_type, signature, is_huge, sector_id, base_xp, exploration_range, object_radius_patch) VALUES (1001141, 0, 7000.0, 0, 4030, 0, 3000.0, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
 INSERT INTO sector_objects_mob (mob_id, mob_count, mob_spawn_radius, respawn_time, delayed_spawn, group_aggro) VALUES (1001142, 1, 0, 90, 0, 0) ON CONFLICT DO NOTHING;
 INSERT INTO mob_spawn_group (id, spawn_group_id, mob_id, group_index) VALUES (1001142, 1001142, 704, 0) ON CONFLICT (id) DO NOTHING;
-INSERT INTO sector_nav_points (sector_object_id, nav_type, signature, is_huge, sector_id, base_xp, exploration_range, object_radius_patch) VALUES (1001142, 0, 1000.0, 0, 4030, 0, 3000.0, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
+INSERT INTO sector_nav_points (sector_object_id, nav_type, signature, is_huge, sector_id, base_xp, exploration_range, object_radius_patch) VALUES (1001142, 0, 7000.0, 0, 4030, 0, 3000.0, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
 INSERT INTO sector_objects_mob (mob_id, mob_count, mob_spawn_radius, respawn_time, delayed_spawn, group_aggro) VALUES (1001143, 1, 0, 90, 0, 0) ON CONFLICT DO NOTHING;
 INSERT INTO mob_spawn_group (id, spawn_group_id, mob_id, group_index) VALUES (1001143, 1001143, 1103, 0) ON CONFLICT (id) DO NOTHING;
-INSERT INTO sector_nav_points (sector_object_id, nav_type, signature, is_huge, sector_id, base_xp, exploration_range, object_radius_patch) VALUES (1001143, 0, 1000.0, 0, 4030, 0, 3000.0, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
+INSERT INTO sector_nav_points (sector_object_id, nav_type, signature, is_huge, sector_id, base_xp, exploration_range, object_radius_patch) VALUES (1001143, 0, 7000.0, 0, 4030, 0, 3000.0, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
 INSERT INTO sector_objects_mob (mob_id, mob_count, mob_spawn_radius, respawn_time, delayed_spawn, group_aggro) VALUES (1001144, 1, 0, 90, 0, 0) ON CONFLICT DO NOTHING;
 INSERT INTO mob_spawn_group (id, spawn_group_id, mob_id, group_index) VALUES (1001144, 1001144, 573, 0) ON CONFLICT (id) DO NOTHING;
-INSERT INTO sector_nav_points (sector_object_id, nav_type, signature, is_huge, sector_id, base_xp, exploration_range, object_radius_patch) VALUES (1001144, 0, 1000.0, 0, 4030, 0, 3000.0, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
+INSERT INTO sector_nav_points (sector_object_id, nav_type, signature, is_huge, sector_id, base_xp, exploration_range, object_radius_patch) VALUES (1001144, 0, 7000.0, 0, 4030, 0, 3000.0, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
 
 COMMIT;
