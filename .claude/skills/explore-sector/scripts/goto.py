@@ -81,6 +81,11 @@ def main():
     best_d = float("inf")
     stall = 0
     STALL = int(os.environ.get("ENB_GOTO_STALL", "3"))
+    # How close counts as ARRIVED. Default VISIT_K (8k) for generic "fly to a nav"
+    # use, but a GATE CROSSING needs the ship on the gate (~<2k) or gate.sh finds no
+    # use-gate icon -- callers crossing a gate set ENB_GOTO_ARRIVE_K=2.5 so goto keeps
+    # direct-warping until the ship is in gate-clicking range instead of conceding at 8k.
+    ARRIVE_K = float(os.environ.get("ENB_GOTO_ARRIVE_K", str(drive.VISIT_K)))
     drive.log(sector, "goto-start", f"heading to {want_name}")
     for rnd in range(rounds):
         cyc = drive.enumerate_cycle(sector)
@@ -88,8 +93,8 @@ def main():
             continue
         match = next((e for e in cyc if e["key"] == want_key), None)
         d = match["dist"] if match else None
-        # ARRIVED: target in range AND within the visit threshold.
-        if match is not None and d is not None and d <= drive.VISIT_K:
+        # ARRIVED: target in range AND within the arrival threshold.
+        if match is not None and d is not None and d <= ARRIVE_K:
             print(f"round {rnd}: {want_name} in range at {d}k", flush=True)
             print(f"ARRIVED {want_name} {d}k", flush=True)
             drive.log(sector, "goto-arrived", f"{want_name} @{d}k")
