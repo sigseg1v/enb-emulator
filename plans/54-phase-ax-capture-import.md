@@ -224,9 +224,27 @@ per-sector file directly into psql.
   aborts if template 573 is missing (Default-mob crash guard). Output committed as
   `db/postgres/seed_turrets.sql`, wired into `schema-init` UNCONDITIONALLY (after
   the capture block, before orphan cleanup + `sync_sequences`), independent of
-  `ENB_SKIP_CAPTURE_SEED`. Generated + applied clean against pristine: 987 turrets
-  (245 gates x3 + 63 starbases x4) across 108 sectors, 0 orphan refs. Documented in
-  `SKILL.md`; `import.sh` runs `gen_turrets.py` after `gen_sql.py`.
+  `ENB_SKIP_CAPTURE_SEED`. Documented in `SKILL.md`; `import.sh` runs
+  `gen_turrets.py` after `gen_sql.py`.
+- [x] **AX-16b** turret shape fix -- the first cut was INVISIBLE in-client.
+  Reported live: no turrets at the High Earth Tau Ceti gate. Root cause: the
+  generator modelled turrets as type-0 mob SPAWNS (`sector_objects.type=0`,
+  `base_asset_id=0`, + `sector_objects_mob` + `mob_spawn_group` -> template 573).
+  The server (`SectorContentSQL.cpp`) loads type 0 as `OT_MOBSPAWN`, and even the
+  turret branch reads the MODEL straight from `sector_objects.base_asset_id` --
+  which was 0, so no model rendered. (The `turret_mob_id` promotion path the
+  server also checks does not apply: that column does not exist in our Postgres
+  schema.) The base data's real turrets are **type 42** with **base_asset_id 14**
+  (the guardian-turret model), `scale 1`, one `sector_nav_points` row, and NO
+  mob/spawn rows (e.g. sector_object 1733). Rewrote `gen_turrets.py` to emit that
+  exact shape, dropped the `mob_base` 573 dependency, and added gap-fill dedup:
+  skip any gate/starbase that already has a real type-42 turret within 6k so the
+  ring never doubles the authentic placements. Regenerated: 716 turrets (168
+  gates x3 + 53 starbases x4), 87 anchors skipped. Applied clean to the live DB.
+  NOTE: a running sector thread loads objects once on cold-start, so a live apply
+  only appears after the sector reloads (re-enter / server restart); a fresh boot
+  has them immediately. Real-client visibility tracked as a CV check (the new
+  shape matches the existing in-game turrets, which render).
 
 ## Notes
 

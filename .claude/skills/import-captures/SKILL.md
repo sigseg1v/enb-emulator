@@ -136,24 +136,31 @@ it runs once); the prerequisite is that the base seeds have already run.
 ## Baseline guardian turrets (`gen_turrets.py` -> `seed_turrets.sql`)
 
 The captures show guardian turrets ringing gates and starbases ("Gate Guardian
-Turret" / "Starbase Guardian Turret", asset 14, level 66, template `mob_base`
-573). A single fly-through only catches the 1-3 turrets nearest the flight path,
-and only in the handful of sectors we flew -- but the retail server placed a small
-ring around EVERY gate and starbase. `gen_turrets.py` extrapolates that captured
-pattern to the whole galaxy as **baseline content** (not an optional mod):
+Turret" / "Starbase Guardian Turret", model asset 14). A single fly-through only
+catches the 1-3 turrets nearest the flight path, and only in the handful of
+sectors we flew; the base data also carries ~129 real turrets, but only near some
+gates/starbases. The retail server placed a small ring around EVERY gate and
+starbase. `gen_turrets.py` **fills the gaps** as **baseline content** (not an
+optional mod):
 
 - It reads every stargate (`sector_objects.type = 11`) and starbase (`type = 12`)
-  with a known position from the running net7 DB, and places an evenly-spaced ring
-  of guardian turrets around each (3 per gate, 4 per starbase), elevated above the
-  anchor plane. The ring radius/elevation give a 3D distance (~1980) squarely
-  inside the captured 1428-2500 band.
-- Each turret is a normal mob spawn (the same 4-row shape the capture import uses:
-  `sector_objects` parent + `sector_objects_mob` + `mob_spawn_group` +
-  `sector_nav_points`), backed by the real `mob_base` 573 template. The display
-  name ("Gate"/"Starbase Guardian Turret") lives on `sector_objects.name`, so one
-  template backs both names. The generator aborts if `mob_base` 573 is missing
-  (a spawn referencing a missing template spawns the NULL-data "Default" mob and
-  crashes the sector server).
+  with a known position from the running net7 DB and, for each that does NOT
+  already have a real turret within 6k, places an evenly-spaced ring of guardian
+  turrets (3 per gate, 4 per starbase) elevated above the anchor plane. The ring
+  radius/elevation give a 3D distance (~1980) squarely inside the captured
+  1428-2500 band. Anchors that already have a turret keep their authentic base
+  placement (the ring is gap-fill, so the two never double up).
+- Each turret matches the existing base-data turret shape exactly (e.g.
+  sector_object 1733): a single `sector_objects` row with **`type = 42`**
+  (OT_MOB / stationary turret -- the server's `SectorContentSQL` turret branch
+  reads the model straight from **`base_asset_id = 14`**), `scale = 1`,
+  `radar_range = 5000`, plus one `sector_nav_points` row (nav_type 1, signature
+  20000, exploration_range 3000). The display name ("Gate"/"Starbase Guardian
+  Turret") lives on `sector_objects.name`. A type-42 turret is self-contained: it
+  writes **no** `sector_objects_mob` and **no** `mob_spawn_group` row. (A type-0
+  mob SPAWN with `base_asset_id 0` -- the original mistaken shape -- loads as an
+  OT_MOBSPAWN with no model and is invisible; the self-delete below still purges
+  any such stale rows.)
 - Synthetic ids live in their OWN range (`sector_object_id >= 2000000`), clear of
   the capture import (1000000) and Phase Y. `seed_turrets.sql` deletes its own
   range first (children before parents), so re-applying is a clean replace.
@@ -162,6 +169,10 @@ pattern to the whole galaxy as **baseline content** (not an optional mod):
   It is independent of `ENB_SKIP_CAPTURE_SEED`: it touches neither base rows nor
   the capture import, so it is present even when regenerating against a pristine
   base DB.
+- A running sector thread reads its objects once on cold-start and does not
+  re-poll the DB, so applying `seed_turrets.sql` to a live DB only shows up after
+  the sector reloads (re-enter the sector, or restart the server). A fresh
+  `docker compose` boot has them from the first load.
 
 Regenerate it with `import.sh` (it runs `gen_turrets.py` after `gen_sql.py`), or
 directly: `python3 .claude/skills/import-captures/scripts/gen_turrets.py`.
