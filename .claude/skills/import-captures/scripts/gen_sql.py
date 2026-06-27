@@ -220,6 +220,12 @@ class DB:
         row["name"] = name
         row["level"] = level if level is not None else row["level"]
         row["base_asset_id"] = asset
+        # `ai` is a free-text designer-notes field in the upstream data (dev
+        # changelog / loadout annotations); the server never reads it. Cloning it
+        # verbatim drags the SOURCE mob's notes onto our synthesized template,
+        # where they are stale and misleading -- blank it.
+        if "ai" in row:
+            row["ai"] = None
         self.synth_key[key] = new_id
         self.synth_rows.append(row)
         return new_id
