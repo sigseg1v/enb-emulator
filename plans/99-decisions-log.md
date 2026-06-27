@@ -8325,3 +8325,94 @@ Pre-lint cleanup pass, removing code already superseded by a shipped replacement
   This is the one deletion candidate I deliberately did NOT remove despite the
   "kill mysql stuff" directive; flagging it for the owner to override if the
   intent was to drop the historical dumps too.
+
+## 2026-06-23 — Captured object data takes priority over current DB data (Phase AX)
+
+Per owner direction: the accurate packet captures are the source of truth for
+prospecting resources and mob positions, overriding whatever the current
+emulator data says. Built `.claude/skills/import-captures/` to decode the
+captures, dedup objects on `(sector, gid)` keeping latest position, and emit
+per-sector `.sql` that imports resources + mobs + missing navs.
+
+Key decisions:
+- **Sector assignment by in-stream marker, not filename.** A capture starts in
+  the previous sector and gates in, so an object's sector is the last `0x003A`
+  handoff before its frame. Marker-less captures (no gate crossing) resolve from
+  the filename prefix. Everything validated against the `sectors` table; instanced
+  `realid*10+1` ids folded back. This is the owner's "GREAT CARE, never write to
+  the wrong sector" requirement.
+- **Replace within 5k by specific object only.** Resources/mobs delete an existing
+  same-ore / same-template object within 5k of a captured one, then insert the
+  captured version. Navs insert only if absent by name. Stations/gates/planets are
+  report-only because the captures lack their child rows and creating them would
+  break them.
+- **Synth id base 1000000, idempotent per-sector files.** Above the Phase Y synth
+  range; each file deletes its own prior synth rows then re-inserts, so re-apply is
+  a clean replace. 5k-deletes target explicit existing-id lists (never over-delete).
+- **Captures never committed.** Only the generated `.sql` artifacts go in git
+  (`db/postgres/capture_import/` + `seed_captures.sql`). `.env` + local captures
+  gitignored. Provenance of the captures is NOT disclosed in skill text or commits.
+- Alternatives rejected: importing stations/gates from captures (would break them,
+  missing child data).
+
+## 2026-06-27 -- Synthesize `mob_base` clones instead of skipping unresolved mobs (Phase AX)
+
+SUPERSEDES the 2026-06-23 decision above to skip unresolved mob names. Owner
+direction: "for missing mob base it should be there ... build a mapping somehow
+that the skill can use to fill all rows." Re-verified the captured names are fully
+parsed (not a decoder truncation) and confirmed they are real mobs via the
+mediawiki enemy-page scrape. The earlier "synth risks the Default-mob crash"
+reasoning was wrong: that crash comes from a MISSING/incomplete template, not from
+a present one.
+
+- **Clone-by-asset synthesis.** A captured mob with no exact `mob_base` name match
+  now SYNTHESIZES a template by cloning the nearest-level row sharing the same
+  `base_asset_id` (physical model), overriding name/level/asset. `mob_base` has no
+  hull/shield columns -- those derive from level + modifiers -- so a same-asset
+  clone is a complete, valid template. All 8 previously-skipped names import.
+- **Synth id ranges.** Synth `mob_base.mob_id >= 900000` (above max real id 2114,
+  below the `sector_object_id >= 1000000` object range). Templates live in their own
+  `capture_import/_mob_templates.sql`, deduped across sectors by (name,asset,level),
+  loaded FIRST (wrapper + `import.sh --apply` both order it ahead of the spawns).
+  Existing synth rows excluded when reading the live DB, so regeneration is
+  deterministic whether or not a prior import is applied.
+- **5k mob replacement keys on `base_asset_id`**, not template id -- consistent with
+  the resource ore-type match (replace the physical thing at that spot).
+- The decomp was NOT needed; clone-by-asset is sufficient. Result: 0 unresolved
+  mobs across all 12 sectors, 10 synth templates, 43 synth spawn rows, 0 orphan
+  `mob_spawn_group`, idempotent.
+
+## 2026-06-27 -- import-captures: global purge + pristine-DB regen guard
+
+Two robustness fixes after applying the full capture corpus "systematically and
+safely" (Phase AX-11/AX-12).
+
+1. **Global `_purge.sql`.** The per-sector files each delete only THEIR OWN prior
+   synth rows (`sector_id = S AND id >= 1000000`). When the captured object set
+   changes, a gid maps to a NEW synth id, so an old row can squat on an id a
+   *different*, earlier-applied sector block now tries to insert -- `ON CONFLICT
+   DO NOTHING` then silently drops the new row, and the squatter is deleted later
+   by its own sector file. Net: 246 synth rows silently vanished on a re-apply
+   over a different mapping. Fix: a global purge of the whole synth id range
+   (children before parents) that runs FIRST, in both the `seed_captures.sql`
+   wrapper and `import.sh --apply`. Every re-apply is now a clean replace.
+
+2. **Replace-block determinism + pristine guard.** HEAD (f42fe3cf) had shipped
+   per-sector files with ZERO 5k-replace blocks, so `seed_captures` left ~25
+   base-seed duplicate mobs/resources across 8 sectors (captured same-asset spawn
+   coexisting with the base spawn). Root cause: the replace blocks delete base
+   rows the import itself removes, so regenerating against a DB where the capture
+   import already ran finds nothing and emits empty replaces. This is a foot-gun:
+   `import.sh --apply` regenerates then applies, so a second run regenerates
+   against the now-non-pristine DB and silently drops the replaces.
+
+   Decision: make regeneration require a PRISTINE base DB and fail loud
+   otherwise, rather than try to make replacement DB-state-independent (which
+   would mean parsing the base seed SQL to reconstruct object positions/assets --
+   a large, fragile rewrite). `gen_sql.py` reads the committed replace-target ids
+   and exits non-zero if any are already deleted. A new `ENB_SKIP_CAPTURE_SEED=1`
+   schema-init env brings up base+Phase-Y with `seed_captures` skipped, the one
+   clean way to get a pristine DB to regenerate against (a plain `down -v` +
+   reboot re-applies the captures, which is circular). Regenerated -> 25 replace
+   blocks restored; fresh normal boot now removes all base dups; guard verified
+   to refuse on a non-pristine DB with the replace blocks left intact.

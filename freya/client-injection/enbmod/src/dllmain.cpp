@@ -59,6 +59,39 @@ bool file_mtime(const std::string& path, FILETIME& out) {
     return true;
 }
 
+// Last-chance crash logger. client.exe "randomly closes" with no diagnostic;
+// this records the faulting module+offset and exception code to enbmod.log so an
+// otherwise-unreproducible crash becomes diagnosable (module name tells us whose
+// code faulted -- ours, the game's, d3d8/ddraw, or wine). It does the minimum at
+// fault time and then returns CONTINUE_SEARCH so the normal crash path (WER /
+// process exit) is unchanged. This only runs when the process is already dying;
+// it is NOT per-frame instrumentation.
+LONG WINAPI crash_filter(EXCEPTION_POINTERS* ep) {
+    if (ep && ep->ExceptionRecord) {
+        void* addr = ep->ExceptionRecord->ExceptionAddress;
+        DWORD code = ep->ExceptionRecord->ExceptionCode;
+        char modname[64] = "?";
+        HMODULE mod = nullptr;
+        uintptr_t off = 0;
+        if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                   GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                               (LPCSTR)addr, &mod) &&
+            mod) {
+            char p[MAX_PATH];
+            if (GetModuleFileNameA(mod, p, sizeof(p))) {
+                const char* base = p;
+                for (const char* q = p; *q; ++q)
+                    if (*q == '\\' || *q == '/')
+                        base = q + 1;
+                lstrcpynA(modname, base, sizeof(modname));
+            }
+            off = (uintptr_t)addr - (uintptr_t)mod;
+        }
+        enb::logf("CRASH exception=0x%08lX at %s+0x%IX (addr=%p)", code, modname, off, addr);
+    }
+    return EXCEPTION_CONTINUE_SEARCH; // let the default handler / WER run unchanged
+}
+
 void run_init_script() {
     if (!g_L)
         return;
@@ -93,7 +126,8 @@ void on_tick() {
 DWORD WINAPI worker(LPVOID) {
     enb::log_init();
     enb::logf("enbmod worker start (pid build, 32-bit)");
-    enb::mem::install_guard(); // VEH fault guard, before any game-memory reads
+    SetUnhandledExceptionFilter(crash_filter); // log the faulting module on a "random close"
+    enb::mem::install_guard();                 // VEH fault guard, before any game-memory reads
 
     g_mod_dir = module_dir();
     g_init_path = g_mod_dir + "\\scripts\\init.lua";

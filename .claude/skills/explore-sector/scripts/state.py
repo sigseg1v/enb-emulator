@@ -292,6 +292,11 @@ def cmd_summary(_args):
             continue
         with open(os.path.join(STATE_DIR, f)) as fh:
             st = json.load(fh)
+        # The survey workdir holds non-ledger JSON too (gate_edges.json,
+        # gate_fails.json, gate_route pending). Those have no "nodes" key; skip
+        # them rather than crash the whole summary on the first one we hit.
+        if not isinstance(st, dict) or "nodes" not in st:
+            continue
         total, visited, skipped, _ = _counts(st)
         tail = f" (+{skipped} skipped)" if skipped else ""
         end = st.get("finished") or _now()

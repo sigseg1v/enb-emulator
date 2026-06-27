@@ -72,6 +72,7 @@ sys.path.insert(0, HERE)
 import navdata  # noqa: E402
 import state    # noqa: E402
 import gravity_wells  # noqa: E402
+import gate_route  # noqa: E402
 
 # In-game nav-target keybinds (owner-directed): W = lock filter to Navs + nearest,
 # D = next-farther nav, C = next-closer nav. The old ">>"/"<<" target-arrow buttons
@@ -106,6 +107,14 @@ ENROUTE_K = float(os.environ.get("ENB_ENROUTE_K", "12.0"))
 # "min-approach" visit at ANY distance, so a dropped warp at 200k got recorded as
 # done. Hard cap so that can never happen again.
 MINAPPROACH_K = float(os.environ.get("ENB_MINAPPROACH_K", "6.0"))
+# Distance within which the use-gate icon is reachable, i.e. close enough that
+# leave_via_gate's gate.sh should attempt the crossing. You CANNOT warp to a gate
+# (the orb never engages on a gate target -- measured live), so approach_gate hops
+# the ship via navs to the one nearest the gate; if that leaves the gate inside
+# GATE_USE_K we hand off to gate.sh, otherwise the gate needs a sublight run we do
+# not do in warp-only mode. Generous on purpose: gate.sh's icon check is the final
+# arbiter of whether the crossing actually fires.
+GATE_USE_K = float(os.environ.get("ENB_GATE_USE_K", "9.0"))
 # Re-engage tries on a mid-transit stall. A re-warp recovers a TOGGLE-cancelled warp
 # (one re-click re-engages), but when the ship is far and a re-warp moves it zero (the
 # orb does nothing at that range -- the distance reads identical across re-warps), more
@@ -1456,6 +1465,12 @@ def map_reposition(sector, ident, targets, by, used):
     for mk, (wx, wy, nm) in ident.items():
         if mk in used:
             continue
+        if by.get(mk, {}).get("type") == "planet":
+            continue            # planets sit at the sector edge; a warp toward one
+                                # stalls ~37k out (Earth, HighEarth) and drags in no
+                                # new slice -- never a useful reposition waypoint, same
+                                # as relocate_far excludes them. The direct-marker
+                                # branch still self-skips a planet target after 2 warps.
         mw = node_xyz(by, mk)
         if mw is None:
             continue
@@ -1566,8 +1581,14 @@ def map_click_reach(sector):
 # Owner algorithm step 9: once the sector is done (visited covers visible, or visible
 # covers possible), find a gate and LEAVE -- preferring a gate to a sector we have not
 # visited yet. These node types are usable jump points; disabled-gate is not.
-GATE_TYPES = {"gate", "class-specific-gate", "factioned-gate", "wormhole-exit",
-              "hidden-gate"}
+# Crossable gate node types: defined once in gate_route so pick_gates and
+# gate_route.has_unexplored never drift out of sync on what counts as a gate.
+GATE_TYPES = gate_route.GATE_TYPES
+
+# Set at drive start to the gate we clicked last run that did NOT actually move the
+# ship (a flaky/unusable crossing). pick_gates sorts it last so a same-sector retry
+# tries a DIFFERENT gate instead of re-clicking the dud. Per-run hint, not persisted.
+SOFT_STUCK_GKEY = None
 GATE_LEAVE = os.environ.get("ENB_GATE_LEAVE", "0") == "1"
 
 
@@ -1592,90 +1613,128 @@ def completed_sectors():
 
 
 def pick_gates(sector):
-    """Return ALL usable gates ordered best-first. Prefer a gate whose label names a
-    sector we have NOT completed yet (owner: 'prefer a gate to a sector we have not
-    visited'). The gate's DISPLAY label is not the destination's navdata file name
-    (gate.sh notes this), so this is a soft heuristic: we match the completed-sector
-    names loosely against the gate label and de-prioritise any gate that names one.
-    Returns [] if the sector has no usable gate. leave_via_gate walks this list in
-    order so one unreachable/locked gate falls through to the next instead of halting."""
+    """Return ALL usable gates ordered best-first, by their RECORDED destination
+    (gate_route), not their display label. A gate's label does NOT name the sector on
+    the other side ('Gate to Castor System' in Yokan lands in Ishuan), so the old
+    label-vs-completed-name heuristic could not route us out of an already-surveyed
+    region -- it re-picked the same first gate and bounced between two completed
+    sectors. gate_route remembers where each gate ACTUALLY led, so we try gates whose
+    destination is unknown (the frontier) first, then known-but-incomplete, and a
+    proven path to an already-complete sector last. A gate with no recorded edge yet
+    keeps its ledger order within the unknown band. Returns [] if no usable gate.
+    leave_via_gate walks this list so one unreachable/locked gate falls through to the
+    next instead of halting."""
     st = state.read(sector)
     gates = [n for n in st["nodes"] if n.get("type") in GATE_TYPES]
     done = {navdata.norm(s) for s in completed_sectors() if s}
-    def to_visited(n):
-        label = navdata.norm(n["name"])
-        return any(d and d in label for d in done)
-    # gates that do NOT obviously lead somewhere we've finished come first.
-    gates.sort(key=to_visited)
+    # DOMINANT: a gate node we marked SKIPPED is a death-zone / unreachable gate -- we
+    # could not safely fly to it even as a nav target (e.g. 'Gate to Beta Hydri System'
+    # in NewEdinburgh wrecked the ship on approach this run). Egress through it would
+    # just wreck us repeatedly until the wreck-budget aborts the whole leave, never
+    # trying a safe gate. So ALL non-skipped gates are tried before ANY skipped one,
+    # regardless of frontier rank: a proven-reachable backtrack beats a death-zone gate.
+    # Primary: real-destination rank (unknown frontier first, dead-ends last).
+    # Tiebreak 1 (within equal rank, mostly the unknown-frontier band): prefer a gate
+    # whose LABEL does not name an already-completed sector. Labels lie about the true
+    # destination so this is only a hint, but among two never-crossed gates it biases
+    # toward the one pointing at fresh ground over an obvious backtrack.
+    # Tiebreak 2: a gate clicked-but-did-not-cross last run sorts last so a retry picks
+    # a different gate.
+    gates.sort(key=lambda n: (1 if n.get("skipped") else 0,
+                              gate_route.gate_rank(sector, n["name"], done),
+                              1 if gate_route.label_names_completed(n["name"], done) else 0,
+                              1 if key(n["name"]) == SOFT_STUCK_GKEY else 0))
     return gates
 
 
 def approach_gate(sector, gkey, gname):
-    """Park the ship as close as possible to gate `gname`, returning True once parked.
+    """Park the ship within GATE_USE_K (use-gate-icon range) of gate `gname` so
+    leave_via_gate's gate.sh can cross. Returns True once the gate is reached, else False.
 
-    A gate can be FAR (out of scanner range) at sector-completion time -- the W/D name
-    cycle only holds in-range navs, so select_named cannot lock a 100k+ gate (this is
-    exactly what halted the Yokan run on 'Gate to Castor System' at 120k). So: try the
-    cheap name-cycle select first; if the gate is not in range, fall back to MAP-CLICK
-    navigation (the same mechanism map_click_reach uses for far navs) -- identify the
-    markers drawn on the map, click the gate's marker and warp to it, or reposition
-    toward its world coords to drag it into range, then retry the select."""
+    A gate IS a selectable target in the W/D/C nav cycle and warp DOES engage toward it
+    (live-verified Ishuan->Yokan, 2026-06-23: 'Gate to Capella System' enumerates at ratio
+    0.97 and goto.py warped straight onto it, then gate.sh crossed). So we use the SAME
+    proven nav-drive method goto.py uses: enumerate the cycle, select the gate BY NAME, and
+    warp to it; when the gate is out of scanner range, hop to the in-range nav whose world
+    coords sit nearest the gate (dragging a fresh slice of the sector into range) and retry.
+    Stop when the gate is within GATE_USE_K (hand to gate.sh), when no farther hop nav
+    remains, or when the round budget is spent.
+
+    (The previous implementation believed 'you cannot warp to a gate' and ONLY hopped
+    between gate-adjacent navs -- it never once selected+warped the gate itself, so it
+    looped forever between Yokan/Barn's/Traders Run never crossing. That assumption was
+    wrong; this is the corrected, live-validated path.)"""
     _, by = ledger(sector)
-    sel, _ = select_named(sector, gkey)
-    if sel is not None:
-        _dest["name"] = gname
-        _dest["xyz"] = node_xyz(by, gkey)
-        return warp_to(sector, gkey, gname)
-    if not MAP_FALLBACK:
-        return False
     gw = node_xyz(by, gkey)
-    used = set()
-    for _ in range(MAP_ROUNDS):
-        ident = identify_markers(sector)
-        if gkey in ident:                       # the gate is drawn -> click + warp to it
-            wx, wy, cname = ident[gkey]
-            click_map(wx, wy)
-            canon, _r = read_navname(sector)
-            if key(canon) == gkey and _map_warp(sector, by, gkey, gname, "gate map-click"):
-                return True
-        # gate not drawn (or its click drifted): reposition toward its world coords to
-        # bring it into range, then re-test the name cycle.
-        if gw is None:
-            return False
-        cand = []
-        for mk, (wx, wy, nm) in ident.items():
-            if mk in used:
-                continue
-            mw = node_xyz(by, mk)
-            if mw is not None:
-                cand.append((math.dist(mw, gw), mk, nm, wx, wy))
-        if not cand:
-            return False
-        cand.sort()                             # marker nearest the gate first
-        _d, mk, nm, wx, wy = cand[0]
-        used.add(mk)
-        click_map(wx, wy)
-        canon, _r = read_navname(sector)
-        if key(canon) != mk:                    # re-click drifted -- next round re-probes
+    for _rnd in range(MAP_ROUNDS):
+        cyc = enumerate_cycle(sector)
+        if cyc is None:                          # fled mid-enumerate; re-round
             continue
-        print(f"  gate-approach: repositioning toward {gname} via {nm}", flush=True)
-        _map_warp(sector, by, mk, nm, "toward gate")
-        sel, _ = select_named(sector, gkey)     # in range now?
-        if sel is not None:
-            _dest["name"] = gname
-            _dest["xyz"] = node_xyz(by, gkey)
-            return warp_to(sector, gkey, gname)
+        match = next((e for e in cyc if e["key"] == gkey), None)
+        if match is None:
+            # Gate not in scanner range yet: hop to the in-range nav closest to it.
+            if gw is None or not MAP_FALLBACK:
+                return False
+            inrange = [e for e in cyc if e["key"]
+                       and (e["dist"] is None or e["dist"] > VISIT_K)]
+            if not inrange:
+                print(f"  gate-approach: no farther nav to hop toward {gname}; re-round",
+                      flush=True)
+                continue
+
+            def gdist(e):
+                ew = node_xyz(by, e["key"])
+                return math.dist(ew, gw) if ew is not None else float("inf")
+            hop = min(inrange, key=gdist)
+            print(f"  gate-approach: hop toward {gname} via {hop['name']} "
+                  f"({gdist(hop):.1f}k from gate)", flush=True)
+            if select_named(sector, hop["key"])[0] is None:
+                continue
+            warp_to(sector, hop["key"], hop["name"])
+            continue
+        d = match["dist"]
+        if d is not None and d <= GATE_USE_K:
+            print(f"  gate-approach: {gname} at {d:.1f}k (<= {GATE_USE_K:g}k use range) "
+                  f"-- parked, handing to gate.sh", flush=True)
+            return True
+        # Gate in range but farther than use range: select it BY NAME and warp onto it.
+        if select_named(sector, gkey)[0] is None:
+            continue
+        if warp_to(sector, gkey, gname):
+            print(f"  gate-approach: reached {gname} -- handing to gate.sh", flush=True)
+            return True
+    print(f"  gate-approach: could not park within {GATE_USE_K:g}k of {gname} in "
+          f"{MAP_ROUNDS} rounds", flush=True)
     return False
 
 
-def leave_via_gate(sector):
+def leave_via_gate(sector, _wreck_budget=2):
     """Cross a gate out of the finished sector. Walks the usable gates best-first; for
     each it parks the ship as close as possible (approach_gate, map-click for far
     gates), then runs gate.sh which CONFIRMS the use-gate icon is on screen before it
     rotates the capture + clicks. A gate whose icon never appears (locked / not usable
     by this ship) returns exit 2, and we fall through to the next gate rather than
     halting. Returns the gate name on a clicked crossing, else None. Detecting arrival
-    + re-identifying the new sector is the caller's job -- this only performs the LEAVE."""
+    + re-identifying the new sector is the caller's job -- this only performs the LEAVE.
+
+    WRECK RECOVERY (Ishuan 2026-06-23): gates draw aggro -- the ship can be DESTROYED
+    flying to a far gate. A wrecked hull reads speed 000 forever (the warp orb becomes
+    the "<<Distress" beacon), so the old loop saw spd=0 on every gate, concluded "no
+    crossable gate," and HALTED on a dead ship. The warp/nav sweep already calls
+    handle_wreck everywhere; egress did not. So we now run the SAME deterministic
+    detector here -- before egress and after any failed approach -- and on a wreck we
+    tow + undock (handle_wreck) and retry the whole egress from the station, bounded by
+    _wreck_budget. handle_wreck itself exits cleanly on a tow that fails or crosses
+    sectors (the wrapper re-detects + resumes)."""
+    # Already wrecked when egress begins? Recover first, then retry from the station.
+    if check_wreck():
+        if not handle_wreck(sector):
+            return None
+        if _wreck_budget <= 0:
+            print("  gate-leave: repeated wrecks during egress -- aborting", flush=True)
+            log(sector, "gate-leave-fail", "repeated wrecks during egress")
+            return None
+        return leave_via_gate(sector, _wreck_budget - 1)
     gates = pick_gates(sector)
     if not gates:
         print(f"  gate-leave: no usable gate in {sector}; cannot auto-leave", flush=True)
@@ -1687,16 +1746,37 @@ def leave_via_gate(sector):
         print(f"  gate-leave: heading to {gname} ({gate['type']}) to leave {sector}",
               flush=True)
         if not approach_gate(sector, gkey, gname):
+            # The approach may have failed because we were DESTROYED mid-flight (gates
+            # cluster mobs), not merely because the gate is far. Distinguish the two:
+            # if wrecked, tow + undock and retry the whole egress; else try next gate.
+            if check_wreck():
+                if not handle_wreck(sector):
+                    return None
+                if _wreck_budget <= 0:
+                    print("  gate-leave: repeated wrecks during egress -- aborting",
+                          flush=True)
+                    log(sector, "gate-leave-fail", "repeated wrecks during egress")
+                    return None
+                return leave_via_gate(sector, _wreck_budget - 1)
             print(f"  gate-leave: could not reach {gname} -- trying next gate", flush=True)
             log(sector, "gate-unreachable", f"could not park on gate {gname}")
             continue
         # gate.sh: confirm icon -> rotate capture -> click. exit 0 clicked, 2 no icon.
         r = sh("bash", os.path.join(HERE, "gate.sh"), sector, gname)
         if r.returncode == 0:
+            # Remember WHICH gate we left by; the next sector detected resolves this
+            # pending crossing into a real (sector,gate)->dest edge (gate_route), so a
+            # re-visit prefers an unexplored gate instead of bouncing back through this
+            # one. The gate label lies about the destination -- only the edge is truth.
+            gate_route.record_cross(sector, gkey)
             log(sector, "gate-left", f"clicked use-gate on {gname} to leave {sector}")
             print(f"  gate-leave: clicked use-gate on {gname}", flush=True)
             return gname
         if r.returncode == 2:
+            # No use-gate icon: locked / not usable by this ship. Record it so it stops
+            # counting as an unexplored frontier (else the survey never recognises a
+            # sector whose only remaining gates it cannot cross).
+            gate_route.record_unusable(sector, gkey)
             print(f"  gate-leave: {gname} shows no use-gate icon (locked/unusable) "
                   f"-- trying next gate", flush=True)
             continue
@@ -1735,6 +1815,17 @@ def main():
                   flush=True)
             sys.exit(EXIT_STUCK)
         print(f"auto-detected current sector from map title: {sector}", flush=True)
+
+    # We now know where we actually landed: promote any pending gate crossing into a
+    # recorded (from-sector, gate) -> this-sector edge so future gate selection routes
+    # by real destinations instead of lying labels (gate_route). If the pending crossing
+    # did NOT move us (still the same sector), resolve hands back that gate's key so
+    # pick_gates deprioritises it and a retry tries a different gate.
+    global SOFT_STUCK_GKEY
+    SOFT_STUCK_GKEY = gate_route.resolve(sector)
+    if SOFT_STUCK_GKEY:
+        print(f"  gate {SOFT_STUCK_GKEY} clicked but did not cross last attempt -- "
+              f"deprioritising it this run", flush=True)
 
     # Refuse sectors that contain a Gravity Well. A gravity well terminates warp
     # mid-flight (server PlayerClass.cpp:1806) and slows the ship -- a screen-only

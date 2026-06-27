@@ -1,0 +1,5 @@
+# per-machine config + any locally-staged captures: never commit
+.env
+captures/
+*.pcap
+*.pcapng

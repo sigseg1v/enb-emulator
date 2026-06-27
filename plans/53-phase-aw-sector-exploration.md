@@ -1,5 +1,17 @@
 # Phase AW -- Sector exploration skill (agent-driven nav survey)
 
+- **2026-06-24 map-reposition planet-filter fix.** Live on HighEarth the map-click
+  SEVERE-stuck fallback kept warping toward the "Earth" PLANET marker (parked 37k out,
+  warp never closes). The direct-marker branch already self-skips a planet target after
+  2 warps (MAX_ATTEMPTS), but `map_reposition` kept re-picking the Earth marker as a
+  reposition WAYPOINT (it sits nearest the remaining unvisited navs), wasting a warp per
+  `map_click_reach` call on an unreachable planet that drags in no new slice. Fix:
+  exclude `by[mk]["type"] == "planet"` from `map_reposition` candidates, mirroring
+  `relocate_far`'s existing planet exclusion. Pure movement heuristic -> zero completion
+  impact (the direct-branch self-skip still handles planet TARGETS). Takes effect on the
+  next sector's drive.py spawn (the running process keeps its in-memory code but is
+  already bounded by `used`+dry-streak). `drive.py` map_reposition ~L1465.
+
 Owner ask (2026-06-20): augment the Claude skills so the agent can, beyond
 login (Phase AU), drive the live client to **fly a sector visiting every nav
 node**, discover the hidden/missing ones, plan efficient multi-node warp paths,
@@ -976,3 +988,381 @@ available.
 - MUST NOT register heavy `enb.on_tick` probes (pump-clocked tick = hang vector;
   see the no-debug-instrumentation memory and Phase AV). This skill uses
   screenshots + XTEST + the cmd channel only.
+
+## AW-3 (2026-06-23) -- live Starstrukk survey: two egress bugs fixed
+
+Live scan (char Starstrukk, Net7Proxy, ENB_PCAP=1) completed Ishuan 24/29 but
+HALTED unable to leave. Two distinct, now-fixed bugs in the egress path:
+
+1. **undock-after-tow camera pitch** (`undock.sh`). A Request-Tow wreck recovery
+   drops the avatar in a hangar with the camera pitched DOWN at the deck, so the
+   ship parked ELEVATED in the bay sits ABOVE the top of the frame -- outside
+   `find_ship`/`find_ship_hint`'s `y in [0,0.72h]` scan region -- and the yaw
+   sweep could never see it (acquire FAILED outright). Fix: `aim_camera_up()`
+   presses the **Up arrow** (`ENB_UNDOCK_CAM_UP`, default 6) before the acquire
+   loop, plus a progressive `ENB_UNDOCK_CAM_UP_STEP` (default 2) per close-in
+   round. Validated live: ship boarded + launched back to space (Ishuan).
+
+2. **approach_gate never warped to the gate** (`drive.py`). The old code believed
+   "you CANNOT warp to a gate" and ONLY hopped between gate-adjacent navs (with a
+   unit-buggy `_d/1000` world-coord print), never once selecting+warping the gate
+   itself -- so it looped forever (Yokan -> Barn's -> Traders Run ...) at huge
+   warp-gaps and then HALTED. **That assumption is false**: a gate IS a selectable
+   target in the W/D/C cycle (live: "Gate to Capella System" enumerates at ratio
+   0.97) and warp DOES engage toward it. goto.py already crossed gates this exact
+   way. Rewrote `approach_gate` to mirror goto.py: enumerate -> select gate by
+   name -> `warp_to` it; hop to the nearest in-range nav only when the gate is out
+   of scanner range. Validated live: goto.py warped onto the Capella gate (3.91k),
+   `gate.sh` saw the use-gate icon (blue=0.31) and crossed **Ishuan -> Yokan**.
+
+Survey resumed from Yokan; the corrected approach_gate now drives subsequent
+gate crossings. Client-only changes -> no server/proxy wire change, no plans/29 CV.
+
+3. **gate routing bounced between completed sectors** (`gate_route.py` NEW,
+   `drive.py`, `survey.sh`). With approach_gate fixed, the autonomous survey
+   surfaced a third bug: it kept taking the SAME first gate out of every completed
+   sector and ping-ponged Yokan <-> Ishuan forever, while 4 other gates (to new
+   sectors) sat unused -- then STALE_MAX=3 killed the whole survey. Root cause: a
+   gate's DISPLAY label does NOT name the sector on the other side ("Gate to Castor
+   System" in Yokan lands in **Ishuan**; "Gate to Capella System" in Ishuan lands in
+   **Yokan**), so `pick_gates`' old label-vs-completed-name heuristic could not route
+   out of a surveyed region. Fix: new `gate_route.py` records the ACTUAL destination
+   of each (sector,gate) crossing (`pending_gate.json` -> `gate_edges.json` in the
+   workdir) and ranks gates unknown-dest-first, known-incomplete next, proven-path-
+   to-completed (and locked/no-icon gates) last. `survey.sh` now only counts a
+   completed-sector arrival as "stale" when `gate_route.py has-unexplored` reports
+   NO frontier gate remains -- so traversing a finished region toward fresh ground
+   no longer burns the stale budget; the survey stops only when every reachable gate
+   is a proven dead-end. Validated live: seeded the two observed edges, relaunched,
+   and the survey routed Yokan -> **Sector Gate to Kailaasa** -> **Kailaasa**
+   (new sector, 0/22) instead of bouncing back to Ishuan.
+
+4. **dud / arrival-only gates + flaky single crossings** (`gate_route.py`,
+   `drive.py`, `survey.sh`). Beyond labels lying, two more failure modes killed
+   unattended runs: (a) a **wormhole-exit you arrive through but cannot leave by**
+   (`Maeldun´s Weft` in Kailaasa) shows a use-gate icon, accepts the click, but the
+   ship never crosses -- and because a non-crossing records no edge it stayed a
+   rank-0 frontier and got re-tried on every visit, forever; (b) a single flaky
+   crossing (slow wormhole load outlasting the detect poll, or a missed use-gate
+   click) made `survey.sh` HALT immediately, so one bad click killed a whole
+   multi-hour run. Fixes:
+   - `survey.sh` now RE-DRIVES a same-sector arrival up to `ENB_CROSS_RETRY`
+     (default 3) times before HALTing, instead of halting on the first non-crossing.
+   - `gate_route.resolve()` returns the gate that was clicked-but-did-not-cross so
+     `drive.py` sets `SOFT_STUCK_GKEY` and `pick_gates` deprioritises it THIS run --
+     the retry picks a different gate (routed Kailaasa around Maeldun to
+     **Sector Gate to Dahin -> Dahin**, then on the return visit to **Gate to Sol
+     System**, both fresh ground).
+   - `resolve()` also keeps a PERSISTENT per-gate fail tally (`gate_fails.json`);
+     at `FAIL_LIMIT` (2) the gate is recorded `LOCKED` (rank 3, tried last and not
+     counted as frontier) so a true dud stops being re-tried across visits. A real
+     crossing clears the tally. `record_unusable` (gate.sh exit 2, no icon) locks
+     immediately. `GATE_TYPES` is now single-sourced in `gate_route.py` and imported
+     by `drive.py` so `has_unexplored`/`pick_gates` can never disagree on what a
+     gate is.
+   - Validated live (Starstrukk, 2026-06-23): Maeldun´s Weft clicked, did not cross,
+     survey logged "did not move the ship -- re-attempting (1/3)", `has-unexplored`
+     kept it from burning the stale budget, the gate was deprioritised, and
+     `pick_gates` routed onward to **Gate to Sol System**; `gate_fails.json` recorded
+     `Kailaasa|maeldunsweft: 1` (one more failure locks it).
+
+5. **galaxy-sized walk cap + label tiebreak** (`survey.sh`, `drive.py`,
+   `gate_route.py`). `ENB_SURVEY_MAX` raised 90 -> 300: the galaxy is ~100+ sectors
+   and a greedy destination-ranked walk revisits some completed sectors in transit,
+   so 90 stopped mid-galaxy; `STALE_MAX` + `has-unexplored` remain the real
+   exhaustion stop, the cap is just a runaway backstop. `pick_gates` gained a
+   `gate_route.label_names_completed` tiebreak: among equal-rank (mostly unknown-
+   frontier) gates, one whose LABEL does not name an already-completed sector sorts
+   first -- a soft hint (labels lie, so it is only a tiebreak) biasing toward fresh
+   ground over an obvious backtrack when no real edge is recorded for either yet.
+
+Client-only changes throughout -> no server/proxy wire change, no plans/29 CV entry.
+
+## AW-4 -- survey outcome + capture parse/import (2026-06-24)
+
+### Reachability boundary reached (NOT a bug)
+The Starstrukk run fully surveyed the region reachable by this ship's gate access:
+**8 sectors -- AdrielPrime, Dahin, Equatorial, Freya, Ishuan, Kailaasa, Margesi,
+Yokan.** Every *crossable* gate among them leads back into an already-complete
+sector; the only unexplored frontier is behind gates this ship cannot traverse:
+- `Kailaasa|maeldunsweft` -> LOCKED (wormhole-exit, arrival-only).
+- `Kailaasa|gatetosolsystem` -> LOCKED (class-specific gate).
+So `survey.sh` correctly converges to "no crossable gate -> HALT" rather than
+spinning. "Every sector in the game" is unreachable from this character: most of
+the galaxy is gated behind jump gates needing a different ship class / wormhole
+device. To extend coverage, move the character through one of those gates (or use
+a ship with the access) and re-run `explore-live.sh` -- it resumes from the new
+region via the ledgers.
+
+### Capture parse + import: nothing to import (DB already complete)
+Parsed all four full-sector captures with `tools/pcap-inventory` and diffed every
+captured nav vs the `net7` content DB by name AND position (3k eps, Phase Y rule):
+- Kailaasa 12/12, Dahin 12/12, Ishuan 18/18 -- **zero** real gap; the DB has every
+  captured nav.
+- All apparent "misses" ran to ground as false positives: gate-approach beacons
+  named after the destination sector (same name, neighbouring sector, ~50k off);
+  and the Ishuan "Nishido/Sundari factory" pair, whose capture coords are
+  byte-exact matches to existing DB objects -- the DB merely has the
+  Weapons<->Manufacturing / Nishido<->Sundari labels scrambled (a possible DB name
+  error, out of nav-marker import scope; correcting from one OCR is unsafe).
+- The 177M "Yokan" capture is multi-sector contaminated (3986 flows, first-day file
+  pre rotation); its "missing Yokan navs" are verified Ishuan navs. NOT imported --
+  attributing them to Yokan would corrupt the DB.
+**Conclusion:** these live captures CONFIRM the content DB, they do not extend it.
+No `seed_phase_aw_navs.sql` written (would be a no-op on clean sectors, wrong on
+contaminated). Differs from Phase Y reconstruct (which had genuine fillable gaps).
+
+## AW-5 -- wreck-detect + undock fixes (2026-06-24)
+
+Hit a hard wreck in **Swooping Eagle** (Sirius), recovered manually, root-caused
+two script defects the run exposed and fixed both:
+
+- **Wreck false-negative (rescue.sh `detect`):** `is_wrecked` keys on the amber
+  `<<Distress` HUD label, but a fresh wreck auto-opens the Station-Mechanic comm
+  dialog ON TOP of that slot, hiding the label -- so `check_wreck()` read ALIVE
+  every poll while the hull sat destroyed, spinning the survey on STALL/DEFER.
+  Fixed: `detect` is now composite -- WRECKED if `is_wrecked` OR the tow dialog
+  (`tow_xy`, "Toggle distress beacon"/"I need a tow") is on screen.
+- **Undock could not find the launch control (undock.sh `exit_starbase_xy`):**
+  the post-tow hangar shows a YELLOW "Exit Starbase" world-object label over the
+  parked ship; clicking it launches. The old detector used grayscale tesseract,
+  which read ZERO "starbase" words (yellow text on a bright-blue hull does not
+  segment) and also false-matched the docking-panel "STARBASE" header. Replaced
+  with a COLOUR detector (yellow mask + 60px neighbour-merged clustering, lower
+  55% of frame). Verified live: detector returned (1018,803), the click launched
+  us from Sirius Station into Ishuan/Castor (SPEED 0 confirmed). The green+red
+  hangar-walk path was never the right mechanism for the tow layout.
+- **state.py summary crash:** crashed on the non-ledger JSON in the workdir
+  (gate_edges/gate_fails); now skips dicts without a `nodes` key.
+
+**Swooping Eagle marked complete/skipped** (6 visited before wreck, 50 nodes
+skipped, reason "sector hostile -- ship wrecks on entry") so the survey will not
+route back into the death sector. NOTE: the wreck was towed manually, bypassing
+drive.py's `handle_wreck` danger-add, so no in-sector danger zone was recorded --
+the sector-complete state is what keeps the survey out.
+
+## AW-6 -- targeted point-to-point nav + goto.py far-gate fix (2026-06-24)
+
+Owner ask: "go from swooping eagle to beta hydri, dont go anywhere unnecessary".
+Ship was actually parked in Ishuan; real route was
+Ishuan -> Yokan -> Swooping Eagle -> Beta Hydri (entry sector **Glenn**). All
+three gates crossed via `gate.sh`, Swooping Eagle transited with NO detour and NO
+wreck, arrived Glenn (shield 97%, capture live). Reaching each gate exposed a
+`goto.py` defect that is now fixed:
+
+- **goto.py far-gate traversal:** the old loop only HOPPED when the target was
+  OUT of scanner range; an in-range-but-far gate got a blind direct warp, which
+  the **HUD auto-flip** (nearest-nav re-lock the instant warp engages in a dense
+  nav field, documented in `drive._warp_to_impl`) stole every time, so the gate
+  distance never shrank (seen on the Capella gate: 78k -> 101k -> 106k, diverging).
+  Rewrite: progress is judged by the REAL gate distance `d` (scanner range here is
+  effectively unlimited -- a 422k gate still enumerates), the ship walks toward the
+  gate via the in-range nav CLOSEST to it (`gdist`), and only commits a direct warp
+  once within `HOP_THRESHOLD` (`ENB_GOTO_HOP_K`, default 30k; ran this trip at 35).
+  A `STALL`-counter (`ENB_GOTO_STALL`, default 3) detects a hop 2-cycle between the
+  gate's two nearest navs and falls back to a direct warp. An earlier per-node
+  monotonic-best guard was tried and REVERTED -- it broke the across-sector walk in
+  huge sectors (after landing on the closest nav it is excluded, next-closest is
+  farther, walk wrongly conceded). Proven on the Capella, Sirius, and Beta Hydri
+  gates. Also guarded coordless target/hop navs (`node_xyz` None -> no route /
+  never prefer as hop).
+
+- **CAPTURE MISLABELLED (my error, disclosed):** the crossings were driven with
+  `gate.sh "<gate-name>"` (single arg) instead of the real signature
+  `gate.sh <from-sector> <gate-name> <to-sector>`. gate.sh's rotate guard only
+  fires when `$to` or `$gatename` (positional 2/3) is set, so with the name landing
+  in `$from` the pcap NEVER rotated. The entire Ishuan->Glenn traversal was captured
+  into ONE mislabelled file (`Ishuan__20260624T142306Z.pcap`, ~1.05 MB, finalized),
+  correlatable to the route via `actions.log` UTC timestamps. A clean ongoing
+  capture was started on arrival (`Glenn__...163815Z.pcap`, confirmed growing).
+  LESSON: always call `gate.sh <from> <gate-name> <to>` so each crossing rotates.
+
+## AW-7 -- Glenn hard-hang, relogin position-revert, undock map-close fix (2026-06-24)
+
+Continuing the Ishuan->Glenn survey. Three things happened:
+
+- **Glenn scan-popup then hard-hang.** Glenn (Beta Hydri) threw a "YOU ARE BEING
+  SCANNED" modal that blocked the screen-only driver; OCR'd it + clicked Done
+  (Glenn went 2->8 navs after). Protocol saved to memory `survey-scan-popup`
+  (ALWAYS check between loops / when stuck). Later Glenn genuinely WINE-froze at
+  19/57 (frozen frame 8s+, client.exe pegged ~1029% redrawing one frame, no modal)
+  -> survey exit 42. Owner chose "kill and ill relaunch"; killed client.exe +
+  Net7Proxy.exe + wineserver by PID.
+
+- **Relogin reverts position to home station.** After relaunch the character did
+  NOT resume at Glenn 19/57 -- login dropped it **DOCKED at Somerset Station, New
+  Edinburgh (Tau Ceti)** (home StartSector; consistent with the fresh-char sector
+  routing trap memory: login routes through home). So Glenn's partial run is
+  stranded server-side, but **New Edinburgh is a fresh unsurveyed sector** -- doing
+  it instead, no loss.
+
+- **undock.sh now closes the map first (owner: "close the fuckin map so you can
+  see" -> "update the script").** The survey's read-sector leaves the
+  SYSTEM/SECTOR/STARBASE map open; while docked that panel overlays the hangar and
+  BLINDS undock.sh's ship/label detectors. Added `close_map()` + `map_open()` to
+  `undock.sh`: OCRs for the docked map's "STARBASE"/"GALAXY MAP" label and clicks
+  the (132,870) toggle to close it (idempotent-guarded -- only clicks when an open
+  map is actually detected), verified before the ship sweep. Runs right after the
+  window-activate, before exit_starbase_xy + find_ship.
+
+- **Screen-only undock from a station concourse is unreliable; owner launched
+  manually.** Even with the map closed, undock.sh could not board: the relogin
+  dropped the avatar in the STATION CONCOURSE (not the hangar catwalk), where there
+  is **no launch button** -- the 4 bottom-left concourse icons are Inventory, the
+  sector map (SYSTEM/SECTOR/STARBASE), the galaxy starmap, and a window toggle, none
+  of which launch. EnB undock from the concourse is walk-the-avatar-to-the-ship, and
+  the green+red nav-light detector never fired (the parked ship shows a cyan engine
+  glow / a single green light from most angles, not a saturated green+red pair).
+  `exit_starbase_xy` also mis-fired a yellow false-positive at (660,523). Owner
+  launched the ship into space manually ("ok i got you out"). KNOWN GAP: screen-only
+  undock works from the hangar-catwalk layout but NOT the concourse layout; not
+  solved this session.
+
+- **Survey resumed in space on New Edinburgh.** Closed a stray avatar-status panel
+  (Escape opened the Quit Menu; second Escape dismissed it), relaunched
+  `explore-live.sh`: preflight OK (window/proxy LIVE/capture), `=== driving
+  NewEdinburgh (crossing #1) ===`. Map-close fix + manual launch both confirmed
+  working.
+
+- **SOLVED: hangar/concourse undock = DOUBLE-CLICK the ship hull, not single.**
+  Later in the run the survey wrecked at the Gate to Beta Hydri (a recorded death
+  zone), towed + respawned DOCKED, and undock.sh's single-clicks failed again
+  (300s timeout aborted the whole survey). Got back into space manually and found
+  the mechanic: a SINGLE click on the ship hull only SELECTS/targets it (stays
+  "SPEED ?" docked); a DOUBLE-click boards and launches it ("SPEED 0" in space).
+  Proven live: `xdotool click --repeat 2 --delay 120 1` on the hull at abs
+  (3343,640) -> read-speed.sh returned SPEED 0. Encoded in `undock.sh`: new
+  `board_click()` helper (win-rel -> abs via win_abs, fast native double-click);
+  replaced BOTH single-click board sites (Exit Starbase label ~L155 and the
+  APPROACH hull-board ~L350) with it. This is the fix for the recurring
+  concourse/hangar undock failure. The green+red nav-light find_ship detector is
+  still the weak link (parked ship reads cyan/single-green from most angles), but
+  once it does center the ship, the double-click now actually launches.
+
+- **Gate to Beta Hydri System = death zone (skip, warp-past-only).** Recorded:
+  warping INTO it wrecks the ship. New Edinburgh reached 18/22 resolved (13
+  visited + 5 skipped) before the wreck. Survey process tree died with the abort;
+  restarting to finish the remaining ~4 navs and continue crossing gates.
+
+- **NewEdinburgh COMPLETE 17/22 (5 skipped); gate-leave was mis-routing to the
+  death zone -- fixed pick_gates to deprioritise SKIPPED gates.** On completion
+  the gate-leave picked "Gate to Beta Hydri System" first because Glenn/Beta Hydri
+  is in-progress 19/57 (a frontier), but that gate is `skipped:True` (death zone)
+  and approaching it would wreck the ship repeatedly until the 2-wreck egress
+  budget aborts -- never trying the safe gate. `pick_gates` had NO death-zone
+  awareness (its "deprioritise" only covered soft-stuck gates). Added a DOMINANT
+  sort key in `drive.py pick_gates`: a gate node with `skipped:True` sorts AFTER
+  every non-skipped gate regardless of frontier rank (a proven-reachable backtrack
+  beats a death-zone gate). NewEdinburgh has a safe `Sector Gate to Inverness`
+  (`visited:True`, leads to a FRESH unsurveyed sector -- no Inverness ledger) and a
+  `Gate to High Earth` (class-specific). Killed the in-flight survey (was already
+  warping at the old code toward Beta Hydri; sector already complete so no loss),
+  restarted explore-live.sh -> gate-leave now heads to "Sector Gate to Inverness".
+  General fix, no hardcoded sector names; benefits every future death-zone gate.
+
+- **Crossed to Inverness (fresh, 24 navs); surveyed to 9/24 then WRECKED + halted at
+  the concourse-undock gap.** The Inverness gate crossing worked; drove to 9/24
+  (auto-found onward gates to New Edinburgh + Arduinne). Shield dropped 97->54% near
+  Nav Sunside 1 (hostiles), ship destroyed -> recorded Nav Sunside 1 as a death zone,
+  requested tow. **The tow dropped the avatar in the Somerled Station CONCOURSE**
+  (chat: "Welcome to InfinitiCorp's Somerled Station" -- Somerled is a NewEdinburgh
+  station, so the tow crossed sectors back). undock.sh "could not undock after tow";
+  run-sector mis-classified the failed undock as a hang (exit 42) and HALTED
+  (manual-client, no auto-relaunch). **Client is ALIVE, not frozen** (frozen-frame
+  check: frames differ; SPEED ? = docked).
+  - **The double-click undock fix is NOT the blocker here -- the CONCOURSE layout is.**
+    The double-click board works from the HANGAR-catwalk layout (ship hull visible).
+    A wreck-tow drops you in the CONCOURSE (avatar standing in an empty hall, NO ship
+    hull on screen), so find_ship has nothing to detect and board_click has nothing to
+    double-click. This is the same KNOWN GAP from AW-7 (concourse undock unsolved in
+    screen-only mode), now hit via the wreck-tow path. Not solved.
+  - **State preserved / resume path:** Inverness ledger persists at 9/24 (Nav Sunside 1
+    skipped as death zone). To resume: operator undocks the ship into space, then
+    re-run `explore-live.sh` -- it auto-detects the current sector from the map title
+    and routes (if towed back to NewEdinburgh-complete, gate-leave -> Inverness via the
+    pick_gates fix; the Inverness ledger continues where it left off). Left the client
+    docked + alive for the operator; did NOT kill it (not a hang) and did NOT blind-click
+    the concourse (no reliable screen-only board from this layout).
+  - **RESOLVED via operator-assisted undock; the walk+double-click DOES work once the
+    ship is visible.** Owner manually navigated the avatar out of the concourse hallway
+    into the HANGAR (where the ship + yellow "Exit Starbase" label become visible) and
+    said "just walk there, right-click hold, at screen center." Did exactly that:
+    `walk_forward` (RMB-hold 7s at window centre) closed the distance, then detected the
+    yellow Exit-Starbase label by colour (median ~(818,480), x-span 590-1046) and
+    DOUBLE-clicked it -> SPEED 0, in space. So the board mechanic (walk + double-click
+    the label/hull) is sound; the ONLY unsolved piece is auto-navigating from the
+    post-tow CONCOURSE HALLWAY into the hangar so the ship comes on screen. undock.sh
+    already has the label detector + walk + double-click; a future enhancement is the
+    concourse->hangar walk-out (the owner did that step by hand this time).
+  - **DONE -- concourse->hangar walk-out is now autonomous (owner: "update scripts as
+    needed to make it work on your own next time", 2026-06-24).** Replaced undock.sh's
+    static 3-screenshot Exit-Starbase check with a bounded WALK-AND-SCAN loop
+    (`CONCOURSE_MAX=8`, `CONCOURSE_SECS=3`): each round it (1) closes a stray map,
+    (2) scans for the yellow Exit-Starbase label via the colour detector and, if found,
+    double-clicks (`board_click`) to launch; (3) if instead the green+red ship PAIR is
+    visible it breaks to the existing hangar rotate/approach sweep (catwalk layout);
+    (4) otherwise -- empty hallway -- it `walk_forward`s one short RMB-hold burst into
+    the hangar (turning Right 6 every other round to re-aim) and rescans. This is
+    exactly the manual sequence the owner walked me through, now looped + bounded so a
+    genuinely empty layout still falls through instead of walking forever. Takes effect
+    on the next wreck/tow with no restart (undock.sh is spawned fresh per wreck).
+    Still screen-read-only. Real-client confirmation that the full autonomous path lands
+    in space is pending the next live wreck-tow (the manual halves are each proven).
+  - **Resumed:** restarted explore-live.sh. Tow had returned us to NewEdinburgh
+    (complete), so gate-leave fired; with the death-zone gate sorted last it now heads
+    to "Gate to High Earth" (unknown frontier) -- Inverness is now a known-incomplete
+    destination (9/24) so it ranks below the fresh High Earth frontier. If High Earth's
+    class-specific gate is locked it falls through to Inverness. Survey driving again.
+  - **CORRECTION -- the "DONE autonomous" claim above was PREMATURE; the WALK-AND-SCAN
+    loop was a NO-OP (bash function-ordering bug). Carpenter wreck-tow, 2026-06-24.** The
+    concourse loop was inserted ABOVE the definitions of `find_ship` / `walk_forward` /
+    `turn` in undock.sh, and bash needs a function defined before it is called -- so every
+    one of those calls errored `command not found` and the loop never walked or detected
+    anything. The post-tow undock fell straight through to the hangar sweep and stalled,
+    and the survey mis-reported it as a frozen-frame hang (exit 42) when the client was
+    alive + docked. FIX: moved the whole concourse loop to BELOW the locomotion-helper
+    definitions (after `aim_camera_up "$CAM_UP"`, before the ACQUIRE sweep) and added a
+    guard comment; `bash -n` clean; the loop now actually executes (`walk_forward` walks,
+    `find_ship` runs, confirmed live on the recovery).
+  - **Second fix: `find_ship` rejected a boardable ship because of a DECOY green light.**
+    Diagnosed on the same Carpenter tow: the clean initial view had a strong red nav light
+    (94px @ x=733) AND green (320px @ x=272), but the green centroid was a far-LEFT station
+    decoy light, so the global red-vs-green span was 461px > the 450px wingtip cap and the
+    pair was REJECTED -- the undock walked right past a ship that filled the frame. FIX:
+    `find_ship` now buckets each colour into compact 40px BLOBS and pairs the closest
+    red-blob/green-blob that fits the wingtip geometry (preferring the pair nearest frame
+    centre), so a far decoy blob is never chosen. Re-validated on the recovery captures:
+    the clean view the old code rejected now detects, and the decoy-green corridor/crystal
+    frames still return no false positive.
+  - **Carpenter client recovered without a kill.** The still-docked Carpenter client (alive,
+    NOT hung) was hand-driven back into the hangar (rotate-scan to find the red nav light,
+    centre + walk_forward, then DOUBLE-click the hull at ~640,600) -> SPEED 0, in space.
+    No client/proxy process was killed. The two undock.sh fixes above take effect on the
+    next wreck/tow with no restart (undock.sh is spawned fresh per wreck). Real-client
+    confirmation that the FULL autonomous concourse->board path lands in space is still
+    pending the next live wreck-tow -- the function-ordering + detection halves are now
+    each proven, but the end-to-end loop has not yet auto-boarded unaided.
+  - **LIVE TEST (same session, ~40 min later): the fixed undock STILL could not board
+    the concourse-hallway layout -- the autonomous concourse->ship navigation is the
+    real unsolved limitation, NOT the function-ordering/detection bugs (those are fixed).
+    Carpenter wreck #2, 2026-06-24.** The survey drove Carpenter to 6/23, took real
+    combat damage (shield 97%->0 was genuine fire, not a washout: best-of-5 maxed at 16%),
+    and WRECKED at Yamuna`s Weft -> tow -> docked. handle_wreck spawned the fixed
+    undock.sh; this time the loop DID execute (walk_forward walked, find_ship ran), but it
+    spent its whole budget wandering the concourse without the ship ever coming into view,
+    and aborted "could not undock after tow" -> run-sector exit 42 -> survey HALT. A
+    post-wreck NPC dialog ("that was one heck of an explosion! are you alright over there?")
+    was also overlaying the centre for part of the run -- undock.sh has NO handling for a
+    blocking conversation/comm dialog, so its centre walk/board clicks may have been eaten.
+    Manual screen-only recovery ALSO struggled: the concourse is maze-like and blind
+    walk_forward bursts wall-stick; without 3D depth perception from a screenshot I cannot
+    reliably navigate a corridor to the hangar either. NET: for a docked-but-alive client
+    in the CONCOURSE-HALLWAY layout, neither the autonomous loop nor my manual screen-only
+    driving is reliable -- this is the case to hand to the owner (walk the avatar into the
+    hangar, or relaunch). TODO for undock.sh: (a) detect + dismiss a blocking NPC/comm
+    dialog (find its close X / a safe dismiss) before the walk-scan each round; (b) the
+    concourse->hangar pathfinding needs a better signal than blind forward bursts.
+  - **Carpenter is a DEATH-ZONE sector for this ship** -- two skipped death zones already
+    (Sector Gate to Slayton, Yamuna`s Weft) and it wrecked the ship at 6/23. Re-grinding
+    it just re-wrecks; once recovered, the better route is to gate OUT to a safer sector
+    rather than keep surveying Carpenter with this hull.

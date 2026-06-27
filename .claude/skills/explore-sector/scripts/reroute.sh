@@ -18,6 +18,10 @@
 set -uo pipefail
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; . "$SKILL_DIR/lib.sh"
 
+# Crossings need the ship ON the gate (~<2k) or gate.sh finds no use-gate icon; the
+# generic goto default (8k) is too far. Drive in tight unless the caller overrode it.
+export ENB_GOTO_ARRIVE_K="${ENB_GOTO_ARRIVE_K:-2.5}"
+
 identify() {   # echo the identified sector key (or empty); $1 = sector to wait to LEAVE
     local leave="${1:-}" out prev="" stable=0
     # poll up to ~40s: the scene swap shows the OLD title mid-load, so require a

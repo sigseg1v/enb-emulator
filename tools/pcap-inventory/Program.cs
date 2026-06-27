@@ -31,11 +31,32 @@ using N7.Tools.PcapInventory;
 
 if (args.Length < 1 || args[0] is "-h" or "--help")
 {
-    Console.Error.WriteLine("usage: pcap-inventory <input.pcapng> [output.txt]");
+    Console.Error.WriteLine("usage: pcap-inventory <input.pcapng> [output.txt] [--json [out.json]]");
     Console.Error.WriteLine("  Decodes a proxy<->server sector UDP capture into a nav/mob/resource inventory.");
     Console.Error.WriteLine("  Default output: <input>.inventory.txt (next to the input).");
+    Console.Error.WriteLine("  --json emits a machine-readable per-object dump (sector-tagged) for the");
+    Console.Error.WriteLine("         import pipeline instead of the human-readable text report.");
     Console.Error.WriteLine("  Tip: on Windows you can drag a .pcapng file onto pcap-inventory.exe.");
     return PauseOnOwnConsole(args.Length < 1 ? 2 : 0);
+}
+
+// --json [path] toggles the machine-readable dump used by the sector-import
+// pipeline. Strip it (and its optional path arg) out of the positional args.
+bool jsonMode = false;
+string? jsonOut = null;
+{
+    var rest = new List<string>();
+    for (int i = 0; i < args.Length; i++)
+    {
+        if (args[i] == "--json")
+        {
+            jsonMode = true;
+            if (i + 1 < args.Length && !args[i + 1].StartsWith("--"))
+                jsonOut = args[++i];
+        }
+        else rest.Add(args[i]);
+    }
+    args = rest.ToArray();
 }
 
 string inputPath = args[0];
@@ -44,9 +65,11 @@ if (!File.Exists(inputPath))
     Console.Error.WriteLine($"error: input not found: {inputPath}");
     return PauseOnOwnConsole(2);
 }
-string outputPath = args.Length >= 2
-    ? args[1]
-    : Path.ChangeExtension(inputPath, null) + ".inventory.txt";
+string outputPath = jsonMode
+    ? (jsonOut ?? Path.ChangeExtension(inputPath, null) + ".objects.json")
+    : args.Length >= 2
+        ? args[1]
+        : Path.ChangeExtension(inputPath, null) + ".inventory.txt";
 
 // Compact 0x2019 RESOURCE_OBJECT_CREATE (proxy CreateResource): GameID i32@0,
 // BaseAsset u16@4, Scale f32@6, HSV0@10, HSV1@14, Pos f32@18/22/26,
@@ -60,6 +83,24 @@ var relationships = new Dictionary<int, (int reaction, bool attacking)>();
 
 var world = new SectorWorld();
 var reassemblers = new Dictionary<string, SectorStreamReassembler>();
+
+// Sector-boundary tracking. A capture starts in the PREVIOUS sector and gates
+// into the target, so objects created before the gate belong to the wrong
+// sector and must not be imported. We tag every object with the sector that was
+// "current" when its CREATE arrived: currentSector advances on each sector-id
+// carrier seen in stream order (0x0036 SERVER_REDIRECT, 0x003A SERVER_HANDOFF,
+// 0x006F GLOBAL_TICKET). gidSector pins each gid to the sector it first
+// appeared under, so flying back across a gate cannot re-tag it.
+int? currentSector = null;
+var gidSector = new Dictionary<int, int>();
+var gidFirstFrame = new Dictionary<int, int>();
+var markers = new List<(int frame, string op, int sector)>();
+void TagCreate(int gid, int frame)
+{
+    if (!gidFirstFrame.ContainsKey(gid)) gidFirstFrame[gid] = frame;
+    if (currentSector is { } sec && !gidSector.ContainsKey(gid))
+        gidSector[gid] = sec;
+}
 
 var readDatagrams = PcapReader.IsClassicPcap(inputPath)
     ? PcapReader.Read(inputPath)
@@ -78,10 +119,29 @@ foreach (var dg in readDatagrams)
         ushort op = pkt.Header.Opcode;
         var body = pkt.Payload.Span;
 
+        // --- sector-id carriers: advance currentSector in stream order ---
+        if (op == 0x0036 && body.Length >= 4)
+        {
+            currentSector = BinaryPrimitives.ReadInt32LittleEndian(body[..4]);
+            markers.Add((frames, "0x0036", currentSector.Value));
+        }
+        else if (op == 0x003A && body.Length >= 24)
+        {
+            currentSector = BinaryPrimitives.ReadInt32BigEndian(body.Slice(20, 4));
+            markers.Add((frames, "0x003A", currentSector.Value));
+        }
+        else if (op == 0x006F && body.Length >= 28)
+        {
+            currentSector = BinaryPrimitives.ReadInt32BigEndian(body.Slice(24, 4));
+            markers.Add((frames, "0x006F", currentSector.Value));
+        }
+
         if (op == 0x0007) continue; // ignore REMOVE: accumulate, do not evict
 
         if (op == 0x2019)
         {
+            int rgid = BinaryPrimitives.ReadInt32LittleEndian(body[..4]);
+            TagCreate(rgid, frames);
             DecodeResource(body, resources);
             continue;
         }
@@ -92,12 +152,25 @@ foreach (var dg in readDatagrams)
             relationships[gid] = (BinaryPrimitives.ReadInt32LittleEndian(body.Slice(4, 4)), body[8] != 0);
         }
 
+        // CREATE-class opcodes carry the gid LE@0; tag it with the current sector.
+        if (op is 0x0004 or 0x2018 && body.Length >= 4)
+            TagCreate(BinaryPrimitives.ReadInt32LittleEndian(body[..4]), frames);
+
         world.Ingest(Packet.ForOpcode(op, body.ToArray()));
     }
 }
 
-var report = BuildReport(inputPath, datagrams, frames, world, resources, relationships);
-File.WriteAllText(outputPath, report);
+if (jsonMode)
+{
+    string json = BuildJson(inputPath, datagrams, frames, world, resources,
+        relationships, gidSector, gidFirstFrame, markers);
+    File.WriteAllText(outputPath, json);
+}
+else
+{
+    string report = BuildReport(inputPath, datagrams, frames, world, resources, relationships);
+    File.WriteAllText(outputPath, report);
+}
 
 Console.WriteLine($"decoded {frames} frames from {datagrams} UDP datagrams across {reassemblers.Count} flow(s)");
 Console.WriteLine($"wrote {outputPath}");
@@ -155,6 +228,94 @@ static void DecodeResource(ReadOnlySpan<byte> body,
             name = Encoding.ASCII.GetString(body.Slice(nameOff + 2, nl));
     }
     resources[gid] = (ba, x, y, z, name);
+}
+
+// Machine-readable dump for the sector-import pipeline. Emits every decoded
+// object with its sector tag (the sector that was current when its CREATE
+// arrived) plus the ordered list of sector-id markers, so the Python side can
+// (a) keep only objects belonging to the target sector and (b) audit the
+// boundary. All policy (classify/exclude players+loot, dedupe across captures,
+// 5k-replace, SQL gen) lives in Python; this is a pure decode-to-JSON.
+static string BuildJson(string inputPath, int datagrams, int frames,
+    SectorWorld world,
+    Dictionary<int, (int baseAsset, float x, float y, float z, string name)> resources,
+    Dictionary<int, (int reaction, bool attacking)> relationships,
+    Dictionary<int, int> gidSector,
+    Dictionary<int, int> gidFirstFrame,
+    List<(int frame, string op, int sector)> markers)
+{
+    int? Sec(int gid) => gidSector.TryGetValue(gid, out var s) ? s : null;
+    int? Frame(int gid) => gidFirstFrame.TryGetValue(gid, out var f) ? f : null;
+
+    var objs = new List<object>();
+    foreach (var t in world.NearestTo(0).Select(t => t.Obj))
+    {
+        relationships.TryGetValue(t.GameId, out var rel);
+        objs.Add(new
+        {
+            gid = t.GameId,
+            sector = Sec(t.GameId),
+            frame = Frame(t.GameId),
+            createType = t.CreateType,
+            name = t.Name,
+            baseAsset = t.BaseAsset,
+            hasPos = t.HasPos,
+            x = t.HasPos ? t.X : (float?)null,
+            y = t.HasPos ? t.Y : (float?)null,
+            z = t.HasPos ? t.Z : (float?)null,
+            level = t.Level,
+            faction = t.Faction,
+            reaction = t.Reaction,
+            isAttacking = t.IsAttacking,
+            isAvatar = t.IsAvatar,
+            isNav = t.IsNav,
+            navType = t.NavType,
+            onRadar = t.OnRadar,
+            visited = t.Visited,
+            signature = t.Signature,
+            kind = SectorWorld.TypeName(t),
+        });
+    }
+    foreach (var kv in resources)
+    {
+        var (ba, x, y, z, name) = kv.Value;
+        relationships.TryGetValue(kv.Key, out var rel);
+        objs.Add(new
+        {
+            gid = kv.Key,
+            sector = Sec(kv.Key),
+            frame = Frame(kv.Key),
+            createType = (int?)38,
+            name = name.Length == 0 ? null : name,
+            baseAsset = (short?)(short)ba,
+            hasPos = true,
+            x = (float?)x,
+            y = (float?)y,
+            z = (float?)z,
+            level = (int?)null,
+            faction = (string?)null,
+            reaction = relationships.TryGetValue(kv.Key, out var r) ? r.reaction : (int?)null,
+            isAttacking = (bool?)null,
+            isAvatar = false,
+            isNav = false,
+            navType = (int?)null,
+            onRadar = (bool?)null,
+            visited = (bool?)null,
+            signature = (float?)null,
+            kind = "resource",
+        });
+    }
+
+    var doc = new
+    {
+        capture = Path.GetFileName(inputPath),
+        datagrams,
+        frames,
+        markers = markers.Select(m => new { m.frame, op = m.op, m.sector }).ToList(),
+        objects = objs,
+    };
+    return System.Text.Json.JsonSerializer.Serialize(doc,
+        new System.Text.Json.JsonSerializerOptions { WriteIndented = false });
 }
 
 static string BuildReport(string inputPath, int datagrams, int frames,
