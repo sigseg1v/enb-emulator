@@ -34,7 +34,7 @@ bool measure_text(const std::string& s, int* w, int* h);
 void begin_frame();  // clear the staging list
 void commit_frame(); // swap staging -> render (under lock)
 
-void text(int x, int y, const std::string& s, uint32_t rgb, float scale = 1.0f);
+void text(int x, int y, const std::string& s, uint32_t rgb, float scale = 1.0f, int alpha = 255);
 void rect(int x, int y, int w, int h, uint32_t rgb, bool filled, int alpha);
 void line(int x0, int y0, int x1, int y1, uint32_t rgb, int alpha);
 // Vertical gradient fill: rgb_top at y, rgb_bottom at y+h (per-vertex D3DCOLOR).

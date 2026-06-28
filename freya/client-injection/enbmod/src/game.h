@@ -187,6 +187,34 @@ constexpr int ShellScreenOptions = 1; // +0x108 id for the OPTIONS_MAIN screen
 // ---- AuxData accessor candidates (universal read primitive once resolved) ----
 constexpr uintptr_t AuxGet_Ability = 0x006a4b40;
 constexpr uintptr_t AuxGet_Skill = 0x00417f21;
+
+// ---- current-target capture (two paired hooks in the target-frame refresh) --
+// The target-frame refresh resolves the selected GameID through the object registry and,
+// in the SAME pass, hands the resolved object to the radar-highlight routine and hands a
+// lightweight display descriptor to the frame repaint. We capture both halves:
+//
+// TargetEntitySet (0x007bd6e0, __thiscall): the radar/target-highlight setter. ECX = the
+// radar manager (ignored), arg0 (param_2) = the LIVE resolved target GAME OBJECT (0 on
+// de-target). Every caller of this routine is a target-refresh path passing the resolved
+// object or 0, so arg0 is exactly the current target object. Its hull/shield AuxData and
+// class name do NOT live on this contact object directly: the contact holds a pointer to
+// its properties container at +0x88, and the aux bag (HullPoints / MaxHullPoints /
+// MaxShieldPower / ShieldPercent) plus the generic CLASS name ("Ship"/"Starbase", a
+// char* at container+0x3c) read off THAT container. We capture arg0 (0 clears) and
+// forward untouched.
+//
+// TargetFrameRefresh (0x00512400, __thiscall): the per-frame target-frame refresh.
+// ECX (its `this`) is the in-space targeting/HUD controller. We capture it read-only
+// (hooks::target_ctrl()) so lua_api can live-read the target's LEVEL each frame:
+// controller[0x13] (ctrl + targeting::ctrl_subsys) is the targeting subsystem, whose
+// vtable getter yields the targeting data object holding the "TargetThreatLevel" aux
+// (see namespace targeting). The level is read live rather than captured here because
+// it arrives from the server AFTER the target-change repaint -- a one-shot capture at
+// target switch sees the not-yet-populated entry and reads -1. Both this refresh and
+// TargetEntitySet still run while the native frame is draw-suppressed by the hide-ui
+// mod (hide-ui only clears the widget's draw-gate bit; the update logic is untouched).
+constexpr uintptr_t TargetFrameRefresh = 0x00512400;
+constexpr uintptr_t TargetEntitySet = 0x007bd6e0;
 } // namespace addr
 
 // Vitals-bar fill chain. Unlike the Offsets struct below (runtime hypotheses),
@@ -215,6 +243,36 @@ constexpr int ctrl_data = 0x04;    // [ctrl + 0x04]   -> data object
 constexpr int data_entity = 0x88;  // [data + 0x88]   -> player ship entity
 constexpr int entity_name = 0x124; // [entity + 0x124]-> char* character name
 } // namespace player
+
+// Target LEVEL read chain, off the in-space targeting controller captured at
+// addr::TargetFrameRefresh (hooks::target_ctrl()). controller[0x13] (ctrl +
+// ctrl_subsys) is the targeting subsystem `ts`; its vtable+getdata_vtoff getter
+// (__thiscall, no args) returns the targeting DATA object; *(dataObj + aux_container)
+// is the aux container holding the "TargetThreatLevel" entry, read as an int through
+// rpg::get_entry (build_key + get_entry, val at +val_off when valid at +valid_off --
+// the same shape as the discipline-level read, the threat keys being that aux-value
+// type). Build-constant offsets observed in the native refresh; only the controller
+// pointer varies per run.
+namespace targeting {
+constexpr int ctrl_subsys = 0x4c;   // controller[0x13] -> targeting subsystem
+constexpr int getdata_vtoff = 0x28; // subsystem vtable+0x28 -> targeting data object
+constexpr int aux_container = 0x88; // *(dataObj + 0x88) -> aux container (threat keys)
+} // namespace targeting
+
+// Target/player WORLD position, for the straight-line range shown on the frame. The
+// client's camera controller computes target distance exactly this way: a space object
+// (a GameID-resolved entity, like the target frame's resolved target) exposes a
+// world-position getter at vtable+wpos_vtoff. It is a struct-returning __thiscall --
+// ECX = the object, and the caller passes the address of a 3-float output buffer as the
+// hidden return pointer; the getter writes world X/Y/Z to buf+wpos_x/_y/_z (three packed
+// floats). Distance = |player_wpos - target_wpos|, both read this way. The flat object
+// offsets are NOT world coords.
+namespace locatable {
+constexpr int wpos_vtoff = 0x24; // entity vtable+0x24(&buf) -> packed Vec3 in buf
+constexpr int wpos_x = 0x00;     // buf + 0x00 -> world X
+constexpr int wpos_y = 0x04;     // buf + 0x04 -> world Y
+constexpr int wpos_z = 0x08;     // buf + 0x08 -> world Z
+} // namespace locatable
 
 // AuxData property-bag reader. The client keeps per-object gameplay vitals as
 // string-keyed float entries (a property bag), NOT flat struct fields -- so the
@@ -250,7 +308,12 @@ constexpr int keybuf_sz = 0x40; // zeroed scratch key-object buffer
 // fresh character (correct), so a successful read shows "0", not the "--" skeleton.
 namespace rpg {
 constexpr int container_off = 0x12c0;       // manager + this -> RPGInfo AuxData container
-constexpr uintptr_t get_entry = 0x00514b60; // __cdecl(container, keybuf) -> entry|0
+constexpr uintptr_t get_entry = 0x00514b60; // __cdecl(container, keybuf) -> entry|0 (int-typed)
+// String-typed property-bag lookup: same __cdecl(container, keybuf) shape as get_entry
+// but resolves a string-typed entry. When valid (entry + aux::valid_off nonzero), the
+// value at entry + aux::val_off is a char* (a NUL-terminated C string), not an int. This
+// is how the HUD reads the target's "TargetThreat" line ("Level N" for a mob).
+constexpr uintptr_t get_string = 0x00514bd0; // __cdecl(container, keybuf) -> entry|0 (string-typed)
 } // namespace rpg
 
 // Chat line RING-BUFFER layout, off the ring object captured at addr::ChatLineAppend
@@ -365,16 +428,6 @@ struct Offsets {
     int state_login = -1;
     int state_charsel = -1;
     int state_load = -1;
-
-    // target object: address of the pointer to the current target, + fields within it.
-    uintptr_t target_ptr_addr = 0;
-    int tgt_name = -1;       // offset to a char* or inline cstr
-    int tgt_name_is_ptr = 1; // 1: field holds char*; 0: field is inline string
-    int tgt_name_wide = 0;   // 1: UTF-16
-    int tgt_hull = -1;
-    int tgt_pos_x = -1;
-    int tgt_pos_y = -1;
-    int tgt_pos_z = -1;
 };
 
 // The single live offsets instance (defined in game.cpp). Mutated by Lua enb.calibrate{}.

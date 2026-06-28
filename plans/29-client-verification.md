@@ -2596,3 +2596,147 @@ moot; the SOLVED block above is the truth):**
   a gate that already had a real turret -- it should NOT have a doubled ring.
 - **Setup**: a fresh `docker compose` boot loads them from the first sector load;
   on a live DB they appear only after the sector reloads (re-enter / restart).
+
+### [ ] CV-30 -- HUD no longer lags/flickers on mouse move
+
+- **What changed**: `freya/client-injection/enbmod/src/lua_api.cpp` `tick()` now
+  gates the overlay display-list rebuild (`begin_frame` + `on_tick` handlers +
+  `commit_frame`) to run at most once per Present, instead of once per
+  `PeekMessageA` pump iteration. A mouse-move flood spins the pump several times
+  per drawn frame, so the old code re-ran every draw handler ~2-4x per frame
+  (wasted CPU -> lag) and widened the window to commit a transient empty list
+  between Presents (-> flicker). This is client-only (enbmod, MIT); no wire change.
+- **Why the real client is needed**: agent-side measurement proved the rebuild
+  rate is now decoupled from the pump (`enb.diag()`: rebuild == present in both
+  idle and mouse-flood; pump rate still spikes but rebuild no longer follows), and
+  a screenshot showed the HUD renders without a blank frame -- but only the owner
+  playing can confirm the *subjective* "no lag, no flicker when I move the mouse".
+- **What to verify (real client)**: in space with the Freya HUD up, move the mouse
+  rapidly/continuously. Confirm the HUD no longer flickers or stutters and the
+  framerate does not visibly drop with mouse motion. (Separate, still-open: the
+  top-middle chat-duplicate on new messages -- AV-1/AV-2 -- is NOT addressed here.)
+- **Setup**: `just build-enbmod` then relaunch the client (the launcher re-stages
+  the DLL next to client.exe on each launch).
+
+### [ ] CV-31 -- No client crash on the action-bar ability-icon (K_TEXQUAD) path
+
+- **What changed**: `freya/client-injection/enbmod/src/overlay.cpp` -- the overlay
+  no longer binds a game-owned ability-icon `IDirect3DTexture8*` that the game may
+  have freed between the display-list REBUILD (resolve, on the tick thread) and the
+  DRAW (in the Present hook). `texture_quad` now `AddRef()`s the texture at resolve
+  time so the game's later `Release` cannot take it below 1; the queued command owns
+  that ref and `Release`s it when its list rotates out (`begin_frame` / device-reset
+  `release_caches`), both on the Present thread. Client-only (enbmod, MIT); no wire
+  change.
+- **Root cause (the crash)**: the action-bar slot icons are LIVE textures owned by
+  the game's UI cards. Lua resolved the card's texture during the rebuild and queued
+  the raw pointer; the game then ran a full frame of logic and could free the card
+  (ability used/swapped, zoning, logout), Releasing its texture to refcount 0. The
+  d3d8 wrapper was destroyed but its freed memory's vtable pointer still read back
+  (so the old shallow guard passed), while its wined3d resource was gone -- and
+  `DrawPrimitiveUP` then NULL-deref'd it. Captured live as `_except.txt`
+  EXCEPTION_ACCESS_VIOLATION read 0x14 at a d3d8 address (`mov edx,[eax+0x14]`,
+  eax=0), call chain hk_Present -> draw_frame -> draw_quad -> d3d8. This is a
+  PRE-EXISTING bug in the K_TEXQUAD path, NOT introduced by the CV-30 lag fix.
+- **Why the real client is needed**: agent-side proved the path is exercised (the
+  leftmost action-bar slot, an ability, renders as a tinted icon) and that entering
+  space + a mouse-move flood + a soak are now stable with no `_except.txt` and no
+  WINE page fault. But the actual free-during-gap trigger (use/swap an ability, or
+  zone with the bar populated) cannot be driven from the cmd channel -- only the
+  owner playing can exercise it. This is an enbmod-only crash (the K_TEXQUAD path
+  exists only when the Lua HUD is loaded), so it is NOT the crash a player (Veret)
+  reported -- he plays with Lua/mods off, so enbmod never loads for him.
+- **What to verify (real client)**: in space with abilities slotted on the action
+  bar, repeatedly activate abilities, swap/re-slot them, and gate between sectors.
+  Confirm no client crash (no new `_except.txt`) and the ability icons keep
+  rendering.
+- **Setup**: `just build-enbmod` then relaunch the client.
+
+## CV-AS-TARGETFRAME -- redesigned bottom-right target frame (bars + name + level)
+
+- **What changed (client-only, MIT)**: the native bottom-right target frame is now
+  hidden by default (hide-ui `TargetFrame`) and the Freya HUD repaints the 2D layer
+  (`freya-hud/target_frame.lua`): NO glass background, two stacked thin bars at the
+  top of the target area (hull red over shield blue, each ~1/3 the player-card bar
+  height, no gap, full target-area width, current/total value printed on the bar at
+  a reduced scale), and below them the target name + " (L<level>)", wrapping to a
+  second line when too wide. The target's 3D model is a separate PIP scene render
+  and stays visible behind the new 2D layer.
+- **Data**: `enb.target()` (the VEH-guarded current-target read) -> name, hull /
+  hull_max (HullPoints / MaxHullPoints), shield_max (MaxShieldPower), shield
+  (MaxShieldPower * ShieldPercent when present), level. A station target has no
+  hull/shield/level, so its bars render as empty tracks and no level suffix shows
+  -- correct.
+- **Target TRACKING fix (relaunch required)**: the live target object is captured
+  from the radar-highlight setter (`TargetEntitySet`, 0x007bd6e0, arg0 = the resolved
+  object, 0 on de-target), which fires on every target switch, and the level from the
+  frame display update (`TargetFrameUpdate`, 0x0060e540, param_4). Both still run while
+  hide-ui draw-suppresses the native frame (hide-ui only clears the draw-gate bit, not
+  the update logic). This is a DLL hook change -> needs a client relaunch to load (Lua
+  hot-reloads; the C++ DLL does not).
+- **VERIFIED LIVE (this box, post-relaunch)**: cycling targets with the in-space
+  target keys, `enb.target()` now returns a DIFFERENT entity on every switch and the
+  rendered frame followed it across genuinely different object types -- Decoration ->
+  Stargate -> Planet -> Starbase -- with the name + 3D model changing each time
+  (screenshots: "Decoration" + station model, then "Stargate" + gate model). Before
+  the fix the captured manager went stale and the frame did not update. The level
+  field reads junk (an uninitialized stack pointer) for non-combat targets, so it is
+  clamped to a plausible range [0,255] in `l_target` and reports no level otherwise
+  -- matching the native frame, which shows the "Combat Level" line for combat
+  targets only. STILL NOT shown: a FILLED bar tracking damage -- stations / gates /
+  decorations expose no hull/shield aux (only mobs / ships do) and the home sector
+  has no mob or ship target, so the bars render as empty tracks here (correct). The
+  filled-bar + damage-tracking case remains the one open real-client check.
+- **Headless coverage**: none -- the mock has no live target entity.
+- **Validated live (this box)**: layout proven against the home-sector station
+  target (model kept, bg/native-bars/name/dist/arrows gone, two empty stacked bars
+  + name below). Bar FILL + cur/total text + level + name wrap proven by temporarily
+  stubbing `enb.target()` with fake vitals (842/1200 hull, 310/600 shield, L37,
+  long name) -- screenshot-verified. NOT yet validated against a real vital target.
+- **What to look for (real client)**:
+  - Target a MOB or another SHIP (something with real hull/shield). The hull and
+    shield bars must FILL to the right fraction with the live current/total numbers
+    on them, and the bars must track damage in real time (drop as you shoot it).
+  - The " (L<level>)" suffix shows the target's combat level for a mob; the name
+    wraps to a second line for a long name and is single-line otherwise.
+  - The 3D model still spins behind the bars; the native glass/bars/name/dist/arrows
+    are gone; no flicker, no crash on target/de-target/zone.
+  - **Switching targets UPDATES the frame**: select a different mob/ship (or cycle
+    with the nav/target keys) and the hull/shield bars + name + level must change to
+    the NEW target immediately; de-targeting clears the frame. This is the tracking
+    fix above and is the primary thing to confirm.
+- **INSTANCE NAME + ENEMY HULL -- FIXED (verified live 2026-06-28)**: the two
+  owner-reported defects (frame showed the generic class name "Ship"/"Starbase", and
+  enemy targets showed NO hull bar) had the same root cause: the hull/shield AuxData
+  and the names live on the object's PROPERTIES CONTAINER at `object+0x88`, not on the
+  contact object itself. `enb.target()` now reads, off that container: hull/shield aux
+  (so enemies show hull -- live a mob read HullPoints 32.55/32.55 and the on-screen
+  frame rendered a full hull bar), the proper INSTANCE name as a char* at
+  `container+0x124` (live: "Needlenose" instead of "Ship"), and the class name at
+  `container+0x3c` only as a fallback when the instance name is empty. The old code
+  read aux + name off the contact object (name at object+0x84), which carries no aux
+  and a garbage +0x84 -- that was the bug.
+- **WHAT TO CONFIRM (real client, remaining)**: instance name was verified on a ship
+  mob only ("Needlenose"); confirm it also reads the proper name on a STATION ("Loki
+  Station") and a named NPC ("Scuttlebug") -- same `container+0x124` field, same object
+  layout, so expected to work. Tracked in plans/49 AS-13.
+- **DISTANCE -- FIXED (verified live 2026-06-28)**: the owner reported the distance was
+  "totally wrong, pulling from the wrong spot". The old code used the magnitude of the
+  contact's flat +0xE8/+0xEC/+0xF0 offsets, which are NOT world coords. `enb.target().dist`
+  now computes the true straight-line range `|player_wpos - target_wpos|` the way the
+  native client does: both ends are positional locatables whose world-position getter is
+  `vtable+0x24` (struct-return, 3 packed floats), and the local SHIP object is fetched via
+  the native target-frame chain (`target_ctrl[0x4c]` targeting subsystem -> `vtable+0x28()`),
+  NOT the vitals-chain entity (which is not positional and returns 0,0,0). Live: targeting
+  the station just undocked-from (Luna), `enb.target()` returned distinct ship/target world
+  positions and `dist=28268`, and the freya-hud frame rendered `Dist 28.27k` on-screen under
+  the name. The frame now prints the abbreviated `Dist %.2fk` (owner ask). **DANGER NOTE**:
+  the ship object MUST come from that deterministic native chain -- calling `vtable+0x24` on
+  a wrong-class object invokes a different virtual method and WEDGES the message pump (froze
+  the live client 3x while developing this); the VEH fault-guard does not catch a non-faulting
+  wrong call.
+- **WHAT TO CONFIRM (real client, distance)**: the `Dist N.NNk` value should match the
+  native "Dist:" readout (now hidden) and shrink as you fly toward the target / grow as you
+  fly away, updating smoothly. Verify on a mob/ship target as well as the station case.
+- **Setup**: `just build-enbmod` then relaunch the client; ensure freya-hud +
+  hide-ui mods enabled.

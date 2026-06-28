@@ -307,6 +307,49 @@ extern "C" __attribute__((naked)) void hk_XpBars() {
                          "jmp *_real_XpBars_tramp\n\t");
 }
 
+// ---- current-target capture (two read-only hooks in the target-frame refresh) -
+// See game.h::addr::TargetEntitySet / TargetFrameRefresh for the full rationale. The
+// refresh resolves the selected GameID and hands the resolved object to the radar-
+// highlight setter (TargetEntitySet); we capture that object there (its hull/shield aux
+// read off the properties container at object+0x88, its instance name straight off the
+// container in lua_api). We also capture the targeting/HUD controller (ECX) at the
+// refresh entry so lua_api can live-read the target LEVEL off the targeting subsystem
+// every frame (the level arrives after the target-change repaint, so a one-shot capture
+// would read -1). Both hooks are read-only and forward every argument via the trampoline.
+static volatile unsigned g_target_obj = 0;  // live resolved target object (0 = none)
+static volatile unsigned g_target_ctrl = 0; // live targeting/HUD controller (ECX of refresh)
+extern "C" {
+void* real_TargetEntitySet_tramp = nullptr;
+void notify_target_entity(unsigned obj) {
+    g_target_obj = obj; // 0 = de-target (clear)
+}
+void* real_TargetFrameRefresh_tramp = nullptr;
+void notify_target_ctrl(unsigned ctrl) {
+    g_target_ctrl = ctrl; // the in-space targeting controller (never 0 while in space)
+}
+}
+extern "C" __attribute__((naked)) void hk_TargetEntitySet() {
+    // __thiscall: ECX = radar manager (ignored), param_2 = resolved target object (0 to
+    // clear). After pushal (esp -= 0x20): ret at 0x20(esp), param_2 at 0x24(esp).
+    __asm__ __volatile__("pushal\n\t"
+                         "movl 0x24(%esp), %ecx\n\t" // param_2 (resolved object) -> obj
+                         "pushl %ecx\n\t"
+                         "call _notify_target_entity\n\t"
+                         "addl $4, %esp\n\t"
+                         "popal\n\t"
+                         "jmp *_real_TargetEntitySet_tramp\n\t");
+}
+extern "C" __attribute__((naked)) void hk_TargetFrameRefresh() {
+    // __thiscall: ECX = the targeting/HUD controller. Capture it (ECX) read-only, the
+    // exact pattern of hk_XpBars, and forward untouched.
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl %ecx\n\t"
+                         "call _notify_target_ctrl\n\t"
+                         "addl $4, %esp\n\t"
+                         "popal\n\t"
+                         "jmp *_real_TargetFrameRefresh_tramp\n\t");
+}
+
 // ---- cockpit controller capture ---------------------------------------------
 // game.h::addr::CockpitThrottle (0x0057dd20) and CockpitCommands (0x0057be50) are
 // the two cockpit-widget CONSTRUCTORS (__fastcall, ECX = the controller). They run
@@ -571,6 +614,16 @@ bool enable_event_hooks() {
         logf("hook XpBarsUpdate failed");
         ok = false;
     }
+    if (MH_CreateHook((void*)game::addr::TargetFrameRefresh, (void*)&hk_TargetFrameRefresh,
+                      &real_TargetFrameRefresh_tramp) != MH_OK) {
+        logf("hook TargetFrameRefresh failed");
+        ok = false;
+    }
+    if (MH_CreateHook((void*)game::addr::TargetEntitySet, (void*)&hk_TargetEntitySet,
+                      &real_TargetEntitySet_tramp) != MH_OK) {
+        logf("hook TargetEntitySet failed");
+        ok = false;
+    }
     if (MH_CreateHook((void*)game::addr::ActionBarUse, (void*)&hk_ActionBar,
                       &real_ActionBar_tramp) != MH_OK) {
         logf("hook ActionBarUse failed");
@@ -621,6 +674,8 @@ bool enable_event_hooks() {
     MH_EnableHook((void*)game::addr::ChatSend);
     MH_EnableHook((void*)game::addr::RpgLevels);
     MH_EnableHook((void*)game::addr::XpBarsUpdate);
+    MH_EnableHook((void*)game::addr::TargetFrameRefresh);
+    MH_EnableHook((void*)game::addr::TargetEntitySet);
     MH_EnableHook((void*)game::addr::ActionBarUse);
     MH_EnableHook((void*)game::addr::ActionBarCtor);
     MH_EnableHook((void*)game::addr::CockpitThrottle);
@@ -641,6 +696,8 @@ void disable_event_hooks() {
     MH_DisableHook((void*)game::addr::ChatSend);
     MH_DisableHook((void*)game::addr::RpgLevels);
     MH_DisableHook((void*)game::addr::XpBarsUpdate);
+    MH_DisableHook((void*)game::addr::TargetFrameRefresh);
+    MH_DisableHook((void*)game::addr::TargetEntitySet);
     MH_DisableHook((void*)game::addr::ActionBarUse);
     MH_DisableHook((void*)game::addr::ActionBarCtor);
     MH_DisableHook((void*)game::addr::CockpitThrottle);
@@ -684,6 +741,12 @@ unsigned rpg_mgr() {
 }
 unsigned xp_ctrl() {
     return g_xp_ctrl;
+}
+unsigned target_obj() {
+    return g_target_obj;
+}
+unsigned target_ctrl() {
+    return g_target_ctrl;
 }
 unsigned actionbar() {
     return g_actionbar;

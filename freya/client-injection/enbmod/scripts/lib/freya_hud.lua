@@ -158,13 +158,15 @@ end
 -- drawn LAST and is the only one carrying `rgb` (the offsets are H.SHADOW), so
 -- specs can match the single colored copy by (text, rgb). Optional `scale`
 -- (default 1.0) shrinks/grows the glyphs uniformly.
-function H.otext(x, y, s, rgb, scale)
+-- Optional `alpha` (0..255, default 255) fades the whole glyph -- the fill copy
+-- and its 4 shadow copies -- uniformly, for translucent labels.
+function H.otext(x, y, s, rgb, scale, alpha)
     x = math.floor(x); y = math.floor(y)
-    enb.draw.text(x - 1, y,     s, H.SHADOW, scale)
-    enb.draw.text(x + 1, y,     s, H.SHADOW, scale)
-    enb.draw.text(x,     y - 1, s, H.SHADOW, scale)
-    enb.draw.text(x,     y + 1, s, H.SHADOW, scale)
-    enb.draw.text(x,     y,     s, rgb, scale)
+    enb.draw.text(x - 1, y,     s, H.SHADOW, scale, alpha)
+    enb.draw.text(x + 1, y,     s, H.SHADOW, scale, alpha)
+    enb.draw.text(x,     y - 1, s, H.SHADOW, scale, alpha)
+    enb.draw.text(x,     y + 1, s, H.SHADOW, scale, alpha)
+    enb.draw.text(x,     y,     s, rgb, scale, alpha)
 end
 
 -- darker shade of an 0xRRGGBB color, for the bottom of a vertical-gradient fill

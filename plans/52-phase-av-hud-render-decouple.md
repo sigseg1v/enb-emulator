@@ -72,13 +72,56 @@ assume they share a fix.
       at message-arrival time. Record which leaf/VT renders at top-middle.
 - [ ] AV-2 Native chat duplicate: hide the offending VT (new-message popup) or
       re-hide synchronously on the append hook. Verify no top-middle flash.
-- [ ] AV-3 Overlay rebuild decouple: clock `begin_frame`/`on_tick`/`commit_frame`
-      off Present (or once-per-present gate). Re-measure `enb.diag()`: rebuild
-      rate should track present rate and stop scaling with mouse input. Decide +
-      document the alt-tab/no-present tradeoff.
-- [ ] AV-4 Real-client visual confirm (owner): no HUD flicker on fast mouse
-      move, no top-middle chat duplicate on new messages. Add a CV entry to
-      `plans/29-client-verification.md`.
+- [x] AV-3 Overlay rebuild decouple (DONE 2026-06-27). `lua_api.cpp` `tick()`:
+      the `begin_frame`/run `on_tick` handlers/`commit_frame` block is now gated to
+      run at most once per Present (`last_rebuild_present` vs
+      `overlay::present_count()`). The cmd-channel poll + event drain ABOVE it stay
+      at pump rate (heartbeat + responsive cmd channel). `enb.diag()` extended to
+      THREE values -- `tick`(pump/input rate), `rebuild`(gated), `present`(draw).
+      Re-measured live (docked, fresh DLL), deltas over 5s:
+      | | tick (pump) | rebuild (gated) | present (draw) |
+      |---|---|---|---|
+      | idle | 360 | 257 | 256 |
+      | mouse-move flood | 450 | 172 | 172 |
+      Rebuild now == present in BOTH conditions (was == tick before, i.e. it rode
+      the pump). Pump rate still spikes with mouse input (360->450) but the rebuild
+      no longer follows it -- fully decoupled. Tradeoff documented in the code
+      comment: if the game stops presenting (alt-tab/minimize) the gated rebuild
+      stalls, which is harmless (nothing is drawn); cmd-poll + event-drain stay at
+      pump rate so the channel/heartbeat remain live.
+- [~] AV-4 Real-client visual confirm. Agent-side confirmed this session: HUD
+      renders correctly under fast mouse-move flood, no blank/flicker frame
+      (screenshot). Owner async confirm of the *subjective* "no lag/flicker while
+      playing" tracked as CV-30 in `plans/29-client-verification.md`. (The
+      top-middle chat-duplicate -- AV-1/AV-2 -- is a SEPARATE bug, still open; the
+      owner's 2026-06-27 ask was the mouse-move lag/flicker only.)
+
+- [x] AV-5 Crash fix: stale game texture bound in the K_TEXQUAD (action-bar
+      ability-icon) path (DONE 2026-06-27). `overlay.cpp`. The slot icons are LIVE
+      textures owned by the game's UI cards; Lua resolved the card's
+      `IDirect3DTexture8*` during the display-list REBUILD (tick thread) and queued
+      the raw pointer, but the bind happened a full frame later in the Present hook.
+      In between the game could free the card (ability used/swapped, zoning, logout),
+      Releasing its texture to refcount 0: the d3d8 wrapper was destroyed, its freed
+      memory's vtable still read back (so the old shallow pointer/vtable guard
+      passed) but its wined3d resource was gone, and `DrawPrimitiveUP` NULL-deref'd
+      it. Captured live as `_except.txt` AV read 0x14 at a d3d8 addr
+      (`mov edx,[eax+0x14]`, eax=0); chain hk_Present -> draw_frame -> draw_quad ->
+      d3d8. **Pre-existing in the K_TEXQUAD path; NOT caused by the AV-3 lag fix.**
+      Fix: `texture_quad` takes a COM `AddRef()` on the texture at resolve time (the
+      Lua walk just validated it), so the game's later Release cannot destroy it; the
+      queued command owns that ref and `Release`s it when its list rotates out
+      (`begin_frame` for the swapped-out list, `release_caches` on device
+      reset/unload), both on the Present thread so any Release-to-zero GL teardown
+      lands on the device's thread. AddRef/Release are interlocked + format-agnostic
+      -- no pixel copy, no new GPU resource, no LockRect/pitch math. (A first attempt
+      that COPIED the pixels was rejected: the per-row `memcpy` overflowed the
+      destination for block-compressed/non-32bpp icon formats -- LockRect pitch is
+      per block-row, ~4x fewer rows than Height -- corrupting the heap and surfacing
+      as a separate ntdll fault on entering space.) Verified live: action-bar ability
+      icon renders; entering space + mouse-flood + 35s soak stable, no `_except.txt`,
+      no page fault. Real-client confirm of the actual use/swap/zone trigger tracked
+      as **CV-31** in `plans/29-client-verification.md`.
 
 ## Related incident -- pump-clocked tick is also a HANG risk (2026-06-20)
 
@@ -101,7 +144,8 @@ contract. Document that contract where `enb.on_tick` is defined.
 
 ## Notes
 
-- `enb.diag()` is the measurement tool; keep it.
+- `enb.diag()` is the measurement tool; keep it. Since AV-3 it returns three
+  values: `tick`(pump/input rate), `rebuild`(gated to draw rate), `present`(draw).
 - This is client-only (`freya/client-injection/enbmod/`, MIT); no server/proxy
   wire change, so no server integrity gate -- but the real-client visual check
   (AV-4) is the only proof the flicker is actually gone.
