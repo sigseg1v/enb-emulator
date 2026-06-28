@@ -308,7 +308,12 @@ constexpr int keybuf_sz = 0x40; // zeroed scratch key-object buffer
 // fresh character (correct), so a successful read shows "0", not the "--" skeleton.
 namespace rpg {
 constexpr int container_off = 0x12c0;       // manager + this -> RPGInfo AuxData container
-constexpr uintptr_t get_entry = 0x00514b60; // __cdecl(container, keybuf) -> entry|0
+constexpr uintptr_t get_entry = 0x00514b60; // __cdecl(container, keybuf) -> entry|0 (int-typed)
+// String-typed property-bag lookup: same __cdecl(container, keybuf) shape as get_entry
+// but resolves a string-typed entry. When valid (entry + aux::valid_off nonzero), the
+// value at entry + aux::val_off is a char* (a NUL-terminated C string), not an int. This
+// is how the HUD reads the target's "TargetThreat" line ("Level N" for a mob).
+constexpr uintptr_t get_string = 0x00514bd0; // __cdecl(container, keybuf) -> entry|0 (string-typed)
 } // namespace rpg
 
 // Chat line RING-BUFFER layout, off the ring object captured at addr::ChatLineAppend

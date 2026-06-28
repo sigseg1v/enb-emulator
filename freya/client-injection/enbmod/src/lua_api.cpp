@@ -456,7 +456,7 @@ static bool world_pos(uintptr_t obj, double out[3]);
 // object; the game stores shield as a 0..1 percent (ShieldPercent) of MaxShieldPower,
 // with no absolute current-shield key. Its INSTANCE name is a char* on that same
 // container at +0x124 (class name at +0x3c). The target's level is live-read off the
-// targeting subsystem (target_level_live()) -- the HUD's own "Combat Level %d" source.
+// targeting subsystem (target_level_live()) -- the server-fed "TargetThreat" string.
 // enb.target_obj() -> live selected target object pointer (0 until the hook fires
 // / when nothing is targeted). Diagnostic: lets Lua walk the target object with
 // guarded raw reads (enb.read.*) without invoking the aux machinery, which faults
@@ -523,11 +523,10 @@ static int l_target(lua_State* L) {
         lua_pushnumber(L, smax * spct);
         lua_setfield(L, -2, "shield");
     }
-    // level: live-read off the targeting subsystem each call (the "TargetThreatLevel"
-    // aux, the native frame's "Combat Level" source). Only combat targets carry a real
-    // threat level; non-combat targets (stations, navs, decorations) leave the entry
-    // unpopulated, so target_level_live() returns -1 and we show no level -- matching
-    // the native frame, which prints the level line for combat targets only.
+    // level: live-read off the targeting subsystem each call. The server sends a mob's
+    // level as the "TargetThreat" string ("Level N"), which target_level_live() parses.
+    // Non-combat targets (stations, navs, decorations) get an empty/relative threat with
+    // no parseable level, so target_level_live() returns -1 and we show no level.
     // Cache the level per target: target_level_live() does a vtable getter call, so we
     // call it only until a valid level lands for the CURRENT target object, then serve
     // the cached value on later frames (the level is async-populated a few frames after
@@ -896,7 +895,7 @@ static int target_level_live() {
         return -1;
     unsigned char keybuf[game::aux::keybuf_sz];
     memset(keybuf, 0, sizeof(keybuf));
-    int level = -1;
+    uintptr_t strptr = 0;
     if (__builtin_setjmp(mem::g_guard_jmp)) {
         mem::g_guard_on = 0;
         return -1; // faulted somewhere in the aux read
@@ -904,13 +903,24 @@ static int target_level_live() {
     mem::g_guard_on = 1;
     uintptr_t cont = mem::ptr(data + game::targeting::aux_container);
     if (cont) {
-        ((AuxBuildKey_t)game::aux::build_key)(keybuf, "TargetThreatLevel");
-        int entry = ((AuxGetValue_t)game::rpg::get_entry)((int)cont, keybuf);
+        // The server populates the target's level as the "TargetThreat" string ("Level N"
+        // for a mob; a relative word like "Even"/"Hard" for a player). It is a string-typed
+        // aux entry, so resolve it with the string lookup and read the char* value.
+        ((AuxBuildKey_t)game::aux::build_key)(keybuf, "TargetThreat");
+        int entry = ((AuxGetValue_t)game::rpg::get_string)((int)cont, keybuf);
         if (entry && mem::i32((uintptr_t)entry + game::aux::valid_off) != 0)
-            level = mem::i32((uintptr_t)entry + game::aux::val_off);
+            strptr = mem::ptr((uintptr_t)entry + game::aux::val_off);
     }
     mem::g_guard_on = 0;
-    return level;
+    if (!strptr)
+        return -1;
+    // Parse a leading "Level N" out of the threat string; anything else (a relative
+    // assessment, or empty) has no absolute level to show. mem::cstr is self-guarding.
+    std::string threat = mem::cstr(strptr, 64);
+    int level = -1;
+    if (sscanf(threat.c_str(), "Level %d", &level) == 1 && level >= 0)
+        return level;
+    return -1;
 }
 
 // Read an in-space object's world position the way the client's camera controller does
