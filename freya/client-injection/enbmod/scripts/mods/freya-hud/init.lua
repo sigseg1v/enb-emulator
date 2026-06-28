@@ -19,4 +19,5 @@
 require("chat")
 require("xp_overlay")
 require("freya_ui")
+require("target_frame")
 require("micromenu")

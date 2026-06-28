@@ -2651,3 +2651,42 @@ moot; the SOLVED block above is the truth):**
   Confirm no client crash (no new `_except.txt`) and the ability icons keep
   rendering.
 - **Setup**: `just build-enbmod` then relaunch the client.
+
+## CV-AS-TARGETFRAME -- redesigned bottom-right target frame (bars + name + level)
+
+- **What changed (client-only, MIT)**: the native bottom-right target frame is now
+  hidden by default (hide-ui `TargetFrame`) and the Freya HUD repaints the 2D layer
+  (`freya-hud/target_frame.lua`): NO glass background, two stacked thin bars at the
+  top of the target area (hull red over shield blue, each ~1/3 the player-card bar
+  height, no gap, full target-area width, current/total value printed on the bar at
+  a reduced scale), and below them the target name + " (L<level>)", wrapping to a
+  second line when too wide. The target's 3D model is a separate PIP scene render
+  and stays visible behind the new 2D layer.
+- **Data**: `enb.target()` (the VEH-guarded current-target read) -> name, hull /
+  hull_max (HullPoints / MaxHullPoints), shield_max (MaxShieldPower), shield
+  (MaxShieldPower * ShieldPercent when present), level (the player's
+  TargetThreatLevel aux). A station target has no hull/shield/level, so its bars
+  render as empty tracks and no level suffix shows -- correct.
+- **Headless coverage**: none -- the mock has no live target entity.
+- **Validated live (this box)**: layout proven against the home-sector station
+  target (model kept, bg/native-bars/name/dist/arrows gone, two empty stacked bars
+  + name below). Bar FILL + cur/total text + level + name wrap proven by temporarily
+  stubbing `enb.target()` with fake vitals (842/1200 hull, 310/600 shield, L37,
+  long name) -- screenshot-verified. NOT yet validated against a real vital target.
+- **What to look for (real client)**:
+  - Target a MOB or another SHIP (something with real hull/shield). The hull and
+    shield bars must FILL to the right fraction with the live current/total numbers
+    on them, and the bars must track damage in real time (drop as you shoot it).
+  - The " (L<level>)" suffix shows the target's combat level for a mob; the name
+    wraps to a second line for a long name and is single-line otherwise.
+  - The 3D model still spins behind the bars; the native glass/bars/name/dist/arrows
+    are gone; no flicker, no crash on target/de-target/zone.
+- **KNOWN LIMITATION (follow-up)**: the name currently comes from the aux container
+  class/type slot (entity+0x88 -> +0x3c), which yields a GENERIC name -- a station
+  reads "Starbase", a ship reads "Ship" -- not the proper instance name the native
+  frame showed ("Luna Station"). The proper name is not in the aux container; it
+  comes from a separate object-name source (sector-object registry / vtable getter)
+  that still needs to be reversed. Until then targets show their class name. Tracked
+  as the remaining work in plans/49 AS-13.
+- **Setup**: `just build-enbmod` then relaunch the client; ensure freya-hud +
+  hide-ui mods enabled.

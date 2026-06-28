@@ -165,6 +165,11 @@ local hidden = {
     -- Identified live by hiding each and watching the arrow vanish (owner ask).
     Unknown1                     = true,
     Unknown2                     = true,
+    -- the bottom-right target frame: native glass bg + hull/shield bars + name +
+    -- "Dist:" + cycle arrows + the round scan/cycle buttons above it. The Freya
+    -- HUD's target_frame.lua repaints the 2D layer (thin stacked bars + name +
+    -- level); the 3D target model is a separate PIP scene and stays visible.
+    TargetFrame                  = true,
 }
 
 -- Hide the native chat TEXT leaves (CHAT_TEXT_VT) wholesale -- Freya draws chat now.
