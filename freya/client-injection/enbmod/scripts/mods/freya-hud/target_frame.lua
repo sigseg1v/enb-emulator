@@ -41,6 +41,9 @@ local CFG = {
 
     PAD_X    = 4,     -- inset of the bars/name from the area's left/right edges
     PAD_TOP  = 3,     -- inset of the first bar from the area's top edge
+    BAR_TRIM_R = 12,  -- trim the bars this many px on the RIGHT (owner ask): keeps
+                      -- the bars off the screen edge and pulls the right-aligned
+                      -- cur/total value inward so its total no longer clips.
 
     -- 1/3 of the player-card vital bar (16px) -> ~5-6px; no gap between the two.
     BAR_H    = 6,
@@ -128,7 +131,7 @@ local function draw_target()
 
     local ax, ay, aw = area_rect()
     local bx = ax + CFG.PAD_X
-    local bw = aw - CFG.PAD_X * 2
+    local bw = aw - CFG.PAD_X * 2 - CFG.BAR_TRIM_R
 
     -- two stacked bars at the top: hull over shield, no gap.
     local by = ay + CFG.PAD_TOP
@@ -145,6 +148,12 @@ local function draw_target()
     for _, ln in ipairs(lines) do
         H.otext(bx, ny, ln, H.INK)
         ny = ny + CFG.LINE_H
+    end
+
+    -- distance: straight-line range to the target (viewer-relative magnitude),
+    -- printed under the name. Dimmer than the name so it reads as secondary.
+    if t.dist then
+        H.otext(bx, ny, string.format("Dist: %.0f", t.dist), H.darker(H.INK))
     end
 end
 

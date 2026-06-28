@@ -13,6 +13,7 @@
 #include <string>
 #include <cstring>
 #include <cstdio>
+#include <cmath>
 #include <windows.h>
 
 extern "C" {
@@ -529,6 +530,21 @@ static int l_target(lua_State* L) {
     if (lvl >= 0 && lvl <= 255) {
         lua_pushinteger(L, lvl);
         lua_setfield(L, -2, "level");
+    }
+    // distance: the contact carries its viewer-relative position as three floats at
+    // +0xE8/+0xEC/+0xF0. The local player sits at the origin, so the straight-line
+    // range is the vector magnitude. Read off the contact object (entity), NOT the
+    // properties container -- the position lives on the contact.
+    {
+        float fx = mem::f32(entity + game::contact::pos_x);
+        float fy = mem::f32(entity + game::contact::pos_y);
+        float fz = mem::f32(entity + game::contact::pos_z);
+        double dist = std::sqrt((double)fx * fx + (double)fy * fy + (double)fz * fz);
+        // a plausible in-sector range; reject NaN / absurd values from a bad read.
+        if (dist == dist && dist >= 0.0 && dist < 1.0e9) {
+            lua_pushnumber(L, dist);
+            lua_setfield(L, -2, "dist");
+        }
     }
     return 1;
 }

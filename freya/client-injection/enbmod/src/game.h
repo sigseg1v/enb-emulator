@@ -244,6 +244,18 @@ constexpr int data_entity = 0x88;  // [data + 0x88]   -> player ship entity
 constexpr int entity_name = 0x124; // [entity + 0x124]-> char* character name
 } // namespace player
 
+// Target contact spatial position. The selected target contact object
+// (hooks::target_obj()) carries its position as three floats at +0xE8/+0xEC/+0xF0.
+// These are VIEWER-RELATIVE: the local player sits at the origin (its own +0xE8
+// vector reads 0,0,0), so the straight-line distance to the target is simply the
+// magnitude sqrt(x*x + y*y + z*z) of the contact's vector -- no player position
+// needed. Build-constant field offsets on the contact object.
+namespace contact {
+constexpr int pos_x = 0xE8; // [obj + 0xE8] -> float x (viewer-relative)
+constexpr int pos_y = 0xEC; // [obj + 0xEC] -> float y
+constexpr int pos_z = 0xF0; // [obj + 0xF0] -> float z
+} // namespace contact
+
 // AuxData property-bag reader. The client keeps per-object gameplay vitals as
 // string-keyed float entries (a property bag), NOT flat struct fields -- so the
 // numeric current/max for hull/shield/reactor (and the discipline levels) have
