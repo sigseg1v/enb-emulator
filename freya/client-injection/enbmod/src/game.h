@@ -188,18 +188,20 @@ constexpr int ShellScreenOptions = 1; // +0x108 id for the OPTIONS_MAIN screen
 constexpr uintptr_t AuxGet_Ability = 0x006a4b40;
 constexpr uintptr_t AuxGet_Skill = 0x00417f21;
 
-// ---- current-target (radar/targeting manager) capture -----------------------
-// The per-frame target-HUD updater resolves the selected target's GameID to its
-// entity and feeds that entity into the radar/targeting manager's update fn
-// (__thiscall, ECX = the radar manager, arg0 = the target entity). That manager
-// caches the live target entity at manager + TargetRadar_entity, and NULLs it on
-// de-target -- so capturing the manager `this` (ECX) once gives the HUD a stable,
-// self-clearing handle on whatever is currently targeted. Capture-only, the exact
-// read-only pattern of the rpg/xp/cockpit hooks; never alters the update. The
-// cached entity is the same entity class enb.aux() accepts, so the target's
-// HullPoints / MaxHullPoints / MaxShieldPower / ShieldPercent read straight off it.
-constexpr uintptr_t TargetRadar = 0x007bd6e0;
-constexpr int TargetRadar_entity = 0x24; // manager + this -> cached target entity ptr (0 = none)
+// ---- current-target capture (target-frame display update) -------------------
+// The target HUD's per-frame display updater (__thiscall): ECX = the target-frame
+// controller, stack arg0 = the LIVE selected target entity (0 on de-target), arg2
+// = the target's level (-1 when none). It is the routine the native target frame
+// itself uses to repaint, so it fires on every target switch -- and it still runs
+// even while the native frame is draw-suppressed by the hide-ui mod (hide-ui only
+// clears the widget's draw-gate bit; the controller update logic is untouched). We
+// capture the target entity + level read-only via this update; no behaviour change.
+// The entity is the same class enb.aux() accepts, so the target's HullPoints /
+// MaxHullPoints / MaxShieldPower / ShieldPercent read straight off it. Capturing the
+// target entity directly (rather than a transient radar-manager `this`) is what makes
+// the read track the live selection: the manager pointer churns across several
+// short-lived instances, so a captured manager goes stale on a target switch.
+constexpr uintptr_t TargetFrameUpdate = 0x0060ed60;
 } // namespace addr
 
 // Vitals-bar fill chain. Unlike the Offsets struct below (runtime hypotheses),

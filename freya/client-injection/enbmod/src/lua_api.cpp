@@ -442,32 +442,27 @@ static int l_unpatch(lua_State* L) {
 // declared so l_target can read the target entity's vitals.
 static uintptr_t player_entity();
 static bool aux_read_f(uintptr_t entity, const char* key, double& out);
-static bool aux_read_i(uintptr_t entity, const char* key, long& out);
 static int aux_entry_guarded(uintptr_t entity, const char* key);
 
 // enb.target() -> { base, name, hull, hull_max, shield, shield_max, level } | nil.
-// The current target is the entity the radar/targeting manager caches (captured by
-// the TargetRadar hook): manager + addr::TargetRadar_entity, NULL when nothing is
-// selected. That entity is the same class enb.aux() accepts, so its hull/shield
-// read straight off it; the game stores shield as a 0..1 percent (ShieldPercent)
-// of MaxShieldPower, with no absolute current-shield key. The target's level is
-// the player's TargetThreatLevel aux (the HUD's own "Combat Level %d" source).
-// enb.target_radar() -> radar/targeting-manager pointer (0 until the hook fires).
-// Diagnostic: lets Lua walk the target entity with guarded raw reads (enb.read.*)
-// without invoking the aux machinery, which faults on entities whose aux-container
-// list shape differs from the player's.
-static int l_target_radar(lua_State* L) {
-    lua_pushinteger(L, (lua_Integer)hooks::target_radar());
+// The current target is the live entity the native target frame repaints from,
+// captured by the TargetFrameUpdate hook (hooks::target_obj()), refreshed on every
+// target switch and 0 when nothing is selected. That entity is the same class
+// enb.aux() accepts, so its hull/shield read straight off it; the game stores shield
+// as a 0..1 percent (ShieldPercent) of MaxShieldPower, with no absolute current-
+// shield key. The target's level is captured alongside it by the same update
+// (hooks::target_level()) -- the HUD's own "Combat Level %d" source.
+// enb.target_obj() -> live selected target entity pointer (0 until the hook fires
+// / when nothing is targeted). Diagnostic: lets Lua walk the target entity with
+// guarded raw reads (enb.read.*) without invoking the aux machinery, which faults
+// on entities whose aux-container list shape differs from the player's.
+static int l_target_obj(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)hooks::target_obj());
     return 1;
 }
 
 static int l_target(lua_State* L) {
-    uintptr_t radar = hooks::target_radar();
-    if (!radar) {
-        lua_pushnil(L);
-        return 1;
-    }
-    uintptr_t entity = mem::ptr(radar + game::addr::TargetRadar_entity);
+    uintptr_t entity = hooks::target_obj();
     if (!entity || !mem::readable((void*)entity, 4)) {
         lua_pushnil(L);
         return 1;
@@ -508,9 +503,10 @@ static int l_target(lua_State* L) {
         lua_pushnumber(L, smax * spct);
         lua_setfield(L, -2, "shield");
     }
-    long lvl;
-    uintptr_t pe = player_entity();
-    if (pe && aux_read_i(pe, "TargetThreatLevel", lvl)) {
+    // level: captured alongside the target by the same display update (-1 = none),
+    // so it tracks the live selection exactly as the native frame's level line does.
+    int lvl = hooks::target_level();
+    if (lvl >= 0) {
         lua_pushinteger(L, lvl);
         lua_setfield(L, -2, "level");
     }
@@ -735,14 +731,6 @@ static bool aux_read_f(uintptr_t entity, const char* key, double& out) {
     out = v;
     return true;
 }
-static bool aux_read_i(uintptr_t entity, const char* key, long& out) {
-    uintptr_t a = aux_addr_core(entity, key);
-    if (!a)
-        return false;
-    out = mem::i32(a);
-    return true;
-}
-
 static uintptr_t aux_value_addr(lua_State* L, int key_arg, int entity_arg) {
     const char* key = luaL_checkstring(L, key_arg);
     uintptr_t entity;
@@ -1564,7 +1552,7 @@ void open(lua_State* L) {
                                    {"offsets", l_offsets},
                                    {"self", l_self},
                                    {"target", l_target},
-                                   {"target_radar", l_target_radar},
+                                   {"target_obj", l_target_obj},
                                    {"aux_entry", l_aux_entry},
                                    {"state", l_state},
                                    {"cursor", l_cursor},

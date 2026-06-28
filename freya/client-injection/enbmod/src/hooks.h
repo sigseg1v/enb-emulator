@@ -79,11 +79,13 @@ unsigned rpg_mgr();
 // off this (enb.xp_frac).
 unsigned xp_ctrl();
 
-// ECX (this) captured from the most recent radar/targeting-manager update: the
-// manager that caches the live current-target entity at manager +
-// game::addr::TargetRadar_entity (0 = no target). 0 until the hook (installed by
-// enable_event_hooks) has fired. lua_api reads the current target off it.
-unsigned target_radar();
+// The live selected target entity, captured from the native target-frame display
+// update (game::addr::TargetFrameUpdate): the exact entity the real frame repaints
+// from, refreshed on every target switch, 0 when nothing is targeted. 0 until the
+// hook (installed by enable_event_hooks) has fired. target_level() is the matching
+// target level (-1 when none). lua_api reads the current target off these.
+unsigned target_obj();
+int target_level();
 
 // ECX (this) of the in-space action-bar controller that owns the numbered
 // ability/weapon slots (primary + alternate). Captured from the bank constructor

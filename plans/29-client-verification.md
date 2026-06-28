@@ -2664,9 +2664,19 @@ moot; the SOLVED block above is the truth):**
   and stays visible behind the new 2D layer.
 - **Data**: `enb.target()` (the VEH-guarded current-target read) -> name, hull /
   hull_max (HullPoints / MaxHullPoints), shield_max (MaxShieldPower), shield
-  (MaxShieldPower * ShieldPercent when present), level (the player's
-  TargetThreatLevel aux). A station target has no hull/shield/level, so its bars
-  render as empty tracks and no level suffix shows -- correct.
+  (MaxShieldPower * ShieldPercent when present), level. A station target has no
+  hull/shield/level, so its bars render as empty tracks and no level suffix shows
+  -- correct.
+- **Target TRACKING fix (relaunch required)**: the live target + its level are now
+  captured from the native target-frame display update (`TargetFrameUpdate`,
+  0x0060ed60) -- the exact routine the real frame repaints from, so it fires on
+  every target switch and the captured entity is always the live selection. The
+  previous source (a radar/targeting-manager `this` captured from 0x007bd6e0) churns
+  across several short-lived manager instances and went STALE on a switch, so the
+  frame did not update when the player changed targets. The update still runs while
+  hide-ui draw-suppresses the native frame (hide-ui only clears the draw-gate bit,
+  not the update logic). This is a DLL hook change -> needs a client relaunch to load
+  (Lua hot-reloads; the C++ DLL does not).
 - **Headless coverage**: none -- the mock has no live target entity.
 - **Validated live (this box)**: layout proven against the home-sector station
   target (model kept, bg/native-bars/name/dist/arrows gone, two empty stacked bars
@@ -2681,6 +2691,10 @@ moot; the SOLVED block above is the truth):**
     wraps to a second line for a long name and is single-line otherwise.
   - The 3D model still spins behind the bars; the native glass/bars/name/dist/arrows
     are gone; no flicker, no crash on target/de-target/zone.
+  - **Switching targets UPDATES the frame**: select a different mob/ship (or cycle
+    with the nav/target keys) and the hull/shield bars + name + level must change to
+    the NEW target immediately; de-targeting clears the frame. This is the tracking
+    fix above and is the primary thing to confirm.
 - **KNOWN LIMITATION (follow-up)**: the name currently comes from the aux container
   class/type slot (entity+0x88 -> +0x3c), which yields a GENERIC name -- a station
   reads "Starbase", a ship reads "Ship" -- not the proper instance name the native

@@ -307,27 +307,39 @@ extern "C" __attribute__((naked)) void hk_XpBars() {
                          "jmp *_real_XpBars_tramp\n\t");
 }
 
-// ---- current-target (radar/targeting manager) capture ----------------------
-// game.h::addr::TargetRadar (0x007bd6e0) is the radar/targeting manager's per-frame
-// update fn (__thiscall, ECX = the manager, arg0 = the target entity). It caches
-// the live target entity at manager + addr::TargetRadar_entity and nulls it on
-// de-target, so we capture the manager `this` (ECX) read-only -- the exact pattern
-// of hk_XpBars -- and lua_api reads the current target off it (hooks::target_radar()).
-// Forwards every argument untouched via the trampoline; never alters game behaviour.
-static volatile unsigned g_target_radar = 0; // ECX (this) of the radar/targeting manager
+// ---- current-target capture (target-frame display update) ------------------
+// game.h::addr::TargetFrameUpdate (0x0060ed60) is the native target-frame's display
+// update fn (__thiscall): ECX = the frame controller, stack arg0 = the live target
+// entity (0 on de-target), arg2 = the target level (-1 when none). It is the routine
+// the real target frame repaints from, so it fires on every target switch -- and it
+// still runs while hide-ui draw-suppresses the frame (hide-ui only clears the draw
+// gate; the controller update logic is untouched). We capture the target entity +
+// level read-only and forward every argument untouched via the trampoline; never
+// alters game behaviour. Capturing the target entity directly (not a transient
+// radar-manager `this`, which churns across short-lived instances and goes stale on
+// a switch) is what makes the read track the live selection.
+static volatile unsigned g_target_obj = 0; // live selected target entity (0 = none)
+static volatile int g_target_level = -1;   // target level (-1 = none)
 extern "C" {
-void* real_TargetRadar_tramp = nullptr;
-void notify_target_radar(unsigned thisp) {
-    g_target_radar = thisp;
+void* real_TargetFrameUpdate_tramp = nullptr;
+void notify_target_frame(unsigned target, int level) {
+    g_target_obj = target;
+    g_target_level = level;
 }
 }
-extern "C" __attribute__((naked)) void hk_TargetRadar() {
+extern "C" __attribute__((naked)) void hk_TargetFrameUpdate() {
+    // __thiscall: after pushal (esp -= 0x20) the saved regs + return addr sit below
+    // the stack args -- arg0 (target) at 0x24(esp), arg2 (level) at 0x2c(esp). Push
+    // them as cdecl args (right-to-left: level then target) for notify_target_frame.
     __asm__ __volatile__("pushal\n\t"
-                         "pushl %ecx\n\t" // this (radar/targeting manager)
-                         "call _notify_target_radar\n\t"
-                         "addl $4, %esp\n\t"
+                         "movl 0x2c(%esp), %eax\n\t" // arg2: level
+                         "pushl %eax\n\t"
+                         "movl 0x28(%esp), %eax\n\t" // arg0: target entity (0x24 + 4 pushed)
+                         "pushl %eax\n\t"
+                         "call _notify_target_frame\n\t"
+                         "addl $8, %esp\n\t"
                          "popal\n\t"
-                         "jmp *_real_TargetRadar_tramp\n\t");
+                         "jmp *_real_TargetFrameUpdate_tramp\n\t");
 }
 
 // ---- cockpit controller capture ---------------------------------------------
@@ -594,9 +606,9 @@ bool enable_event_hooks() {
         logf("hook XpBarsUpdate failed");
         ok = false;
     }
-    if (MH_CreateHook((void*)game::addr::TargetRadar, (void*)&hk_TargetRadar,
-                      &real_TargetRadar_tramp) != MH_OK) {
-        logf("hook TargetRadar failed");
+    if (MH_CreateHook((void*)game::addr::TargetFrameUpdate, (void*)&hk_TargetFrameUpdate,
+                      &real_TargetFrameUpdate_tramp) != MH_OK) {
+        logf("hook TargetFrameUpdate failed");
         ok = false;
     }
     if (MH_CreateHook((void*)game::addr::ActionBarUse, (void*)&hk_ActionBar,
@@ -649,7 +661,7 @@ bool enable_event_hooks() {
     MH_EnableHook((void*)game::addr::ChatSend);
     MH_EnableHook((void*)game::addr::RpgLevels);
     MH_EnableHook((void*)game::addr::XpBarsUpdate);
-    MH_EnableHook((void*)game::addr::TargetRadar);
+    MH_EnableHook((void*)game::addr::TargetFrameUpdate);
     MH_EnableHook((void*)game::addr::ActionBarUse);
     MH_EnableHook((void*)game::addr::ActionBarCtor);
     MH_EnableHook((void*)game::addr::CockpitThrottle);
@@ -670,7 +682,7 @@ void disable_event_hooks() {
     MH_DisableHook((void*)game::addr::ChatSend);
     MH_DisableHook((void*)game::addr::RpgLevels);
     MH_DisableHook((void*)game::addr::XpBarsUpdate);
-    MH_DisableHook((void*)game::addr::TargetRadar);
+    MH_DisableHook((void*)game::addr::TargetFrameUpdate);
     MH_DisableHook((void*)game::addr::ActionBarUse);
     MH_DisableHook((void*)game::addr::ActionBarCtor);
     MH_DisableHook((void*)game::addr::CockpitThrottle);
@@ -715,8 +727,11 @@ unsigned rpg_mgr() {
 unsigned xp_ctrl() {
     return g_xp_ctrl;
 }
-unsigned target_radar() {
-    return g_target_radar;
+unsigned target_obj() {
+    return g_target_obj;
+}
+int target_level() {
+    return g_target_level;
 }
 unsigned actionbar() {
     return g_actionbar;
