@@ -92,10 +92,14 @@ local function draw_bar(x, y, w, rgb, cur, max, bar_h, val_scale)
     if cur and max then
         local val = string.format("%d / %d", math.floor(cur + 0.5), math.floor(max + 0.5))
         local vw, vh = H.measure(val)
-        vw = vw * val_scale
-        vh = vh * val_scale
+        -- owner: hull/shield value font 2px larger. Resolution-scaled (H.sy(2) is 0
+        -- at the 1280x960 baseline, 2 at 2560x1440), added to the rendered glyph
+        -- height so the baseline value size is unchanged.
+        local eff = val_scale + H.sy(2) / vh
+        vw = vw * eff
+        vh = vh * eff
         local ty = y + (bar_h - vh) / 2   -- center the scaled text on the bar
-        H.otext(x + w - CFG.VAL_PAD - vw, ty, val, 0xffffff, val_scale)
+        H.otext(x + w - CFG.VAL_PAD - vw, ty, val, 0xffffff, eff)
     end
 end
 
