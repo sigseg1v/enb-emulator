@@ -2617,3 +2617,36 @@ moot; the SOLVED block above is the truth):**
   top-middle chat-duplicate on new messages -- AV-1/AV-2 -- is NOT addressed here.)
 - **Setup**: `just build-enbmod` then relaunch the client (the launcher re-stages
   the DLL next to client.exe on each launch).
+
+### [ ] CV-31 -- No client crash on the action-bar ability-icon (K_TEXQUAD) path
+
+- **What changed**: `freya/client-injection/enbmod/src/overlay.cpp` -- the overlay
+  no longer binds a game-owned ability-icon `IDirect3DTexture8*` that the game may
+  have freed between the display-list REBUILD (resolve, on the tick thread) and the
+  DRAW (in the Present hook). `texture_quad` now `AddRef()`s the texture at resolve
+  time so the game's later `Release` cannot take it below 1; the queued command owns
+  that ref and `Release`s it when its list rotates out (`begin_frame` / device-reset
+  `release_caches`), both on the Present thread. Client-only (enbmod, MIT); no wire
+  change.
+- **Root cause (the crash)**: the action-bar slot icons are LIVE textures owned by
+  the game's UI cards. Lua resolved the card's texture during the rebuild and queued
+  the raw pointer; the game then ran a full frame of logic and could free the card
+  (ability used/swapped, zoning, logout), Releasing its texture to refcount 0. The
+  d3d8 wrapper was destroyed but its freed memory's vtable pointer still read back
+  (so the old shallow guard passed), while its wined3d resource was gone -- and
+  `DrawPrimitiveUP` then NULL-deref'd it. Captured live as `_except.txt`
+  EXCEPTION_ACCESS_VIOLATION read 0x14 at a d3d8 address (`mov edx,[eax+0x14]`,
+  eax=0), call chain hk_Present -> draw_frame -> draw_quad -> d3d8. This is a
+  PRE-EXISTING bug in the K_TEXQUAD path, NOT introduced by the CV-30 lag fix.
+- **Why the real client is needed**: agent-side proved the path is exercised (the
+  leftmost action-bar slot, an ability, renders as a tinted icon) and that entering
+  space + a mouse-move flood + a soak are now stable with no `_except.txt` and no
+  WINE page fault. But the actual free-during-gap trigger (use/swap an ability, or
+  zone with the bar populated) cannot be driven from the cmd channel -- only the
+  owner playing can exercise it. Possibly the same intermittent crash a player
+  (Veret) reported during normal play; correlation UNCONFIRMED until reproduced.
+- **What to verify (real client)**: in space with abilities slotted on the action
+  bar, repeatedly activate abilities, swap/re-slot them, and gate between sectors.
+  Confirm no client crash (no new `_except.txt`) and the ability icons keep
+  rendering.
+- **Setup**: `just build-enbmod` then relaunch the client.

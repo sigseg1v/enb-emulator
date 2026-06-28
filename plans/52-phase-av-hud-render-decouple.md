@@ -96,6 +96,33 @@ assume they share a fix.
       top-middle chat-duplicate -- AV-1/AV-2 -- is a SEPARATE bug, still open; the
       owner's 2026-06-27 ask was the mouse-move lag/flicker only.)
 
+- [x] AV-5 Crash fix: stale game texture bound in the K_TEXQUAD (action-bar
+      ability-icon) path (DONE 2026-06-27). `overlay.cpp`. The slot icons are LIVE
+      textures owned by the game's UI cards; Lua resolved the card's
+      `IDirect3DTexture8*` during the display-list REBUILD (tick thread) and queued
+      the raw pointer, but the bind happened a full frame later in the Present hook.
+      In between the game could free the card (ability used/swapped, zoning, logout),
+      Releasing its texture to refcount 0: the d3d8 wrapper was destroyed, its freed
+      memory's vtable still read back (so the old shallow pointer/vtable guard
+      passed) but its wined3d resource was gone, and `DrawPrimitiveUP` NULL-deref'd
+      it. Captured live as `_except.txt` AV read 0x14 at a d3d8 addr
+      (`mov edx,[eax+0x14]`, eax=0); chain hk_Present -> draw_frame -> draw_quad ->
+      d3d8. **Pre-existing in the K_TEXQUAD path; NOT caused by the AV-3 lag fix.**
+      Fix: `texture_quad` takes a COM `AddRef()` on the texture at resolve time (the
+      Lua walk just validated it), so the game's later Release cannot destroy it; the
+      queued command owns that ref and `Release`s it when its list rotates out
+      (`begin_frame` for the swapped-out list, `release_caches` on device
+      reset/unload), both on the Present thread so any Release-to-zero GL teardown
+      lands on the device's thread. AddRef/Release are interlocked + format-agnostic
+      -- no pixel copy, no new GPU resource, no LockRect/pitch math. (A first attempt
+      that COPIED the pixels was rejected: the per-row `memcpy` overflowed the
+      destination for block-compressed/non-32bpp icon formats -- LockRect pitch is
+      per block-row, ~4x fewer rows than Height -- corrupting the heap and surfacing
+      as a separate ntdll fault on entering space.) Verified live: action-bar ability
+      icon renders; entering space + mouse-flood + 35s soak stable, no `_except.txt`,
+      no page fault. Real-client confirm of the actual use/swap/zone trigger tracked
+      as **CV-31** in `plans/29-client-verification.md`.
+
 ## Related incident -- pump-clocked tick is also a HANG risk (2026-06-20)
 
 A live local client hard-froze ~1 min after entering space (pump dead: enbmod

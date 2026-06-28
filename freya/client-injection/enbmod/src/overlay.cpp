@@ -30,7 +30,7 @@ struct Cmd {
     uint32_t rgb2;       // gradient bottom color (K_RECT_GRAD / K_RRECT_GRAD)
     int radius;          // corner radius (K_RRECT / K_RRECT_GRAD)
     float scale = 1.0f;  // glyph scale (K_TEXT; 1.0 = native atlas size)
-    void* tex = nullptr; // live game-owned IDirect3DTexture8* (K_TEXQUAD)
+    void* tex = nullptr; // game-owned IDirect3DTexture8* we hold a ref on (K_TEXQUAD)
 };
 static std::vector<Cmd> g_staging; // built by Lua during tick
 static std::vector<Cmd> g_render;  // consumed by the Present hook
@@ -94,6 +94,35 @@ struct Image {
 static std::unordered_map<std::string, Image> g_images;
 static std::mutex g_img_mx;
 
+// ---- keeping game-owned textures alive across resolve->draw (K_TEXQUAD) ------
+// The action-bar ability icons are LIVE textures owned by the game's UI cards.
+// Lua resolves the card's IDirect3DTexture8* during the display-list REBUILD and
+// queues it; the bind happens later, in the Present hook. Between those two
+// points the game runs a full frame of logic and can free the card (ability
+// used/swapped, zoning, logout), Releasing its texture to refcount 0. The d3d8
+// wrapper is then destroyed -- its vtable pointer often still reads back (freed
+// block not yet reused, so a shallow guard passes) but its wined3d resource is
+// gone, and binding it faults deep inside DrawPrimitiveUP (NULL deref).
+//
+// The fix is a plain COM ownership claim: at resolve time (the source was just
+// validated by the Lua walk, no game logic since) we AddRef() it, so the game's
+// later Release cannot take it below 1 and the wrapper survives intact. We queue
+// the same pointer and bind it in Present -- now guaranteed live. Each queued
+// command owns exactly one ref; when its list is discarded (begin_frame swaps in
+// a new staging list, or release_caches on device reset/unload) we Release it.
+// AddRef/Release are interlocked and format-agnostic -- no pixel copy, no new GPU
+// resource, no LockRect/pitch math (block-compressed formats made a copy unsafe).
+// Both ends run on the Present thread (texture_quad skips the AddRef when off it),
+// so any Release-to-zero destruction's GL cleanup lands on the device's thread.
+
+static void release_cmd_textures(std::vector<Cmd>& v) {
+    for (auto& c : v)
+        if (c.kind == K_TEXQUAD && c.tex) {
+            ((IDirect3DTexture8*)c.tex)->Release();
+            c.tex = nullptr;
+        }
+}
+
 static void release_caches() {
     g_fontReady.store(false, std::memory_order_release);
     if (g_fontTex) {
@@ -104,6 +133,11 @@ static void release_caches() {
         g_white->Release();
         g_white = nullptr;
     }
+    {
+        std::lock_guard<std::mutex> lk(g_list_mx);
+        release_cmd_textures(g_render);
+    }
+    release_cmd_textures(g_staging);
     std::lock_guard<std::mutex> lk(g_img_mx);
     for (auto& kv : g_images)
         if (kv.second.tex)
@@ -554,10 +588,12 @@ static void draw_frame(IDirect3DDevice8* dev) {
             break;
         }
         case K_TEXQUAD: {
-            // A live game-owned texture. Guard the pointer (and its vtable) before
-            // binding -- the offsets that produced it are tuned from Lua and may be
-            // wrong; a bad pointer must no-op, not fault the renderer.
-            if (!c.tex || !enb::mem::readable(c.tex, 4) || !enb::mem::readable(*(void**)c.tex, 4))
+            // c.tex is the game's icon texture, on which texture_quad took an
+            // AddRef at resolve time -- so the game's later Release cannot destroy
+            // it and it is always live to bind here. (Binding it WITHOUT holding a
+            // ref used to fault: freed between resolve and draw, the wrapper's
+            // wined3d resource was gone and DrawPrimitiveUP NULL-deref'd it.)
+            if (!c.tex)
                 break;
             // Game icon textures (action-bar abilities, item portraits) are opaque
             // RGB on a BLACK background with no usable alpha channel (alpha bytes
@@ -615,6 +651,14 @@ unsigned long present_count() {
     return g_present_n.load(std::memory_order_relaxed);
 }
 
+// Thread that owns the D3D device (the one Present is called on). texture_quad
+// (called from the tick thread) checks it before AddRef'ing a game texture, so if
+// the tick and Present threads ever differ we skip the icon rather than risk a
+// Release-to-zero destroying a texture (GL cleanup) off the device's thread. In
+// this single-threaded engine they are the same, so the whole AddRef/bind/Release
+// lifecycle stays on one thread.
+static std::atomic<unsigned long> g_present_tid{0};
+
 static HRESULT WINAPI hk_Present(IDirect3DDevice8* dev, const RECT* src, const RECT* dst, HWND wnd,
                                  const RGNDATA* dirty) {
     static bool logged = false;
@@ -623,6 +667,7 @@ static HRESULT WINAPI hk_Present(IDirect3DDevice8* dev, const RECT* src, const R
         logf("overlay: Present hook FIRED -- D3D8 present path live");
     }
     g_present_n.fetch_add(1, std::memory_order_relaxed);
+    g_present_tid.store(GetCurrentThreadId(), std::memory_order_relaxed);
     // Never touch the device while it is not in a drawable state. On alt-tab out
     // of fullscreen-exclusive D3D8 the device becomes D3DERR_DEVICELOST; sampling
     // the backbuffer or issuing our 2D draws then is invalid and a crash vector.
@@ -751,6 +796,9 @@ bool measure_text(const std::string& s, int* w, int* h) {
 }
 
 void begin_frame() {
+    // Release the refs the previous staging list (swapped out at the last commit)
+    // held on game textures, then drop it. On the Present/tick thread.
+    release_cmd_textures(g_staging);
     g_staging.clear();
 }
 void commit_frame() {
@@ -781,6 +829,18 @@ void image(const std::string& path, int x, int y, int w, int h, int alpha) {
     g_staging.push_back({K_IMAGE, x, y, w, h, 0, false, alpha, path, 0, 0});
 }
 void texture_quad(void* tex, int x, int y, int w, int h, int alpha, uint32_t tint, bool additive) {
+    // Claim a ref on the game's icon NOW, while the Lua walk has just validated it,
+    // so it cannot be freed before we bind it in Present. Only do this on the
+    // Present thread: the matching Release (in begin_frame / release_caches) can
+    // destroy the texture if ours is the last ref, and that GL teardown must run on
+    // the device's thread. Off it, skip the icon rather than risk a cross-thread
+    // destroy. A shallow liveness check guards the AddRef vtable call.
+    unsigned long ptid = g_present_tid.load(std::memory_order_relaxed);
+    if (!ptid || GetCurrentThreadId() != ptid)
+        return;
+    if (!tex || !enb::mem::readable(tex, 4) || !enb::mem::readable(*(void**)tex, 4))
+        return;
+    ((IDirect3DTexture8*)tex)->AddRef();
     Cmd c{};
     c.kind = K_TEXQUAD;
     c.x = x;
