@@ -57,7 +57,9 @@ enb.on_tick(function()
     local cal = (st.combat or st.explore or st.trade) ~= nil or me.base ~= 0
 
     local dc_h = CFG.PAD_Y * 2 + #ROWS * CFG.ROW_H + (#ROWS - 1) * CFG.ROW_GAP
-    local x = CFG.X
+    -- on a bigger-than-1280x960 screen slide the disc card RIGHT 32px, the same
+    -- shift chat.lua applies to the chat box (0 at the reference res).
+    local x = CFG.X + H.sx(32)
     -- raised ABOVE the Freya chat box (bottom-left): the card's bottom edge sits
     -- at H.chat_top(), so its top is that minus its own height. On a bigger-than-
     -- 1280x960 screen the owner lifts this "player frame" 20px more (0 at the

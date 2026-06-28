@@ -331,7 +331,9 @@ screenshots commit and push".
     - action bar + player-card: UP 20px off a shared `base_bar_y` so they don't
       compound (`freya_ui.lua` layout()).
     - play card: additionally RIGHT 32px (`+H.sx(32)`).
-    - discipline card ("player frame", `xp_overlay.lua`): UP 20px (`-H.sy(20)`).
+    - discipline card ("player frame" / C-E-T card, `xp_overlay.lua`): UP 20px
+      (`-H.sy(20)`) and RIGHT 32px (`+H.sx(32)`, the same shift chat.lua applies)
+      so the card left-aligns with the chat box below it.
     - chat box: UP 12px + RIGHT 32px, applied locally in `chat.lua` (NOT in
       `H.chat_rect`) so xp_overlay's `H.chat_top()` anchor keeps its own offset.
     - top micro-menu strip: RIGHT 32px + DOWN 16px on the strip origin
