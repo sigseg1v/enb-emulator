@@ -353,6 +353,17 @@ def emit_sector_object(oid, typ, x, y, z, name, radar, rrange, sec, base_asset=0
     # rendered straight from base_asset_id, so it MUST carry the real asteroid
     # model id (1822..1834 etc.) -- 0 renders as asset 0, the "Old Old Terran
     # Fighter" ship, which is the ship-shaped-asteroid bug.
+    #
+    # Choke-point tripwire: a single-rock resource (type 38) drawn at base_asset 0
+    # IS the ship-shaped-asteroid bug. (Invisible field containers are seeded by a
+    # different path, never this helper, so every type-38 row that reaches here is a
+    # visible rock and must carry a real model.) Fail loud rather than regenerate
+    # the bug if a future edit drops the model again.
+    if typ == 38 and not base_asset:
+        raise SystemExit(
+            f"emit_sector_object: refusing to emit resource {oid} (sector {sec}) "
+            "with base_asset 0 -- it would render as asset 0, the Terran-fighter "
+            "ship. Pass the captured asteroid/gas/hulk model as base_asset.")
     return (
         "INSERT INTO sector_objects (sector_object_id, base_asset_id, h, s, v, "
         "type, scale, position_x, position_y, position_z, orientation_u, "
