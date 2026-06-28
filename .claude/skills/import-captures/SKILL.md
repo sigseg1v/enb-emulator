@@ -75,10 +75,21 @@ it runs once); the prerequisite is that the base seeds have already run.
 
 | Object | What happens |
 |---|---|
-| **Resources** (asteroids, clouds, ...) | Source of truth. Each captured rock is inserted as an exact-position single-rock harvestable. Any EXISTING harvestable within 5k whose ore type matches is removed first (only that specific object). |
+| **Resources** (asteroids, clouds, ...) | Source of truth. Each captured rock is inserted as an exact-position single-rock harvestable whose `sector_objects.base_asset_id` is the **captured asteroid/gas/hulk model** (1822..1834 etc.) -- a resource is rendered straight from `base_asset_id`, so leaving it 0 would draw asset 0 (the "Old Old Terran Fighter" ship). A capture whose `baseAsset` is NOT an `assets` row with `main_cat IN ('Asteroids','Hulks')` is a mis-tagged loot/turret/derelict and is DROPPED, not spawned. Any EXISTING harvestable within 5k whose ore type matches is removed first (only that specific object). |
 | **Mobs** | Source of truth. The captured mob is inserted as a 1-mob spawn at its exact position. Any EXISTING mob spawn within 5k of the SAME `base_asset_id` (the physical model at that spot) is removed first. The captured name (+asset/level) resolves to a `mob_base` template: an exact name match is reused; otherwise a NEW template is **synthesized** by cloning the nearest-level same-asset `mob_base` row and overriding name/level/asset, so the captured mob always spawns with the right model and valid stats. (`mob_base` has no hull/shield columns -- those derive from level + modifiers, which the clone inherits.) A mob is skipped only if its asset has no sibling to clone (not observed in the corpus). |
 | **Navs** | Imported only if the name is listed for that sector in `docs/sectors/json/*.jsonl` (the authoritative membership source -- a nav absent from the jsonl does not exist and is dropped), AND a nav of that name does not already exist in the sector. Existing navs are never touched. gen_sql re-checks jsonl membership as a defensive gate (any drop here is a loud regression, since aggregate already enforced it). |
 | **Stations / gates / planets** | **Report-only.** The capture lacks their child-row data (dock / cap-ship / stargate routing), so creating them would break them. We only print what we saw. |
+
+Every imported **mob and resource** also gets a `sector_nav_points` row with
+`nav_type = 0` (NOT a nav node -- `IsNav()` stays false, so it never shows on
+radar as a nav target) carrying `signature = BASE_SIGNATURE` (7000.0). The row
+is REQUIRED: the server LEFT-JOINs `sector_nav_points` onto every
+`sector_object` and reads `signature` as the object's radar detection radius
+(`SectorContentSQL::ProcessDefaultObjectStats` -> `ObjectManager`). With no row
+the signature defaults to 0 and the object only pops in at bare scan range. 7000
+is the dominant base-data value (1220/1372 mobs, 692/839 resources) and the
+captures almost never carry a real per-object signature, so we match the base
+convention rather than under-signature imports.
 
 ## How duplicates are prevented
 
@@ -136,24 +147,31 @@ it runs once); the prerequisite is that the base seeds have already run.
 ## Baseline guardian turrets (`gen_turrets.py` -> `seed_turrets.sql`)
 
 The captures show guardian turrets ringing gates and starbases ("Gate Guardian
-Turret" / "Starbase Guardian Turret", asset 14, level 66, template `mob_base`
-573). A single fly-through only catches the 1-3 turrets nearest the flight path,
-and only in the handful of sectors we flew -- but the retail server placed a small
-ring around EVERY gate and starbase. `gen_turrets.py` extrapolates that captured
-pattern to the whole galaxy as **baseline content** (not an optional mod):
+Turret" / "Starbase Guardian Turret", model asset 14). A single fly-through only
+catches the 1-3 turrets nearest the flight path, and only in the handful of
+sectors we flew; the base data also carries ~129 real turrets, but only near some
+gates/starbases. The retail server placed a small ring around EVERY gate and
+starbase. `gen_turrets.py` **fills the gaps** as **baseline content** (not an
+optional mod):
 
 - It reads every stargate (`sector_objects.type = 11`) and starbase (`type = 12`)
-  with a known position from the running net7 DB, and places an evenly-spaced ring
-  of guardian turrets around each (3 per gate, 4 per starbase), elevated above the
-  anchor plane. The ring radius/elevation give a 3D distance (~1980) squarely
-  inside the captured 1428-2500 band.
-- Each turret is a normal mob spawn (the same 4-row shape the capture import uses:
-  `sector_objects` parent + `sector_objects_mob` + `mob_spawn_group` +
-  `sector_nav_points`), backed by the real `mob_base` 573 template. The display
-  name ("Gate"/"Starbase Guardian Turret") lives on `sector_objects.name`, so one
-  template backs both names. The generator aborts if `mob_base` 573 is missing
-  (a spawn referencing a missing template spawns the NULL-data "Default" mob and
-  crashes the sector server).
+  with a known position from the running net7 DB and, for each that does NOT
+  already have a real turret within 6k, places an evenly-spaced ring of guardian
+  turrets (3 per gate, 4 per starbase) elevated above the anchor plane. The ring
+  radius/elevation give a 3D distance (~1980) squarely inside the captured
+  1428-2500 band. Anchors that already have a turret keep their authentic base
+  placement (the ring is gap-fill, so the two never double up).
+- Each turret matches the existing base-data turret shape exactly (e.g.
+  sector_object 1733): a single `sector_objects` row with **`type = 42`**
+  (OT_MOB / stationary turret -- the server's `SectorContentSQL` turret branch
+  reads the model straight from **`base_asset_id = 14`**), `scale = 1`,
+  `radar_range = 5000`, plus one `sector_nav_points` row (nav_type 1, signature
+  20000, exploration_range 3000). The display name ("Gate"/"Starbase Guardian
+  Turret") lives on `sector_objects.name`. A type-42 turret is self-contained: it
+  writes **no** `sector_objects_mob` and **no** `mob_spawn_group` row. (A type-0
+  mob SPAWN with `base_asset_id 0` -- the original mistaken shape -- loads as an
+  OT_MOBSPAWN with no model and is invisible; the self-delete below still purges
+  any such stale rows.)
 - Synthetic ids live in their OWN range (`sector_object_id >= 2000000`), clear of
   the capture import (1000000) and Phase Y. `seed_turrets.sql` deletes its own
   range first (children before parents), so re-applying is a clean replace.
@@ -162,6 +180,10 @@ pattern to the whole galaxy as **baseline content** (not an optional mod):
   It is independent of `ENB_SKIP_CAPTURE_SEED`: it touches neither base rows nor
   the capture import, so it is present even when regenerating against a pristine
   base DB.
+- A running sector thread reads its objects once on cold-start and does not
+  re-poll the DB, so applying `seed_turrets.sql` to a live DB only shows up after
+  the sector reloads (re-enter the sector, or restart the server). A fresh
+  `docker compose` boot has them from the first load.
 
 Regenerate it with `import.sh` (it runs `gen_turrets.py` after `gen_sql.py`), or
 directly: `python3 .claude/skills/import-captures/scripts/gen_turrets.py`.

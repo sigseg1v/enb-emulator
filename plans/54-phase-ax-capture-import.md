@@ -224,9 +224,62 @@ per-sector file directly into psql.
   aborts if template 573 is missing (Default-mob crash guard). Output committed as
   `db/postgres/seed_turrets.sql`, wired into `schema-init` UNCONDITIONALLY (after
   the capture block, before orphan cleanup + `sync_sequences`), independent of
-  `ENB_SKIP_CAPTURE_SEED`. Generated + applied clean against pristine: 987 turrets
-  (245 gates x3 + 63 starbases x4) across 108 sectors, 0 orphan refs. Documented in
-  `SKILL.md`; `import.sh` runs `gen_turrets.py` after `gen_sql.py`.
+  `ENB_SKIP_CAPTURE_SEED`. Documented in `SKILL.md`; `import.sh` runs
+  `gen_turrets.py` after `gen_sql.py`.
+- [x] **AX-16b** turret shape fix -- the first cut was INVISIBLE in-client.
+  Reported live: no turrets at the High Earth Tau Ceti gate. Root cause: the
+  generator modelled turrets as type-0 mob SPAWNS (`sector_objects.type=0`,
+  `base_asset_id=0`, + `sector_objects_mob` + `mob_spawn_group` -> template 573).
+  The server (`SectorContentSQL.cpp`) loads type 0 as `OT_MOBSPAWN`, and even the
+  turret branch reads the MODEL straight from `sector_objects.base_asset_id` --
+  which was 0, so no model rendered. (The `turret_mob_id` promotion path the
+  server also checks does not apply: that column does not exist in our Postgres
+  schema.) The base data's real turrets are **type 42** with **base_asset_id 14**
+  (the guardian-turret model), `scale 1`, one `sector_nav_points` row, and NO
+  mob/spawn rows (e.g. sector_object 1733). Rewrote `gen_turrets.py` to emit that
+  exact shape, dropped the `mob_base` 573 dependency, and added gap-fill dedup:
+  skip any gate/starbase that already has a real type-42 turret within 6k so the
+  ring never doubles the authentic placements. Regenerated: 716 turrets (168
+  gates x3 + 53 starbases x4), 87 anchors skipped. Applied clean to the live DB.
+  NOTE: a running sector thread loads objects once on cold-start, so a live apply
+  only appears after the sector reloads (re-enter / server restart); a fresh boot
+  has them immediately. Real-client visibility tracked as a CV check (the new
+  shape matches the existing in-game turrets, which render).
+- [x] **AX-17** imported mob/resource radar signature fix. Two related defects in
+  `gen_sql.py`: (1) imported mobs got a `sector_nav_points` row with
+  `signature = 1000`, well below the dominant base-data value of 7000 (1220/1372
+  mobs), so imports were under-detectable; (2) imported RESOURCES got NO
+  `sector_nav_points` row at all, so their signature defaulted to 0 (the server
+  LEFT-JOINs that table onto every object and reads `signature` as the radar
+  detection radius -- `SectorContentSQL::ProcessDefaultObjectStats` ->
+  `ObjectManager`). Added `BASE_SIGNATURE = 7000.0`; mobs now use it and
+  resources get their own `nav_type 0` nav-point row at 7000. Regenerated all 11
+  per-sector files against a pristine throwaway DB (381 mob nav-points re-emitted
+  at 7000, 839 new resource nav-points added; verified all 1220 import nav-points
+  now read 7000, no schema.sql drift). Applied surgically to the live dev DB
+  (UPDATE 381 + INSERT 839). `SKILL.md` import-policy section documents the
+  nav-point/signature contract. DB content only -- no wire/server change, no
+  `plans/29` CV entry.
+- [x] **AX-18** imported-resource ship-model fix (owner-reported: "all these
+  asteroids you generated in Inverness have the model of a ship"). Root cause:
+  `emit_sector_object` hard-coded `base_asset_id = 0` for every row. A type-38
+  resource is rendered straight from `base_asset_id`, and asset 0 is the "Old Old
+  Terran Fighter" ship -- so all 839 imported rocks/gas/gems drew as ships. (Mob
+  spawns were unaffected: a type-0 spawn takes its model from its `mob_base`
+  template, not `base_asset_id`.) Fix: `emit_sector_object` takes a `base_asset`
+  arg; resources now pass the captured asteroid/gas/hulk model (1822..1834 etc.,
+  same value already written into `..._restypes.type`). Also added a guard --
+  `DB.resource_assets` (assets `main_cat IN ('Asteroids','Hulks')`); a capture
+  whose `baseAsset` is not such a model is a mis-tagged loot/turret/derelict and
+  is now DROPPED rather than spawned (3 dropped: Monster Brain 1321, Terran
+  Missile Turret 14, Derelict Alien Ship 1271 -> resource total 839 -> 836).
+  Regenerated all per-sector files against a pristine throwaway DB and applied the
+  corrected wrapper to the live dev DB (verified: 0 rows with base_asset 0 in the
+  capture range, 836 resources now carry models 1822..1834/hulk, 0 junk assets).
+  `SKILL.md` Resources policy updated. DB content only -- no wire/server change,
+  no `plans/29` CV entry. NOTE: the server loads sector content at sector boot, so
+  a player already in a fixed sector must re-enter it (gate out/in or relog) to
+  see the corrected models.
 
 ## Notes
 
