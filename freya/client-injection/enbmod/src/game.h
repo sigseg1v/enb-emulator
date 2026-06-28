@@ -188,20 +188,33 @@ constexpr int ShellScreenOptions = 1; // +0x108 id for the OPTIONS_MAIN screen
 constexpr uintptr_t AuxGet_Ability = 0x006a4b40;
 constexpr uintptr_t AuxGet_Skill = 0x00417f21;
 
-// ---- current-target capture (target-frame display update) -------------------
-// The target HUD's per-frame display updater (__thiscall): ECX = the target-frame
-// controller, stack arg0 = the LIVE selected target entity (0 on de-target), arg2
-// = the target's level (-1 when none). It is the routine the native target frame
-// itself uses to repaint, so it fires on every target switch -- and it still runs
-// even while the native frame is draw-suppressed by the hide-ui mod (hide-ui only
-// clears the widget's draw-gate bit; the controller update logic is untouched). We
-// capture the target entity + level read-only via this update; no behaviour change.
-// The entity is the same class enb.aux() accepts, so the target's HullPoints /
-// MaxHullPoints / MaxShieldPower / ShieldPercent read straight off it. Capturing the
-// target entity directly (rather than a transient radar-manager `this`) is what makes
-// the read track the live selection: the manager pointer churns across several
-// short-lived instances, so a captured manager goes stale on a target switch.
-constexpr uintptr_t TargetFrameUpdate = 0x0060ed60;
+// ---- current-target capture (two paired hooks in the target-frame refresh) --
+// The target-frame refresh resolves the selected GameID through the object registry and,
+// in the SAME pass, hands the resolved object to the radar-highlight routine and hands a
+// lightweight display descriptor to the frame repaint. We capture both halves:
+//
+// TargetEntitySet (0x007bd6e0, __thiscall): the radar/target-highlight setter. ECX = the
+// radar manager (ignored), arg0 (param_2) = the LIVE resolved target GAME OBJECT (0 on
+// de-target). Every caller of this routine is a target-refresh path passing the resolved
+// object or 0, so arg0 is exactly the current target object. Its hull/shield AuxData and
+// class name do NOT live on this contact object directly: the contact holds a pointer to
+// its properties container at +0x88, and the aux bag (HullPoints / MaxHullPoints /
+// MaxShieldPower / ShieldPercent) plus the generic CLASS name ("Ship"/"Starbase", a
+// char* at container+0x3c) read off THAT container. We capture arg0 (0 clears) and
+// forward untouched.
+//
+// TargetFrameUpdate (0x0060e540, __thiscall): the display-update hand-off. ECX = the
+// resolved target object (0 on the de-target clearing call -- our de-target signal),
+// arg1 (param_3) = the title-text struct whose displayed INSTANCE name ("Loki Station",
+// "Scuttlebug") is a char* at +4, arg2 (param_4) = the target's level (-1 when none).
+// The title-text struct is a stack local in the refresh frame, zeroed the instant the
+// refresh returns, so the hook copies the name string out BY VALUE while it is still
+// live (it cannot stash the pointer). Read-only: we capture name + level and forward
+// every argument untouched. Both routines still run while the native frame is
+// draw-suppressed by the hide-ui mod (hide-ui only clears the widget's draw-gate bit;
+// the update logic is untouched).
+constexpr uintptr_t TargetFrameUpdate = 0x0060e540;
+constexpr uintptr_t TargetEntitySet = 0x007bd6e0;
 } // namespace addr
 
 // Vitals-bar fill chain. Unlike the Offsets struct below (runtime hypotheses),

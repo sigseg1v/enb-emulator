@@ -79,11 +79,14 @@ unsigned rpg_mgr();
 // off this (enb.xp_frac).
 unsigned xp_ctrl();
 
-// The live selected target entity, captured from the native target-frame display
-// update (game::addr::TargetFrameUpdate): the exact entity the real frame repaints
-// from, refreshed on every target switch, 0 when nothing is targeted. 0 until the
-// hook (installed by enable_event_hooks) has fired. target_level() is the matching
-// target level (-1 when none). lua_api reads the current target off these.
+// The live selected target object, captured from the native target-refresh's radar
+// highlight setter (game::addr::TargetEntitySet, arg0): the real game object the refresh
+// resolves from the selected GameID, refreshed on every target switch, 0 when nothing is
+// targeted. 0 until the hook (installed by enable_event_hooks) has fired. target_level()
+// is the matching target level captured by the frame-update hook (-1 when none).
+// lua_api reads the current target's hull/shield aux AND its instance name off the
+// object's properties container (object+0x88): the aux bag for hull/shield, the
+// instance name as a char* at container+0x124, the class name at container+0x3c.
 unsigned target_obj();
 int target_level();
 

@@ -445,17 +445,18 @@ static bool aux_read_f(uintptr_t entity, const char* key, double& out);
 static int aux_entry_guarded(uintptr_t entity, const char* key);
 
 // enb.target() -> { base, name, hull, hull_max, shield, shield_max, level } | nil.
-// The current target is the live entity the native target frame repaints from,
-// captured by the TargetFrameUpdate hook (hooks::target_obj()), refreshed on every
-// target switch and 0 when nothing is selected. That entity is the same class
-// enb.aux() accepts, so its hull/shield read straight off it; the game stores shield
-// as a 0..1 percent (ShieldPercent) of MaxShieldPower, with no absolute current-
-// shield key. The target's level is captured alongside it by the same update
-// (hooks::target_level()) -- the HUD's own "Combat Level %d" source.
-// enb.target_obj() -> live selected target entity pointer (0 until the hook fires
-// / when nothing is targeted). Diagnostic: lets Lua walk the target entity with
+// The current target is the live game object the native target-frame refresh resolves
+// from the selected GameID, captured by the TargetEntitySet hook (hooks::target_obj()),
+// refreshed on every target switch and 0 when nothing is selected. Its hull/shield
+// AuxData and class name live on its properties container (object+0x88), not the contact
+// object; the game stores shield as a 0..1 percent (ShieldPercent) of MaxShieldPower,
+// with no absolute current-shield key. Its INSTANCE name is a char* on that same
+// container at +0x124 (class name at +0x3c). The target's level is captured by the
+// frame-update hook (hooks::target_level()) -- the HUD's own "Combat Level %d" source.
+// enb.target_obj() -> live selected target object pointer (0 until the hook fires
+// / when nothing is targeted). Diagnostic: lets Lua walk the target object with
 // guarded raw reads (enb.read.*) without invoking the aux machinery, which faults
-// on entities whose aux-container list shape differs from the player's.
+// on objects whose aux-container list shape differs from the player's.
 static int l_target_obj(lua_State* L) {
     lua_pushinteger(L, (lua_Integer)hooks::target_obj());
     return 1;
@@ -470,34 +471,49 @@ static int l_target(lua_State* L) {
     lua_newtable(L);
     lua_pushinteger(L, (lua_Integer)entity);
     lua_setfield(L, -2, "base");
-    // name: char* at *(*(entity + 0x88) + 0x3c) (aux container -> display name)
+    // The target's hull/shield AuxData and its class name both live on the object's
+    // PROPERTIES CONTAINER, not the contact object itself: the contact at entity holds
+    // a pointer to it at +0x88. The aux property bag (HullPoints / MaxHullPoints /
+    // MaxShieldPower) is read off that container; the class name ("Ship"/"Starbase") is
+    // a char* at container+0x3c.
     uintptr_t container = mem::ptr(entity + 0x88);
-    if (container) {
-        uintptr_t namep = mem::ptr(container + 0x3c);
-        if (namep && mem::readable((void*)namep, 1)) {
-            std::string nm = mem::cstr(namep);
-            if (!nm.empty()) {
-                lua_pushlstring(L, nm.data(), nm.size());
-                lua_setfield(L, -2, "name");
-            }
+    // name: prefer the object's INSTANCE name ("Loki Station", "Scuttlebug", "Needlenose"),
+    // a char* at container+0x124. Fall back to the generic CLASS name (char* at
+    // container+0x3c, "Ship"/"Starbase") only when the instance name is missing/empty, so
+    // the frame always shows something.
+    {
+        std::string nm;
+        if (container) {
+            uintptr_t namep = mem::ptr(container + 0x124);
+            if (namep && mem::readable((void*)namep, 1))
+                nm = mem::cstr(namep);
+        }
+        if (nm.empty() && container) {
+            uintptr_t clsp = mem::ptr(container + 0x3c);
+            if (clsp && mem::readable((void*)clsp, 1))
+                nm = mem::cstr(clsp);
+        }
+        if (!nm.empty()) {
+            lua_pushlstring(L, nm.data(), nm.size());
+            lua_setfield(L, -2, "name");
         }
     }
     double d;
-    if (aux_read_f(entity, "HullPoints", d)) {
+    if (container && aux_read_f(container, "HullPoints", d)) {
         lua_pushnumber(L, d);
         lua_setfield(L, -2, "hull");
     }
-    if (aux_read_f(entity, "MaxHullPoints", d)) {
+    if (container && aux_read_f(container, "MaxHullPoints", d)) {
         lua_pushnumber(L, d);
         lua_setfield(L, -2, "hull_max");
     }
     double smax = -1.0, spct = -1.0;
-    if (aux_read_f(entity, "MaxShieldPower", d)) {
+    if (container && aux_read_f(container, "MaxShieldPower", d)) {
         smax = d;
         lua_pushnumber(L, d);
         lua_setfield(L, -2, "shield_max");
     }
-    if (aux_read_f(entity, "ShieldPercent", d))
+    if (container && aux_read_f(container, "ShieldPercent", d))
         spct = d;
     if (smax >= 0.0 && spct >= 0.0) {
         lua_pushnumber(L, smax * spct);

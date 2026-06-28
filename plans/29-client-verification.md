@@ -2667,16 +2667,13 @@ moot; the SOLVED block above is the truth):**
   (MaxShieldPower * ShieldPercent when present), level. A station target has no
   hull/shield/level, so its bars render as empty tracks and no level suffix shows
   -- correct.
-- **Target TRACKING fix (relaunch required)**: the live target + its level are now
-  captured from the native target-frame display update (`TargetFrameUpdate`,
-  0x0060ed60) -- the exact routine the real frame repaints from, so it fires on
-  every target switch and the captured entity is always the live selection. The
-  previous source (a radar/targeting-manager `this` captured from 0x007bd6e0) churns
-  across several short-lived manager instances and went STALE on a switch, so the
-  frame did not update when the player changed targets. The update still runs while
-  hide-ui draw-suppresses the native frame (hide-ui only clears the draw-gate bit,
-  not the update logic). This is a DLL hook change -> needs a client relaunch to load
-  (Lua hot-reloads; the C++ DLL does not).
+- **Target TRACKING fix (relaunch required)**: the live target object is captured
+  from the radar-highlight setter (`TargetEntitySet`, 0x007bd6e0, arg0 = the resolved
+  object, 0 on de-target), which fires on every target switch, and the level from the
+  frame display update (`TargetFrameUpdate`, 0x0060e540, param_4). Both still run while
+  hide-ui draw-suppresses the native frame (hide-ui only clears the draw-gate bit, not
+  the update logic). This is a DLL hook change -> needs a client relaunch to load (Lua
+  hot-reloads; the C++ DLL does not).
 - **VERIFIED LIVE (this box, post-relaunch)**: cycling targets with the in-space
   target keys, `enb.target()` now returns a DIFFERENT entity on every switch and the
   rendered frame followed it across genuinely different object types -- Decoration ->
@@ -2708,12 +2705,20 @@ moot; the SOLVED block above is the truth):**
     with the nav/target keys) and the hull/shield bars + name + level must change to
     the NEW target immediately; de-targeting clears the frame. This is the tracking
     fix above and is the primary thing to confirm.
-- **KNOWN LIMITATION (follow-up)**: the name currently comes from the aux container
-  class/type slot (entity+0x88 -> +0x3c), which yields a GENERIC name -- a station
-  reads "Starbase", a ship reads "Ship" -- not the proper instance name the native
-  frame showed ("Luna Station"). The proper name is not in the aux container; it
-  comes from a separate object-name source (sector-object registry / vtable getter)
-  that still needs to be reversed. Until then targets show their class name. Tracked
-  as the remaining work in plans/49 AS-13.
+- **INSTANCE NAME + ENEMY HULL -- FIXED (verified live 2026-06-28)**: the two
+  owner-reported defects (frame showed the generic class name "Ship"/"Starbase", and
+  enemy targets showed NO hull bar) had the same root cause: the hull/shield AuxData
+  and the names live on the object's PROPERTIES CONTAINER at `object+0x88`, not on the
+  contact object itself. `enb.target()` now reads, off that container: hull/shield aux
+  (so enemies show hull -- live a mob read HullPoints 32.55/32.55 and the on-screen
+  frame rendered a full hull bar), the proper INSTANCE name as a char* at
+  `container+0x124` (live: "Needlenose" instead of "Ship"), and the class name at
+  `container+0x3c` only as a fallback when the instance name is empty. The old code
+  read aux + name off the contact object (name at object+0x84), which carries no aux
+  and a garbage +0x84 -- that was the bug.
+- **WHAT TO CONFIRM (real client, remaining)**: instance name was verified on a ship
+  mob only ("Needlenose"); confirm it also reads the proper name on a STATION ("Loki
+  Station") and a named NPC ("Scuttlebug") -- same `container+0x124` field, same object
+  layout, so expected to work. Tracked in plans/49 AS-13.
 - **Setup**: `just build-enbmod` then relaunch the client; ensure freya-hud +
   hide-ui mods enabled.
