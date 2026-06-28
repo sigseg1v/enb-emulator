@@ -213,6 +213,12 @@ enb.on_tick(function()
     frame = frame + 1
 
     local x, y, w, h = H.chat_rect()
+    -- on a bigger-than-1280x960 screen the owner slides the chat box up 12px and
+    -- right 32px (0 at the reference res). Applied here, NOT in H.chat_rect, so
+    -- the xp_overlay "player frame" anchored at H.chat_top() keeps its own offset
+    -- and the two do not compound.
+    x = x + H.sx(32)
+    y = y - H.sy(12)
 
     -- input line (above the box body) -- only while capturing
     if editing then

@@ -111,6 +111,10 @@ local CHILD_ADJ    = 0x10       -- subtract to get the child object base
 local LEAF_FLAGS   = 0x18       -- leaf -> visibility flags dword
 local ENABLE_BIT   = 0x200      -- Enabled; clearing it drops draw + INPUT/hover and is
                                 -- never re-asserted (0x400 is, on rollover -- see header)
+local DRAW_GATE    = 0x700      -- Visible|Enabled|inLayout; a leaf draws only when all set
+local REST_DISABLED = 0x100 | 0x400  -- Visible|inLayout but NOT Enabled: the "drawn only
+                                -- while the mouse is over me" state the native target-action
+                                -- button panel rests in (see show_target_buttons below)
 local MAX_NODES    = 256        -- iteration bound (corrupt-list guard)
 
 -- The persistent cockpit chrome panels, in list order. These are the LAST #ELEMENTS
@@ -174,6 +178,19 @@ local hidden = {
 
 -- Hide the native chat TEXT leaves (CHAT_TEXT_VT) wholesale -- Freya draws chat now.
 local hide_chat_text = true
+
+-- Keep the native TARGET ACTION buttons (Follow / Approach / Dock / Register /
+-- Loot ...) ALWAYS visible. They are a TRANSIENT chrome leaf the game inserts when
+-- a target is selected, and at rest it leaves that panel's Enabled bit (0x200)
+-- CLEAR -- so the 0x700 draw gate never completes and the cluster is invisible
+-- until the mouse rolls over it, when the native rollover sets Enabled and the
+-- buttons flash in. The owner wants them up at all times, so each frame we re-assert
+-- Enabled on any TRANSIENT front leaf sitting in that exact resting state (gate ==
+-- REST_DISABLED: Visible|inLayout, Enabled clear). Scoped to the transient block so
+-- it never disturbs a named persistent panel, and self-limiting -- those hover-gated
+-- transients are essentially just these buttons. (A later pass restyles them; for
+-- now this just makes them stop hiding.)
+local show_target_buttons = true
 
 -- one-shot "force the draw bit back on" queue for show() after a hide
 local force_show = {}
@@ -267,7 +284,7 @@ local function set_draw(leaf, on)
 end
 
 local function apply()
-    local map = map_panels()
+    local map, leaves, base = map_panels()
     if not map then return end
     for name in pairs(hidden) do
         set_draw(map[name], false)
@@ -275,6 +292,19 @@ local function apply()
     for name in pairs(force_show) do
         set_draw(map[name], true)
         force_show[name] = nil
+    end
+    -- keep the native target-action button cluster always visible: re-assert Enabled
+    -- on any TRANSIENT front leaf the game is holding in the hover-only resting state.
+    if show_target_buttons and leaves then
+        for i = 1, base do
+            local leaf = leaves[i]
+            if leaf and mem.readable(leaf + LEAF_FLAGS) then
+                local fl = mem.u32(leaf + LEAF_FLAGS)
+                if (fl & DRAW_GATE) == REST_DISABLED then
+                    mem.write_u32(leaf + LEAF_FLAGS, fl | ENABLE_BIT)
+                end
+            end
+        end
     end
     -- native chat text (separate leaf class) -- hidden wholesale, Freya draws chat
     if hide_chat_text then

@@ -65,7 +65,9 @@ local CFG = {
 local function area_rect()
     local sw, sh = enb.screen()
     if not sw or sw == 0 then sw, sh = 1280, 960 end
-    local x = sw - CFG.MARGIN_R - CFG.AREA_W
+    -- on a larger-than-1280x960 screen the owner pulls the whole frame inward
+    -- (32px @ 2560x1440, scaled); at the reference res H.sx is 0 -> no change.
+    local x = sw - (CFG.MARGIN_R + H.sx(32)) - CFG.AREA_W
     local y = sh - CFG.MARGIN_B - CFG.AREA_H
     return x, y, CFG.AREA_W, CFG.AREA_H
 end
@@ -73,25 +75,27 @@ end
 -- ---- one bar: track + gradient fill + border + cur/total text ---------------
 -- Mirrors draw_player_card's vital bar, scaled to BAR_H. cur/max may be nil
 -- (unknown current, e.g. a station's hull) -> empty track, no value text.
-local function draw_bar(x, y, w, rgb, cur, max)
-    enb.draw.rrect(x, y, w, CFG.BAR_H, H.RADIUS, H.TRACK, 220, true)
+-- bar_h and val_scale are resolution-scaled by the caller (taller bars + larger
+-- value font on a big screen), so the bar height and its inner text grow together.
+local function draw_bar(x, y, w, rgb, cur, max, bar_h, val_scale)
+    enb.draw.rrect(x, y, w, bar_h, H.RADIUS, H.TRACK, 220, true)
     local frac
     if cur and max and max > 0 then
         frac = cur / max
         if frac < 0 then frac = 0 elseif frac > 1 then frac = 1 end
         local fw = math.floor(w * frac)
         if fw > 0 then
-            enb.draw.rrect_grad(x, y, fw, CFG.BAR_H, H.RADIUS, rgb, H.darker(rgb), 255)
+            enb.draw.rrect_grad(x, y, fw, bar_h, H.RADIUS, rgb, H.darker(rgb), 255)
         end
     end
-    enb.draw.rrect(x, y, w, CFG.BAR_H, H.RADIUS, H.LINE, 70, false)
+    enb.draw.rrect(x, y, w, bar_h, H.RADIUS, H.LINE, 70, false)
     if cur and max then
         local val = string.format("%d / %d", math.floor(cur + 0.5), math.floor(max + 0.5))
         local vw, vh = H.measure(val)
-        vw = vw * CFG.VAL_SCALE
-        vh = vh * CFG.VAL_SCALE
-        local ty = y + (CFG.BAR_H - vh) / 2   -- center the scaled text on the bar
-        H.otext(x + w - CFG.VAL_PAD - vw, ty, val, 0xffffff, CFG.VAL_SCALE)
+        vw = vw * val_scale
+        vh = vh * val_scale
+        local ty = y + (bar_h - vh) / 2   -- center the scaled text on the bar
+        H.otext(x + w - CFG.VAL_PAD - vw, ty, val, 0xffffff, val_scale)
     end
 end
 
@@ -135,12 +139,17 @@ local function draw_target()
     local bx = ax + CFG.PAD_X
     local bw = aw - CFG.PAD_X * 2 - CFG.BAR_TRIM_R
 
+    -- On a larger-than-1280x960 screen: each bar +6px tall and the on-bar value
+    -- font 1.5x (owner ask, target frame only); both 0/1.0 at the reference res.
+    local bar_h    = CFG.BAR_H + H.sy(6)
+    local val_scale = CFG.VAL_SCALE * H.smul(1.5)
+
     -- two stacked bars at the top: hull over shield, no gap.
     local by = ay + CFG.PAD_TOP
-    draw_bar(bx, by, bw, H.HULL, t.hull, t.hull_max)
-    by = by + CFG.BAR_H + CFG.BAR_GAP
-    draw_bar(bx, by, bw, H.SHIELD, t.shield, t.shield_max)
-    by = by + CFG.BAR_H
+    draw_bar(bx, by, bw, H.HULL, t.hull, t.hull_max, bar_h, val_scale)
+    by = by + bar_h + CFG.BAR_GAP
+    draw_bar(bx, by, bw, H.SHIELD, t.shield, t.shield_max, bar_h, val_scale)
+    by = by + bar_h
 
     -- name + " (L<level>)", wrapped to <= 2 lines under the bars.
     local label = t.name or "Target"

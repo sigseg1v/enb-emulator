@@ -138,8 +138,11 @@ end
 -- button leaves no gap. Returns an array of { idx, x, y, w, h } left -> right.
 local function layout()
     local out = {}
-    local x = CFG.MARGIN_X
-    local y = CFG.MARGIN_Y
+    -- on a bigger-than-1280x960 screen the owner slides the whole strip 32px
+    -- right and 16px down (0 at the reference res). Applied to the strip origin
+    -- here so draw and hit-test stay in lockstep.
+    local x = CFG.MARGIN_X + H.sx(32)
+    local y = CFG.MARGIN_Y + H.sy(16)
     for i, b in ipairs(BUTTONS) do
         if (not b.cond) or b.cond() then
             local w = H.measure(b.label) + 2 * CFG.PAD_X
