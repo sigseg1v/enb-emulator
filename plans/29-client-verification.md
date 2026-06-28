@@ -2720,5 +2720,23 @@ moot; the SOLVED block above is the truth):**
   mob only ("Needlenose"); confirm it also reads the proper name on a STATION ("Loki
   Station") and a named NPC ("Scuttlebug") -- same `container+0x124` field, same object
   layout, so expected to work. Tracked in plans/49 AS-13.
+- **DISTANCE -- FIXED (verified live 2026-06-28)**: the owner reported the distance was
+  "totally wrong, pulling from the wrong spot". The old code used the magnitude of the
+  contact's flat +0xE8/+0xEC/+0xF0 offsets, which are NOT world coords. `enb.target().dist`
+  now computes the true straight-line range `|player_wpos - target_wpos|` the way the
+  native client does: both ends are positional locatables whose world-position getter is
+  `vtable+0x24` (struct-return, 3 packed floats), and the local SHIP object is fetched via
+  the native target-frame chain (`target_ctrl[0x4c]` targeting subsystem -> `vtable+0x28()`),
+  NOT the vitals-chain entity (which is not positional and returns 0,0,0). Live: targeting
+  the station just undocked-from (Luna), `enb.target()` returned distinct ship/target world
+  positions and `dist=28268`, and the freya-hud frame rendered `Dist 28.27k` on-screen under
+  the name. The frame now prints the abbreviated `Dist %.2fk` (owner ask). **DANGER NOTE**:
+  the ship object MUST come from that deterministic native chain -- calling `vtable+0x24` on
+  a wrong-class object invokes a different virtual method and WEDGES the message pump (froze
+  the live client 3x while developing this); the VEH fault-guard does not catch a non-faulting
+  wrong call.
+- **WHAT TO CONFIRM (real client, distance)**: the `Dist N.NNk` value should match the
+  native "Dist:" readout (now hidden) and shrink as you fly toward the target / grow as you
+  fly away, updating smoothly. Verify on a mob/ship target as well as the station case.
 - **Setup**: `just build-enbmod` then relaunch the client; ensure freya-hud +
   hide-ui mods enabled.

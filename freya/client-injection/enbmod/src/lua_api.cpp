@@ -444,6 +444,9 @@ static int l_unpatch(lua_State* L) {
 static uintptr_t player_entity();
 static bool aux_read_f(uintptr_t entity, const char* key, double& out);
 static int aux_entry_guarded(uintptr_t entity, const char* key);
+static int target_level_live();
+static uintptr_t targeting_data_obj();
+static bool world_pos(uintptr_t obj, double out[3]);
 
 // enb.target() -> { base, name, hull, hull_max, shield, shield_max, level } | nil.
 // The current target is the live game object the native target-frame refresh resolves
@@ -452,8 +455,8 @@ static int aux_entry_guarded(uintptr_t entity, const char* key);
 // AuxData and class name live on its properties container (object+0x88), not the contact
 // object; the game stores shield as a 0..1 percent (ShieldPercent) of MaxShieldPower,
 // with no absolute current-shield key. Its INSTANCE name is a char* on that same
-// container at +0x124 (class name at +0x3c). The target's level is captured by the
-// frame-update hook (hooks::target_level()) -- the HUD's own "Combat Level %d" source.
+// container at +0x124 (class name at +0x3c). The target's level is live-read off the
+// targeting subsystem (target_level_live()) -- the HUD's own "Combat Level %d" source.
 // enb.target_obj() -> live selected target object pointer (0 until the hook fires
 // / when nothing is targeted). Diagnostic: lets Lua walk the target object with
 // guarded raw reads (enb.read.*) without invoking the aux machinery, which faults
@@ -520,30 +523,48 @@ static int l_target(lua_State* L) {
         lua_pushnumber(L, smax * spct);
         lua_setfield(L, -2, "shield");
     }
-    // level: captured alongside the target by the same display update. Only combat
-    // targets carry a real level; for non-combat targets (decorations, navs) the
-    // display update leaves the level arg as junk (an uninitialized stack pointer
-    // value, not -1), so accept it only inside a plausible level range and otherwise
-    // report no level -- matching the native frame, which shows the "Combat Level"
-    // line for combat targets only.
-    int lvl = hooks::target_level();
+    // level: live-read off the targeting subsystem each call (the "TargetThreatLevel"
+    // aux, the native frame's "Combat Level" source). Only combat targets carry a real
+    // threat level; non-combat targets (stations, navs, decorations) leave the entry
+    // unpopulated, so target_level_live() returns -1 and we show no level -- matching
+    // the native frame, which prints the level line for combat targets only.
+    // Cache the level per target: target_level_live() does a vtable getter call, so we
+    // call it only until a valid level lands for the CURRENT target object, then serve
+    // the cached value on later frames (the level is async-populated a few frames after
+    // the target switch). Re-arms when the target object changes. This keeps the
+    // per-frame path a pure read once the level is known.
+    static uintptr_t s_lvl_obj = 0;
+    static int s_lvl_val = -1;
+    if (entity != s_lvl_obj) {
+        s_lvl_obj = entity;
+        s_lvl_val = -1;
+    }
+    int lvl = s_lvl_val;
+    if (lvl < 0) {
+        lvl = target_level_live();
+        if (lvl >= 0)
+            s_lvl_val = lvl;
+    }
     if (lvl >= 0 && lvl <= 255) {
         lua_pushinteger(L, lvl);
         lua_setfield(L, -2, "level");
     }
-    // distance: the contact carries its viewer-relative position as three floats at
-    // +0xE8/+0xEC/+0xF0. The local player sits at the origin, so the straight-line
-    // range is the vector magnitude. Read off the contact object (entity), NOT the
-    // properties container -- the position lives on the contact.
+    // distance: straight-line range = |player_wpos - target_wpos|, both read through the
+    // locatable getter (world_pos). The player position comes from the SAME ship object the
+    // native target frame resolves (targeting_data_obj()) -- the local ship, a positional
+    // locatable -- NOT the vitals-chain entity (which is not a positional space object). The
+    // flat pos offsets are uncalibrated, so position must come through the getter.
     {
-        float fx = mem::f32(entity + game::contact::pos_x);
-        float fy = mem::f32(entity + game::contact::pos_y);
-        float fz = mem::f32(entity + game::contact::pos_z);
-        double dist = std::sqrt((double)fx * fx + (double)fy * fy + (double)fz * fz);
-        // a plausible in-sector range; reject NaN / absurd values from a bad read.
-        if (dist == dist && dist >= 0.0 && dist < 1.0e9) {
-            lua_pushnumber(L, dist);
-            lua_setfield(L, -2, "dist");
+        double tp[3], pp[3];
+        uintptr_t ship = targeting_data_obj();
+        if (ship && world_pos(entity, tp) && world_pos(ship, pp)) {
+            double dx = tp[0] - pp[0], dy = tp[1] - pp[1], dz = tp[2] - pp[2];
+            double dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+            // a plausible in-sector range; reject NaN / absurd values from a bad read.
+            if (dist == dist && dist >= 0.0 && dist < 1.0e9) {
+                lua_pushnumber(L, dist);
+                lua_setfield(L, -2, "dist");
+            }
         }
     }
     return 1;
@@ -828,6 +849,112 @@ static int l_rpg_level(lua_State* L) {
     if (mem::i32((uintptr_t)entry + game::aux::valid_off) == 0)
         return 0; // not set
     lua_pushinteger(L, (lua_Integer)mem::i32((uintptr_t)entry + game::aux::val_off));
+    return 1;
+}
+
+// Live-read the current target's combat level off the targeting subsystem, replicating
+// the native target-frame refresh (game.h::addr::TargetFrameRefresh): controller[0x13]
+// -> targeting subsystem `ts` -> ts vtable+0x28 getter (__thiscall, no args) -> data
+// object -> *(data + 0x88) aux container -> "TargetThreatLevel" int. Returns the level,
+// or -1 when none / not-yet-populated. The whole chain (including the vtable getter
+// call) runs under the VEH fault guard, so a stale controller / mid-switch object
+// yields -1 instead of taking the client down.
+// The local player ship object, fetched exactly as the native target-frame refresh does:
+// target_ctrl[ctrl_subsys] is the targeting subsystem, whose vtable+getdata_vtoff getter
+// (__thiscall, no args) returns the ship/targeting data object. This is the very object the
+// camera controller calls vtable+wpos_vtoff on to compute the on-frame target distance, so it
+// is a positional locatable -- its world position is the player's, and its aux (+aux_container)
+// holds the live TargetThreatLevel. Both the level and the player-distance reads go through it.
+// Returns 0 on miss/fault. Runs the vtable getter under the VEH guard.
+static uintptr_t targeting_data_obj() {
+    uintptr_t ctrl = hooks::target_ctrl();
+    if (!ctrl || !mem::readable((void*)(ctrl + game::targeting::ctrl_subsys), 4))
+        return 0;
+    uintptr_t ts = mem::ptr(ctrl + game::targeting::ctrl_subsys);
+    if (!ts || !mem::readable((void*)ts, 4))
+        return 0;
+    uintptr_t vt = mem::ptr(ts);
+    if (!vt || !mem::readable((void*)(vt + game::targeting::getdata_vtoff), 4))
+        return 0;
+    uintptr_t getfn = mem::ptr(vt + game::targeting::getdata_vtoff);
+    if (!getfn)
+        return 0;
+    uintptr_t data = 0;
+    if (__builtin_setjmp(mem::g_guard_jmp)) {
+        mem::g_guard_on = 0;
+        return 0;
+    }
+    mem::g_guard_on = 1;
+    data = (uintptr_t)actions::call_thiscall(getfn, ts, nullptr, 0);
+    mem::g_guard_on = 0;
+    return data;
+}
+
+static int target_level_live() {
+    uintptr_t data = targeting_data_obj();
+    if (!data)
+        return -1;
+    unsigned char keybuf[game::aux::keybuf_sz];
+    memset(keybuf, 0, sizeof(keybuf));
+    int level = -1;
+    if (__builtin_setjmp(mem::g_guard_jmp)) {
+        mem::g_guard_on = 0;
+        return -1; // faulted somewhere in the aux read
+    }
+    mem::g_guard_on = 1;
+    uintptr_t cont = mem::ptr(data + game::targeting::aux_container);
+    if (cont) {
+        ((AuxBuildKey_t)game::aux::build_key)(keybuf, "TargetThreatLevel");
+        int entry = ((AuxGetValue_t)game::rpg::get_entry)((int)cont, keybuf);
+        if (entry && mem::i32((uintptr_t)entry + game::aux::valid_off) != 0)
+            level = mem::i32((uintptr_t)entry + game::aux::val_off);
+    }
+    mem::g_guard_on = 0;
+    return level;
+}
+
+// Read an in-space object's world position the way the client's camera controller does
+// (see game.h::namespace locatable), under the VEH fault guard. The objects we pass here
+// (the GameID-resolved target, and the player's ship entity) expose a struct-returning
+// world-position getter at vtable+wpos_vtoff: ECX = the object, and the address of a
+// 3-float output buffer is passed as the hidden return pointer. The getter writes world
+// X/Y/Z to buf+wpos_x/_y/_z. Returns false on any miss/fault; on success out = {x, y, z}.
+static bool world_pos(uintptr_t obj, double out[3]) {
+    if (!obj || !mem::readable((void*)obj, 4))
+        return false;
+    uintptr_t vt = mem::ptr(obj);
+    if (!vt || !mem::readable((void*)(vt + game::locatable::wpos_vtoff), 4))
+        return false;
+    uintptr_t wfn = mem::ptr(vt + game::locatable::wpos_vtoff);
+    if (!wfn)
+        return false;
+    alignas(4) unsigned char buf[0x40];
+    bool ok = false;
+    if (__builtin_setjmp(mem::g_guard_jmp)) {
+        mem::g_guard_on = 0;
+        return false;
+    }
+    mem::g_guard_on = 1;
+    memset(buf, 0, sizeof(buf));
+    uint32_t args[1] = {(uint32_t)(uintptr_t)buf};
+    actions::call_thiscall(wfn, obj, args, 1);
+    mem::g_guard_on = 0;
+    float x = *(float*)(buf + game::locatable::wpos_x);
+    float y = *(float*)(buf + game::locatable::wpos_y);
+    float z = *(float*)(buf + game::locatable::wpos_z);
+    if (x == x && y == y && z == z) {
+        out[0] = x;
+        out[1] = y;
+        out[2] = z;
+        ok = true;
+    }
+    return ok;
+}
+
+// enb.target_ctrl() -> int. Diagnostic: the captured targeting/HUD controller pointer
+// (hooks::target_ctrl()), 0 until the target-frame refresh has run.
+static int l_target_ctrl(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)hooks::target_ctrl());
     return 1;
 }
 
@@ -1374,7 +1501,8 @@ static int l_draw_text(lua_State* L) {
     const char* s = luaL_checkstring(L, 3);
     uint32_t rgb = (uint32_t)luaL_optinteger(L, 4, 0xFFFFFF);
     float scale = (float)luaL_optnumber(L, 5, 1.0);
-    overlay::text(x, y, s, rgb, scale);
+    int alpha = (int)luaL_optinteger(L, 6, 255);
+    overlay::text(x, y, s, rgb, scale, alpha);
     return 0;
 }
 static int l_draw_rect(lua_State* L) {
@@ -1589,6 +1717,7 @@ void open(lua_State* L) {
                                    {"self", l_self},
                                    {"target", l_target},
                                    {"target_obj", l_target_obj},
+                                   {"target_ctrl", l_target_ctrl},
                                    {"aux_entry", l_aux_entry},
                                    {"state", l_state},
                                    {"cursor", l_cursor},

@@ -40,7 +40,7 @@ local CFG = {
     MARGIN_B = 30,    -- gap from the bottom screen edge to the area
 
     PAD_X    = 4,     -- inset of the bars/name from the area's left/right edges
-    PAD_TOP  = 3,     -- inset of the first bar from the area's top edge
+    PAD_TOP  = 7,     -- inset of the first bar from the area's top edge (owner: +4px down)
     BAR_TRIM_R = 12,  -- trim the bars this many px on the RIGHT (owner ask): keeps
                       -- the bars off the screen edge and pulls the right-aligned
                       -- cur/total value inward so its total no longer clips.
@@ -57,6 +57,8 @@ local CFG = {
 
     NAME_GAP = 3,     -- gap from the lower bar to the name
     LINE_H   = 14,    -- name line height for the 2-line wrap
+    DIST_GAP = 2,     -- extra gap above the distance line (owner: move it down 2px)
+    DIST_ALPHA = 204, -- distance text opacity (~80% of 255)
 }
 
 -- resolve the area rect in current backbuffer coords.
@@ -150,10 +152,11 @@ local function draw_target()
         ny = ny + CFG.LINE_H
     end
 
-    -- distance: straight-line range to the target (viewer-relative magnitude),
+    -- distance: straight-line world range to the target (|player_wpos - target_wpos|),
     -- printed under the name. Dimmer than the name so it reads as secondary.
     if t.dist then
-        H.otext(bx, ny, string.format("Dist: %.0f", t.dist), H.darker(H.INK))
+        H.otext(bx, ny + CFG.DIST_GAP, string.format("Dist %.2fk", t.dist / 1000),
+                H.darker(H.INK), nil, CFG.DIST_ALPHA)
     end
 end
 

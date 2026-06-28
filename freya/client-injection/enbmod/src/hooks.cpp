@@ -307,27 +307,25 @@ extern "C" __attribute__((naked)) void hk_XpBars() {
                          "jmp *_real_XpBars_tramp\n\t");
 }
 
-// ---- current-target capture (two paired hooks in the target-frame refresh) -
-// See game.h::addr::TargetEntitySet / TargetFrameUpdate for the full rationale. The
-// refresh resolves the selected GameID, hands the resolved object to the radar-highlight
-// setter (TargetEntitySet) and to the frame update (TargetFrameUpdate). We capture the
-// object from the former (its hull/shield aux read off the properties container at
-// object+0x88) and the displayed instance name + level from the latter. Both are
-// read-only and forward every argument untouched via the trampoline.
-static volatile unsigned g_target_obj = 0; // live resolved target object (0 = none)
-static volatile int g_target_level = -1;   // target level (-1 = none)
+// ---- current-target capture (two read-only hooks in the target-frame refresh) -
+// See game.h::addr::TargetEntitySet / TargetFrameRefresh for the full rationale. The
+// refresh resolves the selected GameID and hands the resolved object to the radar-
+// highlight setter (TargetEntitySet); we capture that object there (its hull/shield aux
+// read off the properties container at object+0x88, its instance name straight off the
+// container in lua_api). We also capture the targeting/HUD controller (ECX) at the
+// refresh entry so lua_api can live-read the target LEVEL off the targeting subsystem
+// every frame (the level arrives after the target-change repaint, so a one-shot capture
+// would read -1). Both hooks are read-only and forward every argument via the trampoline.
+static volatile unsigned g_target_obj = 0;  // live resolved target object (0 = none)
+static volatile unsigned g_target_ctrl = 0; // live targeting/HUD controller (ECX of refresh)
 extern "C" {
 void* real_TargetEntitySet_tramp = nullptr;
 void notify_target_entity(unsigned obj) {
     g_target_obj = obj; // 0 = de-target (clear)
 }
-void* real_TargetFrameUpdate_tramp = nullptr;
-// entity = ECX (the resolved target object, 0 on the de-target clearing call);
-// level = the frame's combat-level arg (-1 when none). The instance NAME is NOT taken
-// from this refresh -- it reads more reliably straight off the object's properties
-// container in lua_api -- so this hook exists only to capture the level.
-void notify_target_frame(unsigned entity, int level) {
-    g_target_level = (entity == 0) ? -1 : level;
+void* real_TargetFrameRefresh_tramp = nullptr;
+void notify_target_ctrl(unsigned ctrl) {
+    g_target_ctrl = ctrl; // the in-space targeting controller (never 0 while in space)
 }
 }
 extern "C" __attribute__((naked)) void hk_TargetEntitySet() {
@@ -341,19 +339,15 @@ extern "C" __attribute__((naked)) void hk_TargetEntitySet() {
                          "popal\n\t"
                          "jmp *_real_TargetEntitySet_tramp\n\t");
 }
-extern "C" __attribute__((naked)) void hk_TargetFrameUpdate() {
-    // __thiscall: ECX = resolved target object (0 on de-target), param_4 = level. After
-    // pushal (esp -= 0x20): saved ECX at 0x18(esp), param_4 at 0x2c(esp). Read both
-    // before pushing the cdecl args (entity, level) right-to-left.
+extern "C" __attribute__((naked)) void hk_TargetFrameRefresh() {
+    // __thiscall: ECX = the targeting/HUD controller. Capture it (ECX) read-only, the
+    // exact pattern of hk_XpBars, and forward untouched.
     __asm__ __volatile__("pushal\n\t"
-                         "movl 0x18(%esp), %eax\n\t" // ECX (resolved object) -> entity
-                         "movl 0x2c(%esp), %edx\n\t" // param_4 (level)
-                         "pushl %edx\n\t"
-                         "pushl %eax\n\t"
-                         "call _notify_target_frame\n\t"
-                         "addl $8, %esp\n\t"
+                         "pushl %ecx\n\t"
+                         "call _notify_target_ctrl\n\t"
+                         "addl $4, %esp\n\t"
                          "popal\n\t"
-                         "jmp *_real_TargetFrameUpdate_tramp\n\t");
+                         "jmp *_real_TargetFrameRefresh_tramp\n\t");
 }
 
 // ---- cockpit controller capture ---------------------------------------------
@@ -620,9 +614,9 @@ bool enable_event_hooks() {
         logf("hook XpBarsUpdate failed");
         ok = false;
     }
-    if (MH_CreateHook((void*)game::addr::TargetFrameUpdate, (void*)&hk_TargetFrameUpdate,
-                      &real_TargetFrameUpdate_tramp) != MH_OK) {
-        logf("hook TargetFrameUpdate failed");
+    if (MH_CreateHook((void*)game::addr::TargetFrameRefresh, (void*)&hk_TargetFrameRefresh,
+                      &real_TargetFrameRefresh_tramp) != MH_OK) {
+        logf("hook TargetFrameRefresh failed");
         ok = false;
     }
     if (MH_CreateHook((void*)game::addr::TargetEntitySet, (void*)&hk_TargetEntitySet,
@@ -680,7 +674,7 @@ bool enable_event_hooks() {
     MH_EnableHook((void*)game::addr::ChatSend);
     MH_EnableHook((void*)game::addr::RpgLevels);
     MH_EnableHook((void*)game::addr::XpBarsUpdate);
-    MH_EnableHook((void*)game::addr::TargetFrameUpdate);
+    MH_EnableHook((void*)game::addr::TargetFrameRefresh);
     MH_EnableHook((void*)game::addr::TargetEntitySet);
     MH_EnableHook((void*)game::addr::ActionBarUse);
     MH_EnableHook((void*)game::addr::ActionBarCtor);
@@ -702,7 +696,7 @@ void disable_event_hooks() {
     MH_DisableHook((void*)game::addr::ChatSend);
     MH_DisableHook((void*)game::addr::RpgLevels);
     MH_DisableHook((void*)game::addr::XpBarsUpdate);
-    MH_DisableHook((void*)game::addr::TargetFrameUpdate);
+    MH_DisableHook((void*)game::addr::TargetFrameRefresh);
     MH_DisableHook((void*)game::addr::TargetEntitySet);
     MH_DisableHook((void*)game::addr::ActionBarUse);
     MH_DisableHook((void*)game::addr::ActionBarCtor);
@@ -751,8 +745,8 @@ unsigned xp_ctrl() {
 unsigned target_obj() {
     return g_target_obj;
 }
-int target_level() {
-    return g_target_level;
+unsigned target_ctrl() {
+    return g_target_ctrl;
 }
 unsigned actionbar() {
     return g_actionbar;

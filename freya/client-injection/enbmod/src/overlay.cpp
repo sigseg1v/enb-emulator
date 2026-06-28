@@ -542,7 +542,7 @@ static void draw_frame(IDirect3DDevice8* dev) {
     for (auto& c : frame) {
         switch (c.kind) {
         case K_TEXT:
-            draw_text(dev, c.x, c.y, c.s, argb(c.rgb, 255), c.scale);
+            draw_text(dev, c.x, c.y, c.s, argb(c.rgb, c.alpha), c.scale);
             break;
         case K_RECT: {
             D3DCOLOR col = argb(c.rgb, c.alpha);
@@ -806,8 +806,8 @@ void commit_frame() {
     g_render.swap(g_staging);
 }
 
-void text(int x, int y, const std::string& s, uint32_t rgb, float scale) {
-    g_staging.push_back({K_TEXT, x, y, 0, 0, rgb, false, 255, s, 0, 0, scale});
+void text(int x, int y, const std::string& s, uint32_t rgb, float scale, int alpha) {
+    g_staging.push_back({K_TEXT, x, y, 0, 0, rgb, false, alpha, s, 0, 0, scale});
 }
 void rect(int x, int y, int w, int h, uint32_t rgb, bool filled, int alpha) {
     g_staging.push_back({K_RECT, x, y, w, h, rgb, filled, alpha, {}, 0, 0});

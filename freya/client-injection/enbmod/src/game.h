@@ -203,17 +203,17 @@ constexpr uintptr_t AuxGet_Skill = 0x00417f21;
 // char* at container+0x3c) read off THAT container. We capture arg0 (0 clears) and
 // forward untouched.
 //
-// TargetFrameUpdate (0x0060e540, __thiscall): the display-update hand-off. ECX = the
-// resolved target object (0 on the de-target clearing call -- our de-target signal),
-// arg1 (param_3) = the title-text struct whose displayed INSTANCE name ("Loki Station",
-// "Scuttlebug") is a char* at +4, arg2 (param_4) = the target's level (-1 when none).
-// The title-text struct is a stack local in the refresh frame, zeroed the instant the
-// refresh returns, so the hook copies the name string out BY VALUE while it is still
-// live (it cannot stash the pointer). Read-only: we capture name + level and forward
-// every argument untouched. Both routines still run while the native frame is
-// draw-suppressed by the hide-ui mod (hide-ui only clears the widget's draw-gate bit;
-// the update logic is untouched).
-constexpr uintptr_t TargetFrameUpdate = 0x0060e540;
+// TargetFrameRefresh (0x00512400, __thiscall): the per-frame target-frame refresh.
+// ECX (its `this`) is the in-space targeting/HUD controller. We capture it read-only
+// (hooks::target_ctrl()) so lua_api can live-read the target's LEVEL each frame:
+// controller[0x13] (ctrl + targeting::ctrl_subsys) is the targeting subsystem, whose
+// vtable getter yields the targeting data object holding the "TargetThreatLevel" aux
+// (see namespace targeting). The level is read live rather than captured here because
+// it arrives from the server AFTER the target-change repaint -- a one-shot capture at
+// target switch sees the not-yet-populated entry and reads -1. Both this refresh and
+// TargetEntitySet still run while the native frame is draw-suppressed by the hide-ui
+// mod (hide-ui only clears the widget's draw-gate bit; the update logic is untouched).
+constexpr uintptr_t TargetFrameRefresh = 0x00512400;
 constexpr uintptr_t TargetEntitySet = 0x007bd6e0;
 } // namespace addr
 
@@ -244,17 +244,35 @@ constexpr int data_entity = 0x88;  // [data + 0x88]   -> player ship entity
 constexpr int entity_name = 0x124; // [entity + 0x124]-> char* character name
 } // namespace player
 
-// Target contact spatial position. The selected target contact object
-// (hooks::target_obj()) carries its position as three floats at +0xE8/+0xEC/+0xF0.
-// These are VIEWER-RELATIVE: the local player sits at the origin (its own +0xE8
-// vector reads 0,0,0), so the straight-line distance to the target is simply the
-// magnitude sqrt(x*x + y*y + z*z) of the contact's vector -- no player position
-// needed. Build-constant field offsets on the contact object.
-namespace contact {
-constexpr int pos_x = 0xE8; // [obj + 0xE8] -> float x (viewer-relative)
-constexpr int pos_y = 0xEC; // [obj + 0xEC] -> float y
-constexpr int pos_z = 0xF0; // [obj + 0xF0] -> float z
-} // namespace contact
+// Target LEVEL read chain, off the in-space targeting controller captured at
+// addr::TargetFrameRefresh (hooks::target_ctrl()). controller[0x13] (ctrl +
+// ctrl_subsys) is the targeting subsystem `ts`; its vtable+getdata_vtoff getter
+// (__thiscall, no args) returns the targeting DATA object; *(dataObj + aux_container)
+// is the aux container holding the "TargetThreatLevel" entry, read as an int through
+// rpg::get_entry (build_key + get_entry, val at +val_off when valid at +valid_off --
+// the same shape as the discipline-level read, the threat keys being that aux-value
+// type). Build-constant offsets observed in the native refresh; only the controller
+// pointer varies per run.
+namespace targeting {
+constexpr int ctrl_subsys = 0x4c;   // controller[0x13] -> targeting subsystem
+constexpr int getdata_vtoff = 0x28; // subsystem vtable+0x28 -> targeting data object
+constexpr int aux_container = 0x88; // *(dataObj + 0x88) -> aux container (threat keys)
+} // namespace targeting
+
+// Target/player WORLD position, for the straight-line range shown on the frame. The
+// client's camera controller computes target distance exactly this way: a space object
+// (a GameID-resolved entity, like the target frame's resolved target) exposes a
+// world-position getter at vtable+wpos_vtoff. It is a struct-returning __thiscall --
+// ECX = the object, and the caller passes the address of a 3-float output buffer as the
+// hidden return pointer; the getter writes world X/Y/Z to buf+wpos_x/_y/_z (three packed
+// floats). Distance = |player_wpos - target_wpos|, both read this way. The flat object
+// offsets are NOT world coords.
+namespace locatable {
+constexpr int wpos_vtoff = 0x24; // entity vtable+0x24(&buf) -> packed Vec3 in buf
+constexpr int wpos_x = 0x00;     // buf + 0x00 -> world X
+constexpr int wpos_y = 0x04;     // buf + 0x04 -> world Y
+constexpr int wpos_z = 0x08;     // buf + 0x08 -> world Z
+} // namespace locatable
 
 // AuxData property-bag reader. The client keeps per-object gameplay vitals as
 // string-keyed float entries (a property bag), NOT flat struct fields -- so the
