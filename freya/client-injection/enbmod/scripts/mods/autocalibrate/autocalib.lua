@@ -362,8 +362,6 @@ local FIELDS = {
     "combat_lvl", "trade_lvl", "explore_lvl",
     "combat_pct", "trade_pct", "explore_pct", "skill_points",
     "pos_x", "pos_y", "pos_z",
-    "target_ptr_addr", "tgt_name", "tgt_name_is_ptr", "tgt_name_wide",
-    "tgt_hull", "tgt_pos_x", "tgt_pos_y", "tgt_pos_z",
 }
 
 local function calib_data_path()

@@ -193,14 +193,6 @@ static int l_calibrate(lua_State* L) {
     SET_INT(state_login);
     SET_INT(state_charsel);
     SET_INT(state_load);
-    SET_PTR(target_ptr_addr);
-    SET_INT(tgt_name);
-    SET_INT(tgt_name_is_ptr);
-    SET_INT(tgt_name_wide);
-    SET_INT(tgt_hull);
-    SET_INT(tgt_pos_x);
-    SET_INT(tgt_pos_y);
-    SET_INT(tgt_pos_z);
     return 0;
 }
 #undef SET_INT
@@ -238,14 +230,6 @@ static int l_offsets(lua_State* L) {
     PUT(state_login);
     PUT(state_charsel);
     PUT(state_load);
-    PUT(target_ptr_addr);
-    PUT(tgt_name);
-    PUT(tgt_name_is_ptr);
-    PUT(tgt_name_wide);
-    PUT(tgt_hull);
-    PUT(tgt_pos_x);
-    PUT(tgt_pos_y);
-    PUT(tgt_pos_z);
 #undef PUT
     return 1;
 }
@@ -454,41 +438,96 @@ static int l_unpatch(lua_State* L) {
     return 1;
 }
 
+// aux helpers (defined below, after the enb.aux registrations) -- forward
+// declared so l_target can read the target entity's vitals.
+static uintptr_t player_entity();
+static bool aux_read_f(uintptr_t entity, const char* key, double& out);
+static bool aux_read_i(uintptr_t entity, const char* key, long& out);
+static int aux_entry_guarded(uintptr_t entity, const char* key);
+
+// enb.target() -> { base, name, hull, hull_max, shield, shield_max, level } | nil.
+// The current target is the entity the radar/targeting manager caches (captured by
+// the TargetRadar hook): manager + addr::TargetRadar_entity, NULL when nothing is
+// selected. That entity is the same class enb.aux() accepts, so its hull/shield
+// read straight off it; the game stores shield as a 0..1 percent (ShieldPercent)
+// of MaxShieldPower, with no absolute current-shield key. The target's level is
+// the player's TargetThreatLevel aux (the HUD's own "Combat Level %d" source).
+// enb.target_radar() -> radar/targeting-manager pointer (0 until the hook fires).
+// Diagnostic: lets Lua walk the target entity with guarded raw reads (enb.read.*)
+// without invoking the aux machinery, which faults on entities whose aux-container
+// list shape differs from the player's.
+static int l_target_radar(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)hooks::target_radar());
+    return 1;
+}
+
 static int l_target(lua_State* L) {
-    Offsets& o = offs();
-    if (!o.target_ptr_addr) {
+    uintptr_t radar = hooks::target_radar();
+    if (!radar) {
         lua_pushnil(L);
         return 1;
     }
-    uintptr_t t = mem::ptr(o.target_ptr_addr);
-    if (!t) {
+    uintptr_t entity = mem::ptr(radar + game::addr::TargetRadar_entity);
+    if (!entity || !mem::readable((void*)entity, 4)) {
         lua_pushnil(L);
         return 1;
     }
     lua_newtable(L);
-    lua_pushinteger(L, (lua_Integer)t);
+    lua_pushinteger(L, (lua_Integer)entity);
     lua_setfield(L, -2, "base");
-    if (o.tgt_name >= 0) {
-        uintptr_t namep = o.tgt_name_is_ptr ? mem::ptr(t + o.tgt_name) : (t + o.tgt_name);
-        std::string nm = o.tgt_name_wide ? mem::wstr(namep) : mem::cstr(namep);
-        lua_pushlstring(L, nm.data(), nm.size());
-        lua_setfield(L, -2, "name");
+    // name: char* at *(*(entity + 0x88) + 0x3c) (aux container -> display name)
+    uintptr_t container = mem::ptr(entity + 0x88);
+    if (container) {
+        uintptr_t namep = mem::ptr(container + 0x3c);
+        if (namep && mem::readable((void*)namep, 1)) {
+            std::string nm = mem::cstr(namep);
+            if (!nm.empty()) {
+                lua_pushlstring(L, nm.data(), nm.size());
+                lua_setfield(L, -2, "name");
+            }
+        }
     }
-    push_int_field(L, "hull", t, o.tgt_hull);
-    push_flt_field(L, "x", t, o.tgt_pos_x);
-    push_flt_field(L, "y", t, o.tgt_pos_y);
-    push_flt_field(L, "z", t, o.tgt_pos_z);
-    // convenience: distance from self, if both positions known
-    uintptr_t b = player_base();
-    if (b && o.pos_x >= 0 && o.tgt_pos_x >= 0) {
-        double dx = mem::f32(b + o.pos_x) - mem::f32(t + o.tgt_pos_x);
-        double dy = mem::f32(b + o.pos_y) - mem::f32(t + o.tgt_pos_y);
-        double dz = mem::f32(b + o.pos_z) - mem::f32(t + o.tgt_pos_z);
-        lua_pushnumber(L, (dx * dx + dy * dy + dz * dz) > 0
-                              ? __builtin_sqrt(dx * dx + dy * dy + dz * dz)
-                              : 0.0);
-        lua_setfield(L, -2, "distance");
+    double d;
+    if (aux_read_f(entity, "HullPoints", d)) {
+        lua_pushnumber(L, d);
+        lua_setfield(L, -2, "hull");
     }
+    if (aux_read_f(entity, "MaxHullPoints", d)) {
+        lua_pushnumber(L, d);
+        lua_setfield(L, -2, "hull_max");
+    }
+    double smax = -1.0, spct = -1.0;
+    if (aux_read_f(entity, "MaxShieldPower", d)) {
+        smax = d;
+        lua_pushnumber(L, d);
+        lua_setfield(L, -2, "shield_max");
+    }
+    if (aux_read_f(entity, "ShieldPercent", d))
+        spct = d;
+    if (smax >= 0.0 && spct >= 0.0) {
+        lua_pushnumber(L, smax * spct);
+        lua_setfield(L, -2, "shield");
+    }
+    long lvl;
+    uintptr_t pe = player_entity();
+    if (pe && aux_read_i(pe, "TargetThreatLevel", lvl)) {
+        lua_pushinteger(L, lvl);
+        lua_setfield(L, -2, "level");
+    }
+    return 1;
+}
+
+// enb.aux_entry(entity, key) -> raw aux entry pointer | nil. Diagnostic: runs the
+// aux lookup under the fault guard and returns the entry base so Lua can inspect
+// the candidate value slots (+0x70 valid, +0x84 scalar, +0x248 interpolated) and
+// pin which slot a given key uses. Returns nil on miss/fault.
+static int l_aux_entry(lua_State* L) {
+    uintptr_t entity = (uintptr_t)luaL_checkinteger(L, 1);
+    const char* key = luaL_checkstring(L, 2);
+    int entry = aux_entry_guarded(entity, key);
+    if (!entry)
+        return 0;
+    lua_pushinteger(L, (lua_Integer)(unsigned)entry);
     return 1;
 }
 
@@ -642,30 +681,79 @@ typedef int(__cdecl* AuxGetValue_t)(int entity, void* keybuf);
 // address of the 4-byte value (entry+val_off) ready to read, or 0 on any miss.
 // The value's type (float for vitals, int for levels) is the CALLER's choice -- the
 // same slot holds both depending on the key, so the two wrappers below pick.
-static uintptr_t aux_value_addr(lua_State* L, int key_arg, int entity_arg) {
-    const char* key = luaL_checkstring(L, key_arg);
-    uintptr_t entity;
-    if (lua_isnoneornil(L, entity_arg)) {
-        uintptr_t ctrl = hooks::vitals_ctrl();
-        if (!ctrl)
-            return 0; // not in space
-        uintptr_t data = mem::ptr(ctrl + game::player::ctrl_data);
-        entity = data ? mem::ptr(data + game::player::data_entity) : 0;
-    } else {
-        entity = (uintptr_t)luaL_checkinteger(L, entity_arg);
-    }
+// The local player's ship entity (the aux getter's default subject): vitals
+// controller -> data -> entity. 0 out of space.
+static uintptr_t player_entity() {
+    uintptr_t ctrl = hooks::vitals_ctrl();
+    if (!ctrl)
+        return 0;
+    uintptr_t data = mem::ptr(ctrl + game::player::ctrl_data);
+    return data ? mem::ptr(data + game::player::data_entity) : 0;
+}
+
+// Resolve a string-keyed AuxData entry on an explicit ENTITY to the address of its
+// 4-byte value slot, or 0 on any miss. Pure C++ (no Lua stack) so callers other
+// than the enb.aux wrappers (e.g. l_target) can reuse it.
+// Run build_key + get_value under the VEH fault guard (mem::g_guard_*). get_value
+// walks the entity's aux dictionary, and on entities whose dict is not ship-shaped
+// (navs, gates, some decorations) that walk null-derefs -- which would take the
+// client down. The guard __builtin_longjmp's out of any access violation raised
+// while it is armed, so a bad entity yields entry=0 (no value) instead of a crash.
+// Returns the raw entry pointer (0 on miss/fault); callers pick the value slot.
+static int aux_entry_guarded(uintptr_t entity, const char* key) {
     if (!entity || !mem::readable((void*)entity, 4))
         return 0;
-
     unsigned char keybuf[game::aux::keybuf_sz];
     memset(keybuf, 0, sizeof(keybuf));
+    if (__builtin_setjmp(mem::g_guard_jmp)) {
+        mem::g_guard_on = 0;
+        return 0; // aux lookup faulted on this entity -- treat as "no value"
+    }
+    mem::g_guard_on = 1;
     ((AuxBuildKey_t)game::aux::build_key)(keybuf, key);
     int entry = ((AuxGetValue_t)game::aux::get_value)((int)entity, keybuf);
+    mem::g_guard_on = 0;
+    return entry;
+}
+
+static uintptr_t aux_addr_core(uintptr_t entity, const char* key) {
+    int entry = aux_entry_guarded(entity, key);
     if (!entry || !mem::readable((void*)(uintptr_t)entry, game::aux::val_off + 4))
         return 0;
     if (mem::i32((uintptr_t)entry + game::aux::valid_off) == 0)
         return 0; // value not set
     return (uintptr_t)entry + game::aux::val_off;
+}
+// Convenience typed readers off an entity (used by l_target).
+static bool aux_read_f(uintptr_t entity, const char* key, double& out) {
+    uintptr_t a = aux_addr_core(entity, key);
+    if (!a)
+        return false;
+    float v = mem::f32(a);
+    if (v != v)
+        return false; // NaN guard
+    out = v;
+    return true;
+}
+static bool aux_read_i(uintptr_t entity, const char* key, long& out) {
+    uintptr_t a = aux_addr_core(entity, key);
+    if (!a)
+        return false;
+    out = mem::i32(a);
+    return true;
+}
+
+static uintptr_t aux_value_addr(lua_State* L, int key_arg, int entity_arg) {
+    const char* key = luaL_checkstring(L, key_arg);
+    uintptr_t entity;
+    if (lua_isnoneornil(L, entity_arg)) {
+        entity = player_entity();
+        if (!entity)
+            return 0; // not in space
+    } else {
+        entity = (uintptr_t)luaL_checkinteger(L, entity_arg);
+    }
+    return aux_addr_core(entity, key);
 }
 // enb.aux(key [, entity]) -> number | nil. The value as a FLOAT. Use for the
 // numeric vitals: HullPoints / MaxHullPoints / MaxShieldPower / MaxEnergyPower.
@@ -1476,6 +1564,8 @@ void open(lua_State* L) {
                                    {"offsets", l_offsets},
                                    {"self", l_self},
                                    {"target", l_target},
+                                   {"target_radar", l_target_radar},
+                                   {"aux_entry", l_aux_entry},
                                    {"state", l_state},
                                    {"cursor", l_cursor},
                                    {"patch_ret", l_patch_ret},

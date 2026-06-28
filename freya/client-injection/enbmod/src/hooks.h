@@ -79,6 +79,12 @@ unsigned rpg_mgr();
 // off this (enb.xp_frac).
 unsigned xp_ctrl();
 
+// ECX (this) captured from the most recent radar/targeting-manager update: the
+// manager that caches the live current-target entity at manager +
+// game::addr::TargetRadar_entity (0 = no target). 0 until the hook (installed by
+// enable_event_hooks) has fired. lua_api reads the current target off it.
+unsigned target_radar();
+
 // ECX (this) of the in-space action-bar controller that owns the numbered
 // ability/weapon slots (primary + alternate). Captured from the bank constructor
 // the moment a bank exists (entering space) and refreshed on every slot dispatch,

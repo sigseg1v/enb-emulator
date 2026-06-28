@@ -187,6 +187,19 @@ constexpr int ShellScreenOptions = 1; // +0x108 id for the OPTIONS_MAIN screen
 // ---- AuxData accessor candidates (universal read primitive once resolved) ----
 constexpr uintptr_t AuxGet_Ability = 0x006a4b40;
 constexpr uintptr_t AuxGet_Skill = 0x00417f21;
+
+// ---- current-target (radar/targeting manager) capture -----------------------
+// The per-frame target-HUD updater resolves the selected target's GameID to its
+// entity and feeds that entity into the radar/targeting manager's update fn
+// (__thiscall, ECX = the radar manager, arg0 = the target entity). That manager
+// caches the live target entity at manager + TargetRadar_entity, and NULLs it on
+// de-target -- so capturing the manager `this` (ECX) once gives the HUD a stable,
+// self-clearing handle on whatever is currently targeted. Capture-only, the exact
+// read-only pattern of the rpg/xp/cockpit hooks; never alters the update. The
+// cached entity is the same entity class enb.aux() accepts, so the target's
+// HullPoints / MaxHullPoints / MaxShieldPower / ShieldPercent read straight off it.
+constexpr uintptr_t TargetRadar = 0x007bd6e0;
+constexpr int TargetRadar_entity = 0x24; // manager + this -> cached target entity ptr (0 = none)
 } // namespace addr
 
 // Vitals-bar fill chain. Unlike the Offsets struct below (runtime hypotheses),
@@ -365,16 +378,6 @@ struct Offsets {
     int state_login = -1;
     int state_charsel = -1;
     int state_load = -1;
-
-    // target object: address of the pointer to the current target, + fields within it.
-    uintptr_t target_ptr_addr = 0;
-    int tgt_name = -1;       // offset to a char* or inline cstr
-    int tgt_name_is_ptr = 1; // 1: field holds char*; 0: field is inline string
-    int tgt_name_wide = 0;   // 1: UTF-16
-    int tgt_hull = -1;
-    int tgt_pos_x = -1;
-    int tgt_pos_y = -1;
-    int tgt_pos_z = -1;
 };
 
 // The single live offsets instance (defined in game.cpp). Mutated by Lua enb.calibrate{}.

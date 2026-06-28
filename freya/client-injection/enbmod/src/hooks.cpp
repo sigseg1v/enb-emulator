@@ -307,6 +307,29 @@ extern "C" __attribute__((naked)) void hk_XpBars() {
                          "jmp *_real_XpBars_tramp\n\t");
 }
 
+// ---- current-target (radar/targeting manager) capture ----------------------
+// game.h::addr::TargetRadar (0x007bd6e0) is the radar/targeting manager's per-frame
+// update fn (__thiscall, ECX = the manager, arg0 = the target entity). It caches
+// the live target entity at manager + addr::TargetRadar_entity and nulls it on
+// de-target, so we capture the manager `this` (ECX) read-only -- the exact pattern
+// of hk_XpBars -- and lua_api reads the current target off it (hooks::target_radar()).
+// Forwards every argument untouched via the trampoline; never alters game behaviour.
+static volatile unsigned g_target_radar = 0; // ECX (this) of the radar/targeting manager
+extern "C" {
+void* real_TargetRadar_tramp = nullptr;
+void notify_target_radar(unsigned thisp) {
+    g_target_radar = thisp;
+}
+}
+extern "C" __attribute__((naked)) void hk_TargetRadar() {
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl %ecx\n\t" // this (radar/targeting manager)
+                         "call _notify_target_radar\n\t"
+                         "addl $4, %esp\n\t"
+                         "popal\n\t"
+                         "jmp *_real_TargetRadar_tramp\n\t");
+}
+
 // ---- cockpit controller capture ---------------------------------------------
 // game.h::addr::CockpitThrottle (0x0057dd20) and CockpitCommands (0x0057be50) are
 // the two cockpit-widget CONSTRUCTORS (__fastcall, ECX = the controller). They run
@@ -571,6 +594,11 @@ bool enable_event_hooks() {
         logf("hook XpBarsUpdate failed");
         ok = false;
     }
+    if (MH_CreateHook((void*)game::addr::TargetRadar, (void*)&hk_TargetRadar,
+                      &real_TargetRadar_tramp) != MH_OK) {
+        logf("hook TargetRadar failed");
+        ok = false;
+    }
     if (MH_CreateHook((void*)game::addr::ActionBarUse, (void*)&hk_ActionBar,
                       &real_ActionBar_tramp) != MH_OK) {
         logf("hook ActionBarUse failed");
@@ -621,6 +649,7 @@ bool enable_event_hooks() {
     MH_EnableHook((void*)game::addr::ChatSend);
     MH_EnableHook((void*)game::addr::RpgLevels);
     MH_EnableHook((void*)game::addr::XpBarsUpdate);
+    MH_EnableHook((void*)game::addr::TargetRadar);
     MH_EnableHook((void*)game::addr::ActionBarUse);
     MH_EnableHook((void*)game::addr::ActionBarCtor);
     MH_EnableHook((void*)game::addr::CockpitThrottle);
@@ -641,6 +670,7 @@ void disable_event_hooks() {
     MH_DisableHook((void*)game::addr::ChatSend);
     MH_DisableHook((void*)game::addr::RpgLevels);
     MH_DisableHook((void*)game::addr::XpBarsUpdate);
+    MH_DisableHook((void*)game::addr::TargetRadar);
     MH_DisableHook((void*)game::addr::ActionBarUse);
     MH_DisableHook((void*)game::addr::ActionBarCtor);
     MH_DisableHook((void*)game::addr::CockpitThrottle);
@@ -684,6 +714,9 @@ unsigned rpg_mgr() {
 }
 unsigned xp_ctrl() {
     return g_xp_ctrl;
+}
+unsigned target_radar() {
+    return g_target_radar;
 }
 unsigned actionbar() {
     return g_actionbar;
