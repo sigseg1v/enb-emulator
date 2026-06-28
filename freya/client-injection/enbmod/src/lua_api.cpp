@@ -503,10 +503,14 @@ static int l_target(lua_State* L) {
         lua_pushnumber(L, smax * spct);
         lua_setfield(L, -2, "shield");
     }
-    // level: captured alongside the target by the same display update (-1 = none),
-    // so it tracks the live selection exactly as the native frame's level line does.
+    // level: captured alongside the target by the same display update. Only combat
+    // targets carry a real level; for non-combat targets (decorations, navs) the
+    // display update leaves the level arg as junk (an uninitialized stack pointer
+    // value, not -1), so accept it only inside a plausible level range and otherwise
+    // report no level -- matching the native frame, which shows the "Combat Level"
+    // line for combat targets only.
     int lvl = hooks::target_level();
-    if (lvl >= 0) {
+    if (lvl >= 0 && lvl <= 255) {
         lua_pushinteger(L, lvl);
         lua_setfield(L, -2, "level");
     }

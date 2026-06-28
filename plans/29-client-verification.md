@@ -2677,6 +2677,19 @@ moot; the SOLVED block above is the truth):**
   hide-ui draw-suppresses the native frame (hide-ui only clears the draw-gate bit,
   not the update logic). This is a DLL hook change -> needs a client relaunch to load
   (Lua hot-reloads; the C++ DLL does not).
+- **VERIFIED LIVE (this box, post-relaunch)**: cycling targets with the in-space
+  target keys, `enb.target()` now returns a DIFFERENT entity on every switch and the
+  rendered frame followed it across genuinely different object types -- Decoration ->
+  Stargate -> Planet -> Starbase -- with the name + 3D model changing each time
+  (screenshots: "Decoration" + station model, then "Stargate" + gate model). Before
+  the fix the captured manager went stale and the frame did not update. The level
+  field reads junk (an uninitialized stack pointer) for non-combat targets, so it is
+  clamped to a plausible range [0,255] in `l_target` and reports no level otherwise
+  -- matching the native frame, which shows the "Combat Level" line for combat
+  targets only. STILL NOT shown: a FILLED bar tracking damage -- stations / gates /
+  decorations expose no hull/shield aux (only mobs / ships do) and the home sector
+  has no mob or ship target, so the bars render as empty tracks here (correct). The
+  filled-bar + damage-tracking case remains the one open real-client check.
 - **Headless coverage**: none -- the mock has no live target entity.
 - **Validated live (this box)**: layout proven against the home-sector station
   target (model kept, bg/native-bars/name/dist/arrows gone, two empty stacked bars
