@@ -118,6 +118,16 @@ class DB:
     def __init__(self):
         self.valid = {int(r[0]) for r in pg("SELECT sector_id FROM sectors")}
 
+        # Valid prospectable-node models: a captured "resource" is only a real
+        # harvestable if its base_asset is an asteroid/gas/hulk model. The capture
+        # occasionally mis-tags loot, a turret, or a derelict ship as a resource;
+        # those have a non-resource asset main_cat and must NOT become harvestables
+        # (they would render as that ship/turret/loot model with a tractorable
+        # rock attached). main_cat 'Asteroids' covers rock/metal/gem/reactive/
+        # hydrocarbon/gas/crystal; 'Hulks' covers the prospectable inorganic hulks.
+        self.resource_assets = {int(r[0]) for r in pg(
+            "SELECT base_id FROM assets WHERE main_cat IN ('Asteroids', 'Hulks')")}
+
         # Authoritative nav membership: which nav names belong to which sector,
         # straight from docs/sectors/json/*.jsonl. A captured nav whose name is not
         # listed for the sector it was bucketed into does not belong there and is
@@ -337,15 +347,21 @@ def near_ids(captured_pts, existing):
 
 # ---- SQL emit helpers -------------------------------------------------------
 
-def emit_sector_object(oid, typ, x, y, z, name, radar, rrange, sec):
+def emit_sector_object(oid, typ, x, y, z, name, radar, rrange, sec, base_asset=0):
+    # base_asset is the visual model. A MOB spawn (type 0 / OT_MOBSPAWN) takes its
+    # model from its mob_base template, so it stays 0; a RESOURCE (type 38) is
+    # rendered straight from base_asset_id, so it MUST carry the real asteroid
+    # model id (1822..1834 etc.) -- 0 renders as asset 0, the "Old Old Terran
+    # Fighter" ship, which is the ship-shaped-asteroid bug.
     return (
         "INSERT INTO sector_objects (sector_object_id, base_asset_id, h, s, v, "
         "type, scale, position_x, position_y, position_z, orientation_u, "
         "orientation_v, orientation_w, orientation_z, name, appears_in_radar, "
         "radar_range, sector_id, gate_to, sound_effect_id, sound_effect_range) "
-        f"VALUES ({oid}, 0, 0.0, 0.0, 0.0, {typ}, 1.0, {num(x)}, {num(y)}, "
-        f"{num(z)}, 0.0, 0.0, 0.0, 0.0, {sql_str(name)}, {radar}, {num(rrange)}, "
-        f"{sec}, NULL, NULL, NULL) ON CONFLICT (sector_object_id) DO NOTHING;")
+        f"VALUES ({oid}, {base_asset}, 0.0, 0.0, 0.0, {typ}, 1.0, {num(x)}, "
+        f"{num(y)}, {num(z)}, 0.0, 0.0, 0.0, 0.0, {sql_str(name)}, {radar}, "
+        f"{num(rrange)}, {sec}, NULL, NULL, NULL) "
+        "ON CONFLICT (sector_object_id) DO NOTHING;")
 
 
 def emit_nav_points(oid, nav_type, signature, sec, expl=3000.0):
@@ -461,7 +477,7 @@ def main():
         body = []
         replace_ids = set()
         inserts_obj, inserts_child = [], []
-        n_nav = n_nav_skip = n_nav_notjsonl = n_res = n_mob = n_mob_skip = 0
+        n_nav = n_nav_skip = n_nav_notjsonl = n_res = n_res_skip = n_mob = n_mob_skip = 0
         unresolved = collections.Counter()
 
         # ---- MOBS ----------------------------------------------------------
@@ -513,16 +529,26 @@ def main():
             ore = r.get("baseAsset")
             if ore is None:
                 continue
+            ore = int(ore)
+            if ore not in db.resource_assets:
+                # captured object mis-tagged as a resource (loot / turret /
+                # derelict ship) -- its model is not an asteroid/hulk, so it is
+                # not a real harvestable. Drop it rather than spawn a ship-shaped
+                # "rock".
+                n_res_skip += 1
+                continue
             oid = next_id; next_id += 1
-            res_rows.append((oid, int(ore), r))
-            res_pts.append((r["x"], r["y"], r["z"], int(ore)))
+            res_rows.append((oid, ore, r))
+            res_pts.append((r["x"], r["y"], r["z"], ore))
             n_res += 1
         replace_ids |= near_ids(res_pts, db.exist_res[sec])
         for oid, ore, r in res_rows:
             lvl = db.res_level(sec, ore)
+            # base_asset = the captured asteroid model so the node renders as the
+            # right rock/gas/gem instead of asset 0 (the Terran-fighter ship).
             inserts_obj.append(emit_sector_object(
                 oid, 38, r["x"], r["y"], r["z"],
-                r.get("name") or "Resource", 0, 5000.0, sec))
+                r.get("name") or "Resource", 0, 5000.0, sec, base_asset=ore))
             inserts_child.append(
                 "INSERT INTO sector_objects_harvestable (resource_id, level, "
                 "field, res_count, spawn_radius, pop_rock_chance, "
@@ -607,7 +633,8 @@ def main():
         report.append(
             f"sector {sec:5d} {name:<16} navs+{n_nav} (skip {n_nav_skip} exist"
             f"{f', {n_nav_notjsonl} not-in-jsonl' if n_nav_notjsonl else ''}) "
-            f"res+{n_res} mob+{n_mob} (skip {n_mob_skip} unresolved) "
+            f"res+{n_res}{f' (skip {n_res_skip} non-resource)' if n_res_skip else ''} "
+            f"mob+{n_mob} (skip {n_mob_skip} unresolved) "
             f"replace {len(replace_ids)} existing"
             + (f"  STATIONS={len(s['stations'])} GATES={len(s['gates'])} "
                f"PLANETS={len(s['planets'])} (report-only)"

@@ -260,6 +260,26 @@ per-sector file directly into psql.
   (UPDATE 381 + INSERT 839). `SKILL.md` import-policy section documents the
   nav-point/signature contract. DB content only -- no wire/server change, no
   `plans/29` CV entry.
+- [x] **AX-18** imported-resource ship-model fix (owner-reported: "all these
+  asteroids you generated in Inverness have the model of a ship"). Root cause:
+  `emit_sector_object` hard-coded `base_asset_id = 0` for every row. A type-38
+  resource is rendered straight from `base_asset_id`, and asset 0 is the "Old Old
+  Terran Fighter" ship -- so all 839 imported rocks/gas/gems drew as ships. (Mob
+  spawns were unaffected: a type-0 spawn takes its model from its `mob_base`
+  template, not `base_asset_id`.) Fix: `emit_sector_object` takes a `base_asset`
+  arg; resources now pass the captured asteroid/gas/hulk model (1822..1834 etc.,
+  same value already written into `..._restypes.type`). Also added a guard --
+  `DB.resource_assets` (assets `main_cat IN ('Asteroids','Hulks')`); a capture
+  whose `baseAsset` is not such a model is a mis-tagged loot/turret/derelict and
+  is now DROPPED rather than spawned (3 dropped: Monster Brain 1321, Terran
+  Missile Turret 14, Derelict Alien Ship 1271 -> resource total 839 -> 836).
+  Regenerated all per-sector files against a pristine throwaway DB and applied the
+  corrected wrapper to the live dev DB (verified: 0 rows with base_asset 0 in the
+  capture range, 836 resources now carry models 1822..1834/hulk, 0 junk assets).
+  `SKILL.md` Resources policy updated. DB content only -- no wire/server change,
+  no `plans/29` CV entry. NOTE: the server loads sector content at sector boot, so
+  a player already in a fixed sector must re-enter it (gate out/in or relog) to
+  see the corrected models.
 
 ## Notes
 
