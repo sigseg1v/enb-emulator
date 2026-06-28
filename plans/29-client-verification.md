@@ -2596,3 +2596,24 @@ moot; the SOLVED block above is the truth):**
   a gate that already had a real turret -- it should NOT have a doubled ring.
 - **Setup**: a fresh `docker compose` boot loads them from the first sector load;
   on a live DB they appear only after the sector reloads (re-enter / restart).
+
+### [ ] CV-30 -- HUD no longer lags/flickers on mouse move
+
+- **What changed**: `freya/client-injection/enbmod/src/lua_api.cpp` `tick()` now
+  gates the overlay display-list rebuild (`begin_frame` + `on_tick` handlers +
+  `commit_frame`) to run at most once per Present, instead of once per
+  `PeekMessageA` pump iteration. A mouse-move flood spins the pump several times
+  per drawn frame, so the old code re-ran every draw handler ~2-4x per frame
+  (wasted CPU -> lag) and widened the window to commit a transient empty list
+  between Presents (-> flicker). This is client-only (enbmod, MIT); no wire change.
+- **Why the real client is needed**: agent-side measurement proved the rebuild
+  rate is now decoupled from the pump (`enb.diag()`: rebuild == present in both
+  idle and mouse-flood; pump rate still spikes but rebuild no longer follows), and
+  a screenshot showed the HUD renders without a blank frame -- but only the owner
+  playing can confirm the *subjective* "no lag, no flicker when I move the mouse".
+- **What to verify (real client)**: in space with the Freya HUD up, move the mouse
+  rapidly/continuously. Confirm the HUD no longer flickers or stutters and the
+  framerate does not visibly drop with mouse motion. (Separate, still-open: the
+  top-middle chat-duplicate on new messages -- AV-1/AV-2 -- is NOT addressed here.)
+- **Setup**: `just build-enbmod` then relaunch the client (the launcher re-stages
+  the DLL next to client.exe on each launch).

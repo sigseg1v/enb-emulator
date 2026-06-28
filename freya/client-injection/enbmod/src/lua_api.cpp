@@ -26,9 +26,13 @@ namespace lua {
 
 using namespace enb::game;
 
-// Diagnostic: monotonic count of tick() calls (== HUD display-list rebuild rate,
-// clocked off the PeekMessageA pump). Compare to overlay::present_count() (draw rate).
+// Diagnostic: monotonic count of tick() calls, clocked off the PeekMessageA pump
+// (so this tracks INPUT rate -- a mouse-move flood spins it up). Compare to
+// g_rebuild_n (display-list rebuilds, now gated to the draw rate) and
+// overlay::present_count() (draw rate): after the once-per-present gate the
+// rebuild count tracks Present and is independent of how fast the pump spins.
 static std::atomic<unsigned long> g_tick_n{0};
+static std::atomic<unsigned long> g_rebuild_n{0};
 
 // Registered Lua callbacks, held as registry refs.
 static std::vector<int> g_tick_refs;
@@ -1228,11 +1232,13 @@ static int l_screen(lua_State* L) {
     lua_pushinteger(L, h);
     return 2;
 }
-// enb.diag() -> tick_count, present_count  (rebuild rate vs draw rate)
+// enb.diag() -> tick_count (pump/input rate), rebuild_count (gated to draw rate),
+// present_count (draw rate)
 static int l_diag(lua_State* L) {
     lua_pushinteger(L, (lua_Integer)g_tick_n.load(std::memory_order_relaxed));
+    lua_pushinteger(L, (lua_Integer)g_rebuild_n.load(std::memory_order_relaxed));
     lua_pushinteger(L, (lua_Integer)overlay::present_count());
-    return 2;
+    return 3;
 }
 // enb.measure(s) -> w, h  (font pixel size; 0,0 until the atlas is built)
 static int l_measure(lua_State* L) {
@@ -1771,12 +1777,33 @@ void tick(lua_State* L) {
         lua_pushinteger(L, e.b);
         call_ref(L, ref, 2);
     }
-    // overlay: rebuild the display list this frame (enb.draw.* calls land in staging),
-    // then commit it for the Flip hook to render.
-    overlay::begin_frame();
-    for (int ref : g_tick_refs)
-        call_ref(L, ref, 0);
-    overlay::commit_frame();
+    // overlay: rebuild the display list (enb.draw.* calls land in staging), then
+    // commit it for the Present hook to render.
+    //
+    // Clock the rebuild at the DRAW rate, NOT the pump rate. tick() rides
+    // PeekMessageA, which the game's pump calls once per loop iteration -- and a
+    // mouse-move flood makes the pump spin several times per rendered frame
+    // (measured ~4x). Rebuilding on every pump call therefore (a) re-runs every
+    // on_tick draw handler ~4x as often as the frame is actually drawn (pure
+    // wasted CPU that scales with mouse input -> the lag), and (b) widens the
+    // window in which a transient empty/partial rebuild gets committed between
+    // two Presents, which draws as a blank HUD frame -> the flicker. Gating to
+    // once per Present makes the rebuild rate track the draw rate and become
+    // independent of input: one rebuild per drawn frame, no matter how fast the
+    // pump spins. The cmd-channel poll + event drain above stay at pump rate, so
+    // they remain responsive even when the game is not presenting; if the game
+    // stops presenting entirely (alt-tab/minimize) the rebuild stalls, which is
+    // harmless -- nothing is being drawn anyway.
+    static unsigned long last_rebuild_present = (unsigned long)-1;
+    unsigned long pn = overlay::present_count();
+    if (pn != last_rebuild_present) {
+        last_rebuild_present = pn;
+        g_rebuild_n.fetch_add(1, std::memory_order_relaxed);
+        overlay::begin_frame();
+        for (int ref : g_tick_refs)
+            call_ref(L, ref, 0);
+        overlay::commit_frame();
+    }
 }
 
 void on_skill(unsigned a, unsigned b) {
