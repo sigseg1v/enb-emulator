@@ -2643,8 +2643,9 @@ moot; the SOLVED block above is the truth):**
   space + a mouse-move flood + a soak are now stable with no `_except.txt` and no
   WINE page fault. But the actual free-during-gap trigger (use/swap an ability, or
   zone with the bar populated) cannot be driven from the cmd channel -- only the
-  owner playing can exercise it. Possibly the same intermittent crash a player
-  (Veret) reported during normal play; correlation UNCONFIRMED until reproduced.
+  owner playing can exercise it. This is an enbmod-only crash (the K_TEXQUAD path
+  exists only when the Lua HUD is loaded), so it is NOT the crash a player (Veret)
+  reported -- he plays with Lua/mods off, so enbmod never loads for him.
 - **What to verify (real client)**: in space with abilities slotted on the action
   bar, repeatedly activate abilities, swap/re-slot them, and gate between sectors.
   Confirm no client crash (no new `_except.txt`) and the ability icons keep
