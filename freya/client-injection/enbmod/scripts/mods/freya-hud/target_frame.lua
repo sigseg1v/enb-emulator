@@ -56,6 +56,16 @@ local CFG = {
     -- 1/3 of the player-card vital bar (16px) -> ~5-6px; no gap between the two.
     BAR_H    = 6,
     BAR_GAP  = 0,
+    -- the hull/shield bars define the whole frame's width: on a larger-than-reference
+    -- screen the owner pulls the bars' right edge further inward and extends their
+    -- length to the LEFT, and the name / distance / buttons left-align to the bars'
+    -- left edge -- so the entire frame shifts+grows left together. Both authored @
+    -- 2560x1440 and scaled in via H.sx (0 at the 1280x960 baseline, so the base layout
+    -- is untouched).
+    BAR_INSET_R  = 16,   -- extra right-edge inset, 1440p
+    BAR_EXTEND_L = 128,  -- extra bar length added to the LEFT, 1440p
+    -- lift the whole frame (bars + distance + name + buttons) up, 1440p only.
+    FRAME_UP     = 6,
     -- the cur/total value sits ON the bar, right-aligned and vertically centred at
     -- a reduced scale so it fits the thin bar.
     VAL_PAD   = 4,    -- inset of the value text from the bar's right edge
@@ -273,11 +283,16 @@ local function draw_target()
     local bar_h     = CFG.BAR_H + H.sy(6)
     local val_scale = CFG.VAL_SCALE * H.smul(1.5)
 
-    -- content rect: bottom-right anchored with scaled edge gaps.
+    -- content rect: bottom-right anchored with scaled edge gaps. The bars define the
+    -- frame's width and left anchor -- on a larger screen their right edge pulls inward
+    -- (BAR_INSET_R) and the track extends to the LEFT (BAR_EXTEND_L); `bx`/`bw` are the
+    -- resulting bar left edge + width, and the distance / name / buttons left-align to
+    -- `bx` so the whole frame shifts+grows left together. The frame also lifts up by
+    -- FRAME_UP. All three offsets are 0 at the 1280x960 baseline (base layout untouched).
     local right  = sw - (CFG.MARGIN_R + H.sx(CFG.MARGIN_R_TUNE))
-    local bottom = sh - CFG.MARGIN_B
-    local bw = CFG.BAR_W
-    local bx = right - bw
+    local bottom = sh - CFG.MARGIN_B - H.sy(CFG.FRAME_UP)
+    local bw = CFG.BAR_W + H.sx(CFG.BAR_EXTEND_L)
+    local bx = right - H.sx(CFG.BAR_INSET_R) - bw
 
     -- ---- bottom: two stacked bars (hull over shield), shield bottom at `bottom`.
     local shield_y = bottom - bar_h
