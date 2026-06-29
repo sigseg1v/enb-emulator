@@ -132,7 +132,15 @@ local VERBS = {
     { letter = "D", label = "Dock",     op = 0x1c, mode = "target", show = is_station },
     { letter = "R", label = "Register", op = 0x19, mode = "target", show = is_station },
     { letter = "G", label = "Gate",     op = 0x12, mode = "target", show = is_gate },
-    { letter = "L", label = "Land",     op = 0x1d, mode = "target", show = is_planet },
+    -- NOTE -- no Land button. E&B has no planet-surface gameplay: the server's
+    -- "planet landing" command (op 0x1d, case 29) only routes you when the planet has
+    -- a Destination (a rare transit/gate planet); for an ordinary planet it falls
+    -- through to the DEPLOY/scan branch and fires effect 10007 -- the "hack"-looking
+    -- animation. The native client shows Land only on landable planets via the server
+    -- verb list, which we don't read; the class string is just "Planet" for all of
+    -- them, so we cannot tell landable from not. Rather than misfire the deploy effect
+    -- on every planet, Land is omitted (like Loot/Message/Scan) until a real
+    -- landability signal is available.
     { letter = "P", label = "Prospect", op = 0x11, mode = "target", show = is_resource },
     { letter = "T", label = "Tractor",  op = 0x01, mode = "self",   show = is_resource },
     { letter = "F", label = "Follow",   op = 0x0c, mode = "follow", show = is_ship },
