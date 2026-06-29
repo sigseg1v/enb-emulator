@@ -98,25 +98,37 @@ local function is_station(t)
     return cls_has(t, "starbase") or cls_has(t, "station") or cls_has(t, "outpost")
 end
 local function is_gate(t)     return cls_has(t, "gate") end
+local function is_planet(t)   return cls_has(t, "planet") end
 local function is_resource(t)
     return cls_has(t, "asteroid") or cls_has(t, "resource")
         or cls_has(t, "field") or cls_has(t, "ore") or cls_has(t, "cloud")
 end
 -- "ship-like" = a mob/player ship: anything with a hull (or an explicit Ship class)
--- that is not a station / gate / resource. Unknown-class targets with a hull default
--- here so Follow still appears rather than the frame going button-less.
+-- that is not a station / gate / planet / resource. Unknown-class targets with a hull
+-- default here so Follow still appears rather than the frame going button-less.
 local function is_ship(t)
-    if is_station(t) or is_gate(t) or is_resource(t) then return false end
+    if is_station(t) or is_gate(t) or is_planet(t) or is_resource(t) then return false end
     return cls_has(t, "ship") or t.hull_max ~= nil
+end
+-- A PLAYER (not a mob). Both are hull-bearing "Ship"-class objects, so the class name
+-- at container+0x3c cannot tell them apart -- but player GameIDs live in the high id
+-- range (>= 0x40000000) while mob ids are low. t.gid is the target's GameID, read off
+-- entity+0x90 in draw_target. Player-only verbs (Trade/Group/JumpStart) gate on this.
+local function is_player(t)
+    return is_ship(t) and type(t.gid) == "number" and t.gid >= 0x40000000
 end
 
 local VERBS = {
     { letter = "D", label = "Dock",     op = 0x1c, mode = "target", show = is_station },
     { letter = "R", label = "Register", op = 0x19, mode = "target", show = is_station },
     { letter = "G", label = "Gate",     op = 0x12, mode = "target", show = is_gate },
+    { letter = "L", label = "Land",     op = 0x1d, mode = "target", show = is_planet },
     { letter = "P", label = "Prospect", op = 0x11, mode = "target", show = is_resource },
     { letter = "T", label = "Tractor",  op = 0x01, mode = "self",   show = is_resource },
     { letter = "F", label = "Follow",   op = 0x0c, mode = "follow", show = is_ship },
+    { letter = "T", label = "Trade",    op = 0x14, mode = "target", show = is_player },
+    { letter = "G", label = "Group",    op = 0x0a, mode = "target", show = is_player },
+    { letter = "J", label = "JumpStart",op = 0x1a, mode = "target", show = is_player },
 }
 
 -- Build the list of verbs to show for the current target (gated by class).
@@ -248,6 +260,12 @@ end
 local function draw_target()
     local t = enb.target and enb.target()
     if not t then return end
+    -- the target's GameID (entity+0x90) -- distinguishes a player (high id range) from a
+    -- mob so the player-only verbs can gate on it. Cheap, crash-safe (mem.u32 is guarded).
+    if enb.target_obj and enb.mem then
+        local obj = enb.target_obj()
+        if obj and obj ~= 0 then t.gid = enb.mem.u32(obj + 0x90) end
+    end
 
     local sw, sh = enb.screen()
     if not sw or sw == 0 then sw, sh = 1280, 960 end
