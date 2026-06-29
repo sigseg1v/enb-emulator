@@ -113,6 +113,7 @@ end
 local VERBS = {
     { letter = "D", label = "Dock",     op = 0x1c, mode = "target", show = is_station },
     { letter = "R", label = "Register", op = 0x19, mode = "target", show = is_station },
+    { letter = "G", label = "Gate",     op = 0x12, mode = "target", show = is_gate },
     { letter = "P", label = "Prospect", op = 0x11, mode = "target", show = is_resource },
     { letter = "T", label = "Tractor",  op = 0x01, mode = "self",   show = is_resource },
     { letter = "F", label = "Follow",   op = 0x0c, mode = "follow", show = is_ship },
