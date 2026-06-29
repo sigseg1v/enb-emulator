@@ -990,23 +990,29 @@ static int l_worldmgr(lua_State* L) {
     return 1;
 }
 
-// enb.target_action(op[, no_target]) -> bool. Perform a target-action verb on the
-// current target by replaying the client's own command path: build a command object
-// (game::addr::CmdBuild, or AutoFollowBuild when no_target is set -- the follow verb
-// carries no target field) with the local player as actor and the current target's game
-// id, then push it through M's sector-server Connection (game::addr::CmdSend). This is
-// byte-for-byte the sequence the native target-action button / group-verb handler runs.
-//   op       = the per-verb action byte (0x0a Attack, 0x14 Trade, 0x12 Board,
-//              0x19 Loot, 0x1d Dock, 0x0c Follow, ...).
-//   no_target= true for the follow/auto-follow verb (uses AutoFollowBuild, no target).
-// Returns false (no send) when M is not captured yet, or -- for a targeted verb -- when
+// enb.target_action(op[, mode]) -> bool. Perform a target-action verb on the current
+// target by replaying the client's own command path: build a command object with the
+// local player as actor and a target game id, then push it through M's sector-server
+// Connection (game::addr::CmdSend). This is byte-for-byte the sequence the native
+// target-action button / group-verb handler runs. `mode` selects the builder + target:
+//   "target" (default) -- CmdBuild(player, op, <current target's game id>): the verbs
+//                         that act ON the locked target (Dock 0x1c, Register 0x19,
+//                         Prospect 0x11, Trade 0x14, Group 0x0a, ...). Needs a target.
+//   "self"             -- CmdBuild(player, op, <player's own game id>): the verbs the
+//                         client issues against the player as the command target
+//                         (Tractor 0x01, Scan 0x1e -- the server reads the actor's own
+//                         current target server-side). Does not require target_obj().
+//   "follow"           -- AutoFollowBuild(player, op): the Follow verb (op 0x0c), which
+//                         has its own builder and carries no target field (the server
+//                         follows the player's current target).
+// Returns false (no send) when M is not captured yet, or -- for "target" mode -- when
 // nothing is targeted / the target's game id is unreadable. MUST be called on the game
 // thread (it is -- callers run from on_input). The command buffer is a static zeroed
 // 0x20 bytes (the builders only write buf[0..6]); single writer (game thread).
 static unsigned char g_cmd_obj[0x20];
 static int l_target_action(lua_State* L) {
     int op = (int)luaL_checkinteger(L, 1);
-    bool no_target = lua_toboolean(L, 2) != 0;
+    const char* mode = luaL_optstring(L, 2, "target");
     uintptr_t m = hooks::world_mgr();
     if (!m || !mem::readable((void*)(m + game::world::player_id), 4)) {
         lua_pushboolean(L, 0);
@@ -1014,20 +1020,25 @@ static int l_target_action(lua_State* L) {
     }
     uint32_t player = mem::u32(m + game::world::player_id);
     std::memset(g_cmd_obj, 0, sizeof(g_cmd_obj));
-    if (no_target) {
+    if (std::strcmp(mode, "follow") == 0) {
         // Follow/auto-follow: build(player, op) -- no target field on the wire.
         uint32_t b[2] = {player, (uint32_t)op};
         actions::call_thiscall(game::addr::AutoFollowBuild, (unsigned)(uintptr_t)g_cmd_obj, b, 2);
     } else {
-        uintptr_t tgt = hooks::target_obj();
-        uintptr_t cont = (tgt && mem::readable((void*)(tgt + game::world::tgt_container), 4))
-                             ? mem::ptr(tgt + game::world::tgt_container)
-                             : 0;
-        if (!cont || !mem::readable((void*)(cont + game::world::tgt_gid), 4)) {
-            lua_pushboolean(L, 0);
-            return 1;
+        uint32_t target;
+        if (std::strcmp(mode, "self") == 0) {
+            target = player;   // the command target is the player's own game id
+        } else {
+            uintptr_t tgt = hooks::target_obj();
+            uintptr_t cont = (tgt && mem::readable((void*)(tgt + game::world::tgt_container), 4))
+                                 ? mem::ptr(tgt + game::world::tgt_container)
+                                 : 0;
+            if (!cont || !mem::readable((void*)(cont + game::world::tgt_gid), 4)) {
+                lua_pushboolean(L, 0);
+                return 1;
+            }
+            target = mem::u32(cont + game::world::tgt_gid);
         }
-        uint32_t target = mem::u32(cont + game::world::tgt_gid);
         uint32_t b[4] = {player, (uint32_t)op, target, 0};
         actions::call_thiscall(game::addr::CmdBuild, (unsigned)(uintptr_t)g_cmd_obj, b, 4);
     }

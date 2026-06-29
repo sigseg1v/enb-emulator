@@ -235,11 +235,14 @@ constexpr uintptr_t WorldMgrInit = 0x00741180;
 //   CmdBuild (__thiscall, ECX = a caller-owned >=0x1c-byte command buffer; args: uint
 //     player_id, char op, uint target_id, uint extra) writes the command in place (it
 //     only sets buf[0..6], so a zeroed 0x20-byte buffer is sufficient and needs no
-//     cleanup). op is the per-verb action byte (see the verb table in target_frame.lua):
-//     0x0a Attack, 0x14 Trade, 0x12 Board, 0x19 Loot, 0x1d Dock, ...
+//     cleanup). op is the per-verb action byte -- the server's avatar-command case the
+//     packet drives (see the verb table in target_frame.lua and the server's command
+//     switch): 0x01 Tractor, 0x0a Group, 0x11 Prospect, 0x12 Gate, 0x14 Trade,
+//     0x19 Register, 0x1a Jumpstart, 0x1c Dock, 0x1d Land, 0x1e Scan. (Tractor/Scan
+//     pass the player's OWN game id as target_id; the rest pass the locked target's.)
 //   AutoFollowBuild (__thiscall, ECX = buffer; args: uint player_id, char op=0x0c) is the
-//     separate builder the Follow/auto-follow verb uses -- it carries no target field
-//     (the server follows the player's current target), so it has its own constructor.
+//     separate builder the Follow verb uses -- it carries no target field (the server
+//     follows the player's current target), so it has its own constructor.
 //   CmdSend (__thiscall, ECX = M, command buffer) routes the built command through
 //     *(M + world::connection)->vtable[2]. Same address as ChatMsgSend (chat uses the
 //     identical "build object, push through the manager's Connection" path).
