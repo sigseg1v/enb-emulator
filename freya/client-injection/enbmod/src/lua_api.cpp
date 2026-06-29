@@ -1029,15 +1029,16 @@ static int l_target_action(lua_State* L) {
         if (std::strcmp(mode, "self") == 0) {
             target = player;   // the command target is the player's own game id
         } else {
+            // The target's GameID sits directly on the captured contact object at
+            // +tgt_gid (the object stores its own GameID there -- the same field the
+            // client's gid->object lookup validates). This is exactly what the native
+            // verb dispatcher sends; it is NOT a field of the +0x88 aux/properties bag.
             uintptr_t tgt = hooks::target_obj();
-            uintptr_t cont = (tgt && mem::readable((void*)(tgt + game::world::tgt_container), 4))
-                                 ? mem::ptr(tgt + game::world::tgt_container)
-                                 : 0;
-            if (!cont || !mem::readable((void*)(cont + game::world::tgt_gid), 4)) {
+            if (!tgt || !mem::readable((void*)(tgt + game::world::tgt_gid), 4)) {
                 lua_pushboolean(L, 0);
                 return 1;
             }
-            target = mem::u32(cont + game::world::tgt_gid);
+            target = mem::u32(tgt + game::world::tgt_gid);
         }
         uint32_t b[4] = {player, (uint32_t)op, target, 0};
         actions::call_thiscall(game::addr::CmdBuild, (unsigned)(uintptr_t)g_cmd_obj, b, 4);

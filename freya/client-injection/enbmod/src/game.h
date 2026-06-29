@@ -301,13 +301,15 @@ constexpr int aux_container = 0x88; // *(dataObj + 0x88) -> aux container (threa
 // group-verb and target-button handlers use). Only the M pointer varies per run.
 //
 // The dispatch target's game id is NOT on M -- it is read off the captured current-
-// target object (hooks::target_obj()): the contact object holds its properties
-// container at +tgt_container, and the target's game id sits at container + tgt_gid.
+// target object (hooks::target_obj()): the contact object stores its own GameID at
+// +tgt_gid (the same field the client's gid->object lookup validates), and its
+// properties/aux bag (hull/shield/name) hangs off +tgt_container. The native verb
+// dispatcher sends the +tgt_gid GameID directly; it is NOT a field of the aux bag.
 namespace world {
 constexpr int player_id = 0x112c;   // M -> local player game id (command actor)
 constexpr int connection = 0x1124;  // M -> sector-server Connection (command sink)
-constexpr int tgt_container = 0x88;  // target contact object -> properties container
-constexpr int tgt_gid = 0x90;        // container + 0x90 -> target game id
+constexpr int tgt_container = 0x88;  // target contact object -> properties/aux bag (hull/shield/name)
+constexpr int tgt_gid = 0x90;        // target contact object + 0x90 -> its own GameID (command target)
 } // namespace world
 
 // Target/player WORLD position, for the straight-line range shown on the frame. The
