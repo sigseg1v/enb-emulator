@@ -51,7 +51,7 @@ local CFG = {
     BTN_GAP   = 3,    -- gap between adjacent buttons
     BTN_ROW_GAP = 4,  -- gap from the button row down to the name
     BTN_MAX   = 6,    -- hard cap on buttons drawn
-    FLASH_TICKS = 8,  -- click-feedback glow duration
+    FLASH_TICKS = 16, -- click-feedback glow duration (held long enough to read)
 
     -- 1/3 of the player-card vital bar (16px) -> ~5-6px; no gap between the two.
     BAR_H    = 6,
@@ -220,16 +220,22 @@ local function draw_buttons_up(verbs, x, bottom_y, maxw)
     for _, r in ipairs(btn_rects) do
         local hot = (flash[r.op] or 0) > 0
         H.glass(r.x, r.y, r.w, r.h)
-        local tcol = hot and 0x2f4a6e or 0x223044
-        local bcol = hot and 0x132338 or 0x0c121b
-        enb.draw.rrect_grad(r.x, r.y, r.w, r.h, H.RADIUS, tcol, bcol, 230)
+        -- hot = a click landed on this button: paint a vivid cyan fill + bright
+        -- border so the press reads unmistakably (the idle glass is near-flat, so
+        -- the old subtle shift was easy to miss -- the click must feel acknowledged
+        -- even when the action itself is a no-op, e.g. Register at a station you are
+        -- already registered at).
+        local tcol = hot and 0x7ad4ff or 0x223044
+        local bcol = hot and 0x2a8fd6 or 0x0c121b
+        enb.draw.rrect_grad(r.x, r.y, r.w, r.h, H.RADIUS, tcol, bcol, hot and 255 or 230)
         enb.draw.rrect(r.x, r.y, r.w, r.h, H.RADIUS,
-                       hot and H.LINE_HOT or H.LINE, hot and 220 or 150, false)
+                       hot and H.LINE_HOT or H.LINE, hot and 255 or 150, false)
         -- the single letter, centred and scaled up to fill a big-screen button.
         local scale = H.smul(1.5)
         local lw, lh = H.measure(r.letter)
         lw, lh = lw * scale, lh * scale
-        H.otext(r.x + (r.w - lw) / 2, r.y + (r.h - lh) / 2, r.letter, H.INK, scale)
+        H.otext(r.x + (r.w - lw) / 2, r.y + (r.h - lh) / 2, r.letter,
+                hot and 0x06121f or H.INK, scale)
     end
 
     -- decay every flash one tick so the click glow fades.
