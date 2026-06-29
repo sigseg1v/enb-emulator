@@ -40,7 +40,19 @@ local CFG = {
     MARGIN_B = 30,    -- gap from the bottom screen edge to the area
 
     PAD_X    = 4,     -- inset of the bars/name from the area's left/right edges
-    PAD_TOP  = 7,     -- inset of the first bar from the area's top edge (owner: +4px down)
+    PAD_TOP  = 7,     -- inset of the first element from the area's top edge (owner: +4px down)
+
+    -- Freya verb buttons: a row of small SQUARE single-letter buttons sitting just
+    -- ABOVE the hull/shield bars (owner ask: replace the native target-action button
+    -- cluster). One per context-menu verb the server gave the current target; the
+    -- letter is the first character of the verb's display label (Follow -> F, Loot ->
+    -- L, Dock -> D, ...). Clicking one fires that verb through the game's own verb
+    -- dispatcher -- the exact action the native button click performed.
+    BTN_SIZE  = 17,   -- square button edge at the reference res (scaled up on a big screen)
+    BTN_GAP   = 3,    -- gap between adjacent buttons
+    BTN_ROW_GAP = 4,  -- gap from the button row down to the first bar
+    BTN_MAX   = 12,   -- hard cap on buttons drawn (the dispatcher defines 13 verbs)
+    FLASH_TICKS = 8,  -- click-feedback glow duration
     BAR_TRIM_R = 12,  -- trim the bars this many px on the RIGHT (owner ask): keeps
                       -- the bars off the screen edge and pulls the right-aligned
                       -- cur/total value inward so its total no longer clips.
@@ -70,6 +82,67 @@ local function area_rect()
     local x = sw - (CFG.MARGIN_R + H.sx(32)) - CFG.AREA_W
     local y = sh - CFG.MARGIN_B - CFG.AREA_H
     return x, y, CFG.AREA_W, CFG.AREA_H
+end
+
+-- ---- verb table (the target-action letter buttons) --------------------------
+-- The native client decides a target's verb set from a server-pushed verb list our
+-- emulator server does not currently emit, and the on-click dispatcher needs a transient
+-- verb-UI object that is only reachable through the native button we are replacing. So we
+-- drive the buttons from a fixed verb table instead and gate which ones show by the
+-- target's CLASS (enb.target().class -- "Ship"/"Starbase"/"Stargate"/...). Each verb maps
+-- to the SAME wire action the native button performs: enb.target_action(op[, no_target])
+-- builds the command and pushes it through the world manager's sector-server Connection.
+--
+--   op       = the per-verb action byte read out of the client's verb dispatcher.
+--   no_target= the follow verb carries no target field (server follows current target).
+--   show(t)  = predicate on the live target table deciding whether to draw this button.
+--
+-- letter = first char of the label (owner ask: "Follow -> F, Loot -> L"). Dock collides
+-- with no other shown verb per class; where two would collide we pick a distinct glyph.
+local function cls_has(t, word)
+    return type(t.class) == "string" and t.class:lower():find(word, 1, true) ~= nil
+end
+local function is_station(t) return cls_has(t, "starbase") or cls_has(t, "station") end
+local function is_gate(t)    return cls_has(t, "gate") end
+-- "ship-like" = anything with a hull (mob/player ship), or an explicit Ship class, and
+-- not a station/gate. Unknown-class targets default to ship-like so the combat verbs
+-- still appear rather than the frame going button-less.
+local function is_ship(t)
+    if is_station(t) or is_gate(t) then return false end
+    return cls_has(t, "ship") or t.hull_max ~= nil or t.class == nil
+end
+
+local VERBS = {
+    { letter = "A", label = "Attack", op = 0x0a,                show = is_ship },
+    { letter = "F", label = "Follow", op = 0x0c, no_target = true, show = is_ship },
+    { letter = "L", label = "Loot",   op = 0x19,                show = is_ship },
+    { letter = "B", label = "Board",  op = 0x12,                show = is_ship },
+    { letter = "T", label = "Trade",  op = 0x14,
+      show = function(t) return is_station(t) or is_ship(t) end },
+    { letter = "D", label = "Dock",   op = 0x1d,
+      show = function(t) return is_station(t) or is_gate(t) end },
+}
+
+-- Build the list of verbs to show for the current target (gated by class).
+local function read_verbs(t)
+    local out = {}
+    for _, v in ipairs(VERBS) do
+        if #out >= CFG.BTN_MAX then break end
+        if v.show(t) then
+            out[#out + 1] = { letter = v.letter, label = v.label,
+                              op = v.op, no_target = v.no_target }
+        end
+    end
+    return out
+end
+
+-- live button rects (rebuilt every draw) + per-id transient click-flash, so the
+-- on_input hit-test and the draw agree on geometry without recomputing it.
+local btn_rects = {}
+local flash = {}   -- [op] = remaining ticks
+
+local function point_in(px, py, x, y, w, h)
+    return px >= x and px <= x + w and py >= y and py <= y + h
 end
 
 -- ---- one bar: track + gradient fill + border + cur/total text ---------------
@@ -135,6 +208,60 @@ local function wrap_two(s, max_w)
     return lines
 end
 
+-- ---- the Freya verb-button row ----------------------------------------------
+-- Lay one square single-letter button per context verb across the top of the
+-- target area, wrapping to a new row when the row fills the bar width, and paint
+-- each as a small glass button with its letter centred. Rebuilds btn_rects (the
+-- hit-test geometry the on_input handler reads) and returns the total vertical
+-- space consumed, so the caller pushes the bars down below the row. No verbs ->
+-- no row, zero consumed (the bars sit where they always did).
+local function draw_buttons(verbs, x, y, maxw)
+    btn_rects = {}
+    if #verbs == 0 then return 0 end
+
+    -- square edge + gap, grown on a bigger-than-reference screen so the buttons
+    -- track the enlarged bars/value font (both 0 at the 1280x960 baseline).
+    local bsz = CFG.BTN_SIZE + H.sy(7)
+    local gap = CFG.BTN_GAP + H.sx(2)
+
+    local cx, cy = x, y
+    for _, v in ipairs(verbs) do
+        if cx + bsz > x + maxw and cx > x then
+            cx = x
+            cy = cy + bsz + gap
+        end
+        btn_rects[#btn_rects + 1] = { x = cx, y = cy, w = bsz, h = bsz,
+                                      op = v.op, no_target = v.no_target,
+                                      letter = v.letter, label = v.label }
+        cx = cx + bsz + gap
+    end
+
+    for _, r in ipairs(btn_rects) do
+        local hot = (flash[r.op] or 0) > 0
+        H.glass(r.x, r.y, r.w, r.h)
+        local top = hot and 0x2f4a6e or 0x223044
+        local bot = hot and 0x132338 or 0x0c121b
+        enb.draw.rrect_grad(r.x, r.y, r.w, r.h, H.RADIUS, top, bot, 230)
+        enb.draw.rrect(r.x, r.y, r.w, r.h, H.RADIUS,
+                       hot and H.LINE_HOT or H.LINE, hot and 220 or 150, false)
+        -- the single letter, centred. The overlay font is ~14px; on a big screen
+        -- the button is larger, so scale the glyph up to fill it.
+        local scale = H.smul(1.5)
+        local lw, lh = H.measure(r.letter)
+        lw, lh = lw * scale, lh * scale
+        H.otext(r.x + (r.w - lw) / 2, r.y + (r.h - lh) / 2, r.letter, H.INK, scale)
+    end
+
+    -- decay every flash one tick so the click glow fades.
+    for id, n in pairs(flash) do
+        flash[id] = (n > 1) and (n - 1) or nil
+    end
+
+    -- total height = last row's bottom - top, then a gap down to the first bar.
+    local rows_bottom = (#btn_rects > 0) and (btn_rects[#btn_rects].y + bsz) or y
+    return (rows_bottom - y) + CFG.BTN_ROW_GAP
+end
+
 local function draw_target()
     local t = enb.target and enb.target()
     if not t then return end
@@ -148,8 +275,12 @@ local function draw_target()
     local bar_h    = CFG.BAR_H + H.sy(6)
     local val_scale = CFG.VAL_SCALE * H.smul(1.5)
 
-    -- two stacked bars at the top: hull over shield, no gap.
+    -- Freya verb buttons across the top, then the bars BELOW them (the row pushes
+    -- the bars down by exactly the space it used; no verbs -> no shift).
     local by = ay + CFG.PAD_TOP
+    by = by + draw_buttons(read_verbs(t), bx, by, bw)
+
+    -- two stacked bars: hull over shield, no gap.
     draw_bar(bx, by, bw, H.HULL, t.hull, t.hull_max, bar_h, val_scale)
     by = by + bar_h + CFG.BAR_GAP
     draw_bar(bx, by, bw, H.SHIELD, t.shield, t.shield_max, bar_h, val_scale)
@@ -181,3 +312,40 @@ enb.on_tick(function()
     if not show then return end
     draw_target()
 end)
+
+-- ===========================================================================
+-- INPUT  -- click a verb button to fire that verb. enb.target_action(op[, no_target])
+-- builds the target-action command and pushes it through the world manager's sector-
+-- server Connection -- byte-for-byte the wire action the native target-action button
+-- click performs. A click landing on a button is swallowed so it never falls through to
+-- the 3D scene behind it. btn_rects is rebuilt every draw; the geometry the hit-test
+-- reads is whatever was last drawn, so draw and input stay in lockstep. (true = swallow.)
+-- ===========================================================================
+local function mouse_xy(lp)
+    local x = lp & 0xFFFF
+    local y = (lp >> 16) & 0xFFFF
+    if x >= 0x8000 then x = x - 0x10000 end
+    if y >= 0x8000 then y = y - 0x10000 end
+    return x, y
+end
+
+enb.on_input(function(msg, wparam, lparam)
+    local M = enb.msg
+    if not H.vis() then return false end
+    if msg ~= M.LBUTTONDOWN and msg ~= M.LBUTTONUP and msg ~= M.LBUTTONDBLCLK then
+        return false
+    end
+    local mx, my = mouse_xy(lparam)
+    for _, r in ipairs(btn_rects) do
+        if point_in(mx, my, r.x, r.y, r.w, r.h) then
+            if msg == M.LBUTTONDOWN and enb.target_action then
+                enb.target_action(r.op, r.no_target)
+                flash[r.op] = CFG.FLASH_TICKS
+            end
+            return true   -- swallow any button event over a verb button
+        end
+    end
+    return false
+end, enb.WANT_MOUSE)
+
+enb.log("target_frame.lua loaded")

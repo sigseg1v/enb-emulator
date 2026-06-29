@@ -502,6 +502,18 @@ static int l_target(lua_State* L) {
             lua_setfield(L, -2, "name");
         }
     }
+    // class: the generic CLASS name (char* at container+0x3c, e.g. "Ship"/"Starbase"/
+    // "Stargate"/"Asteroid"). The mod gates which verb letter-buttons to show on this.
+    if (container) {
+        uintptr_t clsp = mem::ptr(container + 0x3c);
+        if (clsp && mem::readable((void*)clsp, 1)) {
+            std::string cls = mem::cstr(clsp);
+            if (!cls.empty()) {
+                lua_pushlstring(L, cls.data(), cls.size());
+                lua_setfield(L, -2, "class");
+            }
+        }
+    }
     double d;
     if (container && aux_read_f(container, "HullPoints", d)) {
         lua_pushnumber(L, d);
@@ -965,6 +977,63 @@ static bool world_pos(uintptr_t obj, double out[3]) {
 // (hooks::target_ctrl()), 0 until the target-frame refresh has run.
 static int l_target_ctrl(lua_State* L) {
     lua_pushinteger(L, (lua_Integer)hooks::target_ctrl());
+    return 1;
+}
+
+// enb.worldmgr() -> int. The world/player manager M, captured (ECX) by the world-
+// manager initializer hook (hooks::world_mgr()). 0 until you have zoned into space this
+// session. M carries the local player game id at M + world::player_id and the live
+// sector-server Connection at M + world::connection -- the two things enb.target_action
+// needs to build and push a target-action command. Diagnostic + the dispatch root.
+static int l_worldmgr(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)hooks::world_mgr());
+    return 1;
+}
+
+// enb.target_action(op[, no_target]) -> bool. Perform a target-action verb on the
+// current target by replaying the client's own command path: build a command object
+// (game::addr::CmdBuild, or AutoFollowBuild when no_target is set -- the follow verb
+// carries no target field) with the local player as actor and the current target's game
+// id, then push it through M's sector-server Connection (game::addr::CmdSend). This is
+// byte-for-byte the sequence the native target-action button / group-verb handler runs.
+//   op       = the per-verb action byte (0x0a Attack, 0x14 Trade, 0x12 Board,
+//              0x19 Loot, 0x1d Dock, 0x0c Follow, ...).
+//   no_target= true for the follow/auto-follow verb (uses AutoFollowBuild, no target).
+// Returns false (no send) when M is not captured yet, or -- for a targeted verb -- when
+// nothing is targeted / the target's game id is unreadable. MUST be called on the game
+// thread (it is -- callers run from on_input). The command buffer is a static zeroed
+// 0x20 bytes (the builders only write buf[0..6]); single writer (game thread).
+static unsigned char g_cmd_obj[0x20];
+static int l_target_action(lua_State* L) {
+    int op = (int)luaL_checkinteger(L, 1);
+    bool no_target = lua_toboolean(L, 2) != 0;
+    uintptr_t m = hooks::world_mgr();
+    if (!m || !mem::readable((void*)(m + game::world::player_id), 4)) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    uint32_t player = mem::u32(m + game::world::player_id);
+    std::memset(g_cmd_obj, 0, sizeof(g_cmd_obj));
+    if (no_target) {
+        // Follow/auto-follow: build(player, op) -- no target field on the wire.
+        uint32_t b[2] = {player, (uint32_t)op};
+        actions::call_thiscall(game::addr::AutoFollowBuild, (unsigned)(uintptr_t)g_cmd_obj, b, 2);
+    } else {
+        uintptr_t tgt = hooks::target_obj();
+        uintptr_t cont = (tgt && mem::readable((void*)(tgt + game::world::tgt_container), 4))
+                             ? mem::ptr(tgt + game::world::tgt_container)
+                             : 0;
+        if (!cont || !mem::readable((void*)(cont + game::world::tgt_gid), 4)) {
+            lua_pushboolean(L, 0);
+            return 1;
+        }
+        uint32_t target = mem::u32(cont + game::world::tgt_gid);
+        uint32_t b[4] = {player, (uint32_t)op, target, 0};
+        actions::call_thiscall(game::addr::CmdBuild, (unsigned)(uintptr_t)g_cmd_obj, b, 4);
+    }
+    uint32_t snd[1] = {(uint32_t)(uintptr_t)g_cmd_obj};
+    actions::call_thiscall(game::addr::CmdSend, m, snd, 1);
+    lua_pushboolean(L, 1);
     return 1;
 }
 
@@ -1682,6 +1751,9 @@ static void push_addr_table(lua_State* L) {
     A(RpgLevels);
     A(TargetInfo);
     A(TargetPanel);
+    A(CmdBuild);
+    A(AutoFollowBuild);
+    A(CmdSend);
     A(ChatGadget);
     A(ChatRender);
     A(ChatChannel);
@@ -1728,6 +1800,8 @@ void open(lua_State* L) {
                                    {"target", l_target},
                                    {"target_obj", l_target_obj},
                                    {"target_ctrl", l_target_ctrl},
+                                   {"worldmgr", l_worldmgr},
+                                   {"target_action", l_target_action},
                                    {"aux_entry", l_aux_entry},
                                    {"state", l_state},
                                    {"cursor", l_cursor},

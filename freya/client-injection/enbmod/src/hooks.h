@@ -92,6 +92,14 @@ unsigned xp_ctrl();
 unsigned target_obj();
 unsigned target_ctrl();
 
+// world_mgr() is the world/player manager M, captured (ECX) from the world-manager
+// initializer (game::addr::WorldMgrInit), which runs once at world entry. M is a
+// session-stable singleton; lua_api uses it for target-action dispatch -- the local
+// player game id at M + game::world::player_id and the sector-server Connection at
+// M + game::world::connection. 0 until the world manager has been initialized this
+// session (i.e. once you are in space).
+unsigned world_mgr();
+
 // ECX (this) of the in-space action-bar controller that owns the numbered
 // ability/weapon slots (primary + alternate). Captured from the bank constructor
 // the moment a bank exists (entering space) and refreshed on every slot dispatch,
