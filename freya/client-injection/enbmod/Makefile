@@ -51,7 +51,8 @@ DLL_LDFLAGS  := -shared -static -static-libgcc -static-libstdc++ \
                -Wl,--kill-at -Wl,--enable-stdcall-fixup
 # d3d8 is loaded at runtime (GetModuleHandle/GetProcAddress in overlay.cpp), not linked.
 # gdi32: font-atlas bake (CreateDIBSection/TextOutA).
-DLL_LIBS := $(LUA_LIB) $(MH_LIB) -lkernel32 -luser32 -lgdi32 -lole32 -loleaut32 -lpsapi
+# ws2_32: netredirect.cpp hooks connect() for per-instance loopback (local multibox).
+DLL_LIBS := $(LUA_LIB) $(MH_LIB) -lkernel32 -luser32 -lgdi32 -lole32 -loleaut32 -lpsapi -lws2_32
 
 # ---- inject.exe -------------------------------------------------------------
 INJ     := $(BUILD)/inject.exe

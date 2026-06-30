@@ -8,6 +8,7 @@
 #include "mem.h"
 #include "overlay.h"
 #include "autologin.h"
+#include "netredirect.h"
 
 extern "C" {
 #include "lua.h"
@@ -180,6 +181,11 @@ DWORD WINAPI worker(LPVOID) {
     // character is requested, installs the read-only LoginTask capture hook
     // (MinHook is up by now). No-op for an ordinary launch.
     enb::autologin::init();
+
+    // local multibox: when FREYA_GAME_HOST names a per-instance loopback IP,
+    // hook ws2_32 connect() so this client's fixed 127.0.0.1 game dials reach its
+    // OWN proxy. No-op for an ordinary launch (env unset or 127.0.0.1).
+    enb::netredirect::init();
 
     enb::logf("enbmod ready");
     return 0;

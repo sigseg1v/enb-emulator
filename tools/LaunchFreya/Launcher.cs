@@ -87,10 +87,31 @@ namespace LaunchFreya
         // its own loopback IP. Null until a proxy-spawning launch resolves it.
         MultiboxSlot _slot;
 
+        // Local docker-proxy multibox (play-multibox-local): when set via the
+        // FREYA_GAME_HOST env, this is the loopback IP (127.0.0.N) of THIS
+        // instance's own IN-DOCKER proxy. The client dials it and the position
+        // feed targets it, but no NATIVE proxy is spawned (the proxy is a docker
+        // container -- keeping the proxy<->server leg inside docker, which the
+        // native-proxy path can't do without breaking the server's multi-port
+        // UDP handshake through docker NAT). Null for every other launch path.
+        string _externalProxyHost;
+
         public Launcher(LaunchSetting setting, Action<string> warn = null)
         {
             _setting = setting ?? throw new ArgumentNullException(nameof(setting));
             _warn = warn ?? (_ => { });
+
+            // Per-instance client path (local multibox): when each window runs in its
+            // own WINE prefix (~/.wine-enb-mboxN), the recipe points it at that
+            // prefix's client.exe via FREYA_CLIENT_PATH. Overriding ClientPath here
+            // re-derives BaseFolder, so every per-instance path the launcher patches
+            // -- network.ini, auth.ini, regdata, authlogin.dll, the staged DLLs --
+            // lands in that instance's own prefix, giving each client its own
+            // master-server address (the single shared-prefix network.ini cannot).
+            // The settings ClientPath stays the single-client default.
+            var cp = Environment.GetEnvironmentVariable("FREYA_CLIENT_PATH");
+            if (!string.IsNullOrWhiteSpace(cp))
+                _setting.ClientPath = cp.Trim();
         }
 
         // Kill a previously-spawned proxy (if any) and forget it. Safe to call
@@ -151,12 +172,27 @@ namespace LaunchFreya
                 _slot = spawnsLocalProxy ? MultiboxSlot.Resolve(_warn) : null;
                 string loopbackIp = _slot?.LoopbackIp ?? "127.0.0.1";
 
+                // Local docker-proxy multibox: no native proxy is spawned, but
+                // each instance points at its OWN per-unit docker proxy published
+                // on a distinct loopback IP (127.0.0.N) via FREYA_GAME_HOST. Only
+                // meaningful on the no-native-proxy (Net7Local) path.
+                _externalProxyHost = null;
+                if (!spawnsLocalProxy)
+                {
+                    var h = Environment.GetEnvironmentVariable("FREYA_GAME_HOST");
+                    if (!string.IsNullOrWhiteSpace(h))
+                        _externalProxyHost = h.Trim();
+                }
+
                 // Where the CLIENT dials for the game's master server. With a
                 // local proxy that is this instance's loopback IP (the proxy
                 // listens there and bridges to the real server); the proxy then
                 // stamps its own loopback IP into every sector ServerRedirect, so
-                // the rest of the session stays on 127.0.0.N too.
-                string gameHost = spawnsLocalProxy ? loopbackIp : _setting.Hostname;
+                // the rest of the session stays on 127.0.0.N too. With a docker
+                // proxy (FREYA_GAME_HOST) the client dials that proxy's loopback
+                // IP directly. Otherwise the docker dev stack's Hostname.
+                string gameHost = spawnsLocalProxy ? loopbackIp
+                                : (_externalProxyHost ?? _setting.Hostname);
 
                 PatchAuthLoginFile();
                 PatchRegDataFileNames();
@@ -250,6 +286,15 @@ namespace LaunchFreya
             {
                 Environment.SetEnvironmentVariable("FREYA_MULTIBOX", "1");
                 Environment.SetEnvironmentVariable("FREYA_POS_FEED_ADDRESS", _slot.LoopbackIp);
+            }
+            else if (_externalProxyHost != null)
+            {
+                // Docker-proxy multibox: arm the mutex bypass so a 2nd+ client
+                // sharing this WINE prefix gets past the single-instance guard,
+                // and point the position feed at THIS instance's docker proxy
+                // (127.0.0.N:3807).
+                Environment.SetEnvironmentVariable("FREYA_MULTIBOX", "1");
+                Environment.SetEnvironmentVariable("FREYA_POS_FEED_ADDRESS", _externalProxyHost);
             }
             else
             {

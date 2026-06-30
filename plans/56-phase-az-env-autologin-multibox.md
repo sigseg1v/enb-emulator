@@ -110,14 +110,41 @@ Still open in Half 1:
     xdotool, no per-window typing). Windows without per-slot creds fall back to manual
     entry. This is the "make scripting multibox easy" payoff: N windows, N accounts,
     zero manual input.
-  - What is genuinely still open (an OWNER choice, not code): `play-online` targets
-    the cloud host by default and tears down the local docker stack, so a full
-    end-to-end run needs either (a) two CLOUD accounts on the deployment's DB, or (b)
-    a local variant that downs ONLY the docker proxy (keeping server+login+postgres
-    up) and points `Net7MP` upstream at `127.0.0.1` with the local DTLS cert -- a new
-    recipe/mode, implementable but with its own DTLS-against-local-server + UDP-port-
-    reachability test surface. `devuser2`/`devpass2` (5 chars) is seeded LOCALLY as
-    the prerequisite for (b). Flag for the owner to pick (a) or (b).
+  - Owner picked **(b) local-proxy-only mode**: keep server+login+postgres up, run
+    the clients against the LOCAL docker server. `devuser2`/`devpass2` (5 chars) is
+    seeded LOCALLY as the prerequisite.
+
+#### (b) FINDING (2026-06-30): native WINE proxies do NOT work against the local docker server -- pivot to in-docker per-unit proxies
+
+The first cut of (b) spawned N **native** `FreyaProxy.exe` (the `Net7MP` per-slot
+path) dialing the host-published docker server ports. **This is NAT-broken and
+fails for even a SINGLE client**, not just multibox:
+
+- The server logs the proxy's address as `IP:172.23.0.1` (the docker bridge
+  gateway). A native proxy runs OUTSIDE docker, so its UDP reaches the server
+  through docker's published-port DNAT and is MASQUERADE'd to the gateway. The
+  server's **pushed** replies on its multi-port UDP scheme (sector `Ack request`
+  on 3501, global ticket on 3810) do not reverse back to the proxy's flow.
+- Observed: the proxy reaches `SectorServer LOGIN -- connection active`, then the
+  server emits `Re-send Ack request 3 for <char>` x5 and `---!!> Player <char>
+  timed out during login stage 3`. The proxy log shows
+  `UDPClient(Linux,global): SendTicket timed out / errored`. Reproduced with
+  COUNT=1 (devusertt, sector 4025) and COUNT=2.
+- `play-local` / `play-cli` never hit this because their proxy runs IN docker (own
+  container IP on the stack network) -- the proxy<->server leg never crosses NAT.
+
+**Corrected design (in progress):** one **in-docker** proxy per client
+(`docker-compose.mbox.yml`, mirrors the per-unit `docker-compose.cli.yml` proxy),
+each publishing its client-facing TCP (3801/3805/3500) + posfeed UDP (3807) on a
+distinct host loopback IP `127.0.0.N`. Each WINE client launches in the
+`Net7Local` no-native-proxy path with a new `FREYA_GAME_HOST=127.0.0.N` override
+(points the client dial + the position feed at its own docker proxy) and
+`FREYA_MULTIBOX=1` for the mutex bypass. The default docker proxy is taken down
+first (its `0.0.0.0:3500/3801/3805` bind would shadow the per-unit `127.0.0.N`
+binds). Auth stays the single shared `LocalAuthRelay` on `127.0.0.1:4180`
+(authlogin.dll always dials it; the relay TLS-fans to freya-online). This removes
+the NAT variable entirely and reuses the proven play-local client<->docker-proxy
+path, scaled to N loopback IPs.
 
 ## Half 2 -- env-driven in-client auto-login (NEW)
 
@@ -233,12 +260,60 @@ pattern.
   license dialog accepted -> credentials submitted -> entering world -> server "fully
   logged in" + MVAS synced. No new packet shape emitted (calls existing client code
   paths only), so no CV gate.
-- [~] Multibox: the `play-online N` loop now wires per-slot auto-login --
-  `ENB_ACC_1=.. ENB_PASS_1=.. ENB_CHAR_1=.. ENB_ACC_2=.. .. just play-online 2`
-  launches each window hands-free into its own account. Wiring DONE + parse-verified;
-  full live two-window run is the remaining owner-gated step (which server to target;
-  see Half-1 "Multibox" note for the (a) cloud-accounts / (b) local-proxy-only-mode
-  choice). `devuser2`/`devpass2` seeded locally as the prerequisite for (b). (Task #6.)
+- [x] Multibox: owner chose **(b) local-proxy-only mode** -- keep the docker
+  server/login/postgres up, take the shared docker proxy DOWN, give each WINE client
+  its own in-docker proxy bridged to the local server, with per-window env auto-login.
+  `just play-multibox-local COUNT` drives this. **DONE + LIVE-VERIFIED (2026-06-30):
+  COUNT=2 fully works end to end** -- both clients auto-login with separate accounts
+  (devuser/devusertt + devuser2/devuser2tt) and each reaches its OWN proxy on all four
+  game planes, with the server reporting NO IP mismatch. (Task #6 / #13.)
+
+  **Transport blocker -- SOLVED (socat facade).** The client dials FIXED ports baked
+  into client.exe (3500 sector / 3801 master / 3805 global TCP, 3807 posfeed UDP), so
+  N proxies need N distinct `<ip>:3500` endpoints. Distinct loopback IPs
+  (127.0.0.1, 127.0.0.2, ...) is the obvious split, BUT rootless docker
+  (rootlesskit, builtin port driver) collapses all 127.0.0.0/8 to 127.0.0.1 in its
+  port-conflict allocator -- a 2nd unit publishing :3500 on 127.0.0.2 fails "Bind for
+  127.0.0.1:3500 already allocated". Fix: each proxy publishes on a UNIQUE 127.0.0.1
+  host port; the recipe runs a host-side `socat` per unit binding the FIXED
+  127.0.0.N:{3500,3801,3805,3807} the client wants and forwarding to that unit's
+  unique port. socat is a plain host process so the kernel lets it bind distinct
+  loopback IPs rootless docker refuses. No sudo, no client patch. (compose +
+  justfile, this session.) Verified: 127.0.0.1:3500 and 127.0.0.2:3500 both bound
+  simultaneously; devusertt fully logs in via the facade.
+
+  **COUNT>=2 master/sector blocker -- the client HARDCODES 127.0.0.1, fixed by a
+  connect() hook (netredirect).** The first theory (per-instance `network.ini` would
+  hold a per-instance master address) was WRONG. The client honours the master/sector
+  host from NO config knob at all: `ss -tnp` showed both clients dial `127.0.0.1` for
+  master (3801) AND sector (3500) regardless of (a) `Data/common/network.ini`
+  `[MasterServer]`, (b) `Data/client/ini/network.ini` (which resolves to a public IP,
+  not loopback -- also ignored), and (c) the per-process `-SERVER_ADDR` arg (honoured
+  ONLY for the auth/global 3805 plane). The master+sector host is effectively baked to
+  `127.0.0.1` in client.exe. So on one host every concurrent client funnels its
+  master+sector to one `127.0.0.1:{3801,3500}`, the second client's handoff arrives
+  from the WRONG proxy, and the server's anti-hijack IP-match check
+  (`UDP_Connection::ProcessClientOpcode`, correct, MUST NOT be weakened) rejected it --
+  observed `Player IP mismatch [devuser2tt]: 60017ac 70017ac`.
+  - **Fix (mechanism-independent): a ws2_32 `connect()` hook in the injected DLL**
+    (`freya/client-injection/enbmod/src/netredirect.{h,cpp}`, MIT). It reads
+    `FREYA_GAME_HOST=127.0.0.N` and rewrites any dial to `127.0.0.1` on the four fixed
+    game ports (3500/3801/3805/3807) to `127.0.0.N`, so EVERY plane of client-N reaches
+    its OWN proxy. No-op for instance 1 (`127.0.0.1`) and for non-game ports (the shared
+    `127.0.0.1:4180` auth relay is untouched). Since we already inject the DLL this is
+    the lightest tool: no network namespaces, no root, no server/proxy change, and it
+    works no matter where the client computes the address. The per-instance WINE prefix
+    (`~/.wine-enb-mboxN`, via the launcher's `FREYA_CLIENT_PATH` override) is still
+    used, but ONLY to give each client its own `enbmod.cmd`/`.log`/registry/DLL copy --
+    NOT to fix master/sector (no config knob can).
+  - **LIVE VERIFY (2026-06-30, COUNT=2):** `ss -tnp` shows client 1 master+sector ->
+    `127.0.0.1`, client 2 master+sector -> `127.0.0.2`; client 2 logs
+    `netredirect: loopback game ports (3500/3801/3805/3807) -> 127.0.0.2`; both proxies
+    reach `SectorServer LOGIN -- connection active` with distinct avatars/sectors
+    (0x40000013 sector 4025 via mbox1; 0x40000018 sector 10201 via mbox2); both clients
+    `enb.self()==table` in-world; server log has ZERO `Player IP mismatch`. The
+    anti-hijack check passes LEGITIMATELY (each client's planes all share one proxy
+    container IP) -- it was never weakened.
 
 ## Notes / decisions
 - No screen coords by design (owner: "make not rely on screen coords"). The
