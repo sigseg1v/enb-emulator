@@ -306,10 +306,11 @@ constexpr int aux_container = 0x88; // *(dataObj + 0x88) -> aux container (threa
 // properties/aux bag (hull/shield/name) hangs off +tgt_container. The native verb
 // dispatcher sends the +tgt_gid GameID directly; it is NOT a field of the aux bag.
 namespace world {
-constexpr int player_id = 0x112c;   // M -> local player game id (command actor)
-constexpr int connection = 0x1124;  // M -> sector-server Connection (command sink)
-constexpr int tgt_container = 0x88;  // target contact object -> properties/aux bag (hull/shield/name)
-constexpr int tgt_gid = 0x90;        // target contact object + 0x90 -> its own GameID (command target)
+constexpr int player_id = 0x112c;  // M -> local player game id (command actor)
+constexpr int connection = 0x1124; // M -> sector-server Connection (command sink)
+constexpr int tgt_container =
+    0x88;                     // target contact object -> properties/aux bag (hull/shield/name)
+constexpr int tgt_gid = 0x90; // target contact object + 0x90 -> its own GameID (command target)
 } // namespace world
 
 // Target/player WORLD position, for the straight-line range shown on the frame. The

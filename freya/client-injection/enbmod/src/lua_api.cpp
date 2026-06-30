@@ -1050,7 +1050,7 @@ static int l_target_action(lua_State* L) {
     }
     uint32_t target;
     if (std::strcmp(mode, "self") == 0) {
-        target = player;   // the command target is the player's own game id
+        target = player; // the command target is the player's own game id
     } else {
         // The target's GameID sits directly on the captured contact object at
         // +tgt_gid (the object stores its own GameID there -- the same field the
