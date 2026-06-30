@@ -114,8 +114,8 @@ static BOOL WINAPI hk_GetMessageA(LPMSG m, HWND h, UINT min, UINT max) {
 
 // ---- chat send-line interception (__thiscall) -------------------------------
 // game::addr::ChatSend is a C++ member function, NOT cdecl: `this` in ECX, the
-// raw typed chat line as the one stack arg, callee-cleaned (`ret 4`, verified by
-// disassembly -- the prologue does `mov %ecx,%ebx` and the function ends in
+// raw typed chat line as the one stack arg, callee-cleaned (`ret 4`, verified at
+// the call boundary -- the prologue does `mov %ecx,%ebx` and the function ends in
 // `c2 04 00`). A plain `__cdecl` detour is WRONG twice over: it ends in `ret 0`,
 // leaking 4 stack bytes on every chat send until ESP climbs into a bad return
 // slot and the client jumps onto its own stack (the "/run" crash); and on the

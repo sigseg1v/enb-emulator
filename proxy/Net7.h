@@ -192,12 +192,20 @@ extern long g_AddrStore;
 
 // Client-facing bind address for the TCP listeners and the in-client position
 // feed intake (network byte order). Defaults to INADDR_ANY (0). Set from the
-// FREYA_PROXY_BIND_ADDRESS env var so a multi-box launch can pin EACH proxy to
-// its own loopback IP (127.0.0.N) -- otherwise N proxies collide on the shared
-// client-facing ports (3500/3801/3805/3807). The docker proxy never sets the
-// env (it must keep INADDR_ANY so published ports reach its bridge IP), so this
-// is opt-in and leaves the single-client + docker paths unchanged.
+// FREYA_PROXY_BIND_ADDRESS env var so a native launcher run can keep the proxy's
+// client-facing ports on loopback (127.0.0.1), off the external interfaces;
+// co-located multi-box proxies separate by PORT (FREYA_PROXY_PORT_BASE), not IP.
+// The docker proxy never sets the env (it must keep INADDR_ANY so published
+// ports reach its bridge IP), so the single-client + docker paths are unchanged.
 extern unsigned long g_proxy_bind_addr;
+
+// Per-instance client-facing port-block base (native multi-box; 0 = stock
+// ports). Set from FREYA_PROXY_PORT_BASE. proxy_client_port() maps a stock
+// client-facing port (3500/3801/3805) to its slot in the block; the posfeed UDP
+// intake (base+3) is remapped at its own bind site. Co-located proxies share one
+// loopback IP and differ only by port. Single-client + docker leave this 0.
+extern unsigned short g_proxy_port_base;
+unsigned short proxy_client_port(unsigned short stock);
 
 void LockMessageQueue();
 void UnlockMessageQueue();

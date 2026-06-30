@@ -50,7 +50,7 @@ for i, k in ipairs(KEYS) do VK_TO_IDX[k.vk] = i end
 -- three slots, bank1 the next three -- six slots total, our keys 1-6. Each bank
 -- holds its three box pointers at +0x10/+0x14/+0x18.
 --
--- The dispatcher FUN_006120e0(controller, id) is PRESS/RELEASE-keyed, not
+-- The dispatcher 0x006120e0(controller, id) is PRESS/RELEASE-keyed, not
 -- primary/alternate. A bank exposes a press-id base (+0x50) and a release-id
 -- base (+0x54); box k (k in 0..2) has press id (v50+k) and release id (v54+k):
 --   * press  (id in [v50, v50+3)) fires the action ONLY when the box is idle
@@ -62,7 +62,7 @@ for i, k in ipairs(KEYS) do VK_TO_IDX[k.vk] = i end
 -- and a second activation must use the RELEASE id to turn it off. So replaying a
 -- keypress means: read the box's live +0x6c and pick press-or-release exactly as
 -- the native keybind handler does. Calling a press id on an already-active box
--- (or a release id on an idle box) hits neither branch and FUN_006120e0 returns
+-- (or a release id on an idle box) hits neither branch and 0x006120e0 returns
 -- 0 -- a silent no-op. That mis-pick (computing an id outside both ranges) is why
 -- the previous mapping never actually dispatched. The id+box layout here is read
 -- live from the controller and verified against the running client.
@@ -107,7 +107,7 @@ local function slot_bank_box(i)
     return bank, box, k
 end
 
--- The native keybind drives slot i (1..6) through the dispatcher FUN_006120e0 with
+-- The native keybind drives slot i (1..6) through the dispatcher 0x006120e0 with
 -- a PRESS id on key-down and a RELEASE id on key-up: the ability fires on the
 -- press, and the release just resets the box's pressed flag (+0x6c) back to 0. The
 -- dispatcher gates each branch on that byte (press acts only when byte==0 then sets

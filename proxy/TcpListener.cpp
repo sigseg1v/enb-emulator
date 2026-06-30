@@ -57,9 +57,11 @@ void TcpListener::RunThread() {
     memset(&name, 0, sizeof(name));
     name.sin_family = AF_INET;
     //name.sin_addr.s_addr = m_IpAddress;
-    // INADDR_ANY by default; a multi-box launch pins each proxy to its own
-    // loopback IP (127.0.0.N) via g_proxy_bind_addr so N proxies don't collide
-    // on the shared client-facing ports. The docker proxy leaves it INADDR_ANY.
+    // INADDR_ANY by default; a native launcher run pins this to loopback
+    // (127.0.0.1) via g_proxy_bind_addr, keeping the client-facing ports off the
+    // external interfaces. Co-located multi-box proxies don't collide because
+    // they listen on different PORTS (m_TcpPort is offset by the port-block base),
+    // not different IPs. The docker proxy leaves it INADDR_ANY.
     name.sin_addr.s_addr = g_proxy_bind_addr;
     name.sin_port = htons(m_TcpPort);
 

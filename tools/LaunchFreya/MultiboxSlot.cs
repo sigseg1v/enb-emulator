@@ -5,105 +5,133 @@ using System.Net.Sockets;
 namespace LaunchFreya
 {
     // Per-launcher instance slot for multi-box (running more than one client at
-    // once on the same machine). Each instance gets its own loopback IP --
-    // 127.0.0.1 for slot 0, 127.0.0.2 for slot 1, ... -- so the N co-located
-    // proxies don't collide on the shared client-facing ports (the EnB client
-    // dials FIXED ports compiled into client.exe -- 3500/3801/3805 -- so the
-    // only way to run N proxies on one box is to give each its own IP, never its
-    // own port). The whole 127.0.0.0/8 block is loopback on Linux/WINE, so every
-    // 127.0.0.N is reachable with no interface setup.
+    // once on the same machine), expressed as a contiguous PORT BLOCK on
+    // 127.0.0.1 -- NOT a distinct loopback IP. The EnB client dials FIXED ports
+    // compiled into client.exe (sector 3500, master 3801, global 3805, posfeed
+    // 3807), so co-located proxies cannot simply "use a different port" on their
+    // own; the in-client connect() hook (enbmod netredirect) remaps those fixed
+    // dials onto this block, and the proxy listens on the matching slots:
+    //   base+0 sector, base+1 master, base+2 global, base+3 posfeed (UDP).
+    // Same IP for everyone, different ports per instance -- which is portable to
+    // native Windows (no 127.0.0.N alias juggling) and to rootless docker (which
+    // collapses 127.0.0.0/8 to 127.0.0.1 in its port allocator anyway).
     //
-    // Slot 0 is the ordinary single-client launch: loopback 127.0.0.1, multi-box
-    // OFF, so the client's single-instance guard, the proxy's INADDR_ANY bind,
-    // and the position feed's loopback target are all left exactly as they were.
-    // Only slot >= 1 turns multi-box on (the CreateMutexA bypass, the proxy's
-    // per-instance bind, the per-instance position-feed target).
+    // The DEFAULT block base is 3500: when the stock ports are free this is the
+    // first instance, multi-box is OFF, and the connect hook / proxy port offset
+    // are both no-ops -- byte-identical to a non-multibox launch. Only when the
+    // stock ports are taken does Resolve() autodetect the next free block, which
+    // is exactly "press Play again and land on a fresh instance" with no manual
+    // port juggling and no slot file.
     //
     // The auth relay is NOT per-slot: it terminates the client's plaintext auth
-    // on 127.0.0.1:4180 and re-wraps it as TLS to the (one, shared) upstream
-    // login server, and it already handles concurrent connections -- so a single
-    // relay owned by whichever launcher started first serves every instance. The
-    // client-side auth config (auth.ini AAIUrl=localhost, the patched
-    // authlogin.dll port) stays loopback for all slots and needs no per-instance
-    // value, which is why the relay can be shared.
+    // on 127.0.0.1:4180 and re-wraps it to the (one, shared) upstream login
+    // server, and it already handles concurrent connections -- so a single relay
+    // owned by whichever launcher started first serves every instance. Port 4180
+    // is outside the remapped block, so the connect hook leaves it untouched.
     public sealed class MultiboxSlot
     {
-        // The client-facing TCP port the proxy listens on (PROXY_LOCAL_TCP_PORT
-        // in common/include/net7/Ports.h). We probe a candidate loopback IP by
-        // trying to bind it: in use -> that slot already has a proxy, try the
-        // next IP.
-        const int ProbePort = 3500;
+        // A single instance needs 4 contiguous client-facing ports.
+        const int PortSpan = 4;
 
-        // A sane ceiling on concurrent instances. Far more than anyone runs by
-        // hand, and it bounds the auto-detect scan.
-        const int MaxSlots = 16;
+        // The stock ports the client/proxy use with no remap. When base+0 == 3500
+        // is free, this instance is the first one and runs on the defaults.
+        public const int DefaultBase = 3500;
 
-        public int Index { get; }
-        public string LoopbackIp { get; }
-        public bool Multibox => Index > 0;
+        // Where the autodetect scan looks for a free block once the defaults are
+        // taken. Blocks are spaced PortSpan apart. 100 blocks is far more than
+        // anyone runs by hand and bounds the scan.
+        const int SearchStart = 23500;
+        const int MaxBlocks = 100;
 
-        MultiboxSlot(int index)
-        {
-            Index = index;
-            LoopbackIp = "127.0.0." + (index + 1);
-        }
+        public int PortBase { get; }
+        public bool Multibox => PortBase != DefaultBase;
 
-        // Resolve this launcher's slot. An explicit FREYA_INSTANCE_SLOT env wins
-        // (so a scripted "launch N at once" can pin slots 0..N-1 deterministically
-        // and avoid the spawn race); otherwise auto-detect the lowest free slot by
-        // probing 127.0.0.1, 127.0.0.2, ... for a bindable proxy port. This is
-        // what makes "just launch the launcher again" land on a fresh instance
-        // with no manual port juggling.
+        public int SectorPort => PortBase + 0;
+        public int MasterPort => PortBase + 1;
+        public int GlobalPort => PortBase + 2;
+        public int PosFeedPort => PortBase + 3;
+
+        MultiboxSlot(int portBase) { PortBase = portBase; }
+
+        // Resolve this launcher's port block. An explicit FREYA_GAME_PORT_BASE env
+        // wins (the docker recipe pins it to match its published ports, and a
+        // scripted "launch N at once" can pin deterministic blocks to avoid the
+        // spawn race). Otherwise: use the stock block if it is free (first
+        // instance), else autodetect the lowest free block. This is what makes
+        // "just press Play again" land on a fresh instance.
         public static MultiboxSlot Resolve(Action<string> log = null)
         {
             log ??= _ => { };
 
-            var forced = Environment.GetEnvironmentVariable("FREYA_INSTANCE_SLOT");
+            var forced = Environment.GetEnvironmentVariable("FREYA_GAME_PORT_BASE");
             if (!string.IsNullOrWhiteSpace(forced) &&
-                int.TryParse(forced, out var idx) && idx >= 0 && idx < MaxSlots)
+                int.TryParse(forced, out var fb) && fb > 0 && fb <= 65535 - (PortSpan - 1))
             {
-                var s = new MultiboxSlot(idx);
-                log($"multi-box: using forced slot {idx} ({s.LoopbackIp}, multibox={s.Multibox})");
+                var s = new MultiboxSlot(fb);
+                log($"multi-box: using forced port base {fb} (multibox={s.Multibox})");
                 return s;
             }
 
-            for (int i = 0; i < MaxSlots; i++)
+            if (IsBlockFree(DefaultBase))
             {
-                var ip = "127.0.0." + (i + 1);
-                if (IsProxyPortFree(ip))
+                log($"multi-box: stock ports {DefaultBase} free -- single-client launch");
+                return new MultiboxSlot(DefaultBase);
+            }
+
+            for (int i = 0; i < MaxBlocks; i++)
+            {
+                int b = SearchStart + i * PortSpan;
+                if (b > 65535 - (PortSpan - 1))
+                    break;
+                if (IsBlockFree(b))
                 {
-                    var s = new MultiboxSlot(i);
-                    if (i == 0)
-                        log("multi-box: slot 0 (127.0.0.1) -- single-client launch");
-                    else
-                        log($"multi-box: slots 0..{i - 1} busy; using slot {i} ({ip})");
-                    return s;
+                    log($"multi-box: stock ports busy; using port block {b}..{b + PortSpan - 1}");
+                    return new MultiboxSlot(b);
                 }
             }
 
-            // All slots look busy. Fall back to slot 0 rather than refusing to
-            // launch -- worst case the proxy spawn reports the real bind error.
-            log($"multi-box: all {MaxSlots} slots appear busy; falling back to slot 0");
-            return new MultiboxSlot(0);
+            // Nothing free in the scan window. Fall back to the stock block rather
+            // than refusing to launch -- worst case the proxy spawn reports the
+            // real bind error.
+            log($"multi-box: no free port block in {SearchStart}..; falling back to stock {DefaultBase}");
+            return new MultiboxSlot(DefaultBase);
         }
 
-        static bool IsProxyPortFree(string ip)
+        // A block is free when all 3 TCP ports AND the posfeed UDP port bind on
+        // 127.0.0.1. We probe by binding (and immediately releasing); a busy slot
+        // means another instance already owns that block.
+        static bool IsBlockFree(int b)
+        {
+            for (int k = 0; k < 3; k++)
+                if (!TcpFree(b + k))
+                    return false;
+            return UdpFree(b + 3);
+        }
+
+        static bool TcpFree(int port)
         {
             TcpListener probe = null;
             try
             {
-                probe = new TcpListener(IPAddress.Parse(ip), ProbePort);
+                probe = new TcpListener(IPAddress.Loopback, port);
                 probe.Start();
                 return true;
             }
-            catch (SocketException)
+            catch (SocketException) { return false; }
+            finally { try { probe?.Stop(); } catch { } }
+        }
+
+        static bool UdpFree(int port)
+        {
+            Socket probe = null;
+            try
             {
-                return false; // in use (or this loopback alias isn't bindable)
+                probe = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+                probe.Bind(new IPEndPoint(IPAddress.Loopback, port));
+                return true;
             }
-            finally
-            {
-                try { probe?.Stop(); } catch { }
-            }
+            catch (SocketException) { return false; }
+            finally { try { probe?.Dispose(); } catch { } }
         }
     }
 }

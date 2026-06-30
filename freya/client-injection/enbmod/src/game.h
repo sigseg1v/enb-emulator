@@ -84,14 +84,14 @@ constexpr uintptr_t ChatLocalLine = 0x0074d990; // local chat-window line printe
     // __thiscall(ECX = chat panel, int channel, const char* msg, char flag):
     // channel 0x11=error 0x13=system 0x15=warning 6=usage.
     // The client uses it for its own notices; prefixes COMPUTER/SYSTEM/WARNING then
-    // routes down to ChatLineAppend. (ECX=this confirmed by disasm of its call
+    // routes down to ChatLineAppend. (ECX=this confirmed at its call
     // sites -- the panel comes from a vtable getter, not a global.)
 // Chat line RING-BUFFER append -- the single choke point every displayed chat-panel
-// line passes through. Call graph: ChatLocalLine(0x0074d990) -> FUN_00563760 (chat-log
+// line passes through. Call graph: ChatLocalLine(0x0074d990) -> 0x00563760 (chat-log
 // + add) -> this. System, computer, warning, and network chat (Broadcast/Tell/Guild)
 // all funnel here, because the only path that fills the panel's ring is via
 // ChatLocalLine. __thiscall, ECX = the RING-BUFFER object (== *(chatpanel + 0x13c),
-// confirmed by disasm of FUN_00563760's call site: `mov 0x13c(edi),ecx; call thunk`).
+// confirmed at 0x00563760's call site: `mov 0x13c(edi),ecx; call thunk`).
 // We hook it READ-ONLY to capture that ECX -- the exact capture pattern of the
 // cockpit/xp/rpg hooks -- so the Freya chat window can poll the ring from Lua with no
 // further game calls. Lines land in the ring in call order (== chronological), which
@@ -154,10 +154,10 @@ constexpr uintptr_t CockpitCommands =
 
 // ---- PDA / micro-menu screen dispatcher (bottom-left button band) ----------
 // The micro-menu buttons (Inventory / Character Info / Galaxy Map / Skills / Vault)
-// are driven by the PDA panel controller (Ghidra srcfile "pdain", layout TSI14A).
+// are driven by the PDA panel controller (layout TSI14A).
 // PdaSwitch is the unified "make PDA child screen N active" dispatcher,
 // __thiscall(ECX = the PDA controller, int index): 0=Inventory, 1=Skills,
-// 2=Character Info, 3=Vault, 4=Galaxy Map -- verified from FUN_006956c0's
+// 2=Character Info, 3=Vault, 4=Galaxy Map -- verified from 0x006956c0's
 // child-pointer switch over controller +0x9c..0xa8. PdaCtor is the controller
 // CONSTRUCTOR, __fastcall(ECX = the controller); it builds the child screens and
 // stores the TSI14A screen at controller+0x94. We hook the CTOR read-only to
@@ -171,12 +171,12 @@ constexpr uintptr_t PdaSwitch = 0x00695780;
 // The bottom-left Options button does NOT open a PDA child; it opens the in-game
 // OPTIONS_MAIN screen (layout fa_opt01a.ini). That screen is owned by the screen
 // SHELL controller, which holds the currently-shown screen at +0x104 and a
-// "pending screen id" at +0x108. ShellApply (FUN_00565f80, __fastcall(ECX = the
+// "pending screen id" at +0x108. ShellApply (0x00565f80, __fastcall(ECX = the
 // shell)) is the per-frame "apply the pending screen change" pump: when +0x108
 // is non-zero it tears down the old screen and builds the requested one --
 // id 1 = Options (verified: case 1 constructs the fa_opt01a screen class). It is
 // called every frame by the in-game HUD updater, so hooking it captures the LIVE
-// shell `this` continuously. ShellRequest (FUN_00565f30, __thiscall(ECX = the
+// shell `this` continuously. ShellRequest (0x00565f30, __thiscall(ECX = the
 // shell, int id)) just stores the pending id (+0x108 = id) -- exactly what every
 // native "Options" button does; the next ShellApply frame opens it. We hook
 // ShellApply read-only for the `this`, and drive ShellRequest to open a screen.
@@ -430,9 +430,9 @@ constexpr uintptr_t get_string = 0x00514bd0; // __cdecl(container, keybuf) -> en
 } // namespace rpg
 
 // Chat line RING-BUFFER layout, off the ring object captured at addr::ChatLineAppend
-// (hooks::chat_buf() == FUN_0067d780's ECX). NOT a sorted vector -- it is a fixed-size
-// ring of 0x14-byte slots, indexed (write_count % capacity). Confirmed by reading
-// FUN_0067d780's body:
+// (hooks::chat_buf() == 0x0067d780's ECX). NOT a sorted vector -- it is a fixed-size
+// ring of 0x14-byte slots, indexed (write_count % capacity). Confirmed from
+// 0x0067d780's body:
 //   slot = ring[+0xc] + (ring[+8]++ % ring[+4]) * 0x14
 //   slot+0x00 = uint type/channel   slot+0x08 = char* text   slot+0x0c = uint len
 // To read chronologically: i from max(0, count-capacity) to count-1, slot[(i%cap)].

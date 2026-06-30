@@ -182,9 +182,10 @@ DWORD WINAPI worker(LPVOID) {
     // (MinHook is up by now). No-op for an ordinary launch.
     enb::autologin::init();
 
-    // local multibox: when FREYA_GAME_HOST names a per-instance loopback IP,
-    // hook ws2_32 connect() so this client's fixed 127.0.0.1 game dials reach its
-    // OWN proxy. No-op for an ordinary launch (env unset or 127.0.0.1).
+    // local multibox: when FREYA_GAME_PORT_BASE names a per-instance port block,
+    // hook ws2_32 connect() so this client's fixed 127.0.0.1 game dials are
+    // remapped to its OWN proxy's port block on 127.0.0.1. No-op for an ordinary
+    // launch (env unset or the stock base 3500).
     enb::netredirect::init();
 
     enb::logf("enbmod ready");

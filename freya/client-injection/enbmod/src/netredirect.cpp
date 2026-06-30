@@ -2,15 +2,27 @@
 // Part of the Earth & Beyond emulator preservation project -- Freya (MIT).
 // License: LICENSES/Freya
 //
-// netredirect.cpp -- rewrite the client's fixed-loopback game dials to a
-// per-instance loopback IP, so several local clients each reach their OWN proxy.
+// netredirect.cpp -- remap the client's fixed-loopback game dials to a
+// per-instance PORT block on 127.0.0.1, so several local clients each reach
+// their OWN proxy without giving each a different loopback IP.
 //
 // Why a connect() hook and not config: the client honours -SERVER_ADDR only for
 // the global/auth plane (TCP 3805); the master (3801) and sector (3500) planes
 // always dial 127.0.0.1 no matter what network.ini [MasterServer] or the redirect
 // advertises. The only mechanism-independent fix is to intercept the dial itself.
 // We already inject this DLL, so a ws2_32 connect() detour is the lightest tool:
-// no network namespaces, no root, no server or proxy change.
+// no network namespaces, no root, no distinct loopback aliases (Windows-portable).
+//
+// The four fixed game ports the client dials are non-contiguous (sector 3500,
+// master 3801, global 3805, posfeed 3807). This hook COLLAPSES the three TCP
+// dials into a contiguous 4-port block [base, base+1, base+2] on 127.0.0.1:
+//   3500 (sector) -> base+0
+//   3801 (master) -> base+1
+//   3805 (global) -> base+2
+// The proxy listens on exactly that mapping (FREYA_PROXY_PORT_BASE, or docker
+// publishes the block). The posfeed plane (UDP 3807) is sendto-based, not a
+// connect(), so it is NOT remapped here -- ClientPositionFeed handles it via
+// FREYA_POS_FEED_PORT (= base+3).
 
 #include "netredirect.h"
 #include "log.h"
@@ -31,26 +43,33 @@ namespace {
 using connect_fn = int(WSAAPI*)(SOCKET, const struct sockaddr*, int);
 connect_fn real_connect = nullptr;
 
-// Network-order replacement loopback address (e.g. 127.0.0.2). 0 = inactive.
-unsigned long g_target = 0;
+// Per-instance contiguous port block base on 127.0.0.1. 0 = inactive.
+uint16_t g_port_base = 0;
 
-// The fixed ports client.exe dials on loopback; net_port is network byte order.
-bool is_game_port(uint16_t net_port) {
-    uint16_t p = ntohs(net_port);
-    return p == 3500 || p == 3801 || p == 3805 || p == 3807;
+// Map one of the client's fixed TCP game ports to its slot in the per-instance
+// block. Returns 0 for a port we do not remap (caller passes it through).
+uint16_t remap_port(uint16_t host_port) {
+    switch (host_port) {
+        case 3500: return (uint16_t)(g_port_base + 0); // sector
+        case 3801: return (uint16_t)(g_port_base + 1); // master
+        case 3805: return (uint16_t)(g_port_base + 2); // global / auth
+        default:   return 0;
+    }
 }
 
 int WSAAPI hk_connect(SOCKET s, const struct sockaddr* name, int namelen) {
     if (name && namelen >= (int)sizeof(sockaddr_in) && name->sa_family == AF_INET) {
         const sockaddr_in* in = reinterpret_cast<const sockaddr_in*>(name);
-        // Only a 127.0.0.1 dial on one of the four fixed game ports is rewritten.
-        // The shared LocalAuthRelay (127.0.0.1:4180) and everything else are left
-        // untouched, and a dial already aimed at .N (the global plane via
-        // -SERVER_ADDR) does not match 127.0.0.1 so it passes straight through.
-        if (in->sin_addr.s_addr == htonl(INADDR_LOOPBACK) && is_game_port(in->sin_port)) {
-            sockaddr_in copy = *in;
-            copy.sin_addr.s_addr = g_target;
-            return real_connect(s, reinterpret_cast<const sockaddr*>(&copy), namelen);
+        // Only a 127.0.0.1 dial on one of the three fixed TCP game ports is
+        // remapped. The shared LocalAuthRelay (127.0.0.1:4180) and everything
+        // else are left untouched.
+        if (in->sin_addr.s_addr == htonl(INADDR_LOOPBACK)) {
+            uint16_t dst = remap_port(ntohs(in->sin_port));
+            if (dst != 0) {
+                sockaddr_in copy = *in;
+                copy.sin_port = htons(dst);
+                return real_connect(s, reinterpret_cast<const sockaddr*>(&copy), namelen);
+            }
         }
     }
     return real_connect(s, name, namelen);
@@ -60,37 +79,40 @@ int WSAAPI hk_connect(SOCKET s, const struct sockaddr* name, int namelen) {
 
 void init() {
     char buf[64];
-    DWORD n = GetEnvironmentVariableA("FREYA_GAME_HOST", buf, sizeof buf);
+    DWORD n = GetEnvironmentVariableA("FREYA_GAME_PORT_BASE", buf, sizeof buf);
     if (n == 0 || n >= sizeof buf)
-        n = GetEnvironmentVariableA("ENB_GAME_HOST", buf, sizeof buf);
+        n = GetEnvironmentVariableA("ENB_GAME_PORT_BASE", buf, sizeof buf);
     if (n == 0 || n >= sizeof buf)
-        return; // not requested -- ordinary launch, no redirect
+        return; // not requested -- ordinary launch, no remap
 
-    unsigned long target = inet_addr(buf);
-    if (target == INADDR_NONE || target == htonl(INADDR_LOOPBACK))
-        return; // unset / malformed / plain 127.0.0.1 -- instance 1 keeps loopback
-    g_target = target;
+    long base = strtol(buf, nullptr, 10);
+    if (base <= 0 || base > 65535 - 3)
+        return; // unset / malformed / no room for a 4-port block
+    if (base == 3500)
+        return; // the stock block -- instance 1 keeps default ports, no remap
+    g_port_base = (uint16_t)base;
 
     // Make sure ws2_32 is resident before the master connect (which happens long
     // after DLL attach, but a LoadLibrary here is cheap and removes the ordering
     // assumption). MinHook is already initialised by hooks::mh_init().
     HMODULE ws = LoadLibraryA("ws2_32.dll");
     if (!ws) {
-        logf("netredirect: ws2_32.dll not present -- redirect disabled");
+        logf("netredirect: ws2_32.dll not present -- remap disabled");
         return;
     }
     void* fn = reinterpret_cast<void*>(GetProcAddress(ws, "connect"));
     if (!fn) {
-        logf("netredirect: connect() not found -- redirect disabled");
+        logf("netredirect: connect() not found -- remap disabled");
         return;
     }
     if (MH_CreateHook(fn, reinterpret_cast<void*>(&hk_connect),
                       reinterpret_cast<void**>(&real_connect)) != MH_OK ||
         MH_EnableHook(fn) != MH_OK) {
-        logf("netredirect: failed to hook connect() -- redirect disabled");
+        logf("netredirect: failed to hook connect() -- remap disabled");
         return;
     }
-    logf("netredirect: loopback game ports (3500/3801/3805/3807) -> %s", buf);
+    logf("netredirect: loopback game ports 3500/3801/3805 -> 127.0.0.1:%d/%d/%d",
+         g_port_base + 0, g_port_base + 1, g_port_base + 2);
 }
 
 } // namespace netredirect

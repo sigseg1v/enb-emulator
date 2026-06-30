@@ -1252,7 +1252,7 @@ static int l_pda_ctrl(lua_State* L) {
 }
 
 // enb.pda_switch(index) -> uint. Open / switch the PDA to child screen `index`
-// through the game's own dispatcher (game::addr::PdaSwitch == FUN_00695780),
+// through the game's own dispatcher (game::addr::PdaSwitch == 0x00695780),
 // exactly as a native micro-menu button click would: 0=Inventory, 1=Skills,
 // 2=Character Info, 3=Vault, 4=Galaxy Map. __thiscall(ECX = the PDA controller,
 // int index) -- it dereferences `this` immediately, so we pass the captured
@@ -1280,7 +1280,7 @@ static int l_shell_ctrl(lua_State* L) {
 
 // enb.shell_screen(id) -> uint. Request the in-game screen shell show screen `id`,
 // exactly as a native "Options" button does: ShellRequest (game::addr::ShellRequest
-// == FUN_00565f30) just stores the pending id at shell+0x108, and the shell's own
+// == 0x00565f30) just stores the pending id at shell+0x108, and the shell's own
 // per-frame apply pump opens it next frame. Id 1 = the in-game OPTIONS_MAIN screen
 // (the one micro-menu button that is not a PDA child). __thiscall(ECX = the shell,
 // int id); it writes through `this`, so we pass the captured shell. Returns 0 if
@@ -1299,7 +1299,7 @@ static int l_shell_screen(lua_State* L) {
 }
 
 // enb.chat_send(line [, channel]) -> uint. Submit a typed chat line exactly the way
-// the native chat-input box does (mirrors FUN_0065ccd0), so the Freya chat box owns
+// the native chat-input box does (mirrors 0x0065ccd0), so the Freya chat box owns
 // text entry while the real send path stays the game's:
 //   * A '/'-prefixed line goes to the game's command dispatcher (addr::ChatCmdDispatch,
 //     the chat manager's vtable+0x34 entry): /tell <name> <msg> = whisper, /gen /ooc

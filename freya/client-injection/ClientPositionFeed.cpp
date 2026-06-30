@@ -105,22 +105,24 @@ void FreyaClientPosFeed_Start() {
 
     memset(&g_ProxyAddr, 0, sizeof(g_ProxyAddr));
     g_ProxyAddr.sin_family = AF_INET;
-    g_ProxyAddr.sin_port = htons(FREYA_CLIENT_POS_PORT);
-    // Default target is 127.0.0.1 -- the single-client proxy binds its intake
-    // there. A multi-box launch instead pins each proxy to its own loopback IP
-    // (127.0.0.N) and tells THIS client which one via FREYA_POS_FEED_ADDRESS, so
-    // the feed reaches only its paired proxy and N feeds don't all pile onto the
-    // one shared intake. Unset / malformed -> loopback, leaving single-box as-is.
-    g_ProxyAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK); // 127.0.0.1
+    // The posfeed intake is loopback-only in every configuration (single-client,
+    // docker-published, and native multibox), so the target IP is always
+    // 127.0.0.1. Only the PORT varies for multibox: each co-located proxy owns
+    // its own contiguous port block, and the posfeed slot is base+3. A multi-box
+    // launch passes that port via FREYA_POS_FEED_PORT; unset / malformed leaves
+    // the stock FREYA_CLIENT_POS_PORT, so single-box is unchanged.
+    unsigned short feed_port = FREYA_CLIENT_POS_PORT;
     {
-        char envAddr[64];
-        DWORD n = GetEnvironmentVariableA("FREYA_POS_FEED_ADDRESS", envAddr, sizeof(envAddr));
-        if (n > 0 && n < sizeof(envAddr)) {
-            unsigned long parsed = inet_addr(envAddr);
-            if (parsed != INADDR_NONE)
-                g_ProxyAddr.sin_addr.s_addr = parsed;
+        char envPort[16];
+        DWORD n = GetEnvironmentVariableA("FREYA_POS_FEED_PORT", envPort, sizeof(envPort));
+        if (n > 0 && n < sizeof(envPort)) {
+            long p = strtol(envPort, NULL, 10);
+            if (p > 0 && p <= 65535)
+                feed_port = (unsigned short)p;
         }
     }
+    g_ProxyAddr.sin_port = htons(feed_port);
+    g_ProxyAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK); // 127.0.0.1
 
     g_Run = true;
     g_Thread = (HANDLE)_beginthreadex(NULL, 0, FeedThread, NULL, 0, NULL);

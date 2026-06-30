@@ -1046,17 +1046,21 @@ bool UDPClient::ReadClientShipPosition(float pos[3], float heading[3]) {
         struct sockaddr_in addr;
         memset(&addr, 0, sizeof(addr));
         addr.sin_family = AF_INET;
-        addr.sin_port = htons(FREYA_CLIENT_POS_PORT);
+        // Posfeed intake port = base+3 of this instance's port block under native
+        // multi-box (g_proxy_port_base), else the stock FREYA_CLIENT_POS_PORT. The
+        // in-client posfeed sender (FREYA_POS_FEED_PORT) targets the same slot.
+        addr.sin_port = htons(g_proxy_port_base
+                                  ? (unsigned short)(g_proxy_port_base + 3)
+                                  : (unsigned short)FREYA_CLIENT_POS_PORT);
         // Win32/WINE proxy: co-located with the client, bind loopback so the
         // intake is never network-reachable. Linux docker proxy: bind ANY so the
         // published-port forward delivers; compose restricts the host publish to
         // 127.0.0.1, so it is loopback-only there too.
         //
-        // Multi-box: when this proxy was pinned to a per-instance loopback IP
-        // (FREYA_PROXY_BIND_ADDRESS -> g_proxy_bind_addr, e.g. 127.0.0.N), bind
-        // the intake to THAT specific IP so each client's position hook
-        // (targeting its own 127.0.0.N:FREYA_CLIENT_POS_PORT) reaches only its
-        // own proxy and N intakes don't collide on the one shared port.
+        // Multi-box: when this proxy was pinned to a loopback IP
+        // (FREYA_PROXY_BIND_ADDRESS -> g_proxy_bind_addr), bind the intake to THAT
+        // IP. Co-located native proxies differ by port (g_proxy_port_base above),
+        // so the IP is the shared 127.0.0.1 and the port keeps them apart.
         if (g_proxy_bind_addr != INADDR_ANY) {
             addr.sin_addr.s_addr = g_proxy_bind_addr;
         } else {

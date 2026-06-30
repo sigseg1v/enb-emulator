@@ -12,38 +12,32 @@
 # on the stack network) removes the NAT entirely, exactly like the shared
 # play-local proxy and the per-unit play-cli proxy.
 #
-# WHY unique host PORTS + a host-side socat facade (NOT distinct 127.0.0.N host
-# IPs): the EnB client.exe dials the proxy on FIXED ports compiled into the
-# binary (3500/3801/3805 + posfeed 3807) -- it cannot be told a different port,
-# so each unit needs its OWN <ip>:3500 endpoint. Distinct loopback IPs
-# (127.0.0.1:3500, 127.0.0.2:3500, ...) is the obvious way, BUT rootless docker
-# (rootlesskit, builtin port driver) collapses all of 127.0.0.0/8 to 127.0.0.1
-# in its port-conflict allocator: a second unit publishing :3500 on 127.0.0.2
-# fails with "Bind for 127.0.0.1:3500 already allocated". The kernel itself has
-# no problem with distinct loopback-IP binds -- only rootless docker's allocator
-# does. So each proxy publishes on a UNIQUE 127.0.0.1 host port (no collision),
-# and `just play-multibox-local` runs a tiny host-side `socat` per client that
-# binds the FIXED 127.0.0.N:{3500,3801,3805,3807} the client wants and forwards
-# to that unit's unique host port. socat is a plain host process, so the kernel
-# lets it bind distinct loopback IPs that rootless docker cannot. No sudo, no
-# client patch, no host-interface changes.
+# WHY same IP + different PORTS (NOT distinct 127.0.0.N host IPs): the EnB
+# client.exe dials the proxy on FIXED ports compiled into the binary
+# (3500/3801/3805 + posfeed 3807), but the in-client connect() hook (enbmod
+# netredirect) remaps those onto a per-instance contiguous block base+0..base+3
+# on 127.0.0.1. So each unit just publishes its block on 127.0.0.1 and forwards
+# host base..base+3 -> the proxy's STOCK container ports (3500/3801/3805/3807).
+# Distinct loopback IPs (127.0.0.2:3500, ...) would be the naive alternative, BUT
+# rootless docker collapses all of 127.0.0.0/8 to 127.0.0.1 in its port-conflict
+# allocator -- a non-starter -- and they are not portable to native Windows. The
+# port-block scheme needs no socat, no distinct IPs, no host-interface changes.
 #
-# TOPOLOGY (per unit `-p mboxN`, host ports MBOX_*_PORT, facade IP 127.0.0.N)
-#   client.exe (WINE) --TCP--> 127.0.0.N:{3801,3805,3500}  (socat facade, host)
-#                                  `--> 127.0.0.1:MBOX_*_PORT --> proxy --UDP--> server
-#   FreyaPosFeed.dll  --UDP--> 127.0.0.N:3807               (socat facade, host)
-#                                  `--> 127.0.0.1:MBOX_POS_PORT --> proxy --UDP--> server
+# TOPOLOGY (per unit `-p mboxN`, host port block MBOX_*_PORT on 127.0.0.1)
+#   client.exe (WINE) --TCP--> 127.0.0.1:{base+0,base+1,base+2}  (connect hook remap)
+#                                  `--> docker publish --> proxy 3500/3801/3805 --UDP--> server
+#   FreyaPosFeed.dll  --UDP--> 127.0.0.1:base+3
+#                                  `--> docker publish --> proxy 3807 --UDP--> server
 #   client.exe        --TLS--> 127.0.0.1:4180 (shared LocalAuthRelay) --> freya-online
 #
-# USAGE (see `just play-multibox-local COUNT` -- it spawns the socat facades)
+# USAGE (see `just play-multibox-local COUNT`)
 #   # shared stack up first (creates the `<project>_default` net); default proxy DOWN:
 #   docker compose up -d server net7go freya-online
 #   docker compose rm -sf proxy
-#   # then one proxy unit per client, each on its own UNIQUE host port:
-#   MBOX_GAME_PORT=23500 MBOX_P3801_PORT=23501 MBOX_P3805_PORT=23502 MBOX_POS_PORT=23503 \
+#   # then one proxy unit per client, each publishing its 127.0.0.1 port block:
+#   MBOX_SECTOR_PORT=23500 MBOX_MASTER_PORT=23501 MBOX_GLOBAL_PORT=23502 MBOX_POS_PORT=23503 \
 #     STACK_NETWORK=<project>_default docker compose -f docker-compose.mbox.yml -p mbox1 up -d
-#   # ... and a socat facade so the client's fixed 127.0.0.1:3500 reaches it:
-#   socat TCP-LISTEN:3500,bind=127.0.0.1,reuseaddr,fork TCP:127.0.0.1:23500 &
+#   # and launch the client with FREYA_GAME_PORT_BASE=23500 so its hook remaps onto it.
 #
 # The server force-kicks a duplicate login PER ACCOUNT
 # (PlayerManager::CheckAccountInUse) -- correct retail behaviour, NOT bypassed.
@@ -76,14 +70,15 @@ services:
       - NET7_GAME_SERVER_DOMAIN=${NET7_GAME_SERVER_DOMAIN-localhost}
       - NET7_DTLS_CA=${NET7_DTLS_CA-}
     ports:
-      # Client-facing TCP planes + the posfeed UDP intake. Published on a UNIQUE
-      # 127.0.0.1 host port per unit (defaults are the single-unit values) -- the
-      # recipe's per-unit socat facade re-exposes the client's FIXED ports on
-      # 127.0.0.N. See the header for why unique ports + facade, not 127.0.0.N
-      # binds directly (rootless docker loopback-IP collapse).
-      - "127.0.0.1:${MBOX_GAME_PORT:-3500}:3500/tcp"
-      - "127.0.0.1:${MBOX_P3801_PORT:-3801}:3801/tcp"
-      - "127.0.0.1:${MBOX_P3805_PORT:-3805}:3805/tcp"
+      # Client-facing TCP planes + the posfeed UDP intake, published as a
+      # contiguous 127.0.0.1 host PORT BLOCK per unit (defaults are the stock
+      # single-unit values). The container keeps its STOCK ports; docker forwards
+      # host base..base+3 onto them, and the in-client connect() hook remaps the
+      # client's fixed dials onto base+0/+1/+2 (posfeed base+3). See the header
+      # for why a port block beats distinct 127.0.0.N IPs.
+      - "127.0.0.1:${MBOX_SECTOR_PORT:-3500}:3500/tcp"
+      - "127.0.0.1:${MBOX_MASTER_PORT:-3801}:3801/tcp"
+      - "127.0.0.1:${MBOX_GLOBAL_PORT:-3805}:3805/tcp"
       - "127.0.0.1:${MBOX_POS_PORT:-3807}:3807/udp"
     volumes:
       # GalaxyMap.dat for UDPClient::SendCachedGalaxyMap (served when the in-game

@@ -164,8 +164,8 @@ inline bool FreyaPatchClientOnce() {
         // rebuilds the ship object at a NEW heap address while our slot kept the
         // old, now-freed pointer. The feed then read garbage/zero, went silent,
         // and the server froze the avatar at its last position (could not dock at
-        // a planet base because "you are not near it"). The decompiled Net7Proxy
-        // re-captures whenever the client's transform ptr changes (FUN_0040ebc0:
+        // a planet base because "you are not near it"). The Net7Proxy
+        // re-captures whenever the client's transform ptr changes (0x0040ebc0:
         // `if (ptr+0x48 != cached) cached = ptr+0x48;`), i.e. it tracks the live
         // object every poll; mirror that by always overwriting the slot. The
         // player-hull signature gate ('S' at [EAX], 0x48 at [EAX+2]) still scopes

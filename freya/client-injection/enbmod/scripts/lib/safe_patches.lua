@@ -15,7 +15,7 @@ local M = {}
 -- ---------------------------------------------------------------------------
 -- account-notice / subscription-expiry dialog -- LOGIN-SCREEN CRASH FIX
 --
--- FUN_005aea60 is the retail "account notice" dialog the client pops during
+-- 0x005aea60 is the retail "account notice" dialog the client pops during
 -- LoginTask (right after auth, before character select). It reads a block of
 -- account-status fields the retail billing server used to populate -- subscription
 -- strings at account+0x1098.. and an expiry Unix timestamp at account+0x1130 --

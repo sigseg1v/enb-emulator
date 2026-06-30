@@ -559,11 +559,21 @@ stop-cli UNIT='cli1':
 
 # Bring up the local stack + launch the launcher pre-configured to connect.
 #
-# With no args, defaults to the linux-installer's default install location:
+# Optional hands-free auto-login (Phase AZ): pass an account (+ password +
+# character) and the launcher self-clicks Play, submits the credentials, and
+# enters the world on that character -- ZERO screen automation:
+#   just play-local devuser devpass devusertt   # auto -> in-game on devusertt
+#   just play-local devuser devpass             # auto -> stop at character select
+#   just play-local devuser PROMPT devusertt    # ask for the password (hidden,
+#                                               #   never stored in shell history)
+#   just play-local                             # manual: click Play yourself
+# (ACC/PASS/CHAR also fall back to ENB_ACC_NAME / ENB_ACC_PASS / ENB_CHARACTER.)
+#
+# Client path defaults to the linux-installer's default install location:
 #   $HOME/.wine-enb/drive_c/Program Files/EA GAMES/Earth & Beyond/release/client.exe
-# Override either as a recipe arg or via the ENB_CLIENT_PATH env var:
-#   just play-local /home/me/.wine/drive_c/.../release/client.exe
-#   ENB_CLIENT_PATH=... just play-local
+# Override as the 4th recipe arg or via the ENB_CLIENT_PATH env var:
+#   just play-local '' '' '' /home/me/.wine/.../release/client.exe
+#   ENB_CLIENT_PATH=... just play-local devuser devpass devusertt
 #
 # Architecture (2026-05-29 rewrite):
 #   The recipe brings up the FULL docker-compose stack (postgres + server +
@@ -597,7 +607,7 @@ stop-cli UNIT='cli1':
 #      default case = LaunchClient() only (skip LaunchFreyaProxy).
 #
 # Click Play in the GUI; the client should connect to the local server.
-play-local CLIENT_PATH='':
+play-local ACC='' PASS='' CHAR='' CLIENT_PATH='':
     #!/usr/bin/env bash
     set -euo pipefail
     # Enable the server_status heartbeat (and the external-status outbox) for the
@@ -610,8 +620,34 @@ play-local CLIENT_PATH='':
     if [ -z "$cp" ]; then cp="$HOME/.wine-enb/drive_c/Program Files/EA GAMES/Earth & Beyond/release/client.exe"; fi
     if [ ! -f "$cp" ]; then
         echo "play-local: client.exe not found at: $cp" >&2
-        echo "  pass the path as the recipe arg or set ENB_CLIENT_PATH." >&2
+        echo "  pass the path as the 4th recipe arg or set ENB_CLIENT_PATH." >&2
         exit 1
+    fi
+    # Phase AZ hands-free auto-login: account/password/character from the recipe
+    # args, falling back to the ENB_* env vars. When both account + password are
+    # present we arm the in-client auto-login (submit credentials, auto-enter the
+    # world on CHAR) and FREYA_AUTOPLAY so the launcher self-clicks Play -- no
+    # screen automation. With CHAR omitted the client stops at character select.
+    # With no creds at all the launch is manual (click Play yourself).
+    acc="{{ACC}}"; pass="{{PASS}}"; char="{{CHAR}}"
+    if [ -z "$acc" ]; then acc="${ENB_ACC_NAME:-}"; fi
+    if [ -z "$pass" ]; then pass="${ENB_ACC_PASS:-}"; fi
+    if [ -z "$char" ]; then char="${ENB_CHARACTER:-}"; fi
+    # PASS=PROMPT -> ask for the password interactively (nonprinting), so the
+    # secret never lands in shell history, the process table, or this recipe's
+    # args. Needs a TTY; fail loudly rather than silently launch unauthenticated.
+    if [ "$pass" = "PROMPT" ]; then
+        if [ ! -t 0 ]; then
+            echo "play-local: PASS=PROMPT needs an interactive terminal (stdin is not a TTY)." >&2
+            exit 1
+        fi
+        printf 'Password for %s: ' "${acc:-account}" >&2
+        read -rs pass
+        printf '\n' >&2
+    fi
+    if [ -n "$acc" ] && [ -z "$pass" ]; then
+        echo "play-local: account '$acc' given without a password -- launching MANUAL." >&2
+        acc=""
     fi
 
     echo ">>> bringing up local stack (postgres + server + net7go + freya-online + proxy)"
@@ -685,7 +721,13 @@ play-local CLIENT_PATH='':
     # only carries the launcher + proxy + server logs. For SEH / module
     # tracing on a crash, use `just debug-local` instead (it sets
     # WINEDEBUG=+seh,+module,err+module and then calls this recipe).
-    echo ">>> launching (WINEPREFIX=$WINEPREFIX WINEDEBUG=${WINEDEBUG:-<unset>}) -- click Play in the GUI"
+    if [ -n "$acc" ] && [ -n "$pass" ]; then
+        export ENB_EULA=ACCEPT ENB_ACC_NAME="$acc" ENB_ACC_PASS="$pass" FREYA_AUTOPLAY=1
+        if [ -n "$char" ]; then export ENB_CHARACTER="$char"; fi
+        echo ">>> launching auto-login $acc${char:+/$char} (WINEPREFIX=$WINEPREFIX WINEDEBUG=${WINEDEBUG:-<unset>})"
+    else
+        echo ">>> launching (WINEPREFIX=$WINEPREFIX WINEDEBUG=${WINEDEBUG:-<unset>}) -- click Play in the GUI"
+    fi
     dotnet run --no-build --project tools/LaunchFreya
 
 # Prefers the installer's `enb-cfg` shortcut if it is on PATH, otherwise runs the
@@ -837,17 +879,51 @@ play-online CLIENT_PATH='' HOST='':
         echo ">>> launching (WINEPREFIX=$WINEPREFIX) -- pick Multi-Player if not preselected, then click Play"
         dotnet run --no-build --project tools/LaunchFreya
     else
-        # Multi-box: one launcher PROCESS per instance, each pinned to its slot via
-        # FREYA_INSTANCE_SLOT (slot 0 = 127.0.0.1 single-client, slots 1+ = own
-        # loopback IP + the mutex/proxy/feed multi-box wiring). Forcing the slot
-        # avoids the auto-detect race when they start near-simultaneously. We run
-        # the already-built DLL directly so N msbuild locks don't contend. Staggered
-        # so each proxy binds its 127.0.0.(slot+1):3500 before the next probes.
-        # No autoplay: enter a different account in each window, then click Play.
+        # Multi-box: one launcher PROCESS per instance, each pinned to its own
+        # contiguous 127.0.0.1 PORT BLOCK via FREYA_GAME_PORT_BASE. The launcher
+        # honours that base for BOTH the in-client connect() hook (client dial +
+        # posfeed) AND the native WINE proxy it spawns (FREYA_PROXY_PORT_BASE =
+        # same base, so the proxy listens on base+0..base+3). Instance 0 uses the
+        # stock block 3500 (multibox off, byte-identical to a single launch);
+        # instances 1+ get 23500+i*10. Pinning the base deterministically avoids
+        # the autodetect race when N start near-simultaneously -- a human pressing
+        # Play one window at a time still autodetects a free block (no env).
+        #
+        # Each instance ALSO needs its OWN WINE prefix: same 127.0.0.1, so
+        # network.ini no longer differentiates, but a shared prefix would interleave
+        # each client's enbmod.cmd/.log channel, its staged injection DLLs, and its
+        # WINE registry / per-character config. So instances 2..N get their own
+        # prefix cloned from the base (~/.wine-enb), CACHED across runs (delete
+        # ~/.wine-enb-mbox* to refresh). The native proxy each launcher spawns runs
+        # inside that instance's prefix and listens on the instance's port block, so
+        # N proxies are fully isolated. Instance 1 uses the base prefix as-is.
+        base_prefix="$WINEPREFIX"
+        rel_cp="${cp#$base_prefix/}"          # client.exe path relative to the prefix root
+        if [ "$rel_cp" = "$cp" ]; then
+            echo "play-online: client.exe ($cp) is not under WINEPREFIX ($base_prefix);" >&2
+            echo "  per-instance prefixes need it inside the prefix. Set ENB_CLIENT_PATH/WINEPREFIX." >&2
+            exit 1
+        fi
+        for i in $(seq 1 $((count-1))); do    # instances 2..count get their own clone
+            n=$((i+1)); pfx="$HOME/.wine-enb-mbox$n"
+            if [ -f "$pfx/$rel_cp" ]; then
+                echo ">>>   prefix mbox$n: reusing cached clone $pfx"
+            else
+                echo ">>>   prefix mbox$n: cloning base prefix -> $pfx (first launch; cached after)"
+                rm -rf "$pfx"
+                cp -a --reflink=auto "$base_prefix" "$pfx"
+            fi
+        done
+        # We run the already-built DLL directly so N msbuild locks don't contend.
+        # Staggered so each native proxy binds its block before the next launcher
+        # starts. No autoplay unless per-slot creds are set.
         DLL="$SETTINGS_DIR/FreyaLauncher.dll"
-        echo ">>> launching $count instances (WINEPREFIX=$WINEPREFIX)"
+        echo ">>> launching $count instances"
         for i in $(seq 0 $((count-1))); do
             n=$((i+1))
+            if [ "$i" -eq 0 ]; then base=3500; else base=$((23500 + i*10)); fi
+            if [ "$n" -eq 1 ]; then inst_prefix="$base_prefix"; inst_cp="$cp"
+            else inst_prefix="$HOME/.wine-enb-mbox$n"; inst_cp="$inst_prefix/$rel_cp"; fi
             # Per-slot auto-login (Phase AZ): if ENB_ACC_<n>/ENB_PASS_<n> are set for
             # this window (n is 1-based: window 1 = ENB_ACC_1), the injected enbmod
             # self-logs into that account+character hands-free -- no xdotool, no
@@ -858,14 +934,15 @@ play-online CLIENT_PATH='' HOST='':
             accvar="ENB_ACC_$n"; passvar="ENB_PASS_$n"; charvar="ENB_CHAR_$n"
             acc="${!accvar:-}"; pass="${!passvar:-}"; char="${!charvar:-}"
             if [ -n "$acc" ] && [ -n "$pass" ]; then
-                echo ">>>   instance $i -> 127.0.0.$n  (auto-login $acc${char:+/$char})"
-                FREYA_INSTANCE_SLOT="$i" \
+                echo ">>>   instance $i -> port base $base  prefix=$inst_prefix  (auto-login $acc${char:+/$char})"
+                WINEPREFIX="$inst_prefix" FREYA_CLIENT_PATH="$inst_cp" FREYA_GAME_PORT_BASE="$base" \
                   ENB_EULA=ACCEPT ENB_ACC_NAME="$acc" ENB_ACC_PASS="$pass" ENB_CHARACTER="$char" \
                   FREYA_AUTOPLAY=1 \
                   dotnet "$DLL" &
             else
-                echo ">>>   instance $i -> 127.0.0.$n  (manual login -- set ENB_ACC_$n/ENB_PASS_$n to automate)"
-                FREYA_INSTANCE_SLOT="$i" dotnet "$DLL" &
+                echo ">>>   instance $i -> port base $base  prefix=$inst_prefix  (manual login -- set ENB_ACC_$n/ENB_PASS_$n to automate)"
+                WINEPREFIX="$inst_prefix" FREYA_CLIENT_PATH="$inst_cp" FREYA_GAME_PORT_BASE="$base" \
+                  dotnet "$DLL" &
             fi
             sleep 2
         done
@@ -873,8 +950,8 @@ play-online CLIENT_PATH='' HOST='':
     fi
 
 # Hands-free LOCAL multibox: N clients against the LOCAL docker server, each with
-# its OWN IN-DOCKER proxy published on 127.0.0.<slot+1>, each self-logging into its
-# own account (Phase AZ in-client auto-login).
+# its OWN IN-DOCKER proxy published on a contiguous 127.0.0.1 PORT BLOCK, each
+# self-logging into its own account (Phase AZ in-client auto-login).
 #
 # Topology (why IN-DOCKER, not native -- see plans/56 (b) FINDING):
 #   - The server's control plane is multi-port UDP (master 3808, global 3810,
@@ -884,15 +961,25 @@ play-online CLIENT_PATH='' HOST='':
 #     "login stage 3" for even ONE client. So each client gets its own proxy
 #     CONTAINER on the shared stack network (docker-compose.mbox.yml): the
 #     proxy<->server leg stays inside docker (zero NAT), exactly like play-local /
-#     play-cli. Only the client-facing TCP (3801/3805/3500) + posfeed UDP (3807)
-#     are host-published, on a distinct 127.0.0.N per unit.
-#   - The DEFAULT docker proxy binds 0.0.0.0:3500/3801/3805, which shadows every
-#     per-unit 127.0.0.N bind, so it is torn down here. server/net7go/freya-online
-#     stay UP (the proxy is a leaf), so auth (:4443 via the shared loopback relay)
-#     and the DB are intact.
+#     play-cli. Only the client-facing TCP (3500/3801/3805) + posfeed UDP (3807)
+#     are host-published.
+#   - SAME IP (127.0.0.1), DIFFERENT PORTS per unit. The client dials FIXED ports
+#     baked into client.exe (3500/3801/3805 + posfeed 3807); the in-client
+#     connect() hook (enbmod netredirect) remaps those onto this unit's contiguous
+#     block base+0/+1/+2 (posfeed -> base+3), and the docker proxy PUBLISHES
+#     host 127.0.0.1:base..base+3 onto its stock container ports. No socat, no
+#     distinct 127.0.0.N loopback IPs (which rootless docker collapses to
+#     127.0.0.1 anyway), no client patch -- just a per-instance FREYA_GAME_PORT_BASE.
+#   - The DEFAULT docker proxy binds 0.0.0.0:3500/3801/3805. Unit 1 reuses those
+#     stock-numbered host ports (its block base is 23500, published 23500->3500
+#     etc), so the default proxy is torn down to free the container slots; the
+#     published host ports never collide (each unit has its own block).
+#     server/net7go/freya-online stay UP (the proxy is a leaf), so auth (:4443 via
+#     the shared loopback relay) and the DB are intact.
 #   - Each WINE client launches in the no-native-proxy (Net7Local) path with
-#     FREYA_GAME_HOST=127.0.0.N -- the client dial + the position feed both target
-#     that unit's docker proxy, and FREYA_MULTIBOX arms the single-instance bypass.
+#     FREYA_GAME_PORT_BASE=<base> -- the connect hook remaps the client dial AND the
+#     position feed onto that unit's published block, and FREYA_MULTIBOX arms the
+#     single-instance bypass.
 #   - Per-slot auto-login: window n (1-based) reads ENB_ACC_<n>/ENB_PASS_<n>/
 #     ENB_CHAR_<n>; if set, that window self-logs hands-free. Each window needs a
 #     DIFFERENT account (the server force-kicks a duplicate login of the same
@@ -907,8 +994,26 @@ play-multibox-local COUNT='2':
     count="{{COUNT}}"
     if [[ ! "$count" =~ ^[0-9]+$ ]] || [ "$count" -lt 1 ]; then count=2; fi
     if [ "$count" -gt 8 ]; then
-        echo "play-multibox-local: COUNT $count > 8 (only 127.0.0.1-8 are wired)" >&2; exit 1
+        echo "play-multibox-local: COUNT $count > 8 (8 port blocks are wired)" >&2; exit 1
     fi
+
+    # Self-cleaning: this recipe runs in the foreground for the whole session
+    # (it waits on the launcher processes), so when it exits -- normal end,
+    # Ctrl-C, or a failure under `set -e` -- tear down the per-unit docker
+    # proxies it started and reap any stray socat port-forwarders left by an
+    # older (pre-port-block) multibox run. Otherwise an mbox proxy squatting on
+    # the fixed client ports blocks the next `just play-local` (its plain proxy
+    # publishes 0.0.0.0:3500, which overlaps a leftover 127.0.0.x:3500). The
+    # shared server/net7go/freya-online stack is intentionally left up.
+    _mbox_cleanup() {
+        echo ">>> cleanup: tearing down mbox1..$count proxies + stray socat forwarders" >&2
+        for j in $(seq 1 "$count"); do
+            docker compose -f docker-compose.mbox.yml -p "mbox$j" down >/dev/null 2>&1 || true
+        done
+        pkill -f 'socat TCP-LISTEN:(3500|3801|3805),bind=127\.0\.0\.' >/dev/null 2>&1 || true
+    }
+    trap _mbox_cleanup EXIT
+
     cp="${ENB_CLIENT_PATH:-$HOME/.wine-enb/drive_c/Program Files/EA GAMES/Earth & Beyond/release/client.exe}"
     if [ ! -f "$cp" ]; then
         echo "play-multibox-local: client.exe not found at: $cp" >&2
@@ -930,10 +1035,12 @@ play-multibox-local COUNT='2':
     fi
     just _image-status "" "server net7go freya-online" "just rebuild"
 
-    # The default docker proxy binds 0.0.0.0:3500/3801/3805 -- it SHADOWS every
-    # per-unit 127.0.0.N publish. Remove it so those host IPs are free; kill any
-    # stale native WINE proxies from an earlier (native) multibox attempt.
-    echo ">>> removing the default docker proxy (frees 3500/3801/3805 for per-unit proxies)"
+    # The default docker proxy is the single-client one (stock 3500/3801/3805/3807).
+    # Multibox replaces it with one proxy CONTAINER per unit (each on its own
+    # 23500+ host port block), so the default proxy is unused here -- remove it so
+    # no stray single-client listener is left running; kill any stale native WINE
+    # proxies from an earlier (native) multibox attempt.
+    echo ">>> removing the unused default docker proxy (multibox uses one proxy per unit)"
     docker compose rm -sf proxy >/dev/null 2>&1 || true
     pkill -f 'FreyaProxy\.exe' >/dev/null 2>&1 || true
 
@@ -946,8 +1053,9 @@ play-multibox-local COUNT='2':
 
     SETTINGS_DIR=tools/LaunchFreya/bin/Debug/net10.0
 
-    # Net7Local (no native proxy): the client dials the per-unit docker proxy via
-    # FREYA_GAME_HOST below. Hostname stays localhost so the shared LocalAuthRelay
+    # Net7Local (no native proxy): the client dials the per-unit docker proxy on
+    # 127.0.0.1 via the connect() hook's FREYA_GAME_PORT_BASE (set per instance in
+    # the launch loop below). Hostname stays localhost so the shared LocalAuthRelay
     # relays auth to localhost:4443 (freya-online) and registration resolves local.
     cp_json=$(printf '%s' "$cp" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
     python3 tools/LaunchFreya/merge-settings.py "$SETTINGS_DIR/FreyaLauncher.settings.json" "{
@@ -962,56 +1070,39 @@ play-multibox-local COUNT='2':
     }"
     echo ">>> merged launch settings (Net7Local -> per-unit docker proxy, auth localhost:4443)"
 
-    # socat provides the per-unit loopback-IP facade (see below). Required.
-    if ! command -v socat >/dev/null 2>&1; then
-        echo "play-multibox-local: 'socat' is required for the per-unit facade" >&2
-        echo "  install it (e.g. apt install socat) and retry." >&2; exit 1
-    fi
-
     # Bring up one proxy CONTAINER per unit on the shared stack network. Each
-    # publishes its client TCP + posfeed UDP on a UNIQUE 127.0.0.1 host port --
-    # NOT a distinct 127.0.0.N, because rootless docker collapses all of
-    # 127.0.0.0/8 to 127.0.0.1 in its port-conflict allocator (a second unit's
-    # :3500 on 127.0.0.2 fails as "127.0.0.1:3500 already allocated"). A host-side
-    # socat then binds the FIXED 127.0.0.N:{3500,3801,3805,3807} the client
-    # hardcodes and forwards to this unit's unique port -- socat is a plain host
-    # process, so the kernel lets it bind distinct loopback IPs docker cannot.
+    # publishes its client TCP (3500/3801/3805) + posfeed UDP (3807) onto a
+    # contiguous 127.0.0.1 host PORT BLOCK base..base+3: the client's connect()
+    # hook remaps the fixed dials onto base+0/+1/+2 (posfeed base+3) and docker
+    # forwards host base..base+3 -> the proxy's stock container ports. SAME IP for
+    # every unit, different ports -- no socat, no distinct 127.0.0.N (which
+    # rootless docker collapses to 127.0.0.1 anyway). Blocks are spaced 10 apart
+    # (only base..base+3 are used), starting at 23500.
     # STACK_NETWORK is the shared stack's docker network (<project>_default).
     export STACK_NETWORK="${COMPOSE_PROJECT_NAME:-freya}_default"
     echo ">>> per-unit proxies join stack network '$STACK_NETWORK'"
 
-    # PID file for the socat facades, so `just stop-multibox-local` can reap them.
-    # Reap any from a previous run first, then start clean.
-    PIDF="/tmp/enb-mbox-socat.pids"
-    if [ -f "$PIDF" ]; then xargs -r kill <"$PIDF" >/dev/null 2>&1 || true; fi
-    : >"$PIDF"
-
     for i in $(seq 0 $((count-1))); do
         n=$((i+1))
-        # Unique 127.0.0.1 host ports for this unit: 23500-block, 10 apart.
-        gp=$((23500 + i*10)); ap=$((gp+1)); bp=$((gp+2)); up=$((gp+3))
+        # Contiguous 127.0.0.1 host port block for this unit (sector/master/global/pos).
+        base=$((23500 + i*10)); sp=$base; mp=$((base+1)); gp2=$((base+2)); up=$((base+3))
         if [ -z "${ENB_NOREBUILD:-}" ]; then
             docker compose -f docker-compose.mbox.yml -p "mbox$n" build >/dev/null
         fi
-        MBOX_GAME_PORT="$gp" MBOX_P3801_PORT="$ap" MBOX_P3805_PORT="$bp" MBOX_POS_PORT="$up" \
+        MBOX_SECTOR_PORT="$sp" MBOX_MASTER_PORT="$mp" MBOX_GLOBAL_PORT="$gp2" MBOX_POS_PORT="$up" \
           docker compose -f docker-compose.mbox.yml -p "mbox$n" up -d
-        # Facade: the client's FIXED ports on 127.0.0.$n -> this unit's host ports.
-        nohup socat TCP-LISTEN:3500,bind=127.0.0.$n,reuseaddr,fork TCP:127.0.0.1:$gp >/dev/null 2>&1 & echo $! >>"$PIDF"
-        nohup socat TCP-LISTEN:3801,bind=127.0.0.$n,reuseaddr,fork TCP:127.0.0.1:$ap >/dev/null 2>&1 & echo $! >>"$PIDF"
-        nohup socat TCP-LISTEN:3805,bind=127.0.0.$n,reuseaddr,fork TCP:127.0.0.1:$bp >/dev/null 2>&1 & echo $! >>"$PIDF"
-        nohup socat UDP-LISTEN:3807,bind=127.0.0.$n,reuseaddr,fork UDP:127.0.0.1:$up >/dev/null 2>&1 & echo $! >>"$PIDF"
-        echo ">>>   proxy unit mbox$n -> host 127.0.0.1:{$gp,$ap,$bp,$up}; facade 127.0.0.$n:{3500,3801,3805,3807}"
+        echo ">>>   proxy unit mbox$n -> host 127.0.0.1:{$sp,$mp,$gp2,$up} (base $base)"
     done
 
-    # Per-instance WINE prefix. The master plane (TCP 3801) address is read from the
-    # prefix's single Data/common/network.ini, which the launcher patches per instance
-    # to that instance's facade IP (127.0.0.N, via FREYA_GAME_HOST below). With ONE
-    # shared prefix the second client's patch overwrites the first, so both clients'
-    # master plane funnels to one proxy and the server's anti-hijack IP check rejects
-    # the second (Player IP mismatch). So each unit past the first gets its OWN prefix
-    # cloned from the base (~/.wine-enb) -- its own network.ini AND its own
-    # enbmod.cmd/.log/registry. Instance 1 uses the base prefix as-is (a single-client
-    # run never duplicates anything). Clones are CACHED (skipped if present); delete
+    # Per-instance WINE prefix. Every instance now dials the SAME 127.0.0.1 (the
+    # connect() hook differentiates by PORT BASE, an env var per process), so
+    # network.ini is identical across units and is no longer the driver. The clone
+    # is still needed to isolate each instance's enbmod.cmd/.log command channel,
+    # its staged injection DLLs, and its WINE registry / auth config -- a shared
+    # prefix would interleave the cmd/log channel and clobber per-instance config.
+    # So each unit past the first gets its OWN prefix cloned from the base
+    # (~/.wine-enb). Instance 1 uses the base prefix as-is (a single-client run
+    # never duplicates anything). Clones are CACHED (skipped if present); delete
     # ~/.wine-enb-mbox* to refresh them after a client/prefix update. --reflink=auto
     # makes the clone near-instant + space-free on a CoW filesystem (btrfs/xfs).
     : "${WINEPREFIX:=$HOME/.wine-enb}"
@@ -1034,37 +1125,40 @@ play-multibox-local COUNT='2':
     done
 
     # One launcher PROCESS per instance, each in its OWN prefix (FREYA_CLIENT_PATH +
-    # WINEPREFIX) and pointed at its own facade via FREYA_GAME_HOST=127.0.0.N (client
-    # dial + position feed target + mutex bypass). Run the built DLL directly so N
-    # msbuild locks don't contend. Per-slot creds (ENB_ACC_<n>/ENB_PASS_<n>/
-    # ENB_CHAR_<n>) drive hands-free auto-login; a window with none falls back to
-    # manual entry. The 2s stagger only spaces out WINE/X startup (network.ini is no
-    # longer shared, so it is no longer a correctness barrier).
+    # WINEPREFIX) and pinned to its published port block via FREYA_GAME_PORT_BASE
+    # (the connect hook remaps the client dial + the position feed onto base+0..+3;
+    # FREYA_MULTIBOX arms the single-instance mutex bypass). Run the built DLL
+    # directly so N msbuild locks don't contend. Per-slot creds (ENB_ACC_<n>/
+    # ENB_PASS_<n>/ENB_CHAR_<n>) drive hands-free auto-login; a window with none
+    # falls back to manual entry. The 2s stagger only spaces out WINE/X startup.
     DLL="$SETTINGS_DIR/FreyaLauncher.dll"
     echo ">>> launching $count instances"
     LPIDS=()
     for i in $(seq 0 $((count-1))); do
-        n=$((i+1))
+        n=$((i+1)); base=$((23500 + i*10))
         if [ "$n" -eq 1 ]; then inst_prefix="$base_prefix"; inst_cp="$cp"
         else inst_prefix="$HOME/.wine-enb-mbox$n"; inst_cp="$inst_prefix/$rel_cp"; fi
         accvar="ENB_ACC_$n"; passvar="ENB_PASS_$n"; charvar="ENB_CHAR_$n"
         acc="${!accvar:-}"; pass="${!passvar:-}"; char="${!charvar:-}"
         if [ -n "$acc" ] && [ -n "$pass" ]; then
-            echo ">>>   instance $i -> 127.0.0.$n  prefix=$inst_prefix  (auto-login $acc${char:+/$char})"
-            WINEPREFIX="$inst_prefix" FREYA_CLIENT_PATH="$inst_cp" FREYA_GAME_HOST="127.0.0.$n" \
+            echo ">>>   instance $i -> port base $base  prefix=$inst_prefix  (auto-login $acc${char:+/$char})"
+            WINEPREFIX="$inst_prefix" FREYA_CLIENT_PATH="$inst_cp" FREYA_GAME_PORT_BASE="$base" \
               ENB_EULA=ACCEPT ENB_ACC_NAME="$acc" ENB_ACC_PASS="$pass" ENB_CHARACTER="$char" \
               FREYA_AUTOPLAY=1 \
               dotnet "$DLL" &
         else
-            echo ">>>   instance $i -> 127.0.0.$n  prefix=$inst_prefix  (manual login -- set ENB_ACC_$n/ENB_PASS_$n to automate)"
-            WINEPREFIX="$inst_prefix" FREYA_CLIENT_PATH="$inst_cp" FREYA_GAME_HOST="127.0.0.$n" \
+            echo ">>>   instance $i -> port base $base  prefix=$inst_prefix  (manual login -- set ENB_ACC_$n/ENB_PASS_$n to automate)"
+            WINEPREFIX="$inst_prefix" FREYA_CLIENT_PATH="$inst_cp" FREYA_GAME_PORT_BASE="$base" \
               dotnet "$DLL" &
         fi
         LPIDS+=($!)
         sleep 2
     done
-    # Wait only on the launcher processes; the socat facades stay up for the
-    # session and are reaped by `just stop-multibox-local`.
+    # Wait on the launcher processes for the whole session. When they all exit
+    # (or this recipe is interrupted), the EXIT trap above tears the per-unit
+    # docker proxies down -- so a later `just play-local` is never blocked by a
+    # leftover mbox listener. `just stop-multibox-local` remains the manual
+    # escape hatch if this recipe is hard-killed (SIGKILL) before its trap runs.
     wait "${LPIDS[@]}"
 
 # Tear down the per-unit docker proxies started by play-multibox-local (mbox1..N).
@@ -1077,13 +1171,10 @@ stop-multibox-local COUNT='8':
     [[ "$count" =~ ^[0-9]+$ ]] || count=8
     pkill -f 'FreyaLauncher\.dll' >/dev/null 2>&1 || true
     pkill -f 'client\.exe' >/dev/null 2>&1 || true
-    # Reap the per-unit socat facades (PID file written by play-multibox-local).
-    PIDF="/tmp/enb-mbox-socat.pids"
-    if [ -f "$PIDF" ]; then xargs -r kill <"$PIDF" >/dev/null 2>&1 || true; rm -f "$PIDF"; fi
     for i in $(seq 1 "$count"); do
         docker compose -f docker-compose.mbox.yml -p "mbox$i" down >/dev/null 2>&1 || true
     done
-    echo ">>> stopped mbox1..$count proxies + socat facades + client processes (shared stack left up)"
+    echo ">>> stopped mbox1..$count proxies + client processes (shared stack left up)"
 
 # Drive the C# CLI client against the REMOTE (cloud) server -- the online twin
 # of `just play-cli`. No local docker stack: the CLI's own dedicated proxy
@@ -1158,7 +1249,7 @@ debug-local CLIENT_PATH='':
     export WINEDEBUG
     export PROXY_EXTRA_ARGS=/OPCODES
     export PROXY_S2C_HEXDUMP=1
-    just play-local {{CLIENT_PATH}}
+    just play-local "" "" "" {{CLIENT_PATH}}
 
 # Bisection diagnostic: drop EVERY server->client opcode forwarded by the
 # proxy (the proxy still ACKs 0x2020 login-stage confirms back to the
@@ -1175,7 +1266,7 @@ bisect-drop-all CLIENT_PATH='':
     export WINEDEBUG
     export PROXY_EXTRA_ARGS=/OPCODES
     export PROXY_S2C_DROP_ALL=1
-    just play-local {{CLIENT_PATH}}
+    just play-local "" "" "" {{CLIENT_PATH}}
 
 # Bisection diagnostic: drop a specific set of server->client opcodes (CSV
 # hex, e.g. `just bisect-drop 0x001b,0x0025,0x00b4`). Use after
@@ -1190,7 +1281,7 @@ bisect-drop OPCODES CLIENT_PATH='':
     export WINEDEBUG
     export PROXY_EXTRA_ARGS=/OPCODES
     export PROXY_S2C_DROP={{OPCODES}}
-    just play-local {{CLIENT_PATH}}
+    just play-local "" "" "" {{CLIENT_PATH}}
 
 # Build a binary capture-replay file from a retail packet capture
 # (archive/kyp-snapshot/capturedPackets/capture_NNN.rar) into
@@ -1253,7 +1344,7 @@ packet-replay CAPTURE='capture_1' CLIENT_PATH='':
     export WINEDEBUG
     export PROXY_EXTRA_ARGS=/OPCODES
     export PROXY_S2C_REPLAY=/app/replay/{{CAPTURE}}-sector-s2c.bin
-    just play-local {{CLIENT_PATH}}
+    just play-local "" "" "" {{CLIENT_PATH}}
 
 # Drop into the enb-cli REPL pointed at the running local stack.
 # Assumes the stack is already up (`just dev` / `just run-stack-bg`); does

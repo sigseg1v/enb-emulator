@@ -24,7 +24,8 @@ Relationship to other phases:
   replacement for that flow, driven by env vars instead of pixels. AU stays as
   the screen-driven fallback; AZ is the preferred path for scripted multibox.
 - Phase B (MVAS position feed, PB-2) -- multibox needs each client's position
-  feed pinned to its own proxy; covered by `FREYA_POS_FEED_ADDRESS` below.
+  feed pinned to its own proxy; covered by `FREYA_POS_FEED_PORT` below
+  (= this instance's `base+3` on 127.0.0.1).
 
 ## Env var contract
 
@@ -37,22 +38,41 @@ so a launcher/wrapper sets them per-process before/at spawn.
 | `ENB_ACC_NAME` | Account name. With `ENB_ACC_PASS` set, fill + submit login automatically (no screen coords). |
 | `ENB_ACC_PASS` | Account password (paired with `ENB_ACC_NAME`). |
 | `ENB_CHARACTER` | Character name; once the character list loads, select that character and enter the world. |
-| `FREYA_MULTIBOX=1` | (slot >= 1) bypass client single-instance mutex. |
-| `FREYA_INSTANCE_SLOT=N` | force this launcher's slot (loopback `127.0.0.(N+1)`). |
-| `FREYA_PROXY_BIND_ADDRESS=IP` | proxy binds this specific loopback IP (3500/3801/3805/3807). |
-| `FREYA_POS_FEED_ADDRESS=IP` | client position feed targets this proxy's loopback IP. |
+| `FREYA_MULTIBOX=1` | (base != 3500) bypass client single-instance mutex. |
+| `FREYA_GAME_PORT_BASE=N` | client connect() hook remaps the fixed dials 3500/3801/3805 -> N+0/N+1/N+2 (this instance's contiguous block on 127.0.0.1). Launcher autodetects a free block when unset (native path). |
+| `FREYA_POS_FEED_PORT=N` | client position feed targets `127.0.0.1:N` (= base+3). |
+| `FREYA_PROXY_PORT_BASE=N` | NATIVE proxy offsets its 4 client-facing listeners to N+0..N+3 (docker proxy keeps stock ports + publishes the block instead). |
+
+**Port-block redesign (2026-06-30, owner: "same IP diff PORT").** Multibox is now
+"same 127.0.0.1, a different contiguous 4-port block per instance" -- NOT a
+distinct loopback IP per instance. The earlier `FREYA_INSTANCE_SLOT` /
+`FREYA_PROXY_BIND_ADDRESS=127.0.0.N` / `FREYA_POS_FEED_ADDRESS` / `FREYA_GAME_HOST`
+knobs (distinct-IP + host-side socat facade) are REMOVED -- see the redesign note
+under AZ-7. Same IP, different ports is portable to native Windows and sidesteps
+rootless docker's 127.0.0.0/8 collapse. `FREYA_PROXY_BIND_ADDRESS` survives only
+as the always-`127.0.0.1` client-facing bind for the native proxy.
 
 Values are EXAMPLES only in docs (`devuser`/`devpass`/`devusertt`); never commit
 a real account or character name (CLAUDE.md). The credentials live only in the
 spawning process's environment, never in a committed file.
 
-## Half 1 -- multi-box launch isolation (DONE + VERIFIED this session)
+## Half 1 -- multi-box launch isolation
+
+> **SUPERSEDED (2026-06-30) by the port-block redesign** -- see the REDESIGN note
+> under AZ-7 and the env-contract table above. The "one loopback IP per proxy
+> (127.0.0.N)" premise below was replaced by "same 127.0.0.1, one contiguous
+> 4-port block per instance" at the owner's direction. The mutex-bypass, shared
+> auth relay, and per-prefix isolation items below still hold; the `FREYA_INSTANCE_SLOT`
+> / `FREYA_PROXY_BIND_ADDRESS=127.0.0.N` / `FREYA_GAME_HOST` / `FREYA_POS_FEED_ADDRESS`
+> IP knobs do NOT -- they are removed in favour of `FREYA_GAME_PORT_BASE` /
+> `FREYA_POS_FEED_PORT` / `FREYA_PROXY_PORT_BASE`. The text below is kept as the
+> historical record of why distinct-IP was tried first.
 
 The EnB client dials FIXED compiled-in ports (3500 PROXY_LOCAL_TCP, 3801 MASTER,
-3805 GLOBAL, 3807 pos intake). N proxies on one box therefore need **one
-loopback IP per proxy** (127.0.0.1, 127.0.0.2, ...), never one port per proxy.
-All of 127.0.0.0/8 is loopback on Linux/WINE (NOT native Windows -- documented
-limitation, would need loopback aliases there).
+3805 GLOBAL, 3807 pos intake). The first design gave N proxies on one box **one
+loopback IP per proxy** (127.0.0.1, 127.0.0.2, ...). All of 127.0.0.0/8 is
+loopback on Linux/WINE but NOT native Windows -- one of the reasons the redesign
+moved to a per-instance PORT block instead.
 
 - [x] **Proxy binds a configurable IP.** `proxy/Net7.{h,cpp}` add
   `g_proxy_bind_addr` (default `INADDR_ANY`), parsed from
@@ -133,18 +153,18 @@ fails for even a SINGLE client**, not just multibox:
 - `play-local` / `play-cli` never hit this because their proxy runs IN docker (own
   container IP on the stack network) -- the proxy<->server leg never crosses NAT.
 
-**Corrected design (in progress):** one **in-docker** proxy per client
-(`docker-compose.mbox.yml`, mirrors the per-unit `docker-compose.cli.yml` proxy),
-each publishing its client-facing TCP (3801/3805/3500) + posfeed UDP (3807) on a
-distinct host loopback IP `127.0.0.N`. Each WINE client launches in the
-`Net7Local` no-native-proxy path with a new `FREYA_GAME_HOST=127.0.0.N` override
-(points the client dial + the position feed at its own docker proxy) and
-`FREYA_MULTIBOX=1` for the mutex bypass. The default docker proxy is taken down
-first (its `0.0.0.0:3500/3801/3805` bind would shadow the per-unit `127.0.0.N`
-binds). Auth stays the single shared `LocalAuthRelay` on `127.0.0.1:4180`
-(authlogin.dll always dials it; the relay TLS-fans to freya-online). This removes
-the NAT variable entirely and reuses the proven play-local client<->docker-proxy
-path, scaled to N loopback IPs.
+**Corrected design:** one **in-docker** proxy per client
+(`docker-compose.mbox.yml`, mirrors the per-unit `docker-compose.cli.yml` proxy).
+The in-docker-proxy conclusion (kill the NAT variable, reuse the proven play-local
+client<->docker-proxy leg) is what stuck. The client-facing exposure was first
+distinct host loopback IPs `127.0.0.N` + a socat facade, then -- at the owner's
+direction -- the **port-block** scheme: each unit publishes a contiguous
+`127.0.0.1:base..base+3` block, the in-client connect() hook remaps the client's
+fixed dials onto it (`FREYA_GAME_PORT_BASE`), the position feed targets `base+3`
+(`FREYA_POS_FEED_PORT`), and `FREYA_MULTIBOX=1` bypasses the mutex. The default
+docker proxy is taken down first (its `0.0.0.0:3500/3801/3805` bind would shadow
+unit 1's stock-numbered host ports). Auth stays the single shared `LocalAuthRelay`
+on `127.0.0.1:4180`. See the REDESIGN note under AZ-7 for the full mechanism.
 
 ## Half 2 -- env-driven in-client auto-login (NEW)
 
@@ -154,7 +174,7 @@ calls client functions directly from `enbmod` (CmdBuild/CmdSend verb dispatch),
 so calling the login/charselect entry points the same way is the established
 pattern.
 
-### AZ-1 -- scope the client seams (decomp) -- DONE
+### AZ-1 -- scope the client seams -- DONE
 - [x] All seams the driver needs are mapped and live-validated (addresses in
   `game.h` as `LoginRunLoop` / `EditSetText` / `CredentialAccept` / `CharEnter` and
   the `game::login` offset block): the front-end run loop (LoginTask `this` source),
@@ -168,7 +188,7 @@ pattern.
 ### AZ-2 -- login-stage observation hook -- DONE + LIVE-VERIFIED
 - [x] `hooks::enable_login_hook()` installs a READ-ONLY capture (NAKED trampoline,
   same pattern as the in-space hooks) on the front-end run loop
-  `FUN_00767f50` (`game::addr::LoginRunLoop`), capturing the LoginTask `this`
+  `0x00767f50` (`game::addr::LoginRunLoop`), capturing the LoginTask `this`
   (ECX). `hooks::login_task()` returns it. `autologin::init()` installs it only
   when an account/character env var is set; an ordinary launch never gains it.
 - [x] `autologin::tick()` reads the captured LoginTask, logs state transitions,
@@ -260,60 +280,73 @@ pattern.
   license dialog accepted -> credentials submitted -> entering world -> server "fully
   logged in" + MVAS synced. No new packet shape emitted (calls existing client code
   paths only), so no CV gate.
-- [x] Multibox: owner chose **(b) local-proxy-only mode** -- keep the docker
+- [~] Multibox: owner chose **(b) local-proxy-only mode** -- keep the docker
   server/login/postgres up, take the shared docker proxy DOWN, give each WINE client
   its own in-docker proxy bridged to the local server, with per-window env auto-login.
-  `just play-multibox-local COUNT` drives this. **DONE + LIVE-VERIFIED (2026-06-30):
-  COUNT=2 fully works end to end** -- both clients auto-login with separate accounts
-  (devuser/devusertt + devuser2/devuser2tt) and each reaches its OWN proxy on all four
-  game planes, with the server reporting NO IP mismatch. (Task #6 / #13.)
+  `just play-multibox-local COUNT` drives this. The **distinct-loopback-IP + socat**
+  cut of this was live-verified COUNT=2 earlier this session, but the owner then
+  directed the **port-block redesign** below; that redesign is **implemented + all
+  four units compile clean, and is the source of truth, but the docker COUNT=2 path
+  has NOT yet been re-verified end-to-end on the new code.** (Task #6 / #13.)
 
-  **Transport blocker -- SOLVED (socat facade).** The client dials FIXED ports baked
-  into client.exe (3500 sector / 3801 master / 3805 global TCP, 3807 posfeed UDP), so
-  N proxies need N distinct `<ip>:3500` endpoints. Distinct loopback IPs
-  (127.0.0.1, 127.0.0.2, ...) is the obvious split, BUT rootless docker
-  (rootlesskit, builtin port driver) collapses all 127.0.0.0/8 to 127.0.0.1 in its
-  port-conflict allocator -- a 2nd unit publishing :3500 on 127.0.0.2 fails "Bind for
-  127.0.0.1:3500 already allocated". Fix: each proxy publishes on a UNIQUE 127.0.0.1
-  host port; the recipe runs a host-side `socat` per unit binding the FIXED
-  127.0.0.N:{3500,3801,3805,3807} the client wants and forwarding to that unit's
-  unique port. socat is a plain host process so the kernel lets it bind distinct
-  loopback IPs rootless docker refuses. No sudo, no client patch. (compose +
-  justfile, this session.) Verified: 127.0.0.1:3500 and 127.0.0.2:3500 both bound
-  simultaneously; devusertt fully logs in via the facade.
-
-  **COUNT>=2 master/sector blocker -- the client HARDCODES 127.0.0.1, fixed by a
-  connect() hook (netredirect).** The first theory (per-instance `network.ini` would
-  hold a per-instance master address) was WRONG. The client honours the master/sector
-  host from NO config knob at all: `ss -tnp` showed both clients dial `127.0.0.1` for
-  master (3801) AND sector (3500) regardless of (a) `Data/common/network.ini`
-  `[MasterServer]`, (b) `Data/client/ini/network.ini` (which resolves to a public IP,
-  not loopback -- also ignored), and (c) the per-process `-SERVER_ADDR` arg (honoured
-  ONLY for the auth/global 3805 plane). The master+sector host is effectively baked to
-  `127.0.0.1` in client.exe. So on one host every concurrent client funnels its
-  master+sector to one `127.0.0.1:{3801,3500}`, the second client's handoff arrives
-  from the WRONG proxy, and the server's anti-hijack IP-match check
-  (`UDP_Connection::ProcessClientOpcode`, correct, MUST NOT be weakened) rejected it --
-  observed `Player IP mismatch [devuser2tt]: 60017ac 70017ac`.
-  - **Fix (mechanism-independent): a ws2_32 `connect()` hook in the injected DLL**
-    (`freya/client-injection/enbmod/src/netredirect.{h,cpp}`, MIT). It reads
-    `FREYA_GAME_HOST=127.0.0.N` and rewrites any dial to `127.0.0.1` on the four fixed
-    game ports (3500/3801/3805/3807) to `127.0.0.N`, so EVERY plane of client-N reaches
-    its OWN proxy. No-op for instance 1 (`127.0.0.1`) and for non-game ports (the shared
-    `127.0.0.1:4180` auth relay is untouched). Since we already inject the DLL this is
-    the lightest tool: no network namespaces, no root, no server/proxy change, and it
-    works no matter where the client computes the address. The per-instance WINE prefix
-    (`~/.wine-enb-mboxN`, via the launcher's `FREYA_CLIENT_PATH` override) is still
-    used, but ONLY to give each client its own `enbmod.cmd`/`.log`/registry/DLL copy --
-    NOT to fix master/sector (no config knob can).
-  - **LIVE VERIFY (2026-06-30, COUNT=2):** `ss -tnp` shows client 1 master+sector ->
-    `127.0.0.1`, client 2 master+sector -> `127.0.0.2`; client 2 logs
-    `netredirect: loopback game ports (3500/3801/3805/3807) -> 127.0.0.2`; both proxies
-    reach `SectorServer LOGIN -- connection active` with distinct avatars/sectors
-    (0x40000013 sector 4025 via mbox1; 0x40000018 sector 10201 via mbox2); both clients
-    `enb.self()==table` in-world; server log has ZERO `Player IP mismatch`. The
-    anti-hijack check passes LEGITIMATELY (each client's planes all share one proxy
-    container IP) -- it was never weakened.
+  **REDESIGN (2026-06-30, owner: "if they all go to the same machine why does it
+  need a different ip. shouldnt it use same ip diff PORT?").** Multibox now uses
+  SAME IP (127.0.0.1) + a DIFFERENT contiguous 4-port block per instance, replacing
+  the distinct-loopback-IP + host-side socat facade. This is simpler (no socat, no
+  PID reaping), portable to native Windows (no 127.0.0.N aliasing), and sidesteps
+  rootless docker's 127.0.0.0/8 collapse outright.
+  - **How the fixed client ports get spread.** The client dials FIXED ports baked
+    into client.exe (3500 sector / 3801 master / 3805 global TCP, 3807 posfeed UDP).
+    The injected ws2_32 `connect()` hook (`netredirect.{h,cpp}`, MIT) reads
+    `FREYA_GAME_PORT_BASE` and remaps any 127.0.0.1 dial on 3500/3801/3805 ->
+    base+0/+1/+2 (posfeed handled separately via `FREYA_POS_FEED_PORT` = base+3,
+    since it is `sendto` not `connect`). DefaultBase 3500 == first instance ==
+    multibox OFF == byte-identical no-remap. The auth relay (`127.0.0.1:4180`) is
+    outside the block and untouched.
+  - **Proxy side.** DOCKER path: the per-unit proxy container keeps its STOCK ports
+    and `docker-compose.mbox.yml` PUBLISHES host `127.0.0.1:base..base+3` onto them
+    (no `FREYA_PROXY_PORT_BASE` in the container). The redirect needs no change: the
+    proxy stamps fixed 3500 + `/ADDRESS:127.0.0.1` into every sector ServerRedirect,
+    and the client hook remaps 3500 -> base. NATIVE path (play-online / Windows): the
+    proxy reads `FREYA_PROXY_PORT_BASE` and offsets its own 4 client-facing listeners
+    (`proxy_client_port()` in `Net7.cpp` + `ServerManager.cpp` + the posfeed intake
+    in `UDPClient_linux.cpp`), since there is no docker publish layer.
+  - **Anti-hijack check still passes legitimately.** All of client-N's planes reach
+    the one proxy (one container/process IP), so `UDP_Connection::ProcessClientOpcode`
+    sees a consistent source -- the security check (correct, MUST NOT be weakened) is
+    untouched.
+  - **Why the redesign is correct re: the old master/sector finding.** The earlier
+    finding still holds -- the client bakes master(3801)+sector(3500) to `127.0.0.1`
+    and honours `-SERVER_ADDR` only for the auth/global(3805) plane. The connect hook
+    is exactly what neutralizes that: it remaps the PORT instead of needing a distinct
+    IP, so every plane of client-N lands on its own proxy via its own port block.
+  - **Per-instance WINE prefix retained** (`~/.wine-enb-mboxN`) only to isolate each
+    client's `enbmod.cmd`/`.log`/registry/DLL copy -- network.ini is now identical
+    (127.0.0.1) across instances, so it is no longer the driver. This applies to
+    BOTH multibox recipes: `play-multibox-local` (docker per-unit proxies) AND
+    `play-online` (native per-instance WINE proxies). **Fix this session:** the
+    `play-online N` multibox loop previously shared ONE `WINEPREFIX` across all
+    instances (a latent bug -- it would have interleaved each client's cmd/log
+    channel + clobbered per-instance registry/config), so it now clones
+    `~/.wine-enb-mboxN` per instance (cached, `--reflink=auto`) exactly like
+    `play-multibox-local`, and launches each with its own
+    `WINEPREFIX`+`FREYA_CLIENT_PATH`+`FREYA_GAME_PORT_BASE`. Instance 0 keeps the
+    base prefix + stock port block 3500 (multibox OFF).
+  - **Self-cleaning teardown (2026-06-30).** `play-multibox-local` runs in the
+    foreground for the whole session (waits on the launcher PIDs), so it now sets a
+    `trap _mbox_cleanup EXIT` that, on any exit (normal end / Ctrl-C / `set -e`
+    failure), tears down the `mbox1..N` docker proxies it started and reaps stray
+    `socat TCP-LISTEN:{3500,3801,3805},bind=127.0.0.*` forwarders left by the OLD
+    (pre-port-block) design. Without it a leftover mbox listener squats on the fixed
+    client ports and the next `just play-local` fails its proxy bind
+    (`0.0.0.0:3500 ... address already in use`) -- observed this session from a prior
+    multibox run that stranded 6 socats + the mbox1/mbox2 containers. `stop-multibox-local`
+    stays as the manual escape hatch for a SIGKILL'd run whose trap never fired.
+  - **STATUS: implemented + compiles; docker COUNT=2 NOT yet re-verified on the new
+    code; native/online + Windows are needs-owner-verification (see plans/29
+    CV-AZ-1..3).** Re-run `just play-multibox-local 2` and confirm `ss -tnp` shows
+    client 1 -> 127.0.0.1:{3500,3801,3805} and client 2 -> 127.0.0.1:{23510,23511,23512}
+    (its block), both `enb.self()==table` in-world, server log ZERO `Player IP mismatch`.
 
 ## Notes / decisions
 - No screen coords by design (owner: "make not rely on screen coords"). The

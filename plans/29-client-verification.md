@@ -2792,3 +2792,60 @@ moot; the SOLVED block above is the truth):**
   space, the Freya Dock button must additionally invoke the client landing sequence
   (the dispatcher's `0x20000` path runs `FUN_006...` landing init after the op).
 - **Setup**: same as CV-AS-VERBDISPATCH.
+
+## [ ] CV-AZ-1 -- Multibox port-block: docker COUNT=2 re-verify on the new code
+
+- **Change**: multibox redesigned from distinct loopback IPs (127.0.0.N) + socat
+  facade to SAME IP (127.0.0.1) + a contiguous 4-port block per instance. The
+  in-client ws2_32 `connect()` hook (`netredirect.cpp`) now remaps the client's
+  fixed 3500/3801/3805 dials to `FREYA_GAME_PORT_BASE`+0/+1/+2 (posfeed -> base+3
+  via `FREYA_POS_FEED_PORT`); `docker-compose.mbox.yml` publishes the block on
+  127.0.0.1 and the proxy container keeps stock ports. The earlier socat/distinct-IP
+  cut was live-verified COUNT=2, but this new code path has NOT been re-verified.
+- **Why a CV entry**: the proxy gained a client-facing listener offset
+  (`proxy_client_port()` in `Net7.cpp`/`ServerManager.cpp`/`UDPClient_linux.cpp`).
+  On the docker path it stays a no-op (stock ports + docker publish), but the whole
+  port-remap chain (client hook -> docker publish -> proxy -> server) must be proven
+  end-to-end against the real client, and the server anti-hijack IP-match check must
+  still pass with ZERO `Player IP mismatch`.
+- **What to look for (real client)**: `just play-multibox-local 2` with two
+  accounts. `ss -tnp` shows client 1 dialing `127.0.0.1:{3500,3801,3805}` and client
+  2 dialing `127.0.0.1:{23510,23511,23512}` (its block). Both reach `enb.self()==
+  table` in-world; server log has ZERO `Player IP mismatch`; each client's position
+  feed reaches its own proxy. Single-client (`just play-local`) is byte-identical to
+  before (base 3500, hook + offset both no-ops).
+- **Setup**: `just build-enbmod && just rebuild proxy`, two seeded accounts
+  (devuser/devuser2), `ENB_ACC_1=... ENB_ACC_2=... just play-multibox-local 2`.
+
+## [ ] CV-AZ-2 -- Multibox port-block: NATIVE WINE proxy (play-online) multibox
+
+- **Change**: on the NATIVE proxy path (play-online -- proxy runs in WINE, not
+  docker, so there is no docker publish layer), the proxy reads
+  `FREYA_PROXY_PORT_BASE` and offsets its OWN 4 client-facing listeners to
+  base+0..base+3, matching the client hook's block. `FREYA_PROXY_BIND_ADDRESS` is
+  always 127.0.0.1 now. This path CANNOT be tested on the Linux dev box (no native
+  WINE-proxy multibox here) -- owner verification required.
+- **What to look for (real client)**: two play-online clients on one machine, each
+  with its own native FreyaProxy on its own port block, both reach in-world against
+  the cloud server with no IP mismatch and independent position feeds.
+- **Setup**: owner's play-online multibox path with per-instance
+  `FREYA_GAME_PORT_BASE`/`FREYA_PROXY_PORT_BASE` (launcher autodetects a free block
+  per instance when unset).
+- **Recipe fix (2026-06-30)**: `just play-online N` (N>=2) now also clones a
+  per-instance WINE prefix (`~/.wine-enb-mboxN`, cached) and launches each with its
+  own `WINEPREFIX`+`FREYA_CLIENT_PATH`, matching `play-multibox-local`. Before this
+  it shared one prefix across all instances, which would have interleaved each
+  client's enbmod cmd/log channel and clobbered per-instance registry/config -- so
+  this is part of what owner verification must confirm actually multiboxes cleanly.
+
+## [ ] CV-AZ-3 -- Multibox port-block: native Windows multibox
+
+- **Change**: the port-block scheme was chosen partly because it is portable to
+  native Windows (no 127.0.0.N loopback aliasing, which the old distinct-IP design
+  needed). Same client hook + native proxy port offset as CV-AZ-2, but on real
+  Windows rather than WINE. Untestable on this Linux box.
+- **What to look for (real client)**: two clients on one Windows box multibox
+  cleanly with the autodetected per-instance port blocks; both in-world, no IP
+  mismatch.
+- **Setup**: owner's Windows environment; press Play twice (the launcher autodetects
+  the next free 127.0.0.1 port block per instance).
