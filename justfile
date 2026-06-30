@@ -650,31 +650,94 @@ play-local ACC='' PASS='' CHAR='' CLIENT_PATH='':
         acc=""
     fi
 
-    echo ">>> bringing up local stack (postgres + server + net7go + freya-online + proxy)"
-    just init
-    # BUILD-IF-STALE (default). `docker compose build` recompiles ONLY the
-    # services whose build context actually changed -- Docker's layer cache
-    # makes an unchanged service a near-instant no-op -- then `up -d` recreates
-    # ONLY the containers whose image ID changed. So if you changed nothing,
-    # nothing rebuilds and nothing restarts: your in-flight session is left
-    # alone. If you changed server/ proxy/ C++ or the Go net7go/freya-online,
-    # the new binary is built and only that one container bounces. This is what
-    # kills the stale-image trap (testing an OLD binary because the container
-    # was never rebuilt -- see CLAUDE.md "Wire format & byte order").
+    # ---- multibox auto-promote ---------------------------------------------
+    # Running `just play-local` AGAIN while a client is already up promotes this
+    # launch to its own multibox SLOT: a private docker proxy unit on a free
+    # 127.0.0.1 port block + a cloned WINE prefix, with FREYA_GAME_PORT_BASE
+    # pinned. The launcher then derives FREYA_MULTIBOX itself (single-instance
+    # mutex bypass) + the connect()-hook port remap + the posfeed port from that
+    # base. Slot 0 (first launch) is the ordinary shared-proxy path, unchanged.
     #
-    # ENB_NOREBUILD=1 forces a PURE ATTACH: skip the build entirely and start
-    # only containers that are missing. `--no-recreate` leaves every running
-    # container -- and its in-flight player/session state -- exactly as-is.
-    # Use it when you KNOW the running binaries are current and must not bounce.
-    if [ -n "${ENB_NOREBUILD:-}" ]; then
-        echo ">>> ENB_NOREBUILD=1 -- skipping build; starting only missing containers, running state untouched"
-        docker compose up -d --no-recreate server net7go freya-online proxy
-    else
-        echo ">>> build-if-stale (layer cache skips unchanged services); set ENB_NOREBUILD=1 to skip"
-        docker compose build server net7go freya-online proxy
-        docker compose up -d server net7go freya-online proxy
+    # Slots are claimed atomically with a lock dir, so two concurrent launches
+    # never grab the same one; a lock whose owner PID is dead is reclaimed. The
+    # lock (and any private proxy unit) is released on exit. On the 2nd+ launch
+    # pass ENB_NOREBUILD=1 (you do this yourself) to attach without rebuilding or
+    # bouncing the shared stack -- a recreate would drop client 1's connection.
+    #
+    # NOTE: this shares the mboxN docker projects + ~/.wine-enb-mboxN prefixes and
+    # the 23500+ port blocks with `play-multibox-local`; don't run both at once.
+    slotroot="${XDG_RUNTIME_DIR:-/tmp}/freya-play-local-slots"
+    mkdir -p "$slotroot"
+    slot=""
+    for k in $(seq 0 7); do
+        d="$slotroot/$k"
+        if mkdir "$d" 2>/dev/null; then slot=$k
+        else
+            op=$(cat "$d/pid" 2>/dev/null || echo "")
+            if [ -n "$op" ] && ! kill -0 "$op" 2>/dev/null; then
+                rm -rf "$d" 2>/dev/null || true
+                if mkdir "$d" 2>/dev/null; then slot=$k; fi
+            fi
+        fi
+        [ -n "$slot" ] && break
+    done
+    if [ -z "$slot" ]; then echo "play-local: all 8 multibox slots busy" >&2; exit 1; fi
+    echo "$$" > "$slotroot/$slot/pid"
+    mboxproj=""
+    _play_local_cleanup() {
+        [ -n "$mboxproj" ] && docker compose -f docker-compose.mbox.yml -p "$mboxproj" down >/dev/null 2>&1 || true
+        rm -rf "$slotroot/$slot" 2>/dev/null || true
+    }
+    trap _play_local_cleanup EXIT
+    if [ "$slot" -ne 0 ]; then
+        # Map slot k onto play-multibox-local's instance index k so the docker
+        # project (mbox$((slot+1))) + port block + cloned prefix all line up with
+        # that recipe's naming (don't run both recipes at once -- they'd share a
+        # project name). slot 0's would-be 23500/mbox1 block is simply unused here.
+        portbase=$((23500 + slot*10))
+        export FREYA_GAME_PORT_BASE="$portbase"
+        echo ">>> multibox slot $slot -- private proxy unit on 127.0.0.1:$portbase..$((portbase+3))"
     fi
-    just _image-status "" "proxy server net7go freya-online" "just rebuild"
+
+    if [ "$slot" -eq 0 ]; then
+        echo ">>> bringing up local stack (postgres + server + net7go + freya-online + proxy)"
+        just init
+        # BUILD-IF-STALE (default). `docker compose build` recompiles ONLY the
+        # services whose build context actually changed -- Docker's layer cache
+        # makes an unchanged service a near-instant no-op -- then `up -d` recreates
+        # ONLY the containers whose image ID changed. So if you changed nothing,
+        # nothing rebuilds and nothing restarts: your in-flight session is left
+        # alone. If you changed server/ proxy/ C++ or the Go net7go/freya-online,
+        # the new binary is built and only that one container bounces. This is what
+        # kills the stale-image trap (testing an OLD binary because the container
+        # was never rebuilt -- see CLAUDE.md "Wire format & byte order").
+        #
+        # ENB_NOREBUILD=1 forces a PURE ATTACH: skip the build entirely and start
+        # only containers that are missing. `--no-recreate` leaves every running
+        # container -- and its in-flight player/session state -- exactly as-is.
+        # Use it when you KNOW the running binaries are current and must not bounce.
+        if [ -n "${ENB_NOREBUILD:-}" ]; then
+            echo ">>> ENB_NOREBUILD=1 -- skipping build; starting only missing containers, running state untouched"
+            docker compose up -d --no-recreate server net7go freya-online proxy
+        else
+            echo ">>> build-if-stale (layer cache skips unchanged services); set ENB_NOREBUILD=1 to skip"
+            docker compose build server net7go freya-online proxy
+            docker compose up -d server net7go freya-online proxy
+        fi
+        just _image-status "" "proxy server net7go freya-online" "just rebuild"
+    else
+        # Slot >=1: the shared stack is already up (slot 0 holds the lock). Do NOT
+        # rebuild or recreate it -- that would bounce client 1. Bring up ONLY this
+        # slot's private proxy unit, publishing its 127.0.0.1 port block; the
+        # client's connect() hook remaps the fixed dials (3500/3801/3805 + posfeed
+        # 3807) onto base+0..base+3. compose builds the unit's image on first use.
+        export STACK_NETWORK="${COMPOSE_PROJECT_NAME:-freya}_default"
+        mboxproj="mbox$((slot+1))"
+        echo ">>> slot $slot: bringing up private proxy unit '$mboxproj' on stack net '$STACK_NETWORK'"
+        MBOX_SECTOR_PORT="$portbase" MBOX_MASTER_PORT="$((portbase+1))" \
+          MBOX_GLOBAL_PORT="$((portbase+2))" MBOX_POS_PORT="$((portbase+3))" \
+          docker compose -f docker-compose.mbox.yml -p "$mboxproj" up -d
+    fi
 
     echo ">>> building launcher (so its output dir exists for settings.json)"
     dotnet build tools/LaunchFreya >/dev/null
@@ -715,7 +778,33 @@ play-local ACC='' PASS='' CHAR='' CLIENT_PATH='':
     echo ">>> merged launch settings into $SETTINGS_DIR/FreyaLauncher.settings.json"
 
     : "${WINEPREFIX:=$HOME/.wine-enb}"
-    export WINEPREFIX
+    # Slot >=1 needs its OWN WINE prefix: a shared one would interleave the
+    # enbmod.cmd/.log channel + clobber the staged injection DLLs / registry
+    # between the two running clients. Clone the base prefix to ~/.wine-enb-mboxN
+    # (cached; --reflink=auto makes it near-instant + space-free on CoW fs) and
+    # repoint the client path into the clone -- same scheme as play-multibox-local,
+    # so the cached clones are shared. Slot 0 uses the base prefix untouched.
+    if [ "$slot" -ne 0 ]; then
+        base_prefix="$WINEPREFIX"
+        rel_cp="${cp#$base_prefix/}"
+        if [ "$rel_cp" = "$cp" ]; then
+            echo "play-local: client.exe ($cp) is not under WINEPREFIX ($base_prefix);" >&2
+            echo "  a multibox slot needs it inside the prefix. Set ENB_CLIENT_PATH/WINEPREFIX." >&2
+            exit 1
+        fi
+        pfx="$HOME/.wine-enb-mbox$((slot+1))"
+        if [ -f "$pfx/$rel_cp" ]; then
+            echo ">>> slot $slot prefix: reusing cached clone $pfx"
+        else
+            echo ">>> slot $slot prefix: cloning base prefix -> $pfx (first launch; cached after)"
+            rm -rf "$pfx"
+            cp -a --reflink=auto "$base_prefix" "$pfx"
+        fi
+        export WINEPREFIX="$pfx"
+        export FREYA_CLIENT_PATH="$pfx/$rel_cp"
+    else
+        export WINEPREFIX
+    fi
 
     # Default play-local is quiet -- no WINEDEBUG overrides, so the console
     # only carries the launcher + proxy + server logs. For SEH / module

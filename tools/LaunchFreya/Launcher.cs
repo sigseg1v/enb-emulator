@@ -804,7 +804,16 @@ namespace LaunchFreya
                 !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ENB_ACC_NAME"))
                 || Environment.GetEnvironmentVariable("ENB_EULA") == "ACCEPT";
 
-            if (!_setting.EnablePositionFeed && !_setting.EnableClientMods && !autoLogin)
+            // The single-instance mutex bypass (FreyaMultiboxHook, armed by the
+            // FREYA_MULTIBOX env) lives in FreyaPosFeed.dll, so a multi-box slot
+            // (instance 2+, _slot.Multibox) needs that DLL injected to get past the
+            // "Earth & Beyond is already running" guard -- even if the user has the
+            // position-feed toggle OFF. Without this, double-launching the launcher
+            // on Windows with the feed off would stall the second client on the
+            // mutex. Same decoupling as auto-login above.
+            bool multibox = _slot != null && _slot.Multibox;
+
+            if (!_setting.EnablePositionFeed && !_setting.EnableClientMods && !autoLogin && !multibox)
                 return;
 
             // FreyaInject.exe and the DLLs are Win32 PEs that run natively on Windows
@@ -818,7 +827,7 @@ namespace LaunchFreya
                 return;
             }
 
-            if (_setting.EnablePositionFeed)
+            if (_setting.EnablePositionFeed || multibox)
             {
                 var dos = StagePositionFeedDll();
                 if (dos != null) _injectDlls.Add(dos);

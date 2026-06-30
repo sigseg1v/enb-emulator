@@ -50,10 +50,14 @@ uint16_t g_port_base = 0;
 // block. Returns 0 for a port we do not remap (caller passes it through).
 uint16_t remap_port(uint16_t host_port) {
     switch (host_port) {
-        case 3500: return (uint16_t)(g_port_base + 0); // sector
-        case 3801: return (uint16_t)(g_port_base + 1); // master
-        case 3805: return (uint16_t)(g_port_base + 2); // global / auth
-        default:   return 0;
+    case 3500:
+        return (uint16_t)(g_port_base + 0); // sector
+    case 3801:
+        return (uint16_t)(g_port_base + 1); // master
+    case 3805:
+        return (uint16_t)(g_port_base + 2); // global / auth
+    default:
+        return 0;
     }
 }
 
@@ -111,8 +115,8 @@ void init() {
         logf("netredirect: failed to hook connect() -- remap disabled");
         return;
     }
-    logf("netredirect: loopback game ports 3500/3801/3805 -> 127.0.0.1:%d/%d/%d",
-         g_port_base + 0, g_port_base + 1, g_port_base + 2);
+    logf("netredirect: loopback game ports 3500/3801/3805 -> 127.0.0.1:%d/%d/%d", g_port_base + 0,
+         g_port_base + 1, g_port_base + 2);
 }
 
 } // namespace netredirect

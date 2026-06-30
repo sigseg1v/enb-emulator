@@ -113,7 +113,7 @@ void run_init_script() {
 void on_tick() {
     if (!g_ready.load())
         return;
-    enb::autologin::tick();  // front-end auto-login driver (no-op once in-game / unconfigured)
+    enb::autologin::tick(); // front-end auto-login driver (no-op once in-game / unconfigured)
     enb::lua::tick(g_L);
     // hot-reload: poll init.lua mtime every ~120 ticks
     if (++g_tick_count >= 120) {

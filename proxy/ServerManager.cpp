@@ -59,9 +59,9 @@ void ServerManager::RunMasterServer() {
     // a stub.
     // proxy_client_port() applies the per-instance multi-box port offset (0 for
     // single-client / docker, so the stock ports are used unchanged there).
-    global_server_listener = new TcpListener(m_IpAddressInternal,
-                                             proxy_client_port(GLOBAL_SERVER_PORT), *this,
-                                             CONNECTION_TYPE_CLIENT_TO_GLOBAL_SERVER);
+    global_server_listener =
+        new TcpListener(m_IpAddressInternal, proxy_client_port(GLOBAL_SERVER_PORT), *this,
+                        CONNECTION_TYPE_CLIENT_TO_GLOBAL_SERVER);
     if (g_LocalCert) {
         ssl_listener = new SSL_Listener(m_IpAddressInternal, ssl_port, *this);
     }

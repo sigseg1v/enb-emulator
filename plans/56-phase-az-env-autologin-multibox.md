@@ -347,6 +347,35 @@ pattern.
     CV-AZ-1..3).** Re-run `just play-multibox-local 2` and confirm `ss -tnp` shows
     client 1 -> 127.0.0.1:{3500,3801,3805} and client 2 -> 127.0.0.1:{23510,23511,23512}
     (its block), both `enb.self()==table` in-world, server log ZERO `Player IP mismatch`.
+  - **`just play-local` auto-promote (2026-06-30, owner: "do (a) and make it
+    automatically work. Automatically pass FREYA_MULTIBOX. Assume I will pass
+    ENB_NOREBUILD=1 myself on the 2nd one").** Running `play-local` a SECOND time
+    while a client is up no longer collides on port 3500 -- it self-promotes to a
+    multibox SLOT. A mkdir-lock allocator (`$XDG_RUNTIME_DIR/freya-play-local-slots/<k>`,
+    atomic claim of the lowest free k in 0..7, PID-liveness stale reclaim) assigns
+    a slot; the lock + any private proxy unit are released by an EXIT trap. Slot 0
+    (first launch) is the ordinary shared-proxy path BYTE-IDENTICAL to before. Slot
+    k>=1 maps onto play-multibox-local instance index k: brings up only its own
+    docker proxy unit (`-p mbox$((k+1))`, port block 23500+k*10 on 127.0.0.1, via
+    docker-compose.mbox.yml on the shared stack net), clones the WINE prefix to
+    ~/.wine-enb-mbox$((k+1)) (cached), and exports FREYA_GAME_PORT_BASE -- the
+    launcher then DERIVES FREYA_MULTIBOX itself from _slot.Multibox (so the env is
+    armed automatically, as asked) plus the connect-hook remap + posfeed port. It
+    does NOT rebuild/recreate the shared stack (that would bounce client 1); the
+    user passes ENB_NOREBUILD=1 on the 2nd launch. Don't run play-local promotion
+    and play-multibox-local at once -- they share the mboxN projects/prefixes.
+  - **Windows double-launch fix (2026-06-30, owner: "launch the freya launcher
+    twice and click play on both ... Will it? If not, fix it").** The mutex bypass
+    (FreyaMultiboxHook, in FreyaPosFeed.dll) was only injected when the position-feed
+    toggle was ON, so a 2nd Windows client with the feed off would stall on the
+    "already running" mutex. Fixed in `ConfigureInjection`: a `_slot.Multibox` slot
+    now forces the posfeed DLL injection regardless of the feed toggle. The slot
+    machinery (autodetect a free 127.0.0.1 port block when 3500 is busy) + native
+    per-instance proxy offset + shared LocalAuthRelay reuse were already wired, so
+    on Windows two launcher windows each clicking Play now auto-pick distinct port
+    blocks. Caveat: needs a DIFFERENT account per client (server force-kicks a
+    duplicate per-account login -- NOT bypassed). Real-Windows path is
+    owner-verification (plans/29 CV-AZ-3).
 
 ## Notes / decisions
 - No screen coords by design (owner: "make not rely on screen coords"). The

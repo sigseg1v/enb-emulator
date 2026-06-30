@@ -51,10 +51,14 @@ unsigned short proxy_client_port(unsigned short stock) {
     if (g_proxy_port_base == 0)
         return stock;
     switch (stock) {
-        case PROXY_LOCAL_TCP_PORT: return (unsigned short)(g_proxy_port_base + 0);
-        case MASTER_SERVER_PORT:   return (unsigned short)(g_proxy_port_base + 1);
-        case GLOBAL_SERVER_PORT:   return (unsigned short)(g_proxy_port_base + 2);
-        default:                   return stock;
+    case PROXY_LOCAL_TCP_PORT:
+        return (unsigned short)(g_proxy_port_base + 0);
+    case MASTER_SERVER_PORT:
+        return (unsigned short)(g_proxy_port_base + 1);
+    case GLOBAL_SERVER_PORT:
+        return (unsigned short)(g_proxy_port_base + 2);
+    default:
+        return stock;
     }
 }
 

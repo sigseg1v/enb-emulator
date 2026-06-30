@@ -1049,9 +1049,8 @@ bool UDPClient::ReadClientShipPosition(float pos[3], float heading[3]) {
         // Posfeed intake port = base+3 of this instance's port block under native
         // multi-box (g_proxy_port_base), else the stock FREYA_CLIENT_POS_PORT. The
         // in-client posfeed sender (FREYA_POS_FEED_PORT) targets the same slot.
-        addr.sin_port = htons(g_proxy_port_base
-                                  ? (unsigned short)(g_proxy_port_base + 3)
-                                  : (unsigned short)FREYA_CLIENT_POS_PORT);
+        addr.sin_port = htons(g_proxy_port_base ? (unsigned short)(g_proxy_port_base + 3)
+                                                : (unsigned short)FREYA_CLIENT_POS_PORT);
         // Win32/WINE proxy: co-located with the client, bind loopback so the
         // intake is never network-reachable. Linux docker proxy: bind ANY so the
         // published-port forward delivers; compose restricts the host publish to

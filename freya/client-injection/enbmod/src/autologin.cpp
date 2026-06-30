@@ -44,27 +44,27 @@ namespace autologin {
 namespace {
 
 // ---- env-driven config, read once in init() ---------------------------------
-bool g_want_eula = false;     // ENB_EULA / FREYA_EULA == ACCEPT
-std::string g_acc;            // account name
-std::string g_pass;           // account password
-std::string g_char;           // character to select + enter
-bool g_enabled = false;       // any account/character requested -> capture hook installed
+bool g_want_eula = false; // ENB_EULA / FREYA_EULA == ACCEPT
+std::string g_acc;        // account name
+std::string g_pass;       // account password
+std::string g_char;       // character to select + enter
+bool g_enabled = false;   // any account/character requested -> capture hook installed
 
 // ---- driver latches (act once per phase) ------------------------------------
 int g_last_state = -0x7fffffff;
-bool g_submitted = false;      // credentials sent
-bool g_entered = false;        // character enter requested
-int g_view_throttle = 0;       // frames since last credential-view search
-int g_view_attempts = 0;       // bounded credential-view searches (cost guard)
+bool g_submitted = false; // credentials sent
+bool g_entered = false;   // character enter requested
+int g_view_throttle = 0;  // frames since last credential-view search
+int g_view_attempts = 0;  // bounded credential-view searches (cost guard)
 bool g_view_gaveup = false;
-int g_char_attempts = 0;       // bounded character-name searches
+int g_char_attempts = 0; // bounded character-name searches
 bool g_char_gaveup = false;
 
 // Bound the cost of the credential-view search so a future client build that moved
 // an offset cannot turn tick() into a permanent per-frame memory crawl.
-constexpr int kViewSearchPeriod = 15;  // run the search at most every N frames
-constexpr int kViewSearchMax = 60;     // ~15s of retries, then give up (logged once)
-constexpr int kCharSearchMax = 1800;   // ~30s for the avatar list to arrive + populate
+constexpr int kViewSearchPeriod = 15; // run the search at most every N frames
+constexpr int kViewSearchMax = 60;    // ~15s of retries, then give up (logged once)
+constexpr int kCharSearchMax = 1800;  // ~30s for the avatar list to arrive + populate
 
 // FREYA_* alias wins over ENB_* when both are set.
 std::string env_either(const char* freya_name, const char* enb_name) {
@@ -91,9 +91,8 @@ bool ieq(const std::string& a, const char* b) {
 // dismissed live by eula_dismiss_thread() below.
 void accept_eula_registry() {
     HKEY k = nullptr;
-    LONG r = RegCreateKeyExA(HKEY_CURRENT_USER,
-                             "Software\\Westwood Studios\\Earth & Beyond", 0, nullptr, 0,
-                             KEY_SET_VALUE, nullptr, &k, nullptr);
+    LONG r = RegCreateKeyExA(HKEY_CURRENT_USER, "Software\\Westwood Studios\\Earth & Beyond", 0,
+                             nullptr, 0, KEY_SET_VALUE, nullptr, &k, nullptr);
     if (r != ERROR_SUCCESS) {
         logf("autologin: EULA registry open failed (%ld)", r);
         return;
@@ -120,8 +119,8 @@ void accept_eula_registry() {
 // DirectDraw game window does not have. We post WM_COMMAND/IDOK rather than a
 // VK_RETURN keypress because the dialog's default-button mapping is not knowable
 // from here -- ENTER could land on Decline, IDOK cannot.
-constexpr WORD kLicenseAcceptId = 1;       // IDOK -> the dialog's Accept path
-constexpr int kLicenseTextCtrlId = 0x40D;  // the license-text control unique to this dialog
+constexpr WORD kLicenseAcceptId = 1;      // IDOK -> the dialog's Accept path
+constexpr int kLicenseTextCtrlId = 0x40D; // the license-text control unique to this dialog
 
 struct EulaScan {
     DWORD pid;
@@ -138,7 +137,7 @@ BOOL CALLBACK eula_enum_proc(HWND hwnd, LPARAM lp) {
     // license-text control; the game window (and everything else) does not.
     if (GetDlgItem(hwnd, kLicenseTextCtrlId) != nullptr) {
         s->found = hwnd;
-        return FALSE;  // stop enumerating
+        return FALSE; // stop enumerating
     }
     return TRUE;
 }
@@ -150,7 +149,7 @@ BOOL CALLBACK eula_enum_proc(HWND hwnd, LPARAM lp) {
 // sequence is handled by the same loop.
 DWORD WINAPI eula_dismiss_thread(LPVOID) {
     const DWORD pid = GetCurrentProcessId();
-    const DWORD deadline = GetTickCount() + 120000;  // give the dialog up to ~2 min to appear
+    const DWORD deadline = GetTickCount() + 120000; // give the dialog up to ~2 min to appear
     HWND last_accepted = nullptr;
     int gone_streak = 0;
     bool accepted_any = false;
@@ -212,7 +211,7 @@ bool is_credential_view(uintptr_t v, uintptr_t lt) {
 uintptr_t find_credential_view(uintptr_t lt) {
     constexpr int kMaxDepth = 5;
     constexpr size_t kMaxNodes = 4000;
-    constexpr unsigned kScanSpan = 0x400;  // bytes of each object scanned for child ptrs
+    constexpr unsigned kScanSpan = 0x400; // bytes of each object scanned for child ptrs
 
     std::unordered_set<uintptr_t> seen;
     std::queue<std::pair<uintptr_t, int>> q;
@@ -248,7 +247,7 @@ uintptr_t find_credential_view(uintptr_t lt) {
 void set_widget_text(uintptr_t widget, const std::string& text) {
     if (!widget || mem::u32(widget) != game::login::edit_widget_vtable)
         return;
-    uint32_t args[2] = {(uint32_t)(uintptr_t)text.c_str(), 0u};  // append=0 -> replace
+    uint32_t args[2] = {(uint32_t)(uintptr_t)text.c_str(), 0u}; // append=0 -> replace
     actions::call_thiscall(game::addr::EditSetText, widget, args, 2);
 }
 
@@ -257,8 +256,8 @@ void set_widget_text(uintptr_t widget, const std::string& text) {
 // Returns -1 when no slot matches (list not yet populated, or no such character).
 int find_char_index(uintptr_t lt, const std::string& name) {
     for (int i = 0; i < game::login::char_max; ++i) {
-        uintptr_t slot = lt + game::login::char_name_base +
-                         (unsigned)i * game::login::char_name_stride;
+        uintptr_t slot =
+            lt + game::login::char_name_base + (unsigned)i * game::login::char_name_stride;
         std::string s = mem::cstr(slot, 64);
         if (!s.empty() && _stricmp(s.c_str(), name.c_str()) == 0)
             return i;
@@ -285,7 +284,7 @@ void drive_submit(uintptr_t lt) {
 
     uintptr_t view = find_credential_view(lt);
     if (!view)
-        return;  // widgets not built yet -- retry on the next throttled tick
+        return; // widgets not built yet -- retry on the next throttled tick
 
     set_widget_text(mem::ptr(view + game::login::view_user_widget), g_acc);
     if (!g_pass.empty())
@@ -309,7 +308,7 @@ void drive_enter(uintptr_t lt) {
                  g_char.c_str());
             g_char_gaveup = true;
         }
-        return;  // list may still be populating -- retry next tick
+        return; // list may still be populating -- retry next tick
     }
     mem::write<uint32_t>(lt + game::login::sel_index, (uint32_t)idx);
     actions::call_thiscall(game::addr::CharEnter, lt, nullptr, 0);
@@ -356,7 +355,7 @@ void tick() {
         return;
     uintptr_t lt = hooks::login_task();
     if (!lt)
-        return;  // front-end run loop has not fired yet (no pre-game screens up)
+        return; // front-end run loop has not fired yet (no pre-game screens up)
 
     int st = mem::i32(lt + game::login::state);
     if (st != g_last_state) {

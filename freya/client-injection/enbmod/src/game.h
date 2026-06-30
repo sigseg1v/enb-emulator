@@ -293,21 +293,21 @@ constexpr uintptr_t CharEnter = 0x00769400;
 // the edit-widget vtable. The username/password text lives in the widgets, not in
 // any LoginTask copy, so auth only sees text written through EditSetText.
 namespace login {
-constexpr unsigned state = 0x24;          // int front-end state
-constexpr int state_login = 1;            //   login / pre-game screen up
+constexpr unsigned state = 0x24; // int front-end state
+constexpr int state_login = 1;   //   login / pre-game screen up
 // NOTE on the state field: when credentials are submitted programmatically, this
 // client build authenticates and fills the character-name slots below WITHOUT
 // flipping +0x24 off the login value (the character-select screen never renders).
 // So the avatar list arriving is detected by the NAME SLOTS becoming populated,
 // not by a state change -- the auto-enter gate watches the slots, not +0x24.
-constexpr unsigned view_owner = 0x9c;     // credential view -> back-ptr to LoginTask
-constexpr unsigned view_user_widget = 0xa4;  // credential view -> username edit widget
-constexpr unsigned view_pass_widget = 0xa8;  // credential view -> password edit widget
-constexpr uintptr_t edit_widget_vtable = 0x00afda10;  // first dword of an edit widget
-constexpr unsigned char_name_base = 0x424;   // char[0] name slot
-constexpr unsigned char_name_stride = 0x10c; // stride between char name slots
-constexpr int char_max = 8;                  // character slots to scan
-constexpr unsigned sel_index = 0x1080;       // selected character index (int)
+constexpr unsigned view_owner = 0x9c;                // credential view -> back-ptr to LoginTask
+constexpr unsigned view_user_widget = 0xa4;          // credential view -> username edit widget
+constexpr unsigned view_pass_widget = 0xa8;          // credential view -> password edit widget
+constexpr uintptr_t edit_widget_vtable = 0x00afda10; // first dword of an edit widget
+constexpr unsigned char_name_base = 0x424;           // char[0] name slot
+constexpr unsigned char_name_stride = 0x10c;         // stride between char name slots
+constexpr int char_max = 8;                          // character slots to scan
+constexpr unsigned sel_index = 0x1080;               // selected character index (int)
 } // namespace login
 
 // Vitals-bar fill chain. Unlike the Offsets struct below (runtime hypotheses),
