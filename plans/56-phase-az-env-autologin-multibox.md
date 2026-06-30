@@ -95,21 +95,29 @@ Still open in Half 1:
   devuser2 devpass2`), so a 2-account local test has its credentials ready. (Task #6.)
 - [ ] play-local MVAS: native-proxy play-local impossible on rootless docker;
   MVAS works with the docker proxy. (Record + verify.)
-- [!] **LOCAL multibox is NOT a quick verify -- topology blocker.** The docker
-  proxy binds `INADDR_ANY:3500`, which OVERLAPS every specific-loopback bind on
-  3500, so a second native (WINE) proxy on `127.0.0.2:3500` gets `EADDRINUSE`. The
-  single docker proxy is also single-client (global state), so it can serve exactly
-  one local client. Running N local clients therefore requires N native WINE proxies
-  (one per loopback IP) dialing the docker SERVER's UDP ports directly with the
-  docker proxy DOWN -- but the launcher has no "local server + native per-slot proxy"
-  emulator config today (its modes are Net7Local = the single docker proxy, and
-  online = native WINE proxy -> cloud host). The DESIGNED multibox path is
-  `just play-online N` (native WINE proxy per slot, slot mechanism wired and
-  bind-verified), which targets the cloud host and tears down the local stack -- so
-  verifying it needs the two accounts to exist on the CLOUD DB, not just locally.
-  Net: AZ-7 single-client is DONE; multibox end-to-end is gated on either (a) a new
-  launcher "local + native per-slot proxy" mode, or (b) running `play-online N`
-  against the cloud with two cloud accounts. Flag for the owner to choose.
+- [~] **Multibox now self-logs per window; the only open piece is which SERVER to
+  run it against.** Earlier note here over-stated the blocker: the launcher DOES have
+  a native per-slot-proxy mode -- it is `Net7MP` / `just play-online N`. Each slot
+  spawns its OWN WINE `FreyaProxy.exe` bound to `127.0.0.<slot+1>` (specific IP, never
+  `INADDR_ANY`), so the loopback-overlap problem is already solved for that path; the
+  docker proxy's `INADDR_ANY:3500` only collides when the local docker stack is left
+  up, which `play-online` tears down first. The slot mechanism is wired and
+  bind-verified.
+  - **NEW this session:** the `play-online N` multibox loop now wires per-slot
+    auto-login from env -- window n (1-based) reads `ENB_ACC_<n>`/`ENB_PASS_<n>`/
+    `ENB_CHAR_<n>` and, if set, launches that window with `ENB_EULA=ACCEPT` +
+    `FREYA_AUTOPLAY=1` so the AZ in-client auto-login drives it hands-free (no
+    xdotool, no per-window typing). Windows without per-slot creds fall back to manual
+    entry. This is the "make scripting multibox easy" payoff: N windows, N accounts,
+    zero manual input.
+  - What is genuinely still open (an OWNER choice, not code): `play-online` targets
+    the cloud host by default and tears down the local docker stack, so a full
+    end-to-end run needs either (a) two CLOUD accounts on the deployment's DB, or (b)
+    a local variant that downs ONLY the docker proxy (keeping server+login+postgres
+    up) and points `Net7MP` upstream at `127.0.0.1` with the local DTLS cert -- a new
+    recipe/mode, implementable but with its own DTLS-against-local-server + UDP-port-
+    reachability test surface. `devuser2`/`devpass2` (5 chars) is seeded LOCALLY as
+    the prerequisite for (b). Flag for the owner to pick (a) or (b).
 
 ## Half 2 -- env-driven in-client auto-login (NEW)
 
@@ -225,8 +233,12 @@ pattern.
   license dialog accepted -> credentials submitted -> entering world -> server "fully
   logged in" + MVAS synced. No new packet shape emitted (calls existing client code
   paths only), so no CV gate.
-- [ ] Multibox: `just play-online 2` with two different accounts -> both clients
-  self-login to their own character. (Task #6; needs a second seeded account.)
+- [~] Multibox: the `play-online N` loop now wires per-slot auto-login --
+  `ENB_ACC_1=.. ENB_PASS_1=.. ENB_CHAR_1=.. ENB_ACC_2=.. .. just play-online 2`
+  launches each window hands-free into its own account. Wiring DONE + parse-verified;
+  full live two-window run is the remaining owner-gated step (which server to target;
+  see Half-1 "Multibox" note for the (a) cloud-accounts / (b) local-proxy-only-mode
+  choice). `devuser2`/`devpass2` seeded locally as the prerequisite for (b). (Task #6.)
 
 ## Notes / decisions
 - No screen coords by design (owner: "make not rely on screen coords"). The

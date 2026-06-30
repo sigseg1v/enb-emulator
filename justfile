@@ -745,6 +745,14 @@ config-game:
 #   just play-online 4                # four clients, slots 0..3
 #   just play-online /path/to/client.exe
 #   ENB_ONLINE_HOST=myserver.example just play-online
+#
+# Hands-free multibox (Phase AZ): set per-window credentials and each client
+# self-logs into its own account+character with NO manual input (the AZ in-client
+# auto-login). Window n (1-based) reads ENB_ACC_<n>/ENB_PASS_<n>/ENB_CHAR_<n>:
+#   ENB_ACC_1=alice ENB_PASS_1=pw1 ENB_CHAR_1=alicechar \
+#   ENB_ACC_2=bob   ENB_PASS_2=pw2 ENB_CHAR_2=bobchar   just play-online 2
+# (each window needs a DIFFERENT account -- the server force-kicks a duplicate
+# login of the same account). Windows with no per-slot creds log in manually.
 play-online CLIENT_PATH='' HOST='':
     #!/usr/bin/env bash
     set -euo pipefail
@@ -837,10 +845,28 @@ play-online CLIENT_PATH='' HOST='':
         # so each proxy binds its 127.0.0.(slot+1):3500 before the next probes.
         # No autoplay: enter a different account in each window, then click Play.
         DLL="$SETTINGS_DIR/FreyaLauncher.dll"
-        echo ">>> launching $count instances (WINEPREFIX=$WINEPREFIX); set a DIFFERENT account per window, then click Play"
+        echo ">>> launching $count instances (WINEPREFIX=$WINEPREFIX)"
         for i in $(seq 0 $((count-1))); do
-            echo ">>>   instance $i -> 127.0.0.$((i+1))"
-            FREYA_INSTANCE_SLOT="$i" dotnet "$DLL" &
+            n=$((i+1))
+            # Per-slot auto-login (Phase AZ): if ENB_ACC_<n>/ENB_PASS_<n> are set for
+            # this window (n is 1-based: window 1 = ENB_ACC_1), the injected enbmod
+            # self-logs into that account+character hands-free -- no xdotool, no
+            # typing. This is the multibox-scripting payoff of AZ: N windows, N
+            # accounts, zero manual input. ENB_CHAR_<n> is optional (a window with no
+            # char env stops at char-select). A window with no per-slot creds falls
+            # back to manual entry (type an account, click Play), exactly as before.
+            accvar="ENB_ACC_$n"; passvar="ENB_PASS_$n"; charvar="ENB_CHAR_$n"
+            acc="${!accvar:-}"; pass="${!passvar:-}"; char="${!charvar:-}"
+            if [ -n "$acc" ] && [ -n "$pass" ]; then
+                echo ">>>   instance $i -> 127.0.0.$n  (auto-login $acc${char:+/$char})"
+                FREYA_INSTANCE_SLOT="$i" \
+                  ENB_EULA=ACCEPT ENB_ACC_NAME="$acc" ENB_ACC_PASS="$pass" ENB_CHARACTER="$char" \
+                  FREYA_AUTOPLAY=1 \
+                  dotnet "$DLL" &
+            else
+                echo ">>>   instance $i -> 127.0.0.$n  (manual login -- set ENB_ACC_$n/ENB_PASS_$n to automate)"
+                FREYA_INSTANCE_SLOT="$i" dotnet "$DLL" &
+            fi
             sleep 2
         done
         wait
