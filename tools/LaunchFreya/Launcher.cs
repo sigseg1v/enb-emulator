@@ -81,6 +81,12 @@ namespace LaunchFreya
         // the proxy's own _YYYY_MM_DD.log instead.
         Process _proxyProcess;
 
+        // This launcher's multi-box instance slot, resolved at Launch() time when
+        // a local proxy is spawned. Slot 0 = ordinary single-client launch
+        // (127.0.0.1, multibox off); slot >= 1 = a second/third/... instance on
+        // its own loopback IP. Null until a proxy-spawning launch resolves it.
+        MultiboxSlot _slot;
+
         public Launcher(LaunchSetting setting, Action<string> warn = null)
         {
             _setting = setting ?? throw new ArgumentNullException(nameof(setting));
@@ -124,22 +130,33 @@ namespace LaunchFreya
             {
                 var launch = (_setting.LaunchName ?? "").ToUpperInvariant();
 
-                // Where the CLIENT dials for the game servers (master/global/
-                // sector/chat/...). When we spawn a local Net7Proxy (SP and MP
-                // online play), that is ALWAYS loopback: the proxy listens on
-                // 127.0.0.1 for the client's TCP and bridges it to the real
-                // server over UDP. Pointing the client straight at the public
-                // host fails -- only the server's UDP game ports are reachable
-                // there, not the client-facing TCP listeners (3801/3805/3500),
-                // which exist solely on the local proxy. When no local proxy is
-                // spawned (the Net7Local docker dev stack) the client dials
-                // Hostname directly, which is the docker-published proxy.
-                //
-                // The proxy's UPSTREAM and the auth relay/registration host stay
-                // _setting.Hostname (the real server) -- see LaunchFreyaProxy /
-                // StartLocalAuthRelay / EffectiveRegistrationHostname.
+                // When we spawn a local Net7Proxy (SP and MP online play) the
+                // client dials loopback: the proxy listens there for the client's
+                // TCP and bridges it to the real server over UDP. Pointing the
+                // client straight at the public host fails -- only the server's
+                // UDP game ports are reachable there, not the client-facing TCP
+                // listeners (3801/3805/3500), which exist solely on the local
+                // proxy. When no local proxy is spawned (the Net7Local docker dev
+                // stack) the client dials Hostname directly (the docker-published
+                // proxy). The proxy's UPSTREAM and the auth relay/registration
+                // host stay _setting.Hostname (the real server) -- see
+                // LaunchFreyaProxy / StartLocalAuthRelay / EffectiveRegistrationHostname.
                 bool spawnsLocalProxy = launch == "NET7SP" || launch == "NET7MP";
-                string gameHost = spawnsLocalProxy ? "127.0.0.1" : _setting.Hostname;
+
+                // Resolve the multi-box slot BEFORE deciding the game host: a
+                // second instance binds its proxy/client/feed to its own loopback
+                // IP (127.0.0.N) so it doesn't collide with the first. Only the
+                // local-proxy launch paths multi-box; the docker dev stack
+                // (Net7Local) has a single shared proxy and stays on Hostname.
+                _slot = spawnsLocalProxy ? MultiboxSlot.Resolve(_warn) : null;
+                string loopbackIp = _slot?.LoopbackIp ?? "127.0.0.1";
+
+                // Where the CLIENT dials for the game's master server. With a
+                // local proxy that is this instance's loopback IP (the proxy
+                // listens there and bridges to the real server); the proxy then
+                // stamps its own loopback IP into every sector ServerRedirect, so
+                // the rest of the session stays on 127.0.0.N too.
+                string gameHost = spawnsLocalProxy ? loopbackIp : _setting.Hostname;
 
                 PatchAuthLoginFile();
                 PatchRegDataFileNames();
@@ -221,6 +238,24 @@ namespace LaunchFreya
             var addrs = Dns.GetHostAddresses(gameHost);
             if (addrs.Length == 0)
                 throw new InvalidOperationException($"Could not resolve hostname '{gameHost}'.");
+
+            // Multi-box client-side wiring (read by the injected DLL; WINE
+            // forwards host env to the Win32 process). FREYA_MULTIBOX arms the
+            // single-instance mutex bypass so this second client gets past the
+            // "already running" guard; FREYA_POS_FEED_ADDRESS tells the in-client
+            // position feed which proxy loopback IP to send to (this instance's,
+            // not the shared 127.0.0.1). Slot 0 clears both so the stock guard and
+            // the loopback feed target are untouched for a single-client launch.
+            if (_slot != null && _slot.Multibox)
+            {
+                Environment.SetEnvironmentVariable("FREYA_MULTIBOX", "1");
+                Environment.SetEnvironmentVariable("FREYA_POS_FEED_ADDRESS", _slot.LoopbackIp);
+            }
+            else
+            {
+                Environment.SetEnvironmentVariable("FREYA_MULTIBOX", null);
+                Environment.SetEnvironmentVariable("FREYA_POS_FEED_ADDRESS", null);
+            }
 
             var dir = Path.GetDirectoryName(_setting.ClientPath);
             var clientArgs = $"-SERVER_ADDR {addrs[0]} -PROTOCOL TCP";
@@ -325,7 +360,19 @@ namespace LaunchFreya
             // ports; relaunching over it collides. Kill it first.
             StopProxy();
 
-            var info = WinExe(dir, exe, "/ADDRESS:127.0.0.1");
+            // Pin THIS proxy to its instance's loopback IP -- ALWAYS, even slot 0
+            // (127.0.0.1). /ADDRESS is the address the proxy stamps into sector
+            // ServerRedirects (so the client reconnects to this same proxy);
+            // FREYA_PROXY_BIND_ADDRESS makes it actually bind its client-facing
+            // ports there (see proxy/Net7.cpp). This MUST be a specific IP, never
+            // INADDR_ANY: a slot-0 proxy bound to 0.0.0.0:3500 overlaps every
+            // other slot's 127.0.0.N:3500 and makes their binds fail with
+            // EADDRINUSE (verified). Only the docker proxy keeps INADDR_ANY -- it
+            // is spawned by compose, not this launcher, so it never sets the env.
+            string proxyIp = _slot?.LoopbackIp ?? "127.0.0.1";
+            Environment.SetEnvironmentVariable("FREYA_PROXY_BIND_ADDRESS", proxyIp);
+
+            var info = WinExe(dir, exe, $"/ADDRESS:{proxyIp}");
 
             // Run the proxy headless: it is a console-subsystem PE, so without
             // this it pops a console window (a wineconsole under WINE). The

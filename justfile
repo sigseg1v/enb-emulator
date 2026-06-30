@@ -134,6 +134,7 @@ build-posfeed-dll:
         -Wall -Wextra \
         -o bin/FreyaPosFeed.dll \
         freya/client-injection/PosFeedDllMain.cpp freya/client-injection/ClientPositionFeed.cpp \
+        freya/client-injection/FreyaMultiboxHook.cpp \
         -Ifreya/client-injection \
         -lws2_32 \
         -Wl,--no-insert-timestamp; \
@@ -731,13 +732,28 @@ config-game:
 # Client path: same resolution as play-local (arg 1 / ENB_CLIENT_PATH / default
 # linux-installer location).
 #
-#   just play-online
+# Multi-box: pass an instance COUNT as the first arg to launch that many clients
+# at once, each with its OWN FreyaProxy pinned to its own loopback IP
+# (127.0.0.1, 127.0.0.2, ...) so they don't collide. The injected mutex bypass
+# lets the 2nd+ client past the single-instance guard. Each launcher window is
+# pinned to its slot; enter a DIFFERENT account in each before Play (the server
+# force-kicks a duplicate login of the SAME account). You can also just run the
+# launcher again by hand -- it auto-detects the running instance and takes the
+# next free slot.
+#
+#   just play-online                  # one client (interactive)
+#   just play-online 4                # four clients, slots 0..3
 #   just play-online /path/to/client.exe
 #   ENB_ONLINE_HOST=myserver.example just play-online
 play-online CLIENT_PATH='' HOST='':
     #!/usr/bin/env bash
     set -euo pipefail
     cp="{{CLIENT_PATH}}"
+    # Back-compat + the `just play-online N` form: a bare integer first arg is the
+    # instance COUNT, not a client path.
+    count=1
+    if [[ "$cp" =~ ^[0-9]+$ ]]; then count="$cp"; cp=""; fi
+    if [ "$count" -lt 1 ]; then count=1; fi
     if [ -z "$cp" ]; then cp="${ENB_CLIENT_PATH:-}"; fi
     if [ -z "$cp" ]; then cp="$HOME/.wine-enb/drive_c/Program Files/EA GAMES/Earth & Beyond/release/client.exe"; fi
     if [ ! -f "$cp" ]; then
@@ -748,7 +764,7 @@ play-online CLIENT_PATH='' HOST='':
 
     host="{{HOST}}"
     if [ -z "$host" ]; then host="${ENB_ONLINE_HOST:-enb.sigsegv.land}"; fi
-    echo ">>> online target: $host:443 (no local docker stack)"
+    echo ">>> online target: $host:443 (no local docker stack); instances=$count"
 
     # A local docker stack (from `just play-local`) binds the same client-facing
     # TCP ports this online proxy needs -- 3500 (PROXY_LOCAL_TCP_PORT), 3801
@@ -808,8 +824,27 @@ play-online CLIENT_PATH='' HOST='':
 
     : "${WINEPREFIX:=$HOME/.wine-enb}"
     export WINEPREFIX
-    echo ">>> launching (WINEPREFIX=$WINEPREFIX) -- pick Multi-Player if not preselected, then click Play"
-    dotnet run --no-build --project tools/LaunchFreya
+
+    if [ "$count" -le 1 ]; then
+        echo ">>> launching (WINEPREFIX=$WINEPREFIX) -- pick Multi-Player if not preselected, then click Play"
+        dotnet run --no-build --project tools/LaunchFreya
+    else
+        # Multi-box: one launcher PROCESS per instance, each pinned to its slot via
+        # FREYA_INSTANCE_SLOT (slot 0 = 127.0.0.1 single-client, slots 1+ = own
+        # loopback IP + the mutex/proxy/feed multi-box wiring). Forcing the slot
+        # avoids the auto-detect race when they start near-simultaneously. We run
+        # the already-built DLL directly so N msbuild locks don't contend. Staggered
+        # so each proxy binds its 127.0.0.(slot+1):3500 before the next probes.
+        # No autoplay: enter a different account in each window, then click Play.
+        DLL="$SETTINGS_DIR/FreyaLauncher.dll"
+        echo ">>> launching $count instances (WINEPREFIX=$WINEPREFIX); set a DIFFERENT account per window, then click Play"
+        for i in $(seq 0 $((count-1))); do
+            echo ">>>   instance $i -> 127.0.0.$((i+1))"
+            FREYA_INSTANCE_SLOT="$i" dotnet "$DLL" &
+            sleep 2
+        done
+        wait
+    fi
 
 # Drive the C# CLI client against the REMOTE (cloud) server -- the online twin
 # of `just play-cli`. No local docker stack: the CLI's own dedicated proxy

@@ -106,7 +106,21 @@ void FreyaClientPosFeed_Start() {
     memset(&g_ProxyAddr, 0, sizeof(g_ProxyAddr));
     g_ProxyAddr.sin_family = AF_INET;
     g_ProxyAddr.sin_port = htons(FREYA_CLIENT_POS_PORT);
+    // Default target is 127.0.0.1 -- the single-client proxy binds its intake
+    // there. A multi-box launch instead pins each proxy to its own loopback IP
+    // (127.0.0.N) and tells THIS client which one via FREYA_POS_FEED_ADDRESS, so
+    // the feed reaches only its paired proxy and N feeds don't all pile onto the
+    // one shared intake. Unset / malformed -> loopback, leaving single-box as-is.
     g_ProxyAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK); // 127.0.0.1
+    {
+        char envAddr[64];
+        DWORD n = GetEnvironmentVariableA("FREYA_POS_FEED_ADDRESS", envAddr, sizeof(envAddr));
+        if (n > 0 && n < sizeof(envAddr)) {
+            unsigned long parsed = inet_addr(envAddr);
+            if (parsed != INADDR_NONE)
+                g_ProxyAddr.sin_addr.s_addr = parsed;
+        }
+    }
 
     g_Run = true;
     g_Thread = (HANDLE)_beginthreadex(NULL, 0, FeedThread, NULL, 0, NULL);

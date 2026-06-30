@@ -190,6 +190,15 @@ extern char g_DtlsCaFile[MAX_PATH];       // CA file ("" = system trust store)
 extern char g_Galaxy_Name[MAX_PATH];
 extern long g_AddrStore;
 
+// Client-facing bind address for the TCP listeners and the in-client position
+// feed intake (network byte order). Defaults to INADDR_ANY (0). Set from the
+// FREYA_PROXY_BIND_ADDRESS env var so a multi-box launch can pin EACH proxy to
+// its own loopback IP (127.0.0.N) -- otherwise N proxies collide on the shared
+// client-facing ports (3500/3801/3805/3807). The docker proxy never sets the
+// env (it must keep INADDR_ANY so published ports reach its bridge IP), so this
+// is opt-in and leaves the single-client + docker paths unchanged.
+extern unsigned long g_proxy_bind_addr;
+
 void LockMessageQueue();
 void UnlockMessageQueue();
 void LogMessage(char* format, ...);

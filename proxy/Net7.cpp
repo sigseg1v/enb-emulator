@@ -27,6 +27,12 @@ char* g_server_addr = (0);
 char* default_addr = "127.0.0.1";
 char* g_internal_addr = (0);
 
+// Client-facing bind address (network byte order). INADDR_ANY by default; a
+// multi-box launch sets FREYA_PROXY_BIND_ADDRESS to a per-instance loopback IP
+// (127.0.0.N) so N proxies don't collide on the shared client-facing ports.
+// Resolved in main() from the env var. See Net7.h for the full rationale.
+unsigned long g_proxy_bind_addr = INADDR_ANY;
+
 bool g_Debug = false;
 bool g_ServerShutdown = false; // Terminated the global Server
 
@@ -235,9 +241,34 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // Client-facing bind address for the TCP listeners + the in-client
+    // position-feed intake. INADDR_ANY unless a multi-box launch pins this
+    // proxy to its own loopback IP (127.0.0.N) via FREYA_PROXY_BIND_ADDRESS,
+    // so N proxies can share the box without colliding on the client-facing
+    // ports. The docker proxy never sets the env (it must keep INADDR_ANY for
+    // published-port reachability), so the single-client + docker paths are
+    // unchanged. inet_addr returns INADDR_NONE (0xffffffff) on a malformed
+    // value -- treat that as "unset" rather than binding to a bogus address.
+    {
+        const char* env_bind = getenv("FREYA_PROXY_BIND_ADDRESS");
+        if (env_bind && *env_bind) {
+            unsigned long parsed = inet_addr(env_bind);
+            if (parsed != INADDR_NONE) {
+                g_proxy_bind_addr = parsed;
+                LogMessage("Net7Proxy: client-facing bind address = %s "
+                           "(multi-box per-instance)\n",
+                           env_bind);
+            } else {
+                LogMessage("Net7Proxy: ignoring malformed "
+                           "FREYA_PROXY_BIND_ADDRESS '%s'; using INADDR_ANY\n",
+                           env_bind);
+            }
+        }
+    }
+
     // Bind on 0.0.0.0 by default so the container is reachable from the
-    // host. The TcpListener actually uses INADDR_ANY (TcpListener.cpp:80)
-    // regardless of m_IpAddress.
+    // host. The TcpListener uses g_proxy_bind_addr (INADDR_ANY unless the
+    // multi-box env above pinned it) regardless of m_IpAddress.
     unsigned long ip_address_internal = inet_addr(g_internal_addr);
 
     LogMessage("Net7Proxy: binding TCP %d (MASTER_SERVER_PORT) on %s\n", MASTER_SERVER_PORT,

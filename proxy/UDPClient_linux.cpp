@@ -1051,11 +1051,21 @@ bool UDPClient::ReadClientShipPosition(float pos[3], float heading[3]) {
         // intake is never network-reachable. Linux docker proxy: bind ANY so the
         // published-port forward delivers; compose restricts the host publish to
         // 127.0.0.1, so it is loopback-only there too.
+        //
+        // Multi-box: when this proxy was pinned to a per-instance loopback IP
+        // (FREYA_PROXY_BIND_ADDRESS -> g_proxy_bind_addr, e.g. 127.0.0.N), bind
+        // the intake to THAT specific IP so each client's position hook
+        // (targeting its own 127.0.0.N:FREYA_CLIENT_POS_PORT) reaches only its
+        // own proxy and N intakes don't collide on the one shared port.
+        if (g_proxy_bind_addr != INADDR_ANY) {
+            addr.sin_addr.s_addr = g_proxy_bind_addr;
+        } else {
 #ifdef _WIN32
-        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+            addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 #else
-        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+            addr.sin_addr.s_addr = htonl(INADDR_ANY);
 #endif
+        }
         if (::bind(s, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
             closesocket(s);
             return false;
