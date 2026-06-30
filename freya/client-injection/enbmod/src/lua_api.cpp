@@ -863,6 +863,166 @@ static int l_rpg_level(lua_State* L) {
     return 1;
 }
 
+// enb.group() -> { count = N, members = { {name=, gameid=, [hull=, hull_max=,
+// shield=, shield_max=]}, ... } } | empty table.
+// Reads the party roster from the "GroupInfo" object-typed aux entry, which lives in
+// the same property-bag container as the RPGInfo levels (avatar object + container_off).
+// The container-holding avatar object is captured two ways in this DLL; we try the RPG
+// manager first (the proven holder of that container) and fall back to the vitals-chain
+// ship entity, using whichever actually yields a group object -- both are guarded reads,
+// so a wrong base just misses. Returns an empty table when not in a group, out of space,
+// or before either object has been captured.
+// The member struct stores only name + GameID (+ formation/position); per-member
+// hull/shield are NOT on it. We get them the way the native group window did: resolve
+// each member's GameID to its live contact object via the world manager's entity table
+// (entity_by_gid) and read HullPoints / MaxHullPoints / MaxShieldPower / ShieldPercent
+// off its aux bag, identical to enb.target(). That only works for members in the current
+// sector / scanner range; members elsewhere have no live entity and come back name+id
+// only (their vital keys are simply absent).
+//
+// Convention is load-bearing (same trap as enb.aux): build_key is __thiscall(ECX=keybuf),
+// group::get_object is __cdecl(container, keybuf). The get_object call and the member-array
+// walk run under the VEH fault guard so a stale/half-built roster yields an empty table
+// instead of faulting the client.
+struct GroupMember {
+    uintptr_t namep; // member name char* (resolved to a string outside the guard)
+    unsigned gameid;
+};
+
+// Resolve a GameID to its live in-scene contact object via the world manager's GameID
+// hash table (game::world::ent_*). The member struct stores no vitals, so a party
+// member's hull/shield must be read off the SAME render/contact object the rest of the
+// HUD uses, found by GameID. This is a pure guarded walk -- no native call, so no
+// calling-convention hazard on the live client; a GameID with no live entity (member in
+// another sector / not yet in scene) returns 0, and the bounded hop count guards against
+// a corrupt or cyclic bucket chain. Self-guarded (own setjmp); call it with no other
+// fault guard active.
+static uintptr_t entity_by_gid(unsigned gameid) {
+    uintptr_t M = hooks::world_mgr();
+    if (!M || !gameid)
+        return 0;
+    uintptr_t result = 0;
+    if (__builtin_setjmp(mem::g_guard_jmp)) {
+        mem::g_guard_on = 0;
+        return 0; // a read faulted while walking the table -- treat as "no entity"
+    }
+    mem::g_guard_on = 1;
+    uintptr_t head =
+        M + game::world::ent_buckets + (gameid % game::world::ent_modulus) * 4;
+    if (mem::readable((void*)head, 4)) {
+        uintptr_t node = mem::ptr(head);
+        for (int hops = 0; node && hops < 256; ++hops) {
+            if (!mem::readable((void*)(node + game::world::ent_node_flags), 4))
+                break;
+            if ((mem::i32(node + game::world::ent_node_flags) >> 1) & 1)
+                break; // deleted/skip node terminates the visible chain
+            if ((unsigned)mem::i32(node + game::world::ent_node_gid) == gameid) {
+                result = mem::ptr(node + game::world::ent_node_obj);
+                break;
+            }
+            node = mem::ptr(node + game::world::ent_node_next);
+        }
+    }
+    mem::g_guard_on = 0;
+    return result;
+}
+
+static int l_group(lua_State* L) {
+    uintptr_t bases[2] = {hooks::rpg_mgr(), player_entity()};
+    unsigned char keybuf[game::aux::keybuf_sz];
+    memset(keybuf, 0, sizeof(keybuf));
+
+    // Collect raw member pointers/ids UNDER the fault guard with NO Lua stack ops, so a
+    // mid-walk longjmp can never leave a half-built table on the Lua stack (it just
+    // truncates the C++ vector). The Lua table is built afterwards from these locals.
+    GroupMember raw[game::group::max_members];
+    int n = 0;
+    if (__builtin_setjmp(mem::g_guard_jmp)) {
+        mem::g_guard_on = 0; // a read faulted mid-walk: keep what we gathered so far
+    } else {
+        mem::g_guard_on = 1;
+        ((AuxBuildKey_t)game::aux::build_key)(keybuf, "GroupInfo");
+        uintptr_t group = 0;
+        for (uintptr_t base : bases) {
+            if (!base || !mem::readable((void*)(base + game::rpg::container_off), 4))
+                continue;
+            uintptr_t cont = mem::ptr(base + game::rpg::container_off);
+            if (!cont || !mem::readable((void*)cont, 4))
+                continue;
+            uintptr_t g = (uintptr_t)((AuxGetValue_t)game::group::get_object)((int)cont, keybuf);
+            if (g && mem::readable((void*)(g + game::group::members_end), 4) &&
+                mem::i32(g + game::group::active_off) != 0) {
+                group = g;
+                break;
+            }
+        }
+        if (group) {
+            uintptr_t begin = mem::ptr(group + game::group::members_begin);
+            uintptr_t end = mem::ptr(group + game::group::members_end);
+            for (uintptr_t p = begin; p && p < end && n < game::group::max_members; p += 4) {
+                uintptr_t m = mem::ptr(p);
+                if (!m || !mem::readable((void*)m, 4))
+                    continue;
+                raw[n].namep = mem::ptr(m + game::group::member_name);
+                raw[n].gameid = (unsigned)mem::i32(m + game::group::member_gameid);
+                ++n;
+            }
+        }
+        mem::g_guard_on = 0;
+    }
+
+    lua_newtable(L); // result
+    lua_newtable(L); // members
+    for (int i = 0; i < n; ++i) {
+        lua_newtable(L); // member row
+        if (raw[i].namep && mem::readable((void*)raw[i].namep, 1)) {
+            std::string nm = mem::cstr(raw[i].namep); // self-guarding
+            if (!nm.empty()) {
+                lua_pushlstring(L, nm.data(), nm.size());
+                lua_setfield(L, -2, "name");
+            }
+        }
+        lua_pushinteger(L, (lua_Integer)raw[i].gameid);
+        lua_setfield(L, -2, "gameid");
+        // Per-member hull/shield: the member struct holds none, so resolve the member's
+        // GameID to its live contact object and read vitals off its +tgt_container aux bag
+        // EXACTLY as enb.target() does (HullPoints / MaxHullPoints absolute, shield =
+        // MaxShieldPower * ShieldPercent). Only members in the current sector / scanner
+        // range have a live entity; the rest stay name+id and party_frame draws their bars
+        // as empty tracks. entity_by_gid + each aux_read_f are independently fault-guarded.
+        uintptr_t ent = entity_by_gid(raw[i].gameid);
+        if (ent && mem::readable((void*)(ent + game::world::tgt_container), 4)) {
+            uintptr_t cont = mem::ptr(ent + game::world::tgt_container);
+            double d;
+            if (cont && aux_read_f(cont, "HullPoints", d)) {
+                lua_pushnumber(L, d);
+                lua_setfield(L, -2, "hull");
+            }
+            if (cont && aux_read_f(cont, "MaxHullPoints", d)) {
+                lua_pushnumber(L, d);
+                lua_setfield(L, -2, "hull_max");
+            }
+            double smax = -1.0, spct = -1.0;
+            if (cont && aux_read_f(cont, "MaxShieldPower", d)) {
+                smax = d;
+                lua_pushnumber(L, d);
+                lua_setfield(L, -2, "shield_max");
+            }
+            if (cont && aux_read_f(cont, "ShieldPercent", d))
+                spct = d;
+            if (smax >= 0.0 && spct >= 0.0) {
+                lua_pushnumber(L, smax * spct);
+                lua_setfield(L, -2, "shield");
+            }
+        }
+        lua_rawseti(L, -2, i + 1); // members[i+1] = row
+    }
+    lua_setfield(L, -2, "members");
+    lua_pushinteger(L, n);
+    lua_setfield(L, -2, "count");
+    return 1;
+}
+
 // Live-read the current target's combat level off the targeting subsystem, replicating
 // the native target-frame refresh (game.h::addr::TargetFrameRefresh): controller[0x13]
 // -> targeting subsystem `ts` -> ts vtable+0x28 getter (__thiscall, no args) -> data
@@ -1898,6 +2058,7 @@ void open(lua_State* L) {
                                    {"aux_i", l_aux_i},
                                    {"rpg_level", l_rpg_level},
                                    {"rpg_mgr", l_rpg_mgr},
+                                   {"group", l_group},
                                    {"xp_frac", l_xp_frac},
                                    {"xp_ctrl", l_xp_ctrl},
                                    {"actionbar", l_actionbar},

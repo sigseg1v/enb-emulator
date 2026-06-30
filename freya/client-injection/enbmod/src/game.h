@@ -370,6 +370,22 @@ constexpr int connection = 0x1124; // M -> sector-server Connection (command sin
 constexpr int tgt_container =
     0x88;                     // target contact object -> properties/aux bag (hull/shield/name)
 constexpr int tgt_gid = 0x90; // target contact object + 0x90 -> its own GameID (command target)
+// M also holds the session ENTITY TABLE keyed by GameID -- the same map the native
+// group HUD resolves each member through to reach its render object and read its
+// vitals. It is a fixed 0x101-bucket chained hash on M + ent_buckets: bucket =
+// gid % ent_modulus; each node links to the next via ent_node_next, keys on
+// ent_node_gid, points to the contact object at ent_node_obj, and carries a
+// deleted/skip bit at ent_node_flags ((flags>>1)&1). Walk it with pure guarded
+// reads (no native call -- avoids any calling-convention hazard on the live
+// client); a GameID with no live entity (member in another sector / not yet in
+// scene) simply misses. The resolved contact object's +tgt_container aux bag then
+// yields hull/shield exactly as enb.target() reads them.
+constexpr int ent_buckets = 0x38;       // M -> base of the GameID hash bucket array
+constexpr unsigned ent_modulus = 0x101; // bucket index = gid % ent_modulus
+constexpr int ent_node_next = 0x04;     // node -> next node in its bucket chain
+constexpr int ent_node_obj = 0x10;      // node -> resolved contact object
+constexpr int ent_node_gid = 0x14;      // node -> key (GameID)
+constexpr int ent_node_flags = 0x18;    // node -> flags; (flags>>1)&1 = deleted/skip
 } // namespace world
 
 // Target/player WORLD position, for the straight-line range shown on the frame. The
@@ -428,6 +444,31 @@ constexpr uintptr_t get_entry = 0x00514b60; // __cdecl(container, keybuf) -> ent
 // is how the HUD reads the target's "TargetThreat" line ("Level N" for a mob).
 constexpr uintptr_t get_string = 0x00514bd0; // __cdecl(container, keybuf) -> entry|0 (string-typed)
 } // namespace rpg
+
+// Party/group roster -- the "GroupInfo" entry in the SAME property-bag container
+// the RPGInfo levels live in (rpg::container_off, +0x12c0, off the avatar object).
+// Unlike the value/level entries (get_value / get_entry, which return an ENTRY whose
+// data is at entry+val_off), GroupInfo is an OBJECT-typed entry: get_object returns
+// the group object DIRECTLY (no val_off indirection). get_object is __cdecl(container,
+// keybuf) like the others -- internally it routes the container to a __fastcall index
+// builder (container+0x94) and the keybuf to a __thiscall red-black-tree search, but the
+// public entry point takes both on the stack, so the same typedef as get_value applies.
+// The group object holds the roster:
+//   +0x70  active flag (nonzero when the local player is in a group)
+//   +0x674 member-array begin ptr   +0x678 member-array end ptr
+//          member count = (end - begin) / 4, capped at max_members
+// Each member is a heap object pointer:
+//   +0x120 name (char*)   +0x1a8 GameID (uint32)
+// Keys are built with aux::build_key. Read under the VEH fault guard.
+namespace group {
+constexpr uintptr_t get_object = 0x005927e0; // __cdecl(container, keybuf) -> group object|0
+constexpr int active_off = 0x70;             // group + this -> nonzero when in a group
+constexpr int members_begin = 0x674;         // group + this -> member-array begin ptr
+constexpr int members_end = 0x678;           // group + this -> member-array end ptr
+constexpr int member_name = 0x120;           // member + this -> name char*
+constexpr int member_gameid = 0x1a8;         // member + this -> GameID (uint32)
+constexpr int max_members = 5;               // roster cap (UI shows at most 5 rows)
+} // namespace group
 
 // Chat line RING-BUFFER layout, off the ring object captured at addr::ChatLineAppend
 // (hooks::chat_buf() == 0x0067d780's ECX). NOT a sorted vector -- it is a fixed-size
