@@ -185,3 +185,9 @@ freya/online/server/freya-online
 
 # net7go: locally-built Go game-auth binary (built in Docker for deploy)
 login-server/net7go/net7go
+
+# Vendored Lua build outputs (the .c/.h/Makefile sources are tracked; the
+# extension-less host binaries the enbmod toolchain builds are not -- *.o/*.a
+# are already covered by the C/C++ patterns at the top).
+freya/client-injection/enbmod/third_party/lua/src/lua
+freya/client-injection/enbmod/third_party/lua/src/luac
