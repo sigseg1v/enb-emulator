@@ -11,6 +11,8 @@
 --   freya_ui    -- player card (hull/shield/energy) + 12-slot hotbar, on top
 --   micromenu   -- the four top-left micro-menu buttons (Inventory / Character /
 --                  Map / Options), restoring the hidden bottom-left chrome band
+--   ui_toggle   -- Ctrl+U master switch: flips the whole Freya overlay off (and
+--                  the native HUD back on) and on again
 --
 -- Suppressing the stock in-space widgets that would show through the glass is the
 -- job of the separate `hide-ui` mod, declared as a dependency in mod.json. The
@@ -21,3 +23,4 @@ require("xp_overlay")
 require("freya_ui")
 require("target_frame")
 require("micromenu")
+require("ui_toggle")

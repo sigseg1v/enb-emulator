@@ -128,19 +128,38 @@ local function is_player(t)
     return is_ship(t) and type(t.gid) == "number" and t.gid >= 0x40000000
 end
 
+-- DOCKING_RANGE is the server's verb-activation range (PlanetClass / NavTypeClass
+-- AddVerb(..., DOCKING_RANGE), 5000.0f), measured EDGE-to-edge -- the server's
+-- RangeFrom subtracts the body's m_ObjectRadius before comparing. We only have the
+-- CENTRE-to-centre distance client-side (t.dist = |player_wpos - target_wpos|), and
+-- we cannot read the target body's radius, so the docking-class verbs (D/R/G/L) carry
+-- a `gate` = a CENTRE-distance ceiling chosen as (largest body radius for that class
+-- + DOCKING_RANGE). Beyond `gate` the verb can never be active, so firing it would
+-- only wedge the server's one-shot m_Gating flag (case 29/28/18 set it true and the
+-- handoff never completes when the client did not auto-approach) -- that is exactly
+-- the "I clicked L and it did nothing" the owner hit at 150k from Inverness. The
+-- ceilings never false-disable an in-range button (they exceed the real activation
+-- distance) and stay loose on the safe side; only the wedge-prone verbs are gated.
+-- Stations / gates are small bodies (~<=15k radius) -> 20k. Planets are huge (the
+-- stock planet radii run ~35k-120k) -> 130k. P/T/F/Trade/Group/JumpStart do NOT set
+-- m_Gating (out-of-range just no-ops server-side), so they are deliberately ungated.
+local DOCK_GATE   = 20000   -- station / gate / register centre-distance ceiling
+local LAND_GATE   = 130000  -- planet centre-distance ceiling (radius up to ~120k + 5k)
+
 local VERBS = {
-    { letter = "D", label = "Dock",     op = 0x1c, mode = "target", show = is_station },
-    { letter = "R", label = "Register", op = 0x19, mode = "target", show = is_station },
-    { letter = "G", label = "Gate",     op = 0x12, mode = "target", show = is_gate },
-    -- NOTE -- no Land button. E&B has no planet-surface gameplay: the server's
-    -- "planet landing" command (op 0x1d, case 29) only routes you when the planet has
-    -- a Destination (a rare transit/gate planet); for an ordinary planet it falls
-    -- through to the DEPLOY/scan branch and fires effect 10007 -- the "hack"-looking
-    -- animation. The native client shows Land only on landable planets via the server
-    -- verb list, which we don't read; the class string is just "Planet" for all of
-    -- them, so we cannot tell landable from not. Rather than misfire the deploy effect
-    -- on every planet, Land is omitted (like Loot/Message/Scan) until a real
-    -- landability signal is available.
+    { letter = "D", label = "Dock",     op = 0x1c, mode = "target", show = is_station, gate = DOCK_GATE },
+    { letter = "R", label = "Register", op = 0x19, mode = "target", show = is_station, gate = DOCK_GATE },
+    { letter = "G", label = "Gate",     op = 0x12, mode = "target", show = is_gate,    gate = DOCK_GATE },
+    -- Land on a planet. Landing is a gate: a TWO-step server exchange, not one. op 0x1d
+    -- (server case 29) only ARMS it -- it sets StargateDestination to the planet's
+    -- landing zone (e.g. Inverness -> Inverness Planet) and plays the "Confirmed" sound;
+    -- the actual transit happens when op 0x08 (server case 8) does the SectorServerHandoff.
+    -- The native client sends 0x1d then 0x08 (there is NO fly-in -- it transits instantly
+    -- like a stargate, just a different label + animation). mode "land" sends BOTH back to
+    -- back. Sends the planet's GameID (entity+0x90), the same id Dock uses, so case 29
+    -- resolves the planet via myAction->Target. A planet with no landing Destination
+    -- falls through server-side to the deploy/scan branch (effect 10007 -- the old "hack").
+    { letter = "L", label = "Land",     op = 0x1d, mode = "land",   show = is_planet,  gate = LAND_GATE },
     { letter = "P", label = "Prospect", op = 0x11, mode = "target", show = is_resource },
     { letter = "T", label = "Tractor",  op = 0x01, mode = "self",   show = is_resource },
     { letter = "F", label = "Follow",   op = 0x0c, mode = "follow", show = is_ship },
@@ -149,13 +168,20 @@ local VERBS = {
     { letter = "J", label = "JumpStart",op = 0x1a, mode = "target", show = is_player },
 }
 
--- Build the list of verbs to show for the current target (gated by class).
+-- Build the list of verbs to show for the current target (gated by class). A verb with
+-- a `gate` (the docking-class D/R/G/L) is still SHOWN out of range but marked
+-- enabled=false -- it renders dimmed and refuses to fire, the way the native client
+-- greys an out-of-range target-action button, so it can never wedge the server's
+-- gating flag. Ungated verbs are always enabled. A nil t.dist (distance not yet
+-- resolved) disables a gated verb rather than firing it blind.
 local function read_verbs(t)
     local out = {}
     for _, v in ipairs(VERBS) do
         if #out >= CFG.BTN_MAX then break end
         if v.show(t) then
-            out[#out + 1] = { letter = v.letter, label = v.label, op = v.op, mode = v.mode }
+            local enabled = (v.gate == nil) or (t.dist ~= nil and t.dist <= v.gate)
+            out[#out + 1] = { letter = v.letter, label = v.label, op = v.op,
+                              mode = v.mode, enabled = enabled }
         end
     end
     return out
@@ -164,7 +190,8 @@ end
 -- live button rects (rebuilt every draw) + per-id transient click-flash, so the
 -- on_input hit-test and the draw agree on geometry without recomputing it.
 local btn_rects = {}
-local flash = {}   -- [op] = remaining ticks
+local flash = {}   -- [op] = remaining ticks of the ACCEPT glow (cyan: verb fired)
+local deny  = {}   -- [op] = remaining ticks of the DENY glow (amber: out of range)
 
 local function point_in(px, py, x, y, w, h)
     return px >= x and px <= x + w and py >= y and py <= y + h
@@ -244,35 +271,51 @@ local function draw_buttons_up(verbs, x, bottom_y, maxw)
         if cx + bsz > x + maxw and cx > x then break end   -- single row; clip to width
         btn_rects[#btn_rects + 1] = { x = cx, y = top, w = bsz, h = bsz,
                                       op = v.op, mode = v.mode,
-                                      letter = v.letter, label = v.label }
+                                      letter = v.letter, label = v.label,
+                                      enabled = v.enabled ~= false }
         cx = cx + bsz + gap
     end
 
     for _, r in ipairs(btn_rects) do
-        local hot = (flash[r.op] or 0) > 0
+        local hot     = (flash[r.op] or 0) > 0   -- accept glow (cyan)
+        local denied  = (deny[r.op]  or 0) > 0   -- deny glow (amber: out of range)
         H.glass(r.x, r.y, r.w, r.h)
-        -- hot = a click landed on this button: paint a vivid cyan fill + bright
-        -- border so the press reads unmistakably (the idle glass is near-flat, so
-        -- the old subtle shift was easy to miss -- the click must feel acknowledged
-        -- even when the action itself is a no-op, e.g. Register at a station you are
-        -- already registered at).
-        local tcol = hot and 0x7ad4ff or 0x223044
-        local bcol = hot and 0x2a8fd6 or 0x0c121b
-        enb.draw.rrect_grad(r.x, r.y, r.w, r.h, H.RADIUS, tcol, bcol, hot and 255 or 230)
+        -- hot = a click fired the verb: vivid cyan fill + bright border so the press
+        -- reads unmistakably (the idle glass is near-flat, so a subtle shift is easy to
+        -- miss -- the click must feel acknowledged even when the action is a no-op, e.g.
+        -- Register at a station you are already registered at). denied = a click on an
+        -- out-of-range docking verb: amber so "registered but too far" reads distinctly
+        -- from a successful cyan fire. A disabled (out-of-range) idle button paints
+        -- dimmer than an active one, the way the native client greys an inactive verb.
+        local tcol, bcol, fa
+        if denied then
+            tcol, bcol, fa = 0xffb020, 0x3a2606, 255
+        elseif hot then
+            tcol, bcol, fa = 0x7ad4ff, 0x2a8fd6, 255
+        elseif r.enabled then
+            tcol, bcol, fa = 0x223044, 0x0c121b, 230
+        else
+            tcol, bcol, fa = 0x161d28, 0x080c12, 150   -- dimmed: out of range
+        end
+        enb.draw.rrect_grad(r.x, r.y, r.w, r.h, H.RADIUS, tcol, bcol, fa)
+        local glow = hot or denied
         enb.draw.rrect(r.x, r.y, r.w, r.h, H.RADIUS,
-                       hot and H.LINE_HOT or H.LINE, hot and 255 or 150, false)
+                       glow and H.LINE_HOT or H.LINE,
+                       glow and 255 or (r.enabled and 150 or 80), false)
         -- the single letter, centred and scaled up to fill a big-screen button.
         local scale = H.smul(1.5)
         local lw, lh = H.measure(r.letter)
         lw, lh = lw * scale, lh * scale
-        H.otext(r.x + (r.w - lw) / 2, r.y + (r.h - lh) / 2, r.letter,
-                hot and 0x06121f or H.INK, scale)
+        local ink = H.INK
+        if denied then ink = 0x1a1206
+        elseif hot then ink = 0x06121f
+        elseif not r.enabled then ink = H.darker(H.INK) end
+        H.otext(r.x + (r.w - lw) / 2, r.y + (r.h - lh) / 2, r.letter, ink, scale)
     end
 
-    -- decay every flash one tick so the click glow fades.
-    for id, n in pairs(flash) do
-        flash[id] = (n > 1) and (n - 1) or nil
-    end
+    -- decay both glows one tick so the feedback fades.
+    for id, n in pairs(flash) do flash[id] = (n > 1) and (n - 1) or nil end
+    for id, n in pairs(deny)  do deny[id]  = (n > 1) and (n - 1) or nil end
 end
 
 local function draw_target()
@@ -365,9 +408,17 @@ enb.on_input(function(msg, wparam, lparam)
     local mx, my = mouse_xy(lparam)
     for _, r in ipairs(btn_rects) do
         if point_in(mx, my, r.x, r.y, r.w, r.h) then
-            if msg == M.LBUTTONDOWN and enb.target_action then
-                enb.target_action(r.op, r.mode)
-                flash[r.op] = CFG.FLASH_TICKS
+            if msg == M.LBUTTONDOWN then
+                if r.enabled and enb.target_action then
+                    enb.target_action(r.op, r.mode)
+                    flash[r.op] = CFG.FLASH_TICKS
+                else
+                    -- out of range: acknowledge the click (amber) but do NOT fire --
+                    -- firing a docking verb out of range only wedges the server's
+                    -- gating flag. The owner must fly closer for it to activate.
+                    deny[r.op] = CFG.FLASH_TICKS
+                    enb.log(string.format("%s: out of range -- fly closer", r.label))
+                end
             end
             return true   -- swallow any button event over a verb button
         end

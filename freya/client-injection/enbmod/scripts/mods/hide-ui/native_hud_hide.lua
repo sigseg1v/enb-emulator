@@ -275,6 +275,20 @@ end
 local function apply()
     local map = map_panels()
     if not map then return end
+    -- Master Freya-UI toggle (Ctrl+U, owned by freya-hud): when the owner turns
+    -- the Freya overlay OFF, stop hiding and actively RE-SHOW every native chrome
+    -- leaf (and the chat text) each tick, so the stock HUD comes back intact. We
+    -- re-set the enable bit every frame rather than once, so it survives any game
+    -- re-clear. `enb.freya_ui_on` is the shared flag on the global table; nil
+    -- (flag never set, e.g. freya-hud disabled) means "no Freya UI present" and
+    -- we behave normally and keep hiding.
+    if enb.freya_ui_on == false then
+        for _, n in ipairs(ELEMENTS) do set_draw(map[n], true) end
+        if hide_chat_text then
+            for _, leaf in ipairs(chat_text_leaves() or {}) do set_draw(leaf, true) end
+        end
+        return
+    end
     for name in pairs(hidden) do
         set_draw(map[name], false)
     end

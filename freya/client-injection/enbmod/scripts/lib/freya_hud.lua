@@ -90,6 +90,18 @@ function H.state()
     return (enb.state and enb.state()) or "unknown"
 end
 
+-- ---- master UI toggle (Ctrl+U) ---------------------------------------------
+-- One flag flips the WHOLE Freya cockpit overlay off and lets the native HUD
+-- chrome come back, so the owner can fall back to the stock UI at any moment if
+-- anything Freya-side misbehaves. The flag lives on the GLOBAL `enb` table (not a
+-- module local) on purpose: hide-ui is a SEPARATE mod that must read the same
+-- flag to re-show the native chrome, and it does not require() this lib. Default
+-- on. ui_toggle.lua owns the Ctrl+U key handler that flips it.
+if enb.freya_ui_on == nil then enb.freya_ui_on = true end
+function H.ui_on()      return enb.freya_ui_on ~= false end
+function H.set_ui(on)   enb.freya_ui_on = (on ~= false); return enb.freya_ui_on end
+function H.toggle_ui()  return H.set_ui(not H.ui_on()) end
+
 -- returns: show_hud, show_hotbar
 --   space            -> full HUD (cards + hotbar)
 --   station          -> cards, NO hotbar (owner ask: hide skill buttons in
@@ -103,6 +115,8 @@ end
 -- default existed only because enb.state() could never positively detect space.
 -- Now that it can, showing the HUD outside space is wrong.
 function H.vis()
+    -- master toggle off -> draw nothing; hide-ui restores the native chrome.
+    if not H.ui_on() then return false, false end
     local s = H.state()
     if s == "space" then
         return true, true

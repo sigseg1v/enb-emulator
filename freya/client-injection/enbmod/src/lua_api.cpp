@@ -1005,11 +1005,30 @@ static int l_worldmgr(lua_State* L) {
 //   "follow"           -- AutoFollowBuild(player, op): the Follow verb (op 0x0c), which
 //                         has its own builder and carries no target field (the server
 //                         follows the player's current target).
-// Returns false (no send) when M is not captured yet, or -- for "target" mode -- when
-// nothing is targeted / the target's game id is unreadable. MUST be called on the game
-// thread (it is -- callers run from on_input). The command buffer is a static zeroed
+//   "land"             -- planet landing. The native Land verb is a TWO-step server
+//                         exchange, NOT one: op 0x1d (server case 29) only ARMS the
+//                         transit -- it sets m_Gating + SetStargateDestination(planet
+//                         Destination()) and waits; the actual sector handoff happens in
+//                         server case 8 ("land"), which the native client sends when its
+//                         client finishes the landing animation. case 8 does NOT check
+//                         the player's position (only that StargateDestination is armed),
+//                         so we send 0x1d then 0x08 back-to-back -- an instant transit
+//                         exactly like a gate (the same two-step arm/handoff a stargate
+//                         uses: 0x12 then 0x13). No fly-in; just a different animation +
+//                         label from a gate. Acts on the target.
+// Returns false (no send) when M is not captured yet, or -- for "target"/"land" mode --
+// when nothing is targeted / the target's game id is unreadable. MUST be called on the
+// game thread (it is -- callers run from on_input). The command buffer is a static zeroed
 // 0x20 bytes (the builders only write buf[0..6]); single writer (game thread).
 static unsigned char g_cmd_obj[0x20];
+// Build CmdBuild(player, op, target, 0) into g_cmd_obj and push it via M's Connection.
+static void send_target_cmd(uintptr_t m, uint32_t player, uint32_t op, uint32_t target) {
+    std::memset(g_cmd_obj, 0, sizeof(g_cmd_obj));
+    uint32_t b[4] = {player, op, target, 0};
+    actions::call_thiscall(game::addr::CmdBuild, (unsigned)(uintptr_t)g_cmd_obj, b, 4);
+    uint32_t snd[1] = {(uint32_t)(uintptr_t)g_cmd_obj};
+    actions::call_thiscall(game::addr::CmdSend, m, snd, 1);
+}
 static int l_target_action(lua_State* L) {
     int op = (int)luaL_checkinteger(L, 1);
     const char* mode = luaL_optstring(L, 2, "target");
@@ -1019,32 +1038,37 @@ static int l_target_action(lua_State* L) {
         return 1;
     }
     uint32_t player = mem::u32(m + game::world::player_id);
-    std::memset(g_cmd_obj, 0, sizeof(g_cmd_obj));
     if (std::strcmp(mode, "follow") == 0) {
         // Follow/auto-follow: build(player, op) -- no target field on the wire.
+        std::memset(g_cmd_obj, 0, sizeof(g_cmd_obj));
         uint32_t b[2] = {player, (uint32_t)op};
         actions::call_thiscall(game::addr::AutoFollowBuild, (unsigned)(uintptr_t)g_cmd_obj, b, 2);
-    } else {
-        uint32_t target;
-        if (std::strcmp(mode, "self") == 0) {
-            target = player;   // the command target is the player's own game id
-        } else {
-            // The target's GameID sits directly on the captured contact object at
-            // +tgt_gid (the object stores its own GameID there -- the same field the
-            // client's gid->object lookup validates). This is exactly what the native
-            // verb dispatcher sends; it is NOT a field of the +0x88 aux/properties bag.
-            uintptr_t tgt = hooks::target_obj();
-            if (!tgt || !mem::readable((void*)(tgt + game::world::tgt_gid), 4)) {
-                lua_pushboolean(L, 0);
-                return 1;
-            }
-            target = mem::u32(tgt + game::world::tgt_gid);
-        }
-        uint32_t b[4] = {player, (uint32_t)op, target, 0};
-        actions::call_thiscall(game::addr::CmdBuild, (unsigned)(uintptr_t)g_cmd_obj, b, 4);
+        uint32_t snd[1] = {(uint32_t)(uintptr_t)g_cmd_obj};
+        actions::call_thiscall(game::addr::CmdSend, m, snd, 1);
+        lua_pushboolean(L, 1);
+        return 1;
     }
-    uint32_t snd[1] = {(uint32_t)(uintptr_t)g_cmd_obj};
-    actions::call_thiscall(game::addr::CmdSend, m, snd, 1);
+    uint32_t target;
+    if (std::strcmp(mode, "self") == 0) {
+        target = player;   // the command target is the player's own game id
+    } else {
+        // The target's GameID sits directly on the captured contact object at
+        // +tgt_gid (the object stores its own GameID there -- the same field the
+        // client's gid->object lookup validates). This is exactly what the native
+        // verb dispatcher sends; it is NOT a field of the +0x88 aux/properties bag.
+        uintptr_t tgt = hooks::target_obj();
+        if (!tgt || !mem::readable((void*)(tgt + game::world::tgt_gid), 4)) {
+            lua_pushboolean(L, 0);
+            return 1;
+        }
+        target = mem::u32(tgt + game::world::tgt_gid);
+    }
+    send_target_cmd(m, player, (uint32_t)op, target);
+    if (std::strcmp(mode, "land") == 0) {
+        // Complete the landing: op 0x08 (server case 8) does TerminateWarp +
+        // SectorServerHandoff to the destination the 0x1d we just sent armed.
+        send_target_cmd(m, player, 0x08, target);
+    }
     lua_pushboolean(L, 1);
     return 1;
 }
@@ -1691,6 +1715,15 @@ static int l_char(lua_State* L) {
     lua_pushboolean(L, actions::post_char((unsigned)luaL_checkinteger(L, 1)));
     return 1;
 }
+// enb.key_down(vk) -> true if the physical key is currently held. Backed by
+// GetAsyncKeyState so it reflects the real hardware state at call time -- unlike
+// a KEYDOWN/KEYUP latch, it cannot get stuck when a KEYUP is dropped (e.g. a
+// sector transition steals window focus mid-chord). Used by the Ctrl+U toggle.
+static int l_key_down(lua_State* L) {
+    int vk = (int)luaL_checkinteger(L, 1);
+    lua_pushboolean(L, (GetAsyncKeyState(vk) & 0x8000) != 0);
+    return 1;
+}
 
 static int collect_args(lua_State* L, int from, uint32_t* out) {
     int n = 0;
@@ -1856,6 +1889,7 @@ void open(lua_State* L) {
                                    {"reset_callbacks", l_reset_callbacks},
                                    {"tap", l_tap},
                                    {"key", l_key},
+                                   {"key_down", l_key_down},
                                    {"char", l_char},
                                    {"call", l_call},
                                    {"call_cdecl", l_call_cdecl},
