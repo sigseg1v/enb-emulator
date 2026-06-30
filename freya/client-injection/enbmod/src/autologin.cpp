@@ -82,10 +82,13 @@ bool ieq(const std::string& a, const char* b) {
     return _stricmp(a.c_str(), b) == 0;
 }
 
-// Pre-accept the EULA by writing the registry value the client's own EULA check
-// reads (HKCU\Software\Westwood Studios\Earth & Beyond, "Trial" = DWORD 0). This
-// is an ordinary registry write -- no game memory, no game call -- so it is safe
-// to do unconditionally when requested.
+// Pre-accept the trial EULA by writing the registry value the client's own EULA
+// check reads (HKCU\Software\Westwood Studios\Earth & Beyond, "Trial" = DWORD 0).
+// This is an ordinary registry write -- no game memory, no game call -- so it is
+// safe to do unconditionally when requested. NOTE: this suppresses only the trial
+// "demoEULA" dialog. The license / Rules-of-Conduct dialog the retail client shows
+// every launch has NO persistent accepted-flag, so it cannot be pre-set away; it is
+// dismissed live by eula_dismiss_thread() below.
 void accept_eula_registry() {
     HKEY k = nullptr;
     LONG r = RegCreateKeyExA(HKEY_CURRENT_USER,
@@ -102,6 +105,84 @@ void accept_eula_registry() {
         logf("autologin: EULA pre-accepted (Trial=0)");
     else
         logf("autologin: EULA registry write failed (%ld)", r);
+}
+
+// ---- live license-dialog dismiss (no screen coordinates) --------------------
+//
+// The retail client shows its license / Rules-of-Conduct agreement as a MODAL
+// Win32 dialog (DialogBoxParamA) before the game window appears. Because it is
+// modal, the main thread is parked in the dialog's own message loop and the
+// game's per-frame pump (which drives tick()) never runs while it is up -- so the
+// dialog must be dismissed from a SEPARATE thread, not from tick(). We accept it
+// by posting the dialog's own "Accept" command, identifying the dialog purely by
+// its license-text control (no pixels, no synthetic mouse): the Accept button is
+// control id 1 (IDOK) and the license-text control is id 0x40D, which the normal
+// DirectDraw game window does not have. We post WM_COMMAND/IDOK rather than a
+// VK_RETURN keypress because the dialog's default-button mapping is not knowable
+// from here -- ENTER could land on Decline, IDOK cannot.
+constexpr WORD kLicenseAcceptId = 1;       // IDOK -> the dialog's Accept path
+constexpr int kLicenseTextCtrlId = 0x40D;  // the license-text control unique to this dialog
+
+struct EulaScan {
+    DWORD pid;
+    HWND found;
+};
+
+BOOL CALLBACK eula_enum_proc(HWND hwnd, LPARAM lp) {
+    auto* s = reinterpret_cast<EulaScan*>(lp);
+    DWORD wpid = 0;
+    GetWindowThreadProcessId(hwnd, &wpid);
+    if (wpid != s->pid || !IsWindowVisible(hwnd))
+        return TRUE;
+    // The license dialog is the only top-level window in this process that owns the
+    // license-text control; the game window (and everything else) does not.
+    if (GetDlgItem(hwnd, kLicenseTextCtrlId) != nullptr) {
+        s->found = hwnd;
+        return FALSE;  // stop enumerating
+    }
+    return TRUE;
+}
+
+// Poll for the modal license dialog and post its Accept command. Runs on its own
+// thread for a bounded window after launch; exits once it has accepted a dialog and
+// no dialog remains, or when the deadline passes. Posting to a window that has
+// already closed is a harmless no-op, so a second (demoEULA) dialog that appears in
+// sequence is handled by the same loop.
+DWORD WINAPI eula_dismiss_thread(LPVOID) {
+    const DWORD pid = GetCurrentProcessId();
+    const DWORD deadline = GetTickCount() + 120000;  // give the dialog up to ~2 min to appear
+    HWND last_accepted = nullptr;
+    int gone_streak = 0;
+    bool accepted_any = false;
+
+    while (GetTickCount() < deadline) {
+        EulaScan s{pid, nullptr};
+        EnumWindows(eula_enum_proc, reinterpret_cast<LPARAM>(&s));
+        if (s.found) {
+            PostMessageA(s.found, WM_COMMAND, MAKEWPARAM(kLicenseAcceptId, 0), 0);
+            if (s.found != last_accepted) {
+                logf("autologin: license dialog accepted (hwnd=%p)", (void*)s.found);
+                last_accepted = s.found;
+                accepted_any = true;
+            }
+            gone_streak = 0;
+        } else if (accepted_any) {
+            // Past the dialog(s): once we have accepted at least one and none has
+            // been present for ~1.5s, we are done.
+            if (++gone_streak >= 8)
+                break;
+        }
+        Sleep(200);
+    }
+    return 0;
+}
+
+void start_eula_dismiss_thread() {
+    HANDLE h = CreateThread(nullptr, 0, eula_dismiss_thread, nullptr, 0, nullptr);
+    if (h)
+        CloseHandle(h);
+    else
+        logf("autologin: failed to start license-dialog dismiss thread");
 }
 
 // A candidate pointer must be 4-aligned and land in the client's mapped range
@@ -244,8 +325,13 @@ void init() {
     g_char = env_either("FREYA_CHARACTER", "ENB_CHARACTER");
     g_want_eula = ieq(env_either("FREYA_EULA", "ENB_EULA"), "ACCEPT");
 
-    if (g_want_eula)
+    if (g_want_eula) {
         accept_eula_registry();
+        // Also dismiss the live (modal) license / Rules-of-Conduct dialog, which has
+        // no persistent accepted-flag to pre-set. Runs on its own thread because the
+        // modal dialog parks the game thread (and thus tick()).
+        start_eula_dismiss_thread();
+    }
 
     // Only arm the front-end capture when there is an account or character to
     // drive. With neither set, an ordinary launch installs no hook and tick() is

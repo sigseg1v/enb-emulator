@@ -88,11 +88,28 @@ limitation, would need loopback aliases there).
   clean.
 
 Still open in Half 1:
-- [ ] Full end-to-end multibox run needs DIFFERENT accounts per instance (server
+- [~] Full end-to-end multibox run needs DIFFERENT accounts per instance (server
   force-kicks duplicate login of same account). Unblocked by Half 2's
-  `ENB_ACC_NAME`/`ENB_CHARACTER` per-process credentials. (Task #6.)
+  `ENB_ACC_NAME`/`ENB_CHARACTER` per-process credentials, AND a second dev account
+  is now seeded: **`devuser2`/`devpass2`** with 5 chars (`just seed-dev-account
+  devuser2 devpass2`), so a 2-account local test has its credentials ready. (Task #6.)
 - [ ] play-local MVAS: native-proxy play-local impossible on rootless docker;
   MVAS works with the docker proxy. (Record + verify.)
+- [!] **LOCAL multibox is NOT a quick verify -- topology blocker.** The docker
+  proxy binds `INADDR_ANY:3500`, which OVERLAPS every specific-loopback bind on
+  3500, so a second native (WINE) proxy on `127.0.0.2:3500` gets `EADDRINUSE`. The
+  single docker proxy is also single-client (global state), so it can serve exactly
+  one local client. Running N local clients therefore requires N native WINE proxies
+  (one per loopback IP) dialing the docker SERVER's UDP ports directly with the
+  docker proxy DOWN -- but the launcher has no "local server + native per-slot proxy"
+  emulator config today (its modes are Net7Local = the single docker proxy, and
+  online = native WINE proxy -> cloud host). The DESIGNED multibox path is
+  `just play-online N` (native WINE proxy per slot, slot mechanism wired and
+  bind-verified), which targets the cloud host and tears down the local stack -- so
+  verifying it needs the two accounts to exist on the CLOUD DB, not just locally.
+  Net: AZ-7 single-client is DONE; multibox end-to-end is gated on either (a) a new
+  launcher "local + native per-slot proxy" mode, or (b) running `play-online N`
+  against the cloud with two cloud accounts. Flag for the owner to choose.
 
 ## Half 2 -- env-driven in-client auto-login (NEW)
 
@@ -108,9 +125,10 @@ pattern.
   the `game::login` offset block): the front-end run loop (LoginTask `this` source),
   the edit-control text setter, the NON-blocking credential-accept, the
   character-enter entry point, and the LoginTask layout (state `+0x24`, credential
-  view ptr/edit-widget children, inline char-name slots, selected index). The one
-  seam still missing is the EULA-DIALOG accept (AZ-3) -- the registry value the
-  client reads does not gate that dialog.
+  view ptr/edit-widget children, inline char-name slots, selected index). The
+  EULA-DIALOG accept seam (AZ-3) is also mapped and dismissed in-client (a modal
+  `DialogBoxParamA` identified by its license-text control, driven via
+  `WM_COMMAND`/IDOK from a worker thread); all login seams are now covered.
 
 ### AZ-2 -- login-stage observation hook -- DONE + LIVE-VERIFIED
 - [x] `hooks::enable_login_hook()` installs a READ-ONLY capture (NAKED trampoline,
@@ -130,19 +148,27 @@ pattern.
     = char-list head; `+0x1080` = selected index.
   - Buffers live in the low data segment (`0x0036xxxx`), 256+ writable bytes each.
 
-### AZ-3 -- EULA auto-accept -- REGISTRY DONE; dialog dismiss still screen-driven
+### AZ-3 -- EULA auto-accept -- DONE + LIVE-VERIFIED (fully in-client, no screen click)
 - [x] `ENB_EULA`/`FREYA_EULA == ACCEPT` -> `autologin::init()` writes
   `HKCU\Software\Westwood Studios\Earth & Beyond` `Trial` = DWORD 0 (the value the
-  client's own EULA check reads). Registry write only; no game memory/call.
-- [!] **The registry write does NOT skip the 506x362 EULA dialog.** Live-verified
-  on the running prefix: with `Trial`=0 written before launch, the client STILL
-  pops the small EULA dialog, and the autologin trace only starts (`state ... -> 1`)
-  AFTER the dialog is dismissed. So the dialog is gated by something other than that
-  registry value. Currently dismissed by a single screen click
-  (`05-eula-accept.sh`); this is the LAST remaining screen-coord dependency in the
-  otherwise-hands-free flow. Open: find the dialog's in-client accept seam (its
-  window proc / button handler) and click it from the DLL, OR identify the real
-  state byte the dialog reads, so the whole login is pixel-free.
+  client's own trial-demo EULA check reads). Registry write only; no game memory/call.
+- [x] **The registry write alone does NOT skip the dialog** -- the dialog the client
+  actually pops is the Rules-of-Conduct modal (it has no persistent accepted-flag in
+  the registry to pre-set), so `Trial`=0 only suppresses the separate trial-demo
+  prompt. The RoC dialog must be dismissed live.
+- [x] **In-client dialog dismiss (no screen coords).** The dialog is a real modal
+  `DialogBoxParamA`; while it is up the main thread is parked in the dialog's own
+  message loop, so the per-frame `tick()` is DORMANT and cannot dismiss it. So
+  `init()` spawns a dedicated worker thread (`eula_dismiss_thread`) that polls our
+  process's top-level windows, identifies the dialog by the presence of its
+  license-text control (`GetDlgItem(hwnd, 0x40D) != NULL`), and `PostMessage`s
+  `WM_COMMAND`/IDOK to drive its own Accept path (`EndDialog(hwnd, 1)`). Deterministic;
+  no pixel, no button-coord, no `xdotool`. Stops itself after the dialog stays gone.
+- [x] **LIVE trace (clean run, this session), with NO `05-eula-accept.sh`:**
+  `autologin: license dialog accepted (hwnd=0002005c)` ->
+  `autologin: state ... -> 1` -> `credentials submitted` ->
+  `entering world as devusertt`; in-game `enb.self()==table`, `enb.state()=="space"`.
+  The ENTIRE login is now pixel-free end to end.
 
 ### AZ-4 -- account/password auto-submit -- DONE + LIVE-VERIFIED
 - [x] Final approach (the blocking-handler trap from the first attempt is avoided):
@@ -192,12 +218,13 @@ pattern.
   LoginTask after entry (the clean trace above shows zero spam post-entry).
 
 ### AZ-7 -- verify
-- [x] **Single-client: DONE + LIVE-VERIFIED (this session).** Env vars only
-  (`ENB_ACC_NAME`/`ENB_ACC_PASS`/`ENB_CHARACTER`), launch, land in-game with NO
-  screen automation except the one EULA-dialog click (AZ-3, still open). Confirmed
-  repeatedly: credentials submitted -> entering world -> server "fully logged in" +
-  MVAS synced. No new packet shape emitted (calls existing client code paths only),
-  so no CV gate.
+- [x] **Single-client: DONE + LIVE-VERIFIED (this session), FULLY PIXEL-FREE.** Env
+  vars only (`ENB_ACC_NAME`/`ENB_ACC_PASS`/`ENB_CHARACTER`/`ENB_EULA`), launch, land
+  in-game with ZERO screen automation -- the last screen dependency (the EULA-dialog
+  click) is gone, dismissed in-client by AZ-3's dismiss thread. Confirmed repeatedly:
+  license dialog accepted -> credentials submitted -> entering world -> server "fully
+  logged in" + MVAS synced. No new packet shape emitted (calls existing client code
+  paths only), so no CV gate.
 - [ ] Multibox: `just play-online 2` with two different accounts -> both clients
   self-login to their own character. (Task #6; needs a second seeded account.)
 
