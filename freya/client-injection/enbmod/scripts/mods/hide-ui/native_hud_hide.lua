@@ -128,7 +128,8 @@ local ELEMENTS = {
     "ChatFrameBackgroundAndScroll", -- 7
     "NavButtonBar",                 -- 8
     "LevelBarsAndMicroMenu",        -- 9
-    "Unknown3",                     -- 10
+    "ChatSplitControl",             -- 10 top-right "change text window split / hide
+                                    --    chat window" button + its up-arrow (one panel)
     "Unknown4",                     -- 11
     "ScannerScreenBorder",          -- 12
     "BottomHudChrome",              -- 13
@@ -165,6 +166,11 @@ local hidden = {
     -- Identified live by hiding each and watching the arrow vanish (owner ask).
     Unknown1                     = true,
     Unknown2                     = true,
+    -- the top-right native chat control: a "change text window split" button + an
+    -- up-arrow (one panel). It was the only chrome leaf still at the full 0x700 draw
+    -- gate, so it stayed visible AND hoverable (its tooltip showed on rollover) after
+    -- everything else was hidden. Freya draws its own chat, so kill it (owner ask).
+    ChatSplitControl             = true,
     -- the bottom-right target frame: native glass bg + hull/shield bars + name +
     -- "Dist:" + cycle arrows + the round scan/cycle buttons above it. The Freya
     -- HUD's target_frame.lua repaints the 2D layer (thin stacked bars + name +
@@ -269,6 +275,20 @@ end
 local function apply()
     local map = map_panels()
     if not map then return end
+    -- Master Freya-UI toggle (Ctrl+U, owned by freya-hud): when the owner turns
+    -- the Freya overlay OFF, stop hiding and actively RE-SHOW every native chrome
+    -- leaf (and the chat text) each tick, so the stock HUD comes back intact. We
+    -- re-set the enable bit every frame rather than once, so it survives any game
+    -- re-clear. `enb.freya_ui_on` is the shared flag on the global table; nil
+    -- (flag never set, e.g. freya-hud disabled) means "no Freya UI present" and
+    -- we behave normally and keep hiding.
+    if enb.freya_ui_on == false then
+        for _, n in ipairs(ELEMENTS) do set_draw(map[n], true) end
+        if hide_chat_text then
+            for _, leaf in ipairs(chat_text_leaves() or {}) do set_draw(leaf, true) end
+        end
+        return
+    end
     for name in pairs(hidden) do
         set_draw(map[name], false)
     end

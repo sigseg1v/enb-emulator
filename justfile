@@ -687,6 +687,27 @@ play-local CLIENT_PATH='':
     echo ">>> launching (WINEPREFIX=$WINEPREFIX WINEDEBUG=${WINEDEBUG:-<unset>}) -- click Play in the GUI"
     dotnet run --no-build --project tools/LaunchFreya
 
+# Prefers the installer's `enb-cfg` shortcut if it is on PATH, otherwise runs the
+# WINE wrapper in the configured prefix (WINEPREFIX, default ~/.wine-enb).
+#
+# Launch the EnB game config tool (net7config.exe -- graphics/audio/controls) under WINE.
+config-game:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v enb-cfg >/dev/null 2>&1; then
+        exec enb-cfg
+    fi
+    : "${WINEPREFIX:=$HOME/.wine-enb}"
+    wrapper="$WINEPREFIX/drive_c/Program Files/EA GAMES/Earth & Beyond/EBCONFIG/net7config.exe_wine_launcher.sh"
+    if [ -x "$wrapper" ]; then
+        exec "$wrapper"
+    fi
+    echo "config-game: 'enb-cfg' is not on PATH and no wrapper was found at:" >&2
+    echo "  $wrapper" >&2
+    echo "Install the client first (client/linux-installer/install-enb-linux.sh)," >&2
+    echo "or set WINEPREFIX to the prefix that holds it." >&2
+    exit 1
+
 # Connect to the REMOTE cloud server -- no local docker stack at all.
 #
 # Unlike `play-local` (which boots postgres + server + login + proxy in docker

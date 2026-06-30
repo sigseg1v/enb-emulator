@@ -215,6 +215,40 @@ constexpr uintptr_t AuxGet_Skill = 0x00417f21;
 // mod (hide-ui only clears the widget's draw-gate bit; the update logic is untouched).
 constexpr uintptr_t TargetFrameRefresh = 0x00512400;
 constexpr uintptr_t TargetEntitySet = 0x007bd6e0;
+
+// WorldMgrInit (0x00741180, __fastcall(ECX = M)): the WORLD/PLAYER manager M's
+// initializer. It runs once at world entry (zone-in). Capturing ECX here is the
+// deterministic, no-target / no-hover / no-packet way to obtain M: a world manager
+// always exists once you are in space, so this fires every session. M is the object
+// that carries the local player's game id at M + world::player_id and the live sector-
+// server Connection at M + world::connection -- the same M the game's own group/verb
+// command paths use to build and push a target-action command. We hook it READ-ONLY to
+// capture M (ECX); M is a session-stable singleton, so one capture serves the whole
+// session, exposed via hooks::world_mgr().
+constexpr uintptr_t WorldMgrInit = 0x00741180;
+// --- target-action (verb) dispatch: build a command, push it through M's Connection ---
+// This is the exact sequence the client's own command paths run (e.g. the /group verb
+// handler and the native target-action buttons): construct a fixed command object, then
+// hand it to M->Connection. We replicate it from a Lua-callable helper (enb.target_action)
+// so the Freya letter buttons perform the native action without needing the transient
+// verb-UI object the on-click dispatcher uses internally.
+//   CmdBuild (__thiscall, ECX = a caller-owned >=0x1c-byte command buffer; args: uint
+//     player_id, char op, uint target_id, uint extra) writes the command in place (it
+//     only sets buf[0..6], so a zeroed 0x20-byte buffer is sufficient and needs no
+//     cleanup). op is the per-verb action byte -- the server's avatar-command case the
+//     packet drives (see the verb table in target_frame.lua and the server's command
+//     switch): 0x01 Tractor, 0x0a Group, 0x11 Prospect, 0x12 Gate, 0x14 Trade,
+//     0x19 Register, 0x1a Jumpstart, 0x1c Dock, 0x1d Land, 0x1e Scan. (Tractor/Scan
+//     pass the player's OWN game id as target_id; the rest pass the locked target's.)
+//   AutoFollowBuild (__thiscall, ECX = buffer; args: uint player_id, char op=0x0c) is the
+//     separate builder the Follow verb uses -- it carries no target field (the server
+//     follows the player's current target), so it has its own constructor.
+//   CmdSend (__thiscall, ECX = M, command buffer) routes the built command through
+//     *(M + world::connection)->vtable[2]. Same address as ChatMsgSend (chat uses the
+//     identical "build object, push through the manager's Connection" path).
+constexpr uintptr_t CmdBuild = 0x00876360;
+constexpr uintptr_t AutoFollowBuild = 0x0089d070;
+constexpr uintptr_t CmdSend = 0x00728150;
 } // namespace addr
 
 // Vitals-bar fill chain. Unlike the Offsets struct below (runtime hypotheses),
@@ -258,6 +292,25 @@ constexpr int ctrl_subsys = 0x4c;   // controller[0x13] -> targeting subsystem
 constexpr int getdata_vtoff = 0x28; // subsystem vtable+0x28 -> targeting data object
 constexpr int aux_container = 0x88; // *(dataObj + 0x88) -> aux container (threat keys)
 } // namespace targeting
+
+// World/player manager M field offsets, off the M captured at addr::WorldMgrInit
+// (hooks::world_mgr()). These are the two fields the target-action dispatch needs:
+// the local player's game id (the command's actor) and the live sector-server
+// Connection the built command is pushed through. Build-constant offsets, confirmed
+// against the client's own command paths (the same M[player_id] / M[connection] the
+// group-verb and target-button handlers use). Only the M pointer varies per run.
+//
+// The dispatch target's game id is NOT on M -- it is read off the captured current-
+// target object (hooks::target_obj()): the contact object stores its own GameID at
+// +tgt_gid (the same field the client's gid->object lookup validates), and its
+// properties/aux bag (hull/shield/name) hangs off +tgt_container. The native verb
+// dispatcher sends the +tgt_gid GameID directly; it is NOT a field of the aux bag.
+namespace world {
+constexpr int player_id = 0x112c;   // M -> local player game id (command actor)
+constexpr int connection = 0x1124;  // M -> sector-server Connection (command sink)
+constexpr int tgt_container = 0x88;  // target contact object -> properties/aux bag (hull/shield/name)
+constexpr int tgt_gid = 0x90;        // target contact object + 0x90 -> its own GameID (command target)
+} // namespace world
 
 // Target/player WORLD position, for the straight-line range shown on the frame. The
 // client's camera controller computes target distance exactly this way: a space object

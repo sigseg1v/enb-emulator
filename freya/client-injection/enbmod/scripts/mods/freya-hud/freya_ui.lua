@@ -336,11 +336,20 @@ local function layout()
 
     local bar_w = #KEYS * CFG.SLOT + (#KEYS - 1) * CFG.GAP
     local bar_x = math.floor((sw - bar_w) / 2)
-    local bar_y = sh - CFG.SLOT - CFG.BOTTOM
+    -- base hotbar Y (1280x960 layout). On a bigger screen the owner lifts the
+    -- action bar 20px and the player card 12px. Both offsets derive from
+    -- base_bar_y so they do not compound, and all are 0 at the reference res.
+    -- They scale @ 2560x1440.
+    local base_bar_y = sh - CFG.SLOT - CFG.BOTTOM
+    local bar_y = base_bar_y - H.sy(20)
 
     local pc_h = CFG.PC_PAD_Y + CFG.HEAD_H + CFG.VITAL_GAP
                + #VITALS * CFG.VITAL_H + (#VITALS - 1) * CFG.VITAL_GAP + CFG.PC_PAD_Y
-    local pc = { x = bar_x, y = bar_y - CFG.PC_GAP - pc_h, w = CFG.PC_W, h = pc_h }
+    -- The player card is anchored so its RIGHT edge meets the screen centerline
+    -- (owner layout): back off from the centre by the card's fixed design width.
+    local pc = { x = math.floor(sw / 2) - CFG.PC_W,
+                 y = base_bar_y - CFG.PC_GAP - pc_h - H.sy(12),
+                 w = CFG.PC_W, h = pc_h }
 
     return { sw = sw, sh = sh, bar_x = bar_x, bar_y = bar_y, bar_w = bar_w, pc = pc }
 end

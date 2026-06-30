@@ -44,6 +44,33 @@ H.LINE     = 0x5f86b0    -- hairline border
 H.LINE_HOT = 0x78e1ff    -- glowing cyan corner ticks
 H.RADIUS   = 2           -- design corner radius
 
+-- ---- resolution-scaled layout offsets --------------------------------------
+-- The base HUD geometry is tuned for a 1280x960 render. On a LARGER backbuffer
+-- the bars/panels keep their fixed pixel size, so they read small and the owner
+-- nudges several elements outward / up / down to suit the roomier screen. Those
+-- nudges are authored at 2560x1440 (H.TUNE_*) and scaled LINEARLY to the actual
+-- screen: 0 at the reference 1280x960 (base layout untouched), the full offset
+-- at 2560x1440, linear beyond. Gate: BOTH dimensions must be strictly larger
+-- than the reference, so 1280x960 -- or anything not bigger on each axis -- gets
+-- no offset at all (the current layout, which the owner is happy with).
+H.REF_W,  H.REF_H  = 1280, 960
+H.TUNE_W, H.TUNE_H = 2560, 1440
+
+local function dpi_frac()
+    local sw, sh = enb.screen()
+    if not sw or sw <= H.REF_W or sh <= H.REF_H then return 0, 0 end
+    return (sw - H.REF_W) / (H.TUNE_W - H.REF_W),
+           (sh - H.REF_H) / (H.TUNE_H - H.REF_H)
+end
+
+-- scale a horizontal / vertical pixel offset (authored @ 2560x1440) to the
+-- current screen, rounded to whole px. Both return 0 at/below the reference res.
+function H.sx(px) local fx = dpi_frac();    return math.floor(px * fx + 0.5) end
+function H.sy(px) local _, fy = dpi_frac(); return math.floor(px * fy + 0.5) end
+-- scale a 1.0-based size multiplier (font / bar growth) along the vertical axis:
+-- returns `mult` at the tuned res, 1.0 at the reference, linear between.
+function H.smul(mult) local _, fy = dpi_frac(); return 1 + (mult - 1) * fy end
+
 -- ---- visibility off the game state -----------------------------------------
 -- enb.state() (C++) returns one of: "space","station","login","charsel",
 -- "load","none","unknown". Two sources feed it:
@@ -63,6 +90,18 @@ function H.state()
     return (enb.state and enb.state()) or "unknown"
 end
 
+-- ---- master UI toggle (Ctrl+U) ---------------------------------------------
+-- One flag flips the WHOLE Freya cockpit overlay off and lets the native HUD
+-- chrome come back, so the owner can fall back to the stock UI at any moment if
+-- anything Freya-side misbehaves. The flag lives on the GLOBAL `enb` table (not a
+-- module local) on purpose: hide-ui is a SEPARATE mod that must read the same
+-- flag to re-show the native chrome, and it does not require() this lib. Default
+-- on. ui_toggle.lua owns the Ctrl+U key handler that flips it.
+if enb.freya_ui_on == nil then enb.freya_ui_on = true end
+function H.ui_on()      return enb.freya_ui_on ~= false end
+function H.set_ui(on)   enb.freya_ui_on = (on ~= false); return enb.freya_ui_on end
+function H.toggle_ui()  return H.set_ui(not H.ui_on()) end
+
 -- returns: show_hud, show_hotbar
 --   space            -> full HUD (cards + hotbar)
 --   station          -> cards, NO hotbar (owner ask: hide skill buttons in
@@ -76,6 +115,8 @@ end
 -- default existed only because enb.state() could never positively detect space.
 -- Now that it can, showing the HUD outside space is wrong.
 function H.vis()
+    -- master toggle off -> draw nothing; hide-ui restores the native chrome.
+    if not H.ui_on() then return false, false end
     local s = H.state()
     if s == "space" then
         return true, true

@@ -350,6 +350,33 @@ extern "C" __attribute__((naked)) void hk_TargetFrameRefresh() {
                          "jmp *_real_TargetFrameRefresh_tramp\n\t");
 }
 
+// ---- world/player manager capture (world-manager initializer) ---------------
+// game.h::addr::WorldMgrInit (0x00741180) is the WORLD/PLAYER manager M's init
+// routine, __fastcall(ECX = M). It runs once at world entry (zone-in). M carries the
+// local player's game id (M + game::world::player_id) and the live sector-server
+// Connection (M + game::world::connection) -- the two fields the Freya target-action
+// letter buttons need to build and push a verb command (enb.target_action). We capture
+// M (ECX) read-only -- the same shape as hk_XpBars -- and forward untouched. It does not
+// depend on the server emitting anything: a world manager always exists once in space,
+// so it fires every session. M is a session-stable singleton, so one capture serves the
+// whole session; lua_api exposes it (enb.worldmgr()).
+static volatile unsigned g_world_mgr = 0; // ECX (M) of the world-manager initializer
+extern "C" {
+void* real_WorldMgrInit_tramp = nullptr;
+void notify_world_mgr(unsigned m) {
+    g_world_mgr = m;
+}
+}
+extern "C" __attribute__((naked)) void hk_WorldMgrInit() {
+    // __fastcall: ECX = M. Preserve ECX across the cdecl notify call, then forward.
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl %ecx\n\t" // M (this) -> notify_world_mgr(M)
+                         "call _notify_world_mgr\n\t"
+                         "addl $4, %esp\n\t"
+                         "popal\n\t"
+                         "jmp *_real_WorldMgrInit_tramp\n\t");
+}
+
 // ---- cockpit controller capture ---------------------------------------------
 // game.h::addr::CockpitThrottle (0x0057dd20) and CockpitCommands (0x0057be50) are
 // the two cockpit-widget CONSTRUCTORS (__fastcall, ECX = the controller). They run
@@ -624,6 +651,11 @@ bool enable_event_hooks() {
         logf("hook TargetEntitySet failed");
         ok = false;
     }
+    if (MH_CreateHook((void*)game::addr::WorldMgrInit, (void*)&hk_WorldMgrInit,
+                      &real_WorldMgrInit_tramp) != MH_OK) {
+        logf("hook WorldMgrInit failed");
+        ok = false;
+    }
     if (MH_CreateHook((void*)game::addr::ActionBarUse, (void*)&hk_ActionBar,
                       &real_ActionBar_tramp) != MH_OK) {
         logf("hook ActionBarUse failed");
@@ -676,6 +708,7 @@ bool enable_event_hooks() {
     MH_EnableHook((void*)game::addr::XpBarsUpdate);
     MH_EnableHook((void*)game::addr::TargetFrameRefresh);
     MH_EnableHook((void*)game::addr::TargetEntitySet);
+    MH_EnableHook((void*)game::addr::WorldMgrInit);
     MH_EnableHook((void*)game::addr::ActionBarUse);
     MH_EnableHook((void*)game::addr::ActionBarCtor);
     MH_EnableHook((void*)game::addr::CockpitThrottle);
@@ -698,6 +731,7 @@ void disable_event_hooks() {
     MH_DisableHook((void*)game::addr::XpBarsUpdate);
     MH_DisableHook((void*)game::addr::TargetFrameRefresh);
     MH_DisableHook((void*)game::addr::TargetEntitySet);
+    MH_DisableHook((void*)game::addr::WorldMgrInit);
     MH_DisableHook((void*)game::addr::ActionBarUse);
     MH_DisableHook((void*)game::addr::ActionBarCtor);
     MH_DisableHook((void*)game::addr::CockpitThrottle);
@@ -747,6 +781,9 @@ unsigned target_obj() {
 }
 unsigned target_ctrl() {
     return g_target_ctrl;
+}
+unsigned world_mgr() {
+    return g_world_mgr;
 }
 unsigned actionbar() {
     return g_actionbar;

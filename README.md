@@ -54,6 +54,20 @@ This project is **one repo** that consolidates:
 
 These projects it's based on are super old code but the Net-7 current codebase is private and otherwise inaccessible for extending, so this is the best I can do for now. If more modern code for that was released I'd be happy to build on it.
 
+## Screenshots
+
+Here's a demonstration of the new Lua UI modding capabilities
+![New Lua UI](screenshots/enb-ui-new.png)
+
+And the old UI for comparison
+![Old UI](screenshots/enb-ui-old.png)
+
+And here's the new galaxy map / site with auction house / vault / etc
+![New Galaxy Map / Site](screenshots/enb-site-galaxy-map.png)
+
+And the new launcher
+![New Launcher](screenshots/new-launcher.png)
+
 ## Project status
 
 Tracked in `plans/*.md`. 

@@ -2740,3 +2740,55 @@ moot; the SOLVED block above is the truth):**
   fly away, updating smoothly. Verify on a mob/ship target as well as the station case.
 - **Setup**: `just build-enbmod` then relaunch the client; ensure freya-hud +
   hide-ui mods enabled.
+
+## [ ] CV-AS-VERBDISPATCH -- Freya target-action letter buttons fire the native action
+
+- **What changed (client-only, MIT)**: the redesigned target frame
+  (`freya-hud/target_frame.lua`) now draws square single-letter glass buttons above
+  the target bars (A Attack, F Follow, L Loot, B Board, T Trade, D Dock), gated by
+  the target class (A/F/L/B for ships, T for ship+station, D for station+gate).
+  Clicking one calls the new `enb.target_action(op[, no_target])`, which builds the
+  server avatar command (`CmdBuild` 0x00876360 / `AutoFollowBuild` 0x0089d070) and
+  pushes it via the same sender the chat path uses (`CmdSend` 0x00728150, through the
+  sector Connection at `M+0x1124`). Player id reads `M+0x112c`; target gid reads the
+  contact's container `obj+0x88 -> +0x90`. Op bytes: Attack 0x0a, Follow 0x0c,
+  Board 0x12, Trade 0x14, Loot 0x19, Dock 0x1d.
+- **Why this path (not the native verb dispatcher)**: the native verb dispatcher
+  `FUN_00658430`'s `this` (the verb-UI object) has no static xref and the Freya
+  server rarely emits the `0x5C VERB_UPDATE` packet, so neither reading a persistent
+  verb catalog nor hooking the packet handler is reliable. The command path mirrors
+  the proven chat-send, so it carries that path's low freeze risk -- but it bypasses
+  the client-side verb UI entirely, which is exactly why it needs real-client
+  verification.
+- **This is NOT a server/proxy wire change**: it emits the same avatar-command
+  opcodes the native client already sends when you click a verb button. No server,
+  proxy, or login change; nothing to pin in the CLI. The verification is purely
+  "does the real client behave correctly when WE synthesize that command".
+- **Headless coverage**: none -- requires a live target in space.
+- **Validated**: NOT yet live. Code built clean and staged; the freeze-safety plan
+  is to fire ONE controlled `enb.target_action` via the enbmod cmd channel against a
+  real station/gate target BEFORE trusting the buttons.
+- **What to look for (real client)**:
+  - Target a station within range, click **T** (Trade) -- the trade/vendor window
+    should open exactly as the native Trade verb does.
+  - Target a ship/mob, click **A** (Attack) -- weapons engage; click **F** (Follow)
+    -- the ship autofollows; click **L** (Loot) on a wreck -- the loot window opens.
+  - No client freeze / pump wedge on any button (the command build + send must not
+    fault). If any button wedges the client, STOP -- the convention is wrong.
+- **Setup**: `just build-enbmod` then relaunch; freya-hud + hide-ui enabled; fly
+  within range of a station/gate (and have a mob/ship to test combat verbs).
+
+## [ ] CV-AS-DOCK -- Freya Dock (D) button completes the client-side landing sequence
+
+- **The concern**: the Dock button sends the server dock command (op 0x1d) directly,
+  but the native Dock verb ALSO runs a client-side landing sequence
+  (camera/Landing_Init transition) that op 0x1d alone does not trigger. The server
+  may accept the dock and place the avatar at the station, but the **client station
+  transition (the dock/landing screen) may not fire**, leaving the client in space
+  while the server thinks it docked.
+- **What to look for (real client)**: target a station within docking range, click
+  **D**. Confirm the client actually transitions into the station (dock/landing
+  screen + station UI), not just that the server logs a dock. If the client stays in
+  space, the Freya Dock button must additionally invoke the client landing sequence
+  (the dispatcher's `0x20000` path runs `FUN_006...` landing init after the op).
+- **Setup**: same as CV-AS-VERBDISPATCH.
