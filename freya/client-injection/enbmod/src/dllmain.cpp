@@ -7,6 +7,7 @@
 #include "lua_api.h"
 #include "mem.h"
 #include "overlay.h"
+#include "autologin.h"
 
 extern "C" {
 #include "lua.h"
@@ -111,6 +112,7 @@ void run_init_script() {
 void on_tick() {
     if (!g_ready.load())
         return;
+    enb::autologin::tick();  // front-end auto-login driver (no-op once in-game / unconfigured)
     enb::lua::tick(g_L);
     // hot-reload: poll init.lua mtime every ~120 ticks
     if (++g_tick_count >= 120) {
@@ -173,6 +175,11 @@ DWORD WINAPI worker(LPVOID) {
     // overlay needs MinHook initialized (hooks::init did MH_Initialize) before it hooks Flip.
     if (!enb::overlay::init())
         enb::logf("overlay::init failed -- no drawing");
+
+    // env-driven auto-login: reads ENB_*/FREYA_* and, only when an account or
+    // character is requested, installs the read-only LoginTask capture hook
+    // (MinHook is up by now). No-op for an ordinary launch.
+    enb::autologin::init();
 
     enb::logf("enbmod ready");
     return 0;

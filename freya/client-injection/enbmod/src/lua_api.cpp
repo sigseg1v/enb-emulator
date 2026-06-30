@@ -990,6 +990,15 @@ static int l_worldmgr(lua_State* L) {
     return 1;
 }
 
+// enb.login_task() -> int. The front-end LoginTask `this` captured read-only from
+// the login run-loop hook (hooks::login_task()); 0 until the pre-game screens are
+// up. The auto-login driver and live probing read the login-field/char-list state
+// off it. Only non-zero when an auto-login env var armed the capture hook.
+static int l_login_task(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)hooks::login_task());
+    return 1;
+}
+
 // enb.target_action(op[, mode]) -> bool. Perform a target-action verb on the current
 // target by replaying the client's own command path: build a command object with the
 // local player as actor and a target game id, then push it through M's sector-server
@@ -1752,6 +1761,26 @@ static int l_hwnd(lua_State* L) {
     lua_pushinteger(L, (lua_Integer)(uintptr_t)actions::game_hwnd());
     return 1;
 }
+// enb.strbuf(s) -> address of a persistent client-memory copy of the string.
+// collect_args marshals only integers, so a game function that takes a char*
+// (e.g. a UI edit-control text setter) cannot be fed a Lua string directly. This
+// copies the bytes into one of a small rotating pool of static buffers (so a few
+// pending arguments do not clobber each other) and returns the buffer address,
+// which IS a valid pointer inside client.exe. Truncates to the buffer size.
+static int l_strbuf(lua_State* L) {
+    size_t len = 0;
+    const char* s = luaL_checklstring(L, 1, &len);
+    static char pool[8][256];
+    static int slot = 0;
+    char* b = pool[slot];
+    slot = (slot + 1) & 7;
+    if (len > sizeof(pool[0]) - 1)
+        len = sizeof(pool[0]) - 1;
+    memcpy(b, s, len);
+    b[len] = '\0';
+    lua_pushinteger(L, (lua_Integer)(uintptr_t)b);
+    return 1;
+}
 
 // enb.list_dir(path) -> { name, name, ... }
 // Directory entry names (files + subdirs, excluding "." and ".."). Used by the
@@ -1864,6 +1893,7 @@ void open(lua_State* L) {
                                    {"inspace", l_inspace},
                                    {"vitals_ctrl", l_vitals_ctrl},
                                    {"vitals", l_vitals},
+                                   {"login_task", l_login_task},
                                    {"aux", l_aux},
                                    {"aux_i", l_aux_i},
                                    {"rpg_level", l_rpg_level},
@@ -1893,6 +1923,7 @@ void open(lua_State* L) {
                                    {"char", l_char},
                                    {"call", l_call},
                                    {"call_cdecl", l_call_cdecl},
+                                   {"strbuf", l_strbuf},
                                    {"hwnd", l_hwnd},
                                    {"list_dir", l_list_dir},
                                    {nullptr, nullptr}};

@@ -764,6 +764,56 @@ bool enable_inspace_hook() {
     return true;
 }
 
+// ---- front-end LoginTask capture (env-driven auto-login) --------------------
+// game.h::addr::LoginRunLoop (0x00767f50) is the front-end run loop,
+// __fastcall(ECX = LoginTask). It dispatches the EULA/login/charselect state
+// machine every frame while we are on the pre-game screens. We capture its `this`
+// (ECX) read-only -- the exact pattern of hk_WorldMgrInit, but for the front end --
+// so autologin.cpp has the LoginTask pointer to drive credential submit + character
+// select. Capture only; forwards every argument untouched via the trampoline.
+// Installed ONLY when an auto-login env var is set (enable_login_hook), so an
+// ordinary launch never gains this hook.
+static volatile unsigned g_login_task = 0; // ECX (LoginTask) of the front-end run loop
+extern "C" {
+void* real_LoginRunLoop_tramp = nullptr;
+void notify_login_task(unsigned thisp) {
+    g_login_task = thisp;
+}
+}
+extern "C" __attribute__((naked)) void hk_LoginRunLoop() {
+    // __fastcall: ECX = LoginTask. Preserve ECX across the cdecl notify call, forward.
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl %ecx\n\t" // LoginTask (this) -> notify_login_task
+                         "call _notify_login_task\n\t"
+                         "addl $4, %esp\n\t"
+                         "popal\n\t"
+                         "jmp *_real_LoginRunLoop_tramp\n\t");
+}
+
+static bool g_login_hook_on = false;
+bool enable_login_hook() {
+    if (g_login_hook_on)
+        return true;
+    MH_STATUS s = MH_CreateHook((void*)game::addr::LoginRunLoop, (void*)&hk_LoginRunLoop,
+                                &real_LoginRunLoop_tramp);
+    if (s != MH_OK) {
+        logf("hook LoginRunLoop MH_CreateHook failed: %s", MH_StatusToString(s));
+        return false;
+    }
+    s = MH_EnableHook((void*)game::addr::LoginRunLoop);
+    if (s != MH_OK) {
+        logf("enable LoginRunLoop MH_EnableHook failed: %s", MH_StatusToString(s));
+        return false;
+    }
+    g_login_hook_on = true;
+    logf("login capture hook installed on LoginRunLoop @ %p", (void*)game::addr::LoginRunLoop);
+    return true;
+}
+
+unsigned login_task() {
+    return g_login_task;
+}
+
 unsigned long last_inspace_tick() {
     return g_last_inspace_tick;
 }

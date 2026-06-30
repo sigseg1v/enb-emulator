@@ -249,7 +249,66 @@ constexpr uintptr_t WorldMgrInit = 0x00741180;
 constexpr uintptr_t CmdBuild = 0x00876360;
 constexpr uintptr_t AutoFollowBuild = 0x0089d070;
 constexpr uintptr_t CmdSend = 0x00728150;
+
+// ---- front-end login flow (EULA / login / character select) -----------------
+// The pre-game screens are driven by a single LoginTask object and its state
+// machine. We capture the LoginTask `this` (ECX) read-only from the per-frame
+// run loop and drive the env-fed auto-login (see namespace login + autologin.cpp).
+//
+// LoginRunLoop (__fastcall(ECX = LoginTask)): the main front-end
+// loop. Runs EVERY frame while on the EULA/login/charselect screens and dispatches
+// the state machine. We hook it READ-ONLY to capture the LoginTask `this` -- the
+// exact capture pattern of WorldMgrInit, but for the front end. It is the one
+// place the LoginTask pointer is reliably available before we are in the world.
+constexpr uintptr_t LoginRunLoop = 0x00767f50;
+// EulaAccepted (no args) -> nonzero when the EULA has been accepted (reads the
+// "Trial" registry value; 0 == accepted/not-a-trial). We do not call it; we set
+// the registry value it reads (autologin EULA accept).
+constexpr uintptr_t EulaAccepted = 0x005fade0;
+// EditSetText (__thiscall(this = edit widget, char* text, int append)): replaces
+// (append == 0) the text of a login edit widget. The credential view's username
+// and password widgets (login::view_user_widget / login::view_pass_widget) take
+// this; setting the password widget shows the masked dots, exactly as typing does.
+constexpr uintptr_t EditSetText = 0x006aa570;
+// CredentialAccept (__thiscall(this = credential view), no args): the work the
+// Login button does -- reads the two edit widgets and kicks off authentication.
+// NON-BLOCKING: it returns immediately and the client's own per-frame run loop
+// pumps the result. Safe to call from the tick (a blocking handler would wedge
+// it). Driven with the credential-view `this`, NOT the LoginTask. NOTE: this path
+// does NOT advance the front-end state off login::state_login (1) -- the
+// char-select screen never renders; the avatar list instead arrives and populates
+// the inline name slots, which is the signal auto-login waits on (see autologin.cpp).
+constexpr uintptr_t CredentialAccept = 0x005ae450;
+// CharEnter (__thiscall(this = LoginTask), no args): resolves the character at
+// login::sel_index to its galaxy id and requests entry into the world. Also
+// non-blocking.
+constexpr uintptr_t CharEnter = 0x00769400;
 } // namespace addr
+
+// Front-end LoginTask layout (build-constant field offsets, runtime-validated).
+// Only the LoginTask pointer and the per-run credential-view pointer vary per
+// launch; these offsets do not. The credential view is a child object located by
+// signature each run (see autologin.cpp): its back-pointer (view_owner) equals the
+// LoginTask, and its two edit-widget slots point at objects whose first dword is
+// the edit-widget vtable. The username/password text lives in the widgets, not in
+// any LoginTask copy, so auth only sees text written through EditSetText.
+namespace login {
+constexpr unsigned state = 0x24;          // int front-end state
+constexpr int state_login = 1;            //   login / pre-game screen up
+// NOTE on the state field: when credentials are submitted programmatically, this
+// client build authenticates and fills the character-name slots below WITHOUT
+// flipping +0x24 off the login value (the character-select screen never renders).
+// So the avatar list arriving is detected by the NAME SLOTS becoming populated,
+// not by a state change -- the auto-enter gate watches the slots, not +0x24.
+constexpr unsigned view_owner = 0x9c;     // credential view -> back-ptr to LoginTask
+constexpr unsigned view_user_widget = 0xa4;  // credential view -> username edit widget
+constexpr unsigned view_pass_widget = 0xa8;  // credential view -> password edit widget
+constexpr uintptr_t edit_widget_vtable = 0x00afda10;  // first dword of an edit widget
+constexpr unsigned char_name_base = 0x424;   // char[0] name slot
+constexpr unsigned char_name_stride = 0x10c; // stride between char name slots
+constexpr int char_max = 8;                  // character slots to scan
+constexpr unsigned sel_index = 0x1080;       // selected character index (int)
+} // namespace login
 
 // Vitals-bar fill chain. Unlike the Offsets struct below (runtime hypotheses),
 // these are CONFIRMED build-constant field offsets, observed at runtime: the
