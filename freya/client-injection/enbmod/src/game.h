@@ -246,9 +246,20 @@ constexpr uintptr_t WorldMgrInit = 0x00741180;
 //   CmdSend (__thiscall, ECX = M, command buffer) routes the built command through
 //     *(M + world::connection)->vtable[2]. Same address as ChatMsgSend (chat uses the
 //     identical "build object, push through the manager's Connection" path).
+//   CtaBuild (__thiscall, ECX = buffer; args: uint source_id, uint target_id, uint
+//     action) is the builder for the group call-to-arms / formation request (wire
+//     opcode 0x00BC, CTARequest{SourceID, TargetID, Action} -- see
+//     common/include/net7/PacketStructures.h). It writes 6 dwords (0x18 bytes), so the
+//     same zeroed 0x20-byte buffer works, and the built object goes through CmdSend
+//     like every other outgoing command. This is the packet behind the native group
+//     window's Formation / "Target my target" controls. action routes the server's
+//     GroupAction switch: 4 Slot Back, 5 Block, 6 Pipe (set formation, leader-only),
+//     7 Form Up, 8 Leave Formation, 9 Break Formation (leader), 12 target-my-target.
+//     target_id -1 = the whole group (the builder's own no-arg default).
 constexpr uintptr_t CmdBuild = 0x00876360;
 constexpr uintptr_t AutoFollowBuild = 0x0089d070;
 constexpr uintptr_t CmdSend = 0x00728150;
+constexpr uintptr_t CtaBuild = 0x0086f070;
 
 // ---- front-end login flow (EULA / login / character select) -----------------
 // The pre-game screens are driven by a single LoginTask object and its state
@@ -476,6 +487,14 @@ constexpr int members_end = 0x678;           // group + this -> member-array end
 constexpr int member_name = 0x120;           // member + this -> name char*
 constexpr int member_gameid = 0x1a8;         // member + this -> GameID (uint32)
 constexpr int max_members = 5;               // roster cap (UI shows at most 5 rows)
+// The client's own "am I the group leader?" check -- the exact function the native
+// group window runs at init to decide whether its top button reads GRP DISBAND
+// (leader) or GRP LEAVE (member). __fastcall(avatar object) -- the same
+// container-holding avatar base the roster read uses (it looks up the GroupInfo
+// entry off base+rpg::container_off itself, so a single-ECX call_thiscall with no
+// stack args is the right calling shape). Returns nonzero when the local player
+// leads their current group; zero when member / solo. Call under the VEH guard.
+constexpr uintptr_t is_leader = 0x0074d690; // __fastcall(avatar base) -> leader?
 } // namespace group
 
 // Chat line RING-BUFFER layout, off the ring object captured at addr::ChatLineAppend

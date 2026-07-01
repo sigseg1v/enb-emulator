@@ -1433,6 +1433,66 @@ static int l_target_action(lua_State* L) {
     return 1;
 }
 
+// enb.group_action(action [, target_gid]) -> bool. Send a group call-to-arms /
+// formation request (wire opcode 0x00BC, CTARequest{SourceID, TargetID, Action}) --
+// the packet behind the native group window's Formation and "Target my target"
+// controls. Built with the client's own request constructor (addr::CtaBuild) into
+// the shared command buffer and pushed through M's Connection exactly like
+// enb.target_action. action codes (the server's GroupAction switch): 4 Slot Back,
+// 5 Block, 6 Pipe (set formation, leader-only), 7 Form Up, 8 Leave Formation,
+// 9 Break Formation (leader), 12 ask the group to target my target. target_gid
+// defaults to -1 = the whole group (the constructor's own default). Returns false
+// (no send) when M is not captured yet. Game-thread only (callers run from
+// on_input), same single-writer g_cmd_obj contract as send_target_cmd.
+static int l_group_action(lua_State* L) {
+    int action = (int)luaL_checkinteger(L, 1);
+    uint32_t target = (uint32_t)(int32_t)luaL_optinteger(L, 2, -1);
+    uintptr_t m = hooks::world_mgr();
+    if (!m || !mem::readable((void*)(m + game::world::player_id), 4)) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    uint32_t player = mem::u32(m + game::world::player_id);
+    std::memset(g_cmd_obj, 0, sizeof(g_cmd_obj));
+    uint32_t b[3] = {player, target, (uint32_t)action};
+    actions::call_thiscall(game::addr::CtaBuild, (unsigned)(uintptr_t)g_cmd_obj, b, 3);
+    uint32_t snd[1] = {(uint32_t)(uintptr_t)g_cmd_obj};
+    actions::call_thiscall(game::addr::CmdSend, m, snd, 1);
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+// enb.is_leader() -> bool. Whether the local player LEADS their current group --
+// the client's own leader check (group::is_leader), the same one the native group
+// window runs to choose GRP DISBAND (leader) vs GRP LEAVE (member). Called with
+// the same candidate avatar bases the roster read (enb.group) walks; false when
+// solo, member, out of space, or before the bases are captured. VEH-guarded like
+// every other native call.
+static int l_is_leader(lua_State* L) {
+    uintptr_t bases[2] = {hooks::rpg_mgr(), player_entity()};
+    int lead = 0;
+    if (__builtin_setjmp(mem::g_guard_jmp)) {
+        mem::g_guard_on = 0; // the native check faulted: report not-leader
+    } else {
+        mem::g_guard_on = 1;
+        for (uintptr_t base : bases) {
+            if (!base || !mem::readable((void*)(base + game::rpg::container_off), 4))
+                continue;
+            if (!mem::ptr(base + game::rpg::container_off))
+                continue;
+            // The check returns a char in AL -- the rest of EAX is callee scratch,
+            // so mask to the low byte before testing.
+            if ((actions::call_thiscall(game::group::is_leader, base, nullptr, 0) & 0xff) != 0) {
+                lead = 1;
+                break;
+            }
+        }
+        mem::g_guard_on = 0;
+    }
+    lua_pushboolean(L, lead);
+    return 1;
+}
+
 // enb.rpg_mgr() -> int. Raw pointer to the RPG manager captured by the RpgLevels
 // hook (hooks::rpg_mgr()). 0 = the client's level-reader has NOT run yet this
 // session, so enb.rpg_level() will return nothing. Diagnostic: open the in-game
@@ -2179,6 +2239,7 @@ static void push_addr_table(lua_State* L) {
     A(CmdBuild);
     A(AutoFollowBuild);
     A(CmdSend);
+    A(CtaBuild);
     A(ChatGadget);
     A(ChatRender);
     A(ChatChannel);
@@ -2227,6 +2288,8 @@ void open(lua_State* L) {
                                    {"target_ctrl", l_target_ctrl},
                                    {"worldmgr", l_worldmgr},
                                    {"target_action", l_target_action},
+                                   {"group_action", l_group_action},
+                                   {"is_leader", l_is_leader},
                                    {"aux_entry", l_aux_entry},
                                    {"state", l_state},
                                    {"cursor", l_cursor},
