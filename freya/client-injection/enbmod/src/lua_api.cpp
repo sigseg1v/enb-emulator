@@ -963,8 +963,16 @@ static int l_group(lua_State* L) {
                 uintptr_t m = mem::ptr(p);
                 if (!m || !mem::readable((void*)m, 4))
                     continue;
+                // The member array is a FIXED max_members-slot block; unused slots read
+                // back with a zero GameID (and no name). Skip those so `count` is the
+                // number of REAL party members -- otherwise a solo player (or a small
+                // party) reports the empty trailing slots and the party frame paints
+                // blank "Member" rows for them.
+                unsigned gid = (unsigned)mem::i32(m + game::group::member_gameid);
+                if (gid == 0)
+                    continue;
                 raw[n].namep = mem::ptr(m + game::group::member_name);
-                raw[n].gameid = (unsigned)mem::i32(m + game::group::member_gameid);
+                raw[n].gameid = gid;
                 ++n;
             }
         }

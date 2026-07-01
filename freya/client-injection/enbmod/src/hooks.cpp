@@ -211,7 +211,19 @@ void* real_InSpace_tramp = nullptr;
 // it each frame gives calibration tooling a live, valid root with no scanning.
 void notify_inspace(unsigned thisp) {
     g_last_inspace_tick = GetTickCount();
-    g_vitals_ctrl = thisp;
+    // While the player is grouped, the native party/group member bars are
+    // repainted through this SAME EnergyBar updater, so their controllers also
+    // land here and would clobber g_vitals_ctrl -- leaving enb.vitals()/self()
+    // pointing at a member bar (zeroed fill, no player-data backref), which is
+    // why the self player-card fell back to "PILOT" and lost hull/shield when a
+    // party formed. The player's OWN vitals controller is the only one that
+    // carries a non-null player-data object at +ctrl_data (the chain
+    // vitals() walks to the character name); a member bar reads back 0 there.
+    // So only latch a controller that has that backref -- member bars never
+    // overwrite the real one. thisp is a live object (ECX of the call) so the
+    // +ctrl_data read is safe.
+    if (thisp && *(volatile unsigned*)(thisp + game::player::ctrl_data) != 0)
+        g_vitals_ctrl = thisp;
 }
 }
 extern "C" __attribute__((naked)) void hk_InSpace() {

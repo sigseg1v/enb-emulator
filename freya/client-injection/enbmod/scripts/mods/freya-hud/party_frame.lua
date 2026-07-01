@@ -25,7 +25,7 @@ local H = require("freya_hud")
 -- ---- geometry (window-relative; anchored to the right edge, stacked down) -----
 local CFG = {
     PANEL_W  = 188,   -- panel / row content width at the reference res
-    MARGIN_R = 12,    -- gap from the right screen edge
+    MARGIN_R = 28,    -- gap from the right screen edge (inset 16px past the base 12)
     MARGIN_T = 232,   -- gap from the top screen edge to the panel top (below the radar)
     -- on a larger-than-1280x960 screen pull the panel inward from the right and down
     -- from the top, matching how the rest of the HUD scales its border gaps (both 0 at

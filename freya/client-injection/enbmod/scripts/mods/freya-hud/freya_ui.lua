@@ -305,6 +305,11 @@ local CFG = {
     BOTTOM        = 18,    -- gap from screen bottom to the hotbar (design bottom:18)
 
     PC_W          = 224,   -- player-card width (design)
+    -- Low-res rightward nudge so the card clears the bottom-left chat box. FULL at
+    -- the 1280x960 reference (card left edge 416 vs chat right edge 482 -> ~66px
+    -- overlap; 72 clears it with a small gap), decaying to 0 by 2560x1440 where the
+    -- centerline has moved right enough that the card no longer touches the chat.
+    PC_LOWRES_DX  = 72,
     PC_PAD_X      = 7,
     PC_PAD_Y      = 5,
     HEAD_H        = 16,    -- name/level header row
@@ -347,7 +352,14 @@ local function layout()
                + #VITALS * CFG.VITAL_H + (#VITALS - 1) * CFG.VITAL_GAP + CFG.PC_PAD_Y
     -- The player card is anchored so its RIGHT edge meets the screen centerline
     -- (owner layout): back off from the centre by the card's fixed design width.
-    local pc = { x = math.floor(sw / 2) - CFG.PC_W,
+    -- On a small screen that puts its left edge over the bottom-left chat box, so
+    -- nudge it RIGHT. The nudge is full at the 1280x960 reference and decays
+    -- linearly to 0 by 2560x1440: H.sx(N) grows the OPPOSITE way (0 at ref, N at
+    -- the tuned res), so `N - H.sx(N)` is N at the reference and 0 at 2560x1440
+    -- (clamped so it never goes negative past the tuned res). Larger screens keep
+    -- the current centered position exactly.
+    local pc_dx = math.max(0, CFG.PC_LOWRES_DX - H.sx(CFG.PC_LOWRES_DX))
+    local pc = { x = math.floor(sw / 2) - CFG.PC_W + pc_dx,
                  y = base_bar_y - CFG.PC_GAP - pc_h - H.sy(12),
                  w = CFG.PC_W, h = pc_h }
 
