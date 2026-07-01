@@ -2935,6 +2935,8 @@ moot; the SOLVED block above is the truth):**
   sent clean from the leader, server log clean. Items 2/3/5 (click-through
   behaviour, disband/leave/formation via the ON-SCREEN buttons) + the visual
   row check remain for the owner.
+- **RESOLVED 2026-07-01**: owner confirmed the on-screen rows work on the live
+  grouped pair ("works great").
 
 ## CV-AZ-DUPCHAR -- duplicate-login kick is now per-CHARACTER, not per-account
 
