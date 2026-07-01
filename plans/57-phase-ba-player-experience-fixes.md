@@ -473,13 +473,27 @@ active profile on Play and on close.
 
 BA-4b -- "Lock Mouse to Window" toggle (owner, 2026-06-30). New checkbox beside
 Fullscreen: confines the cursor to the focused client window (multibox QoL).
-Maps to the WINE X11 driver's `DXGrab` (`HKCU\Software\Wine\X11 Driver` "DXGrab"
-= "Y"/"N", written EVERY launch so toggling off clears a prior grab).
 `UserSettings.LockMouseToWindow` (persisted per-profile) + `LaunchSetting`
-mirror; `Launcher.cs` registry base-`entries` adds the DXGrab write; UI
-`c_CheckBox_LockMouse` marshalled in ApplyUserToUi/CaptureUiToUser + set on the
-Play + Save paths. Builds clean. Also centered the Profile `+`/`X` button glyphs
+mirror; UI `c_CheckBox_LockMouse` marshalled in ApplyUserToUi/CaptureUiToUser +
+set on the Play + Save paths. Also centered the Profile `+`/`X` button glyphs
 (HorizontalContentAlignment/VerticalContentAlignment=Center).
+
+REWORKED (2026-07-01, owner: "turning off Lock Mouse To Window doesnt work").
+The original DXGrab registry write was a DEAD KNOB: wine-11.8's winex11 has no
+DXGrab (or GrabPointer) option at all -- only GrabFullscreen -- so the write
+changed nothing. The confinement players see is the CLIENT's own ClipCursor
+call, which modern wine honours unconditionally. Semantics flipped to match
+reality: locked IS the game's native behaviour, so `LockMouseToWindow` now
+defaults TRUE and the checkbox's job is the OFF case. OFF injects enbmod and
+its new ClipCursor MinHook (`freya/client-injection/enbmod/src/hooks.cpp`,
+gated on env `FREYA_LOCK_MOUSE=0`, set process-wide in OnPlayClick both ways so
+a stale value never leaks): the hook swallows ClipCursor(rect) with TRUE and
+calls the real ClipCursor(nullptr) once at init to free any grab taken before
+injection. `ConfigureInjection` gains a `mouseUnlock` gate so unticking the box
+triggers injection even with Lua mods off; the DXGrab registry entry is
+deleted. VERIFIED on a throwaway mbox3 client 2026-07-01: enbmod.log prints
+"mouse unlock: ClipCursor neutered (FREYA_LOCK_MOUSE=0)". Real-client feel
+check tracked as plans/29 CV-BA-MOUSEUNLOCK.
 
 ## BA-5 -- optional login fields
 

@@ -798,10 +798,6 @@ namespace LaunchFreya
                 (@"HKLM\Software\EACom\AuthAuth",                       "AuthLoginBaseService", "REG_SZ",   "AuthLogin"),
                 (@"HKLM\Software\Westwood Studios\Earth and Beyond\Registration",
                                                                         "Registered",           "REG_DWORD","1"),
-                // Lock-mouse-to-window: the WINE X11 driver's DXGrab confines the
-                // cursor to the focused DirectX window. Written Y/N every launch so
-                // toggling the box off actively clears a prior grab.
-                (@"HKCU\Software\Wine\X11 Driver",                      "DXGrab",               "REG_SZ",   _setting.LockMouseToWindow ? "Y" : "N"),
             };
             // BA-4: the EnB client reads its render resolution + windowed flag from
             // HKLM\Software\Westwood Studios\Earth and Beyond\Render. The 32-bit
@@ -885,7 +881,13 @@ namespace LaunchFreya
             // mutex. Same decoupling as auto-login above.
             bool multibox = _slot != null && _slot.Multibox;
 
-            if (!_setting.EnablePositionFeed && !_setting.EnableClientMods && !autoLogin && !multibox)
+            // Unchecking "Lock Mouse To Window" needs enbmod's ClipCursor hook
+            // (hooks.cpp, gated on FREYA_LOCK_MOUSE=0): the game confines the
+            // pointer itself via ClipCursor and modern wine honours that
+            // unconditionally -- there is no registry knob to override it.
+            bool mouseUnlock = !_setting.LockMouseToWindow;
+
+            if (!_setting.EnablePositionFeed && !_setting.EnableClientMods && !autoLogin && !multibox && !mouseUnlock)
                 return;
 
             // FreyaInject.exe and the DLLs are Win32 PEs that run natively on Windows
@@ -912,7 +914,7 @@ namespace LaunchFreya
             // mods toggle off -- the native publisher runs regardless of whether
             // any Lua mod is active. Without this the feed would have no resolver
             // and send nothing.
-            if (_setting.EnableClientMods || autoLogin || _setting.EnablePositionFeed)
+            if (_setting.EnableClientMods || autoLogin || _setting.EnablePositionFeed || mouseUnlock)
             {
                 var dos = StageClientMods();
                 if (dos != null) _injectDlls.Add(dos);

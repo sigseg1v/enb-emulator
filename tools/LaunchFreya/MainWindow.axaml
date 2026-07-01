@@ -102,7 +102,7 @@
           <ComboBox Name="c_ComboBox_Resolution" Width="190" />
           <CheckBox Name="c_CheckBox_Fullscreen" Content="Fullscreen" VerticalAlignment="Center" />
           <CheckBox Name="c_CheckBox_LockMouse" Content="Lock Mouse to Window" VerticalAlignment="Center"
-                    ToolTip.Tip="Confine the mouse cursor to the client window while it has focus (helpful for multiboxing)." />
+                    ToolTip.Tip="The game confines the mouse to its window while it has focus (its native behaviour). Untick to free the pointer so it can leave the window, e.g. to reach another client while multiboxing." />
         </StackPanel>
 
         <!-- Optional login (BA-5) + optional client-window placement. Window Pos:

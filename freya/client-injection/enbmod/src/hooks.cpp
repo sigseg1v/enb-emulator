@@ -70,6 +70,18 @@ static BOOL WINAPI hk_PeekMessageA(LPMSG m, HWND h, UINT min, UINT max, UINT rm)
     return real_PeekMessageA(m, h, min, max, rm);
 }
 
+// ---- mouse-unlock hook ------------------------------------------------------
+// The client confines the pointer to its window with ClipCursor, and modern
+// wine honours that unconditionally (wine 11.x has no DXGrab/GrabPointer
+// registry knob to override it). When the launcher's "Lock Mouse To Window"
+// is OFF it exports FREYA_LOCK_MOUSE=0 and we neuter ClipCursor here so the
+// pointer can leave the window (multibox: reach the other client).
+typedef BOOL(WINAPI* ClipCursor_t)(const RECT*);
+static ClipCursor_t real_ClipCursor = nullptr;
+static BOOL WINAPI hk_ClipCursor(const RECT*) {
+    return TRUE;
+}
+
 static BOOL WINAPI hk_GetMessageA(LPMSG m, HWND h, UINT min, UINT max) {
     BOOL r = real_GetMessageA(m, h, min, max);
     // r == -1 is an error, 0 is WM_QUIT; only a positive return removed a real
@@ -611,6 +623,23 @@ bool init() {
         logf("input hook installed on GetMessageA");
     } else {
         logf("WARNING: GetMessageA hook failed -- HUD input (clicks/key highlight) disabled");
+    }
+
+    // Mouse unlock: only when the launcher explicitly asked for it. Non-fatal
+    // if it fails -- the game just keeps its native pointer confinement.
+    char lock[8] = {0};
+    if (GetEnvironmentVariableA("FREYA_LOCK_MOUSE", lock, sizeof(lock)) &&
+        lock[0] == '0' && lock[1] == '\0') {
+        void* clip = (void*)GetProcAddress(u32, "ClipCursor");
+        if (clip && MH_CreateHook(clip, (void*)&hk_ClipCursor, (void**)&real_ClipCursor) == MH_OK &&
+            MH_EnableHook(clip) == MH_OK) {
+            // Clear any confinement set before the hook landed (FreyaInject
+            // starts the client suspended, so normally there is none).
+            real_ClipCursor(nullptr);
+            logf("mouse unlock: ClipCursor neutered (FREYA_LOCK_MOUSE=0)");
+        } else {
+            logf("WARNING: ClipCursor hook failed -- mouse stays locked to the window");
+        }
     }
     return true;
 }

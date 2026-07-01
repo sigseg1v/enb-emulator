@@ -1023,6 +1023,11 @@ namespace LaunchFreya
             _setting.Resolution = SelectedResolution();
             _setting.Fullscreen = c_CheckBox_Fullscreen.IsChecked == true;
             _setting.LockMouseToWindow = c_CheckBox_LockMouse.IsChecked == true;
+            // enbmod's ClipCursor hook (hooks.cpp) frees the pointer when this is
+            // "0". Always set both ways so a stale value from a prior launch in
+            // this process never leaks into the next one.
+            Environment.SetEnvironmentVariable("FREYA_LOCK_MOUSE",
+                _setting.LockMouseToWindow ? "1" : "0");
 
             // Optional client-window placement: only reposition when BOTH X and Y are
             // given (a half-set position is ambiguous, so we ignore it and leave the
@@ -1472,6 +1477,9 @@ namespace LaunchFreya
 
         void AppendLog(string s)
         {
+            // Mirror to stdout so a terminal launch sees the same diagnostics the
+            // Advanced... dialog shows.
+            Console.WriteLine(s);
             void Append()
             {
                 var sb = new StringBuilder(c_LogPane.Text ?? "");

@@ -61,12 +61,13 @@ namespace LaunchFreya.Config
         public string Resolution { get; set; } = "";
         public bool Fullscreen { get; set; } = false;
 
-        // Confine the mouse cursor to the client window while the game holds focus
-        // (maps to the WINE X11 driver's DXGrab, written to the prefix registry
-        // before launch). Handy for multiboxing so the pointer does not slip onto
-        // another client's window. Persisted per-profile like the other display
-        // settings.
-        public bool LockMouseToWindow { get; set; } = false;
+        // Whether the mouse cursor stays confined to the client window while the
+        // game holds focus. The game itself confines the pointer (ClipCursor), so
+        // ON is the native behaviour and the default; OFF injects enbmod's
+        // ClipCursor hook (FREYA_LOCK_MOUSE=0) to free the pointer -- handy for
+        // multiboxing so it can reach the other client's window. Persisted
+        // per-profile like the other display settings.
+        public bool LockMouseToWindow { get; set; } = true;
 
         // BA-5: optional auto-login credentials. AccountName + CharacterName are
         // persisted; the password is NEVER written to disk (it is held only in the

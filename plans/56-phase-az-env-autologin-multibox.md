@@ -122,12 +122,24 @@ Still open in Half 1:
 - [x] **Launcher per-profile window placement (owner ask 2026-06-30).** Optional
   `Window X`/`Window Y` inputs on the launcher (row under the client path); when
   BOTH are set the launched client window is repositioned there after it appears
-  (`tools/LaunchFreya/ClientWindowPlacer.cs` -- Windows `SetWindowPos` via
-  EnumWindows/PID match, Linux `xdotool search --pid ... windowmove`), so each
-  multibox profile can pin its own screen spot. Persisted per-profile
-  (`UserSettings.WindowX/WindowY`, null when blank = never touch the window).
-  Launcher builds clean; live placement check rides along with CV-AZ-DUPCHAR's
-  two-box run. CAVEAT (Linux/WINE): moving a WINE window externally is the exact
+  (`tools/LaunchFreya/ClientWindowPlacer.cs`), so each multibox profile can pin
+  its own screen spot. Persisted per-profile (`UserSettings.WindowX/WindowY`,
+  null when blank = never touch the window).
+  **FIXED (2026-07-01, owner: "windows pos X adn Y dont work, doesnt apply to
+  game window").** The first cut had two bugs, both confirmed live: (1) the
+  Linux match (`xdotool search --class`, no `--onlyvisible`) also returned
+  WINE's invisible 1x1 helper windows and moved the first fresh id ONCE -- the
+  two live clients' helper windows sat at exactly the configured (2560,0) while
+  both real game windows were untouched; (2) even a correct single move is
+  undone when the client re-centers on its D3D mode-set. Rewrite: only a
+  VISIBLE window >= 640x480 qualifies (excludes helpers + the 506x362 EULA
+  dialog; Windows side symmetric via EnumWindows + IsWindowVisible +
+  GetWindowRect instead of MainWindowHandle), and the move is ENFORCED -- move,
+  read back the settled position (WM frame offsets it from the requested
+  coords, so the read-back is the reference), re-move on drift, exit after 10s
+  stable or the 60s enforcement deadline. VERIFIED on a throwaway mbox3 client
+  2026-07-01: game window moved to (200,150), re-asserted once after the D3D
+  recenter, settled; the fresh 1x1 helper window was ignored. CAVEAT (Linux/WINE): moving a WINE window externally is the exact
   thing the login-automation runbook forbids for script-driven clients (it desyncs
   WINE's internal rect from the X position and breaks the skills' absolute-coord
   click translation) -- leave Window X/Y BLANK on any profile the screen-driven

@@ -2958,3 +2958,25 @@ moot; the SOLVED block above is the truth):**
      older session MUST still be force-kicked (the per-character check).
   3. Server log shows no account-in-use rejects; no new Error/WARNING lines on
      the login path.
+
+## CV-BA-MOUSEUNLOCK -- "Lock Mouse to Window" OFF now neuters the client's ClipCursor
+
+- **What changed (client-side enbmod DLL, 2026-07-01)**: unticking the launcher's
+  "Lock Mouse to Window" checkbox (BA-4b rework, plans/57) sets FREYA_LOCK_MOUSE=0
+  and injects enbmod, whose new hook (`enbmod/src/hooks.cpp`) swallows every
+  user32 ClipCursor(rect) call with TRUE and frees any pre-injection grab once at
+  init. The old DXGrab registry write was a dead knob (wine-11.8 winex11 has no
+  such option) and is deleted; ticked (the default) means the game's native
+  confinement runs untouched -- no hook, no injection on its account.
+- **Verified so far (throwaway client, 2026-07-01)**: with the box unticked,
+  enbmod.log prints "mouse unlock: ClipCursor neutered (FREYA_LOCK_MOUSE=0)" and
+  the client boots normally to the login screen.
+- **What to look for (real client, human at the mouse)**:
+  1. Box UNTICKED: while the client has focus (windowed), the pointer must cross
+     freely OUT of the client window -- e.g. straight onto the second multibox
+     client -- during login, char select, in-space, and while a station UI is up.
+  2. Box TICKED (default): confinement behaves exactly as it always did (pointer
+     held inside the focused window); no enbmod injection happens if Lua mods,
+     auto-login, and the position feed are all off.
+  3. No new WARNING/fault lines in enbmod.log from the hook; camera-drag and
+     UI clicking feel unchanged in both modes.
