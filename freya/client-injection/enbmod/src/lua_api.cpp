@@ -939,8 +939,7 @@ static uintptr_t entity_by_gid(unsigned gameid) {
         return 0; // a read faulted while walking the table -- treat as "no entity"
     }
     mem::g_guard_on = 1;
-    uintptr_t head =
-        M + game::world::ent_buckets + (gameid % game::world::ent_modulus) * 4;
+    uintptr_t head = M + game::world::ent_buckets + (gameid % game::world::ent_modulus) * 4;
     if (mem::readable((void*)head, 4)) {
         uintptr_t node = mem::ptr(head);
         for (int hops = 0; node && hops < 256; ++hops) {
