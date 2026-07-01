@@ -900,12 +900,10 @@ long AccountManager::GetAvatarID(char *username, int slot)
 
 char * AccountManager::IssueTicket(char *username, char *password)
 {
-    //Check if the account is already in use!
-	if (g_PlayerMgr->CheckAccountInUse(username))
-	{
-		return 0;
-	}
-
+    // No account-level "already in use" gate: multiboxing (two different
+    // characters on one account online at once) is allowed. Same-character
+    // duplication is prevented later at character-select
+    // (Player::SetCharacterID -> CheckForDuplicatePlayers).
 	long account = ValidateAccount(username, password);
 
     //If ValidateAccount returned -1, this username/password set is invalid

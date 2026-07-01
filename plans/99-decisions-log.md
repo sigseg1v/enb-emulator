@@ -8416,3 +8416,23 @@ safely" (Phase AX-11/AX-12).
    reboot re-applies the captures, which is circular). Regenerated -> 25 replace
    blocks restored; fresh normal boot now removes all base dups; guard verified
    to refuse on a non-pristine DB with the replace blocks left intact.
+
+## 2026-06-30 -- Duplicate-login kick scoped to CHARACTER, not account (owner-directed)
+
+The inherited server rejected a login while ANY session on the same ACCOUNT was
+online (`PlayerManager::CheckAccountInUse`, called from `UDP_Global.cpp`, plus a
+matching account check at IssueTicket time in `AccountManager.cpp`). The owner
+directed (2026-06-30): "It only needs to prevent the SAME character from logging
+in at the same time, not two different chars" -- multiboxing two different
+characters of one account is wanted behaviour, locally and for the hosted stack.
+
+Decision: remove the account-level guard entirely; keep the per-character
+duplicate check (`CheckForDuplicatePlayers` at SetCharacterID time, which
+force-kicks the OLDER session of the same avatar) unchanged. This is an
+owner-directed policy divergence, not a fidelity fix: no retail capture governs
+the account-scoped kick (the guard is a fork-era addition, and the retail
+service's own policy is not evidenced in our primary sources either way), so the
+CLAUDE.md correctness gate does not bind -- but it is recorded here as a
+deliberate divergence with a real-client check tracked as plans/29 CV-AZ-DUPCHAR
+(two different chars of one account stay online together; the same char twice
+still kicks the older session).

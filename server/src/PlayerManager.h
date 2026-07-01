@@ -105,7 +105,6 @@ public:
     bool    SetupPlayer(Player *player, long IPaddr);
     void    SetGlobalMemoryHandler(GMemoryHandler *MemMgr);
     void    CheckForDuplicatePlayers(Player *player);
-	bool	CheckAccountInUse(char *username);
     u32	  * GetSectorList(Player *player);
 	bool	GetNextPlayerOnList(Player *&p, u32 *player_list);
 	bool	GetIndex(Player *p, u32 *player_list);
