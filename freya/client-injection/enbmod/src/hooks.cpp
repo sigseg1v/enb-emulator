@@ -211,19 +211,33 @@ void* real_InSpace_tramp = nullptr;
 // it each frame gives calibration tooling a live, valid root with no scanning.
 void notify_inspace(unsigned thisp) {
     g_last_inspace_tick = GetTickCount();
-    // While the player is grouped, the native party/group member bars are
-    // repainted through this SAME EnergyBar updater, so their controllers also
-    // land here and would clobber g_vitals_ctrl -- leaving enb.vitals()/self()
-    // pointing at a member bar (zeroed fill, no player-data backref), which is
-    // why the self player-card fell back to "PILOT" and lost hull/shield when a
-    // party formed. The player's OWN vitals controller is the only one that
-    // carries a non-null player-data object at +ctrl_data (the chain
-    // vitals() walks to the character name); a member bar reads back 0 there.
-    // So only latch a controller that has that backref -- member bars never
-    // overwrite the real one. thisp is a live object (ECX of the call) so the
-    // +ctrl_data read is safe.
-    if (thisp && *(volatile unsigned*)(thisp + game::player::ctrl_data) != 0)
-        g_vitals_ctrl = thisp;
+    if (!thisp)
+        return;
+    // thisp is a live object (ECX of the call). Its +ctrl_data is the avatar
+    // object the bar is painting; 0 means this is not a real, backed vitals bar.
+    unsigned player = *(volatile unsigned*)(thisp + game::player::ctrl_data);
+    if (player == 0)
+        return;
+    // The SAME EnergyBar updater repaints the self HUD bar AND every party/group
+    // member bar, so a naive latch grabs whichever drew LAST -- in a group that is
+    // a teammate, and the self player-card then shows the teammate's
+    // hull/shield/name (the "reactor values get mixed up" multibox bug). A member
+    // bar's controller is NOT distinguishable by "+ctrl_data != 0": a grouped
+    // teammate's controller has a perfectly valid avatar object there. Gate on
+    // IDENTITY instead: the world manager holds the local avatar's GameID at
+    // M + world::player_id, and every bar controller's avatar carries its own
+    // GameID at player + world::tgt_gid. Latch ONLY the controller whose avatar is
+    // the local player. Before M is captured (pre-zone) or before the id is
+    // populated, fall back to latching any backed controller so a solo player's
+    // card still fills.
+    unsigned M = world_mgr();
+    if (M) {
+        unsigned localgid = *(volatile unsigned*)(M + game::world::player_id);
+        unsigned ctrlgid = *(volatile unsigned*)(player + game::world::tgt_gid);
+        if (localgid != 0 && ctrlgid != localgid)
+            return; // a teammate's member bar -- never clobber the local latch
+    }
+    g_vitals_ctrl = thisp;
 }
 }
 extern "C" __attribute__((naked)) void hk_InSpace() {

@@ -15,7 +15,7 @@ primary-source proof + CLI parse/test first + plans/29 CV entry).
 | Item | Summary | State |
 |------|---------|-------|
 | BA-1 | Multibox HUD reads the wrong process's stats (both clients show the last-launched char) | [x] REFUTED -- live in-space 2-box shot: each HUD shows its OWN char (GRIEVERTE 12/12 hull LV0 vs DEVUSERTT 3400/3400 hull LV75), zero cross-bleed. Symptom is identity duplication (same char on both slots), fix = per-slot identity (BA-3/BA-5) |
-| BA-2 | No party/group member frame in the new HUD (old UI showed name/hull/shield bars for up to 5) | [x] roster frame + per-member hull/shield (GameID->entity aux read); builds clean. Owner client-verify pending |
+| BA-2 | No party/group member frame in the new HUD (old UI showed name/hull/shield bars for up to 5) | [x] roster frame + per-member hull AND shield (GameID->entity; shield via shared-auxdata ShieldPercent, BA-2b item 5). Verified live grouped 2-box, both directions: hull+shield bars fill correctly, no phantom slots, self-card keeps own identity |
 | BA-3 | Launcher Profile section: per-profile config files, dropdown + add/delete, Default special-cased | [x] done (builds clean) |
 | BA-4 | Launcher Resolution dropdown + Fullscreen checkbox under Client EXE, applied on Play | [x] done (builds clean) |
 | BA-5 | Launcher optional Username / Password / Character fields -> auto-login env; autosave (not password) | [x] done (builds clean) |
@@ -251,13 +251,25 @@ The two DLL fixes (1, 3) require relaunching the client to load; #2 is Lua.
 
 RELAUNCH (2026-06-30): both boxes torn down and relaunched on the fresh DLL
 (griever slot0 shared proxy / devusertt slot1 mbox2), both back in space with the
-new `enbmod.dll` staged. Verified SOLO so far: the self-card keeps name +
+new `enbmod.dll` staged. Verified SOLO: the self-card keeps name +
 hull/shield/energy (griever GRIEVERTE 12/12 50/50 134/134; devusertt DEVUSERTT
 3400/3400 126822/126822 4389/4389) and the low-res shift (#4) clears the chat
-overlap at 960p. Items 1 and 3 only manifest while GROUPED, and the relaunch
-dropped the prior group -> re-group (owner-driven; group-invite UI is unreliable
-under XTEST) then confirm no phantom party slots and the self-card stays
-name+vitals while grouped.
+overlap at 960p.
+
+VERIFIED GROUPED (2026-06-30): re-grouped the two boxes (`/invite devusertt` from
+griever via chat, Accept on devusertt) and confirmed live:
+- **Defect 1 (phantom slots): GONE.** `enb.group()` reports exactly one member each
+  way; `party_frame.lua` draws a single bar-set, no empty "Member" placeholders.
+- **Defect 3 (self-card PILOT/vitals): GONE.** Each box's self-card keeps its OWN
+  name + vitals while grouped (griever's card = grieverte's, devusertt's =
+  devusertt's -- not mixed). The `g_vitals_ctrl` identity latch holds.
+- **Party-frame HULL: filled** both directions (griever sees devusertt 3400/3400;
+  devusertt sees grieverte 12/12) -- the `entity_by_gid` gid-match-before-flag-break
+  fix.
+- **Party-frame SHIELD: filled** both directions (griever sees devusertt
+  126822/126822; devusertt sees grieverte 50/50) -- the shared-auxdata fix in item 5
+  below. Screenshot-confirmed: each party frame draws BOTH the red hull bar and the
+  blue shield bar full, previously the shield track was empty.
 
 4. **Player card overlaps the bottom-left chat box at low res** (owner,
    2026-06-30). At 1280x960 the card's left edge (sw/2 - PC_W = 416) sits ~66px
@@ -269,6 +281,41 @@ name+vitals while grouped.
    centerline moves right on its own there, so the card never touches the chat).
    Verified across 1280x960 / 1440x1080 / 1920x1440 / 2560x1440: card clears the
    chat at every step; dx = 72/63/36/0. Pure Lua. [x] done.
+
+5. **Party-frame SHIELD bar stayed empty for group members** (owner: "hull and
+   shield on party frame both missing still", 2026-06-30). Once the hull fix landed,
+   the member hull bar filled but the shield bar remained an empty track. ROOT
+   CAUSE: current shield is a 0..1 percent, `ShieldPercent`, and it does NOT live in
+   the plain aux value list that `enb.aux()` / `aux_read_f` read (the generic getter
+   `aux::get_value` @0x546710 returns 0 for it -- its `+val_off` (0x84) slot is
+   empty, which is why the read came back nil). `ShieldPercent` lives in a SEPARATE
+   SHARED / network-replicated, delta-interpolated auxdata list, resolved through a
+   different getter (`aux::get_shared` @0x5bf2b0, same `__cdecl(container, keybuf)`
+   shape). The live value is a float at `entry + 0x248` (guarded by the same
+   `+0x70` valid flag as the plain list). HullPoints/MaxHullPoints DO sit in the
+   plain list at `+0x84`, which is why hull worked and shield did not.
+   FIX: added `aux_read_shared_f(container, key, out)` (`src/lua_api.cpp`) --
+   builds the key, resolves via `aux::get_shared`, checks the valid flag, returns
+   the float at `+shared_val_off` (0x248), fully VEH-guarded like
+   `aux_entry_guarded`. Added `aux::get_shared` + `shared_val_off` to
+   `src/game.h`. `enb.group()` and `enb.target()` now read `ShieldPercent` through
+   it; `shield = MaxShieldPower * ShieldPercent`. The shared entry is present for
+   BOTH the local player and any in-range remote, so a group member's CURRENT shield
+   is genuinely readable client-side (proven live: a remote member's
+   `ShieldPercent+0x248` resolves from the other box) -- no faked full-bar. [x]
+   built, verified live grouped (see the VERIFIED GROUPED note above).
+
+### BA-2c -- same-sector position/MVAS overlap (owner report, 2026-06-30) [ ] OPEN
+
+Part of the same "multibox HUD derps hard" report: with both boxes in ONE sector,
+the owner saw them "keep teleporting to each other's positions" and the MVAS
+overlays overlapping. This is NOT the enbmod HUD (fixed above) -- it is
+position/visibility REPLICATION between two boxes sharing a sector, i.e.
+server avatar-position broadcast and/or the per-box MVAS position feed, which is
+gated wire territory (server/proxy change needs primary-source + CLI parse/tests +
+plans/29 CV). Deferred as a separate investigation; the client-side HUD defects
+(1, 3, hull, 5-shield) are the ones the owner's latest message was about and are
+done. Not yet root-caused.
 
 ## BA-3 -- launcher Profile section
 

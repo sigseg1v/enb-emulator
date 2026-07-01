@@ -443,6 +443,7 @@ static int l_unpatch(lua_State* L) {
 // declared so l_target can read the target entity's vitals.
 static uintptr_t player_entity();
 static bool aux_read_f(uintptr_t entity, const char* key, double& out);
+static bool aux_read_shared_f(uintptr_t container, const char* key, double& out);
 static int aux_entry_guarded(uintptr_t entity, const char* key);
 static int target_level_live();
 static uintptr_t targeting_data_obj();
@@ -529,7 +530,7 @@ static int l_target(lua_State* L) {
         lua_pushnumber(L, d);
         lua_setfield(L, -2, "shield_max");
     }
-    if (container && aux_read_f(container, "ShieldPercent", d))
+    if (container && aux_read_shared_f(container, "ShieldPercent", d))
         spct = d;
     if (smax >= 0.0 && spct >= 0.0) {
         lua_pushnumber(L, smax * spct);
@@ -799,6 +800,36 @@ static bool aux_read_f(uintptr_t entity, const char* key, double& out) {
     out = v;
     return true;
 }
+
+// Read a SHARED / network-replicated auxdata float (ShieldPercent lives here, not
+// in the plain get_value list). Builds the key, resolves the entry through
+// aux::get_shared, checks the valid flag, and returns the live 0..1 value at
+// entry + shared_val_off. Fully fault-guarded like aux_entry_guarded: a fault in
+// the key build or resolve longjmps back and yields "no value".
+static bool aux_read_shared_f(uintptr_t container, const char* key, double& out) {
+    if (!container || !mem::readable((void*)container, 4))
+        return false;
+    unsigned char keybuf[game::aux::keybuf_sz];
+    memset(keybuf, 0, sizeof(keybuf));
+    int entry = 0;
+    if (__builtin_setjmp(mem::g_guard_jmp)) {
+        mem::g_guard_on = 0;
+        return false;
+    }
+    mem::g_guard_on = 1;
+    ((AuxBuildKey_t)game::aux::build_key)(keybuf, key);
+    entry = ((AuxGetValue_t)game::aux::get_shared)((int)container, keybuf);
+    mem::g_guard_on = 0;
+    if (!entry || !mem::readable((void*)(uintptr_t)entry, game::aux::shared_val_off + 4))
+        return false;
+    if (mem::i32((uintptr_t)entry + game::aux::valid_off) == 0)
+        return false; // value not set
+    float v = mem::f32((uintptr_t)entry + game::aux::shared_val_off);
+    if (v != v)
+        return false; // NaN guard
+    out = v;
+    return true;
+}
 static uintptr_t aux_value_addr(lua_State* L, int key_arg, int entity_arg) {
     const char* key = luaL_checkstring(L, key_arg);
     uintptr_t entity;
@@ -895,8 +926,9 @@ struct GroupMember {
 // HUD uses, found by GameID. This is a pure guarded walk -- no native call, so no
 // calling-convention hazard on the live client; a GameID with no live entity (member in
 // another sector / not yet in scene) returns 0, and the bounded hop count guards against
-// a corrupt or cyclic bucket chain. Self-guarded (own setjmp); call it with no other
-// fault guard active.
+// a corrupt or cyclic bucket chain. The bucket for gid % ent_modulus holds the node whose
+// ent_node_gid keys the entity; match the key and take ent_node_obj. Self-guarded (own
+// setjmp); call it with no other fault guard active.
 static uintptr_t entity_by_gid(unsigned gameid) {
     uintptr_t M = hooks::world_mgr();
     if (!M || !gameid)
@@ -912,14 +944,20 @@ static uintptr_t entity_by_gid(unsigned gameid) {
     if (mem::readable((void*)head, 4)) {
         uintptr_t node = mem::ptr(head);
         for (int hops = 0; node && hops < 256; ++hops) {
-            if (!mem::readable((void*)(node + game::world::ent_node_flags), 4))
+            if (!mem::readable((void*)(node + game::world::ent_node_gid), 4))
                 break;
-            if ((mem::i32(node + game::world::ent_node_flags) >> 1) & 1)
-                break; // deleted/skip node terminates the visible chain
+            // Match the key FIRST. (An earlier version broke the walk on a
+            // "deleted/skip" bit at node+0x18 before comparing the key -- but that
+            // byte reads back non-zero on perfectly LIVE nodes, so it aborted the
+            // walk on the first, matching node and every avatar resolved to 0.
+            // That was the "party-frame hull/shield stay empty" bug: the member's
+            // real contact object was right there under a matching key.)
             if ((unsigned)mem::i32(node + game::world::ent_node_gid) == gameid) {
                 result = mem::ptr(node + game::world::ent_node_obj);
                 break;
             }
+            if (!mem::readable((void*)(node + game::world::ent_node_next), 4))
+                break;
             node = mem::ptr(node + game::world::ent_node_next);
         }
     }
@@ -1016,7 +1054,7 @@ static int l_group(lua_State* L) {
                 lua_pushnumber(L, d);
                 lua_setfield(L, -2, "shield_max");
             }
-            if (cont && aux_read_f(cont, "ShieldPercent", d))
+            if (cont && aux_read_shared_f(cont, "ShieldPercent", d))
                 spct = d;
             if (smax >= 0.0 && spct >= 0.0) {
                 lua_pushnumber(L, smax * spct);

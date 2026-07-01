@@ -374,18 +374,17 @@ constexpr int tgt_gid = 0x90; // target contact object + 0x90 -> its own GameID 
 // group HUD resolves each member through to reach its render object and read its
 // vitals. It is a fixed 0x101-bucket chained hash on M + ent_buckets: bucket =
 // gid % ent_modulus; each node links to the next via ent_node_next, keys on
-// ent_node_gid, points to the contact object at ent_node_obj, and carries a
-// deleted/skip bit at ent_node_flags ((flags>>1)&1). Walk it with pure guarded
-// reads (no native call -- avoids any calling-convention hazard on the live
-// client); a GameID with no live entity (member in another sector / not yet in
-// scene) simply misses. The resolved contact object's +tgt_container aux bag then
-// yields hull/shield exactly as enb.target() reads them.
+// ent_node_gid, and points to the contact object at ent_node_obj. Walk it with
+// pure guarded reads (no native call -- avoids any calling-convention hazard on
+// the live client), matching ent_node_gid and taking ent_node_obj; a GameID with
+// no live entity (member in another sector / not yet in scene) simply misses. The
+// resolved contact object's +tgt_container aux bag then yields hull/shield exactly
+// as enb.target() reads them.
 constexpr int ent_buckets = 0x38;       // M -> base of the GameID hash bucket array
 constexpr unsigned ent_modulus = 0x101; // bucket index = gid % ent_modulus
 constexpr int ent_node_next = 0x04;     // node -> next node in its bucket chain
 constexpr int ent_node_obj = 0x10;      // node -> resolved contact object
 constexpr int ent_node_gid = 0x14;      // node -> key (GameID)
-constexpr int ent_node_flags = 0x18;    // node -> flags; (flags>>1)&1 = deleted/skip
 } // namespace world
 
 // Target/player WORLD position, for the straight-line range shown on the frame. The
@@ -424,6 +423,15 @@ constexpr uintptr_t get_value = 0x00546710;
 constexpr int val_off = 0x84;   // entry + 0x84 -> float value
 constexpr int valid_off = 0x70; // entry + 0x70 -> nonzero when value is set
 constexpr int keybuf_sz = 0x40; // zeroed scratch key-object buffer
+// get_shared(container, keybuf) -> entry|0: __cdecl. Resolves a SHARED /
+// network-replicated, delta-interpolated auxdata entry (a different list than
+// get_value's) -- this is where ShieldPercent lives. get_value returns 0 for
+// these keys (their +val_off slot is empty); the live value is a 0..1 float at
+// entry + shared_val_off, guarded by the same valid_off flag. Present for both
+// the local player and any in-range remote (so a group member's current shield
+// is readable client-side).
+constexpr uintptr_t get_shared = 0x005bf2b0;
+constexpr int shared_val_off = 0x248; // entry + 0x248 -> float (0..1) live value
 } // namespace aux
 
 // Discipline levels (RPGInfo Combat/Trade/Explore) -- a property bag like aux,
