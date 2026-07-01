@@ -15,9 +15,10 @@
 - added CLI that can fully parse all network packet fields and can stimulate a client via REPL (you can log in and play the game through the CLI)
 - added Discord bot that can display server status, who is logged in, and alert when players level up or log in/out
 - added website with login, account panel, mailbox, auction house where you can auction your items from your Vault to other players
-- added clientside Lua for user interface modding
+- added clientside Lua for user interface modding (Ctrl+U to toggle on and off)
 - containerized everything
 - added terraform/infra-as-code to make managing and spinning server up easier
+- made a new launcher with options such as profiles, autofill username/pass, auto login to specific character, customize window positioning, launch multiple games (multibox)
 - to avoid confusion for users, the launcher/etc for this project is called Freya to indicate that it has undergone significant changes from Net7. All original and derivative Net7 code remains Net7 licensed.
 
 ## A quick note
