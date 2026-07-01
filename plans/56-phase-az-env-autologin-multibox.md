@@ -108,11 +108,31 @@ moved to a per-instance PORT block instead.
   clean.
 
 Still open in Half 1:
-- [~] Full end-to-end multibox run needs DIFFERENT accounts per instance (server
-  force-kicks duplicate login of same account). Unblocked by Half 2's
-  `ENB_ACC_NAME`/`ENB_CHARACTER` per-process credentials, AND a second dev account
-  is now seeded: **`devuser2`/`devpass2`** with 5 chars (`just seed-dev-account
-  devuser2 devpass2`), so a 2-account local test has its credentials ready. (Task #6.)
+- [x] ~~Full end-to-end multibox run needs DIFFERENT accounts per instance (server
+  force-kicks duplicate login of same account).~~ **RESOLVED server-side 2026-06-30
+  (owner-directed): the duplicate-login kick is now per-CHARACTER, not
+  per-account.** The account-level guard (`PlayerManager::CheckAccountInUse` + its
+  `UDP_Global.cpp` call + the IssueTicket-time account check in
+  `AccountManager.cpp`) is removed; `CheckForDuplicatePlayers` at SetCharacterID
+  time still force-kicks the older session of the SAME avatar. Two DIFFERENT
+  characters of one account can now multibox together. Real-client check:
+  plans/29 CV-AZ-DUPCHAR; decision recorded in plans/99. The second dev account
+  (**`devuser2`/`devpass2`**, `just seed-dev-account devuser2 devpass2`) remains
+  seeded for 2-account tests.
+- [x] **Launcher per-profile window placement (owner ask 2026-06-30).** Optional
+  `Window X`/`Window Y` inputs on the launcher (row under the client path); when
+  BOTH are set the launched client window is repositioned there after it appears
+  (`tools/LaunchFreya/ClientWindowPlacer.cs` -- Windows `SetWindowPos` via
+  EnumWindows/PID match, Linux `xdotool search --pid ... windowmove`), so each
+  multibox profile can pin its own screen spot. Persisted per-profile
+  (`UserSettings.WindowX/WindowY`, null when blank = never touch the window).
+  Launcher builds clean; live placement check rides along with CV-AZ-DUPCHAR's
+  two-box run. CAVEAT (Linux/WINE): moving a WINE window externally is the exact
+  thing the login-automation runbook forbids for script-driven clients (it desyncs
+  WINE's internal rect from the X position and breaks the skills' absolute-coord
+  click translation) -- leave Window X/Y BLANK on any profile the screen-driven
+  automation (login-to-client / explore-sector) will drive; the placement is for
+  human multibox play.
 - [ ] play-local MVAS: native-proxy play-local impossible on rootless docker;
   MVAS works with the docker proxy. (Record + verify.)
 - [~] **Multibox now self-logs per window; the only open piece is which SERVER to

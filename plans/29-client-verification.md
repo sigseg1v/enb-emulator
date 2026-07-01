@@ -2887,3 +2887,63 @@ moot; the SOLVED block above is the truth):**
   to dock. enbmod's `targeting_data_obj()` must keep resolving across the zone.
 - **Setup**: `just play-cli` (or the multibox launch) for two accounts in one
   sector; group them; fly. Runtime launch only -- credentials are not committed.
+
+## CV-AS-GRPBTN -- group frame action buttons (Freya-drawn, native packet paths)
+
+- **What changed (client-only, MIT)**: `freya-hud/party_frame.lua` now draws an
+  action-button row ABOVE the party frame (leader `[D]isband [F]ormation [T]arget`;
+  member `[L]eave [F] [T]`; F expands a formation sub-row -- leader
+  `S`lot-Back/`B`lock/`P`ipe/`X` break, member `U` form-up/`X` leave-formation) and
+  the roster panel shifted down below it. Two new DLL calls back it:
+  `enb.group_action(action[,target_gid])` builds the group call-to-arms /
+  formation request with the client's own constructor and pushes it through the
+  Connection (wire opcode 0x00BC `CTARequest{SourceID, TargetID, Action}`,
+  TargetID -1 = whole group), and `enb.is_leader()` runs the client's own
+  leader check (the one the native group window uses to pick GRP DISBAND vs
+  GRP LEAVE). Disband/Leave fire the existing avatar-command path
+  (`enb.target_action` 0x0d / 0x0e self-targeted -- byte-identical to the
+  `/group disband` / `/group remove` slash verbs). NO server or proxy change.
+- **Why a CV is needed**: DLL change (needs a client relaunch to load; Lua alone
+  hot-reloads but the buttons gate on the new `enb.is_leader`). The CLI suite
+  covers the server's 0xBC handling but cannot click the overlay or prove the
+  in-client constructor/leader-check calls are stable across sessions; only the
+  real client does.
+- **What to look for (real client, two grouped multibox boxes)**:
+  1. Leader box shows D/F/T above the party frame; member box shows L/F/T; the
+     roster sits just below the row on both.
+  2. Leader D disbands the group on BOTH boxes (rosters vanish); re-group, member
+     L removes only the member.
+  3. F opens the sub-row; leader S/B/P sets the formation type (server chat
+     confirms / formation HUD updates), member U forms up, X leaves; leader X
+     breaks the formation.
+  4. T ("Target my target") makes each OTHER member receive the group chat line
+     "Target my target." -- and NOTHING more: the server's GroupAction 12 is a
+     stub upstream (the actual retarget push is commented out), so an automatic
+     target switch on the other box would be a surprise, not the expectation.
+  5. Clicks on the buttons must NOT leak into the 3D scene behind them; no
+     crash/fault lines in enbmod.log from `is_leader` polling while solo, docked,
+     or during a sector gate.
+- **Known caveat recorded**: making GroupAction 12 actually retarget is a server
+  change under the full CLAUDE.md gate (primary source + CLI parse/tests first +
+  its own CV entry); not part of this change.
+
+## CV-AZ-DUPCHAR -- duplicate-login kick is now per-CHARACTER, not per-account
+
+- **What changed (server, owner-directed 2026-06-30)**: the login path no longer
+  rejects a second ONLINE session on the same ACCOUNT. The account-level guard
+  (`CheckAccountInUse` in `PlayerManager`, its call in `UDP_Global.cpp`, and the
+  IssueTicket-time account check in `AccountManager.cpp`) is removed; the
+  per-CHARACTER duplicate check (`CheckForDuplicatePlayers` at SetCharacterID
+  time, which force-kicks the OLDER session of the SAME avatar) is retained
+  unchanged. Owner call: multiboxing two DIFFERENT characters of one account is
+  wanted dev/live behaviour; only the same character twice must still be kicked.
+  Recorded in plans/99 as an owner-directed divergence (no retail capture governs
+  the account-scoped kick; upstream's guard was itself a fork-era addition).
+- **What to look for (real client)**:
+  1. Launch two multibox clients on the SAME account, pick two DIFFERENT
+     characters: both must reach in-space and stay online simultaneously (no
+     force-kick of the first).
+  2. On a third launch (or relog of box 2) pick the SAME character as box 1: the
+     older session MUST still be force-kicked (the per-character check).
+  3. Server log shows no account-in-use rejects; no new Error/WARNING lines on
+     the login path.
