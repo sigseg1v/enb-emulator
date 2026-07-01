@@ -753,11 +753,14 @@ void PlayerManager::BroadcastChat(long GameID, char *message, bool copy_to_origi
             EmitExternalStatusEvent(EXT_STATUS_BROADCAST, line);
         }
 
-        if (s && s->GetSectorPlayerList())
+        if (s)
         {
 			char Channel[] = "Broadcast";		// Channel
-            
-			while (GetNextPlayerOnList(p, s->GetSectorPlayerList()))   
+
+			// Broadcast reaches the entire server (every online player), the same
+			// reach as ChatSendEveryone. "To Local Area" (LocalChat) is the
+			// sector/range-scoped channel.
+			while (GetNextPlayerOnList(p, m_GlobalPlayerList))
 			{
 				//only send to originating player if directed to.
 				if (((p->GameID() != GameID) || copy_to_originator) 
