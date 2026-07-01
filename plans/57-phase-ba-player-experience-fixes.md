@@ -14,7 +14,7 @@ primary-source proof + CLI parse/test first + plans/29 CV entry).
 
 | Item | Summary | State |
 |------|---------|-------|
-| BA-1 | Multibox HUD reads the wrong process's stats (both clients show the last-launched char) | [x] REFUTED -- live in-space 2-box shot: each HUD shows its OWN char (GRIEVERTE 12/12 hull LV0 vs DEVUSERTT 3400/3400 hull LV75), zero cross-bleed. Symptom is identity duplication (same char on both slots), fix = per-slot identity (BA-3/BA-5) |
+| BA-1 | Multibox HUD reads the wrong process's stats (both clients show the last-launched char) | [x] REFUTED -- live in-space 2-box shot: each HUD shows its OWN char (CHARB 12/12 hull LV0 vs CHARA 3400/3400 hull LV75), zero cross-bleed. Symptom is identity duplication (same char on both slots), fix = per-slot identity (BA-3/BA-5) |
 | BA-2 | No party/group member frame in the new HUD (old UI showed name/hull/shield bars for up to 5) | [x] roster frame + per-member hull AND shield (GameID->entity; shield via shared-auxdata ShieldPercent, BA-2b item 5). Verified live grouped 2-box, both directions: hull+shield bars fill correctly, no phantom slots, self-card keeps own identity |
 | BA-3 | Launcher Profile section: per-profile config files, dropdown + add/delete, Default special-cased | [x] done (builds clean) |
 | BA-4 | Launcher Resolution dropdown + Fullscreen checkbox under Client EXE, applied on Play | [x] done (builds clean) |
@@ -23,7 +23,7 @@ primary-source proof + CLI parse/test first + plans/29 CV entry).
 
 ## BA-1 -- multibox HUD reads the wrong process
 
-Symptom: two clients (devusertt, grievertt); both HUDs show the most-recently
+Symptom: two clients (charA, charB); both HUDs show the most-recently
 launched char's stats. A DLL in process A is sourcing process B's state -> some
 cross-process shared state, not per-process memory.
 
@@ -72,8 +72,8 @@ source is per-process:
   cannot carry B's object into A's process.
 
 A number in A's address space cannot resolve to B's character. So "both HUDs show
-grievertt (the last-launched)" is consistent with exactly ONE thing: both clients
-are actually ON grievertt -- an IDENTITY/login duplication, not a memory read.
+charB (the last-launched)" is consistent with exactly ONE thing: both clients
+are actually ON charB -- an IDENTITY/login duplication, not a memory read.
 That is a launcher/env issue, not an enbmod bug. The `play-local` multibox path
 launches each slot as a SEPARATE launcher process (separate env), and the GUI
 launcher sets the credential env + CreateProcess synchronously per Play click, so
@@ -86,21 +86,21 @@ for "each box on its own character" is: distinct profile per slot.
 
 OPEN (needs a live repro to pin, do NOT fake a fix): confirm whether, in the
 owner's repro, the two clients were genuinely logged into DIFFERENT characters
-server-side while both HUDs showed grievertt (which would contradict the code and
+server-side while both HUDs showed charB (which would contradict the code and
 mean there is a shared-state path I have not found -- re-investigate then), OR
-both ended up logged into grievertt (identity duplication -> the per-profile path
+both ended up logged into charB (identity duplication -> the per-profile path
 above is the fix, and the "wrong process memory" framing was a misdiagnosis).
 Options (a)/(c) below (per-process window bind / unique window title) are NOT
 implemented: the per-process bind is ALREADY correct, and a unique title that no
 mod consumes would be dead code (CLAUDE.md no-dead-code).
 
 LIVE 2-BOX SESSION (2026-06-30, this box, distinct creds per slot):
-- slot0 `just play-local devuser devpass devusertt` (SHARED freya-dev proxy),
-  slot1 `just play-local griever <pw> grieverte` (private mbox2 proxy, cloned
+- slot0 `just play-local boxA <pw> charA` (SHARED freya-dev proxy),
+  slot1 `just play-local boxB <pw> charB` (private mbox2 proxy, cloned
   ~/.wine-enb-mbox2 prefix). Both windowed 1280x960, both reached in-game.
 - Server confirmed TWO DISTINCT avatars logged in simultaneously:
-  `player 0x40000022 'devusertt' fully logged in` and
-  `player 0x40000029 'grieverte' fully logged in`. NOT the same char on both.
+  `player 0x40000022 'charA' fully logged in` and
+  `player 0x40000029 'charB' fully logged in`. NOT the same char on both.
   => the "both HUDs show the last-launched char" symptom cannot arise here: each
   HUD reads ITS OWN process's per-char state, and the two processes are on
   different chars. BA-1 does NOT reproduce with distinct per-slot credentials.
@@ -111,8 +111,8 @@ LIVE 2-BOX SESSION (2026-06-30, this box, distinct creds per slot):
   same char), which distinct creds prevent.
 - A duplicate-login collision IS easy to trigger by accident and is worth noting
   as the likely origin of the owner's report: relaunching slot0 while a prior
-  devuser session was still resident produced
-  `Account user devuser trying to log in twice, removed` + `avaLogout` of the
+  boxA session was still resident produced
+  `Account user boxA trying to log in twice, removed` + `avaLogout` of the
   first session, bouncing that client to the login screen with "That account is
   already logged in." If a user launches two boxes on the SAME account/char (or
   reuses one profile for both), one box wins the char and the other is a
@@ -121,8 +121,8 @@ LIVE 2-BOX SESSION (2026-06-30, this box, distinct creds per slot):
 DOCKED-VISUAL CONFIRMATION (2026-06-30 relaunch, both boxes windowed 1280x960):
 captured each window individually (window->char mapped via PID->WINEPREFIX, then
 `import -window <id>`). The two HUDs are NOT cross-bleeding -- each renders its
-OWN char in its OWN station: griever's chat reads "Welcome to Guiana Spaceport,
-home of the Good Earth Trading Company's Sol Space Division"; devusertt's reads
+OWN char in its OWN station: boxB's chat reads "Welcome to Guiana Spaceport,
+home of the Good Earth Trading Company's Sol Space Division"; charA's reads
 "DOCK OFFICER: Landing clearance granted. Welcome to InfinitiCorp's Loki
 Station!". Different chars, different stations, different per-char chat/dock
 messages in each window. This is the visual half of the refutation at the DOCKED
@@ -132,14 +132,14 @@ state (the docked HUD is otherwise minimal -- chat + bottom buttons -- since
 IN-SPACE VISUAL -- DELIVERED (2026-06-30, owner undocked both boxes manually):
 side-by-side, both HUDs populated in space, each showing its OWN char's distinct
 vitals with NO cross-bleed whatsoever:
-- griever/slot0 self-frame: `GRIEVERTE`  LV 0,  hull 12/12,   shield 50/50,
+- boxB/slot0 self-frame: `CHARB`  LV 0,  hull 12/12,   shield 50/50,
   energy 134/134, C/E/T all LV 0, in Equatorial Earth Sector.
-- devusertt/slot1 self-frame: `DEVUSERTT` LV 75, hull 3400/3400, shield
+- charA/slot1 self-frame: `CHARA` LV 75, hull 3400/3400, shield
   126822/126822, energy 4389/4389, C/E/T LV 25, in High Earth Sector.
-devusertt was launched SECOND (the "most-recent" char BA-1 says both HUDs would
-show). griever's HUD does NOT show devusertt's 3400 hull -- it shows griever's
+charA was launched SECOND (the "most-recent" char BA-1 says both HUDs would
+show). boxB's HUD does NOT show charA's 3400 hull -- it shows boxB's
 own 12. That is the direct, populated-HUD refutation of BA-1. Shots:
-/tmp/enbshot/mbox/{griever,devusertt}-space.png. BA-1 CLOSED as refuted; the
+/tmp/enbshot/mbox/{boxB,charA}-space.png. BA-1 CLOSED as refuted; the
 supported multibox fix remains per-slot identity (BA-3 profiles / BA-5 login
 fields), NOT any change to how the HUD reads state.
 
@@ -216,15 +216,15 @@ decomp analysis and have not yet been exercised against a live group.
 
 ### BA-2b -- three grouped-HUD defects (owner report, 2026-06-30)
 
-Reported on a live 2-box grouped session (griever + devusertt, both in space):
+Reported on a live 2-box grouped session (boxB + charA, both in space):
 
 1. **Party frame shows phantom empty "Member" slots.** `enb.group()` returned
    `count=5` with only slot 1 real and slots 2-5 `gameid==0` (confirmed live:
-   `count=5 [1]devusertt/40000022 [2]nil/0 [3]nil/0 [4]nil/0 [5]nil/0`). The
+   `count=5 [1]charA/40000022 [2]nil/0 [3]nil/0 [4]nil/0 [5]nil/0`). The
    member array is a FIXED `max_members` (5) block; `l_group` walked all 5 and
    emitted the empty ones. FIX (`src/lua_api.cpp`, `l_group`): skip any slot with
    `gameid==0` so `count` is the real member count. Post-fix this session would
-   report `count=1` (devusertt), so `party_frame.lua` (already loops only real
+   report `count=1` (charA), so `party_frame.lua` (already loops only real
    members) draws exactly one bar-set, no placeholders. [x] built, logic-validated
    live; needs relaunch to load the DLL for the visual.
 
@@ -250,24 +250,24 @@ every game-memory read is VEH-guarded). DLL rebuilt clean (`just build-enbmod`).
 The two DLL fixes (1, 3) require relaunching the client to load; #2 is Lua.
 
 RELAUNCH (2026-06-30): both boxes torn down and relaunched on the fresh DLL
-(griever slot0 shared proxy / devusertt slot1 mbox2), both back in space with the
+(boxB slot0 shared proxy / charA slot1 mbox2), both back in space with the
 new `enbmod.dll` staged. Verified SOLO: the self-card keeps name +
-hull/shield/energy (griever GRIEVERTE 12/12 50/50 134/134; devusertt DEVUSERTT
+hull/shield/energy (boxB CHARB 12/12 50/50 134/134; charA CHARA
 3400/3400 126822/126822 4389/4389) and the low-res shift (#4) clears the chat
 overlap at 960p.
 
-VERIFIED GROUPED (2026-06-30): re-grouped the two boxes (`/invite devusertt` from
-griever via chat, Accept on devusertt) and confirmed live:
+VERIFIED GROUPED (2026-06-30): re-grouped the two boxes (`/invite charA` from
+boxB via chat, Accept on charA) and confirmed live:
 - **Defect 1 (phantom slots): GONE.** `enb.group()` reports exactly one member each
   way; `party_frame.lua` draws a single bar-set, no empty "Member" placeholders.
 - **Defect 3 (self-card PILOT/vitals): GONE.** Each box's self-card keeps its OWN
-  name + vitals while grouped (griever's card = grieverte's, devusertt's =
-  devusertt's -- not mixed). The `g_vitals_ctrl` identity latch holds.
-- **Party-frame HULL: filled** both directions (griever sees devusertt 3400/3400;
-  devusertt sees grieverte 12/12) -- the `entity_by_gid` gid-match-before-flag-break
+  name + vitals while grouped (boxB's card = charB's, charA's =
+  charA's -- not mixed). The `g_vitals_ctrl` identity latch holds.
+- **Party-frame HULL: filled** both directions (boxB sees charA 3400/3400;
+  charA sees charB 12/12) -- the `entity_by_gid` gid-match-before-flag-break
   fix.
-- **Party-frame SHIELD: filled** both directions (griever sees devusertt
-  126822/126822; devusertt sees grieverte 50/50) -- the shared-auxdata fix in item 5
+- **Party-frame SHIELD: filled** both directions (boxB sees charA
+  126822/126822; charA sees charB 50/50) -- the shared-auxdata fix in item 5
   below. Screenshot-confirmed: each party frame draws BOTH the red hull bar and the
   blue shield bar full, previously the shield track was empty.
 
@@ -322,7 +322,7 @@ missed it.
 
 **What IS confirmed (re-verified at runtime this session):**
 - Posfeed intake ports ARE isolated per box. `/proc/<pid>/environ` on both live
-  `client.exe`: mbox2 (devusertt) has `FREYA_POS_FEED_PORT=23513`, griever has no
+  `client.exe`: mbox2 (charA) has `FREYA_POS_FEED_PORT=23513`, boxB has no
   override -> stock 3807. The DLL (`ClientPositionFeed.cpp:117`) reads
   `FREYA_POS_FEED_PORT` correctly and sends to `127.0.0.1:<that port>`. So the
   pre-AZ shared-intake mechanism is genuinely NOT the cause of the residual

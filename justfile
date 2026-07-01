@@ -562,9 +562,9 @@ stop-cli UNIT='cli1':
 # Optional hands-free auto-login (Phase AZ): pass an account (+ password +
 # character) and the launcher self-clicks Play, submits the credentials, and
 # enters the world on that character -- ZERO screen automation:
-#   just play-local devuser devpass devusertt   # auto -> in-game on devusertt
+#   just play-local devuser devpass <char>   # auto -> in-game on <char>
 #   just play-local devuser devpass             # auto -> stop at character select
-#   just play-local devuser PROMPT devusertt    # ask for the password (hidden,
+#   just play-local devuser PROMPT <char>    # ask for the password (hidden,
 #                                               #   never stored in shell history)
 #   just play-local                             # manual: click Play yourself
 # (ACC/PASS/CHAR also fall back to ENB_ACC_NAME / ENB_ACC_PASS / ENB_CHARACTER.)
@@ -573,7 +573,7 @@ stop-cli UNIT='cli1':
 #   $HOME/.wine-enb/drive_c/Program Files/EA GAMES/Earth & Beyond/release/client.exe
 # Override as the 4th recipe arg or via the ENB_CLIENT_PATH env var:
 #   just play-local '' '' '' /home/me/.wine/.../release/client.exe
-#   ENB_CLIENT_PATH=... just play-local devuser devpass devusertt
+#   ENB_CLIENT_PATH=... just play-local devuser devpass <char>
 #
 # Architecture (2026-05-29 rewrite):
 #   The recipe brings up the FULL docker-compose stack (postgres + server +
@@ -1075,7 +1075,7 @@ play-online CLIENT_PATH='' HOST='':
 #     account). devuser/devuser2 are seeded locally.
 #
 #   just play-multibox-local 2
-#   ENB_ACC_1=devuser  ENB_PASS_1=devpass  ENB_CHAR_1=devusertt \
+#   ENB_ACC_1=devuser  ENB_PASS_1=devpass  ENB_CHAR_1=<char> \
 #   ENB_ACC_2=devuser2 ENB_PASS_2=devpass2 ENB_CHAR_2=<char2>   just play-multibox-local 2
 play-multibox-local COUNT='2':
     #!/usr/bin/env bash

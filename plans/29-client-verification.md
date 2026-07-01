@@ -701,7 +701,7 @@ format & byte order", Trap 2).
 > **VERIFIED 2026-06-07** against `enb.sigsegv.land` with the real Win32 client.
 > Proxy console showed the previously-absent `accept on port 3500 from 127.0.0.1`
 > -> `<client> SectorServer LOGIN -- connection active` -> `START_ACK -> server`
-> (player griever, sector 10151). Sector entry succeeds; no +15s kick.
+> (player boxB, sector 10151). Sector entry succeeds; no +15s kick.
 
 - **Change**: the launcher (`tools/LaunchFreya/Launcher.cs::LaunchNet7Proxy`)
   now spawns Net7Proxy with `/ADDRESS:127.0.0.1` for ALL upstreams, instead of
@@ -2815,7 +2815,7 @@ moot; the SOLVED block above is the truth):**
   feed reaches its own proxy. Single-client (`just play-local`) is byte-identical to
   before (base 3500, hook + offset both no-ops).
 - **Setup**: `just build-enbmod && just rebuild proxy`, two seeded accounts
-  (devuser/devuser2), `ENB_ACC_1=... ENB_ACC_2=... just play-multibox-local 2`.
+  (boxA/devuser2), `ENB_ACC_1=... ENB_ACC_2=... just play-multibox-local 2`.
 
 ## [ ] CV-AZ-2 -- Multibox port-block: NATIVE WINE proxy (play-online) multibox
 

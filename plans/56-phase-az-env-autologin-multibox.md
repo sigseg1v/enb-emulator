@@ -52,7 +52,7 @@ under AZ-7. Same IP, different ports is portable to native Windows and sidesteps
 rootless docker's 127.0.0.0/8 collapse. `FREYA_PROXY_BIND_ADDRESS` survives only
 as the always-`127.0.0.1` client-facing bind for the native proxy.
 
-Values are EXAMPLES only in docs (`devuser`/`devpass`/`devusertt`); never commit
+Values are EXAMPLES only in docs (`boxA`/`<pw>`/`charA`); never commit
 a real account or character name (CLAUDE.md). The credentials live only in the
 spawning process's environment, never in a committed file.
 
@@ -149,7 +149,7 @@ fails for even a SINGLE client**, not just multibox:
   server emits `Re-send Ack request 3 for <char>` x5 and `---!!> Player <char>
   timed out during login stage 3`. The proxy log shows
   `UDPClient(Linux,global): SendTicket timed out / errored`. Reproduced with
-  COUNT=1 (devusertt, sector 4025) and COUNT=2.
+  COUNT=1 (charA, sector 4025) and COUNT=2.
 - `play-local` / `play-cli` never hit this because their proxy runs IN docker (own
   container IP on the stack network) -- the proxy<->server leg never crosses NAT.
 
@@ -195,7 +195,7 @@ pattern.
   and dumps the candidate offsets (read-only, mem-guarded) on each state change.
 - [x] **LIVE DUMP (single client, login screen, state=1) CONFIRMED the layout:**
   - `+0x24` = int state (1 at login screen).
-  - `+0x1084` = `char*` -> username ASCII ("devuser"); `+0x1088` = `char*` ->
+  - `+0x1084` = `char*` -> username ASCII ("boxA"); `+0x1088` = `char*` ->
     password buffer (empty). **These are COPIES the task fills at submit time, NOT
     the live edit-control buffers** -- writing bytes into `*(+0x1088)` did NOT
     change the on-screen password field. So filling these alone does not feed auth.
@@ -222,7 +222,7 @@ pattern.
 - [x] **LIVE trace (clean run, this session), with NO `05-eula-accept.sh`:**
   `autologin: license dialog accepted (hwnd=0002005c)` ->
   `autologin: state ... -> 1` -> `credentials submitted` ->
-  `entering world as devusertt`; in-game `enb.self()==table`, `enb.state()=="space"`.
+  `entering world as charA`; in-game `enb.self()==table`, `enb.state()=="space"`.
   The ENTIRE login is now pixel-free end to end.
 
 ### AZ-4 -- account/password auto-submit -- DONE + LIVE-VERIFIED
@@ -242,7 +242,7 @@ pattern.
 - [x] **LIVE trace (clean run, this session):**
   `autologin: state -2147483647 -> 1` ->
   `autologin: credentials submitted (view=06dd1640)` -> auth succeeds, server logs
-  `player 0x40000013 'devusertt' fully logged in`. Zero screen coords for the
+  `player 0x40000013 'charA' fully logged in`. Zero screen coords for the
   login itself.
 
 ### AZ-5 -- character auto-enter -- DONE + LIVE-VERIFIED
@@ -258,9 +258,9 @@ pattern.
   any `+0x24` transition. (The original manual-test assumption that state goes 1->2
   was wrong for this path; proven by manually firing `CharEnter` from state 1, which
   entered the world.) `drive_enter` polls the slots and fires once the name shows up.
-- [x] **LIVE trace:** `autologin: entering world as devusertt (idx=3)` ->
+- [x] **LIVE trace:** `autologin: entering world as charA (idx=3)` ->
   in-game confirmed (`enb.self()=table`, `enb.state()=space`, server
-  `MVAS synched and locked in for devusertt`).
+  `MVAS synched and locked in for charA`).
 
 ### AZ-6 -- wire into DllMain / driver -- DONE
 - [x] `autologin::tick()` runs first thing in the game-thread `on_tick`
