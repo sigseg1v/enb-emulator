@@ -97,6 +97,9 @@ win_by_class() {
 # for ~1.5s rides out the transition instead of conceding "no window" on a blink. A
 # genuinely dead/closed client still fails after the retries.
 client_win() {
+    # Multibox override: pin a specific client.exe window by id (two clients of
+    # identical size are indistinguishable to the largest-viewable heuristic).
+    [ -n "${ENB_CLIENT_WID:-}" ] && { printf '%s\n' "$ENB_CLIENT_WID"; return 0; }
     local i id
     for i in 1 2 3 4 5 6; do
         id="$(win_by_class 'client.exe')" && { printf '%s\n' "$id"; return 0; }

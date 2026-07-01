@@ -34,11 +34,17 @@ There is no publicly-open server officially hosted for this project. It's not me
 
 3. run the following:
 ```
-just play-local
+just run-stack-bg
 just seed-account testclient testpw
+just play-local
 ```
 
 Then click **Play** in the Freya launcher and log in with username `testclient` / password `testpw`.
+
+Alternatively, to fully log in from the CLI you can run the following (and you can also optionally add the character name). If you set the password to the string `PROMPT` it will prompt you instead of storing it in the bash command history. There's also env vars for each of those params if you prefer. This only works if you have at least 1 character, so launch with `just play-local` first until you create at least one.
+```
+just play-local testclient testpw
+```
 
 ## What this is
 

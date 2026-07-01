@@ -23,6 +23,14 @@ fi
 
 export DISPLAY="${DISPLAY:-:0}"
 
+# Multibox override: pin a specific client.exe window by id (two clients of
+# identical size are indistinguishable to the largest-viewable heuristic below).
+if [ -n "${ENB_CLIENT_WID:-}" ]; then
+    import -window "$ENB_CLIENT_WID" "$OUT"
+    echo "$OUT"
+    exit 0
+fi
+
 # Choose the largest viewable client.exe window.
 best_id=""; best_area=0
 for id in $(xdotool search --class 'client.exe' 2>/dev/null); do
