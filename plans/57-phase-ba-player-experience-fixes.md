@@ -305,17 +305,56 @@ griever via chat, Accept on devusertt) and confirmed live:
    `ShieldPercent+0x248` resolves from the other box) -- no faked full-bar. [x]
    built, verified live grouped (see the VERIFIED GROUPED note above).
 
-### BA-2c -- same-sector position/MVAS overlap (owner report, 2026-06-30) [ ] OPEN
+### BA-2c -- same-sector position/MVAS overlap (owner report, 2026-06-30) [x] RESOLVED-by-existing-fix
 
 Part of the same "multibox HUD derps hard" report: with both boxes in ONE sector,
 the owner saw them "keep teleporting to each other's positions" and the MVAS
-overlays overlapping. This is NOT the enbmod HUD (fixed above) -- it is
-position/visibility REPLICATION between two boxes sharing a sector, i.e.
-server avatar-position broadcast and/or the per-box MVAS position feed, which is
-gated wire territory (server/proxy change needs primary-source + CLI parse/tests +
-plans/29 CV). Deferred as a separate investigation; the client-side HUD defects
-(1, 3, hull, 5-shield) are the ones the owner's latest message was about and are
-done. Not yet root-caused.
+overlays overlapping.
+
+**Root cause (identified 2026-07-01): the pre-Phase-AZ shared posfeed intake
+port.** The in-client MVAS position hook (FreyaPosFeed / ClientPositionFeed.cpp)
+sends its 40-byte `FreyaClientPosDatagram` to a single hardcoded loopback intake
+port (`FREYA_CLIENT_POS_PORT` 3807). Before Phase AZ, EVERY co-located box sent
+to that ONE port, so whichever proxy owned 3807 drained ALL boxes' feeds and
+streamed them to the server as opcode 0x1004 keyed on ITS OWN player_id
+(`UDP_MVAS.cpp HandleMVASPosReturn` -> `GetPlayer(hdr->player_id)` ->
+`UpdatePositionFromMVAS` -> `SetPosition`). Result: box A's proxy pushed box B's
+coordinates onto box A's avatar -- exactly "characters teleporting to each other's
+positions." This was a SILENT failure (no error logged, avatars just snapped).
+
+**Already fixed by Phase AZ per-instance posfeed port isolation** (plans/56, item
+"Position feed per-instance target"). Each co-located instance owns a contiguous
+127.0.0.1 port block base+0/+1/+2/+3; posfeed is base+3. Producer targets its own
+`FREYA_POS_FEED_PORT` (= base+3); consumer binds base+3
+(`proxy/UDPClient_linux.cpp:1052`, `g_proxy_port_base + 3`). No two boxes share
+the intake port, so no cross-feed.
+
+**Live verification (2026-07-01), current isolated build, both boxes in one sector:**
+- Posfeed ports isolated per box: griever -> `127.0.0.1:3807` -> `freya-dev-proxy-1`;
+  devusertt -> `127.0.0.1:23513` -> `mbox2-proxy-1`. Separate proxy containers.
+- docker mbox topology confirmed consistent: `mbox2-proxy-1` has NO
+  `FREYA_PROXY_PORT_BASE` env, so `g_proxy_port_base=0` and it binds STOCK
+  container:3807; docker forwards host `23513` -> container `3807`
+  (docker-compose.mbox.yml). Client port base (23510) is deliberately decoupled
+  from the container's stock ports by docker's port map -- this is by design, not
+  a bug.
+- Server routes each MVAS/position packet by `hdr->player_id` (not source IP/port)
+  and broadcasts under `GameID()`; the two boxes have distinct player_id / GameID,
+  so with the feeds isolated there is no same-machine shared position channel left
+  (TCP sector/master/global planes are likewise port-block-isolated).
+- Empirical: the remote avatar's HUD marker stayed rock-steady over a ~7.5s burst,
+  the two avatars sat at distinct positions (~60k vs ~15k from Earth). The bug does
+  NOT reproduce on the current build.
+
+**No new wire change made, and none warranted.** The replication path is correct;
+the defect was the shared intake port, and Phase AZ already isolates it. A
+"datagram carries an instance id, consumer rejects mismatches" hardening was
+considered and REJECTED: in the docker mbox topology the proxy's own port base (0,
+stock container) is intentionally decoupled from the client's `FREYA_GAME_PORT_BASE`
+(23510) by docker forwarding, so an `instance == my-port-base` check would
+false-reject the LEGITIMATE mbox feed and silently kill it -- a worse silent-drop
+bug than the one it guards. The owner's teleport observation predates running the
+properly-isolated build on both boxes; on the isolated build it is fixed.
 
 ## BA-3 -- launcher Profile section
 
