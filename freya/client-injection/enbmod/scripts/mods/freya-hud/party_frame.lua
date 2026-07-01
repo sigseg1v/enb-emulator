@@ -26,7 +26,7 @@ local H = require("freya_hud")
 local CFG = {
     PANEL_W  = 188,   -- panel / row content width at the reference res
     MARGIN_R = 28,    -- gap from the right screen edge (inset 16px past the base 12)
-    MARGIN_T = 232,   -- gap from the top screen edge to the panel top (below the radar)
+    MARGIN_T = 228,   -- gap from the top screen edge to the panel top (below the radar)
     -- on a larger-than-1280x960 screen pull the panel inward from the right and down
     -- from the top, matching how the rest of the HUD scales its border gaps (both 0 at
     -- the reference res, so the base layout is untouched).
@@ -37,7 +37,7 @@ local CFG = {
     ROW_GAP  = 8,     -- gap between two member rows
     NAME_H   = 14,    -- member-name line height
     NAME_GAP = 2,     -- gap from the name down to the hull bar
-    BAR_H    = 6,     -- vital bar height (matches target_frame's thin bars)
+    BAR_H    = 8,     -- vital bar height (matches target_frame's thin bars)
     BAR_GAP  = 0,     -- no gap between the stacked hull / shield bars
     VAL_PAD  = 4,     -- inset of the cur/total value text from the bar's right edge
     VAL_SCALE = 0.6,  -- value-text scale so it fits the thin bar
@@ -60,7 +60,7 @@ local function draw_bar(x, y, w, rgb, cur, max, bar_h, val_scale)
     if cur and max then
         local val = string.format("%d / %d", math.floor(cur + 0.5), math.floor(max + 0.5))
         local vw, vh = H.measure(val)
-        local eff = val_scale + H.sy(2) / vh
+        local eff = val_scale + (H.sy(2) + 2) / vh
         vw, vh = vw * eff, vh * eff
         local ty = y + (bar_h - vh) / 2
         H.otext(x + w - CFG.VAL_PAD - vw, ty, val, 0xffffff, eff)
