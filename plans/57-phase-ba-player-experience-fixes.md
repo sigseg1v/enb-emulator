@@ -495,6 +495,18 @@ deleted. VERIFIED on a throwaway mbox3 client 2026-07-01: enbmod.log prints
 "mouse unlock: ClipCursor neutered (FREYA_LOCK_MOUSE=0)". Real-client feel
 check tracked as plans/29 CV-BA-MOUSEUNLOCK.
 
+SECOND FIX (2026-07-01, owner: unlock "only half works" -- pointer leaves on
+click but "keeps teleporting the mouse back in a few times a second" while the
+window is focused). ClipCursor was only HALF the confinement: the client also
+calls `SetCursorPos` to actively re-warp the pointer to window-centre several
+times a second while focused. Added a second MinHook on user32 SetCursorPos
+under the same `FREYA_LOCK_MOUSE=0` gate that swallows it (returns TRUE without
+moving). This inherently disables cursor-recenter camera look -- expected and
+correct: a free pointer (the whole point of unlock, for multibox) cannot
+coexist with a pointer the game yanks back to centre. enbmod.log now also
+prints "mouse unlock: SetCursorPos recenter neutered (FREYA_LOCK_MOUSE=0)".
+Camera-drag feel added to the CV-BA-MOUSEUNLOCK real-client checklist.
+
 ## BA-5 -- optional login fields
 
 - `Username (optional)`, `Password (optional)` (asterisks), `Character (optional)`

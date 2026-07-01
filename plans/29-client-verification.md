@@ -2968,15 +2968,28 @@ moot; the SOLVED block above is the truth):**
   init. The old DXGrab registry write was a dead knob (wine-11.8 winex11 has no
   such option) and is deleted; ticked (the default) means the game's native
   confinement runs untouched -- no hook, no injection on its account.
+- **Second hook (2026-07-01)**: ClipCursor alone left the pointer still
+  teleporting back to centre a few times a second while focused (owner: unlock
+  "only half works") -- the client also actively re-warps the pointer with
+  SetCursorPos. Added a second MinHook on user32 SetCursorPos under the same
+  FREYA_LOCK_MOUSE=0 gate that swallows it. This deliberately disables
+  cursor-recenter camera look (a free pointer and a recentering pointer are
+  mutually exclusive).
 - **Verified so far (throwaway client, 2026-07-01)**: with the box unticked,
-  enbmod.log prints "mouse unlock: ClipCursor neutered (FREYA_LOCK_MOUSE=0)" and
-  the client boots normally to the login screen.
+  enbmod.log prints "mouse unlock: ClipCursor neutered (FREYA_LOCK_MOUSE=0)"
+  and "mouse unlock: SetCursorPos recenter neutered (FREYA_LOCK_MOUSE=0)"; the
+  client boots normally to the login screen.
 - **What to look for (real client, human at the mouse)**:
   1. Box UNTICKED: while the client has focus (windowed), the pointer must cross
      freely OUT of the client window -- e.g. straight onto the second multibox
-     client -- during login, char select, in-space, and while a station UI is up.
+     client -- during login, char select, in-space, and while a station UI is up,
+     AND must NOT snap/teleport back inside a fraction of a second later.
   2. Box TICKED (default): confinement behaves exactly as it always did (pointer
      held inside the focused window); no enbmod injection happens if Lua mods,
      auto-login, and the position feed are all off.
-  3. No new WARNING/fault lines in enbmod.log from the hook; camera-drag and
-     UI clicking feel unchanged in both modes.
+  3. No new WARNING/fault lines in enbmod.log from the hooks.
+  4. UNTICKED, camera behaviour: right-drag camera-look that relied on
+     cursor-recenter will change (the pointer no longer snaps back). Confirm this
+     is acceptable for the unlock use case -- if the owner wants recenter look
+     preserved while unlocked, the SetCursorPos swallow needs a look-drag gate.
+     TICKED: camera-drag unchanged.

@@ -70,15 +70,28 @@ static BOOL WINAPI hk_PeekMessageA(LPMSG m, HWND h, UINT min, UINT max, UINT rm)
     return real_PeekMessageA(m, h, min, max, rm);
 }
 
-// ---- mouse-unlock hook ------------------------------------------------------
-// The client confines the pointer to its window with ClipCursor, and modern
-// wine honours that unconditionally (wine 11.x has no DXGrab/GrabPointer
-// registry knob to override it). When the launcher's "Lock Mouse To Window"
-// is OFF it exports FREYA_LOCK_MOUSE=0 and we neuter ClipCursor here so the
-// pointer can leave the window (multibox: reach the other client).
+// ---- mouse-unlock hooks -----------------------------------------------------
+// The client keeps the pointer inside its window TWO ways, and unlocking needs
+// both neutered:
+//   1. ClipCursor(rect) -- a confinement rectangle. Modern wine honours it
+//      unconditionally (wine 11.x has no DXGrab/GrabPointer registry knob to
+//      override it), so we swallow it and clear any pre-existing clip.
+//   2. SetCursorPos(x,y) -- the client actively re-warps the pointer back to
+//      window-centre a few times a second while focused. Killing only the clip
+//      leaves this recenter, so the pointer still "teleports back in". We
+//      swallow it too. This inherently disables cursor-recenter camera look,
+//      which is the point: a free pointer (multibox: reach the other client)
+//      cannot coexist with a pointer the game keeps yanking to centre.
+// Both are gated on FREYA_LOCK_MOUSE=0 (launcher "Lock Mouse To Window" OFF).
 typedef BOOL(WINAPI* ClipCursor_t)(const RECT*);
 static ClipCursor_t real_ClipCursor = nullptr;
 static BOOL WINAPI hk_ClipCursor(const RECT*) {
+    return TRUE;
+}
+
+typedef BOOL(WINAPI* SetCursorPos_t)(int, int);
+static SetCursorPos_t real_SetCursorPos = nullptr;
+static BOOL WINAPI hk_SetCursorPos(int, int) {
     return TRUE;
 }
 
@@ -639,6 +652,14 @@ bool init() {
             logf("mouse unlock: ClipCursor neutered (FREYA_LOCK_MOUSE=0)");
         } else {
             logf("WARNING: ClipCursor hook failed -- mouse stays locked to the window");
+        }
+        void* scp = (void*)GetProcAddress(u32, "SetCursorPos");
+        if (scp &&
+            MH_CreateHook(scp, (void*)&hk_SetCursorPos, (void**)&real_SetCursorPos) == MH_OK &&
+            MH_EnableHook(scp) == MH_OK) {
+            logf("mouse unlock: SetCursorPos recenter neutered (FREYA_LOCK_MOUSE=0)");
+        } else {
+            logf("WARNING: SetCursorPos hook failed -- pointer still teleports back to centre");
         }
     }
     return true;
