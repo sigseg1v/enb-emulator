@@ -1179,6 +1179,152 @@ static bool world_pos(uintptr_t obj, double out[3]) {
     return ok;
 }
 
+// ---------------------------------------------------------------------------
+// MVAS position-feed publisher (BA-2c).
+//
+// FreyaPosFeed.dll relays the LOCAL ship's world position + orientation to the
+// server as MVAS opcode 0x1004 so other clients can render us. Its old source
+// was a render-loop transform hijack that captured ANY player hull matching a
+// shared engine signature -- so with a grouped teammate rendered in range it
+// periodically shipped the OTHER ship's transform stamped as ours, and the
+// remote ship "teleported" between two positions every few seconds.
+//
+// enbmod already resolves the LOCAL ship unambiguously (targeting_data_obj(),
+// which the native target frame uses as "our ship") and reads it under the VEH
+// fault guard, so we compute the sample here on the tick and publish it for
+// FreyaPosFeed to pick up over a process-local export -- no code patching, no
+// signature guessing, and never another ship's transform. See plans/57 BA-2c
+// and plans/29 CV-MVAS-POS.
+//
+// Position comes from world_pos() (the same struct-returning locatable getter
+// the target frame trusts for our position). Orientation comes from the ship's
+// affine transform at *(ship+0x14)+0x48 -- a row-major 3x4 matrix whose
+// translation column (bytes 12/28/44) we validate against world_pos() before
+// trusting its orientation column (bytes 0/16/32); a mismatch means that offset
+// is not this build's transform, so we publish position-only (zero heading)
+// rather than a wrong facing.
+struct FreyaShipSample {
+    volatile unsigned int seq; // seqlock: odd = write in progress
+    float pos[3];
+    float heading[3];
+    unsigned int sector;
+    unsigned int valid; // 1 = fresh in-space sample
+};
+static FreyaShipSample g_ship_sample = {0, {0, 0, 0}, {0, 0, 0}, 0, 0};
+
+// Try to read the ship orientation from one candidate object's affine transform
+// at *(obj+0x14)+0x48, validating the matrix translation column (bytes 12/28/44)
+// against the world_pos we already trust. Returns true and fills heading_out
+// only on a validated matrix; leaves heading_out untouched otherwise. All reads
+// are self-guarding (mem::ptr / mem::f32 pre-check + VEH), so a bad pointer
+// during a sector change just fails the read, never faults.
+static bool try_read_transform_heading(uintptr_t obj, const float pos[3], float heading_out[3]) {
+    if (!obj)
+        return false;
+    uintptr_t t = mem::ptr(obj + 0x14);
+    if (!t)
+        return false;
+    uintptr_t m = t + 0x48;
+    if (!mem::readable((const void*)m, 48))
+        return false;
+    float tx = mem::f32(m + 12), ty = mem::f32(m + 28), tz = mem::f32(m + 44);
+    float dx = tx - pos[0], dy = ty - pos[1], dz = tz - pos[2];
+    // >2 units apart -> this matrix is not the ship world_pos resolved: don't
+    // trust its orientation. Also rejects NaN (a compare with NaN is false).
+    if (!(dx * dx + dy * dy + dz * dz <= 4.0f))
+        return false;
+    heading_out[0] = mem::f32(m + 0);
+    heading_out[1] = mem::f32(m + 16);
+    heading_out[2] = mem::f32(m + 32);
+    return true;
+}
+
+// Best-effort ship orientation, validated against the position world_pos gave
+// us. The affine transform lives on the ship ENTITY (the render-loop object), so
+// try player_entity() first; fall back to the targeting data object the position
+// came from. Leaves heading_out at {0,0,0} if neither candidate's matrix
+// validates -- so a wrong offset yields a neutral heading, never a wrong facing.
+static void read_ship_heading(uintptr_t ship, const float pos[3], float heading_out[3]) {
+    heading_out[0] = heading_out[1] = heading_out[2] = 0.0f;
+    if (try_read_transform_heading(player_entity(), pos, heading_out))
+        return;
+    try_read_transform_heading(ship, pos, heading_out);
+}
+
+// Called every tick from on_tick (the pump thread), under enbmod's fault guard.
+// Resolves the local ship and publishes {pos, heading, valid} via a seqlock so
+// FreyaPosFeed's feed thread can read a consistent sample without touching any
+// client memory itself.
+void publish_ship_state() {
+    uintptr_t ship = targeting_data_obj();
+    double wp[3];
+    if (!ship || !world_pos(ship, wp)) {
+        // No live in-space ship (loading / docked / char-select / pre-capture).
+        g_ship_sample.seq++; // begin write (odd)
+        __atomic_signal_fence(__ATOMIC_ACQ_REL);
+        g_ship_sample.valid = 0;
+        __atomic_signal_fence(__ATOMIC_ACQ_REL);
+        g_ship_sample.seq++; // end write (even)
+        return;
+    }
+    float pos[3] = {(float)wp[0], (float)wp[1], (float)wp[2]};
+    float heading[3];
+    read_ship_heading(ship, pos, heading);
+
+    // seqlock write. The compiler fences keep the field stores between the two
+    // seq bumps -- x86 preserves store order in hardware, so a pure compiler
+    // barrier is all the reader (FreyaEnbmodShipState, other thread) needs.
+    g_ship_sample.seq++; // begin write (odd)
+    __atomic_signal_fence(__ATOMIC_ACQ_REL);
+    g_ship_sample.pos[0] = pos[0];
+    g_ship_sample.pos[1] = pos[1];
+    g_ship_sample.pos[2] = pos[2];
+    g_ship_sample.heading[0] = heading[0];
+    g_ship_sample.heading[1] = heading[1];
+    g_ship_sample.heading[2] = heading[2];
+    // The proxy attributes the sample to its own session; the historical feed
+    // never carried a sector id, so leave it 0.
+    g_ship_sample.sector = 0;
+    g_ship_sample.valid = 1;
+    __atomic_signal_fence(__ATOMIC_ACQ_REL);
+    g_ship_sample.seq++; // end write (even)
+}
+
+// Process-local export FreyaPosFeed.dll binds to (GetModuleHandleA("enbmod.dll")
+// -> GetProcAddress). extern "C" gives it the unqualified symbol name regardless
+// of this namespace nesting. Returns 1 and fills pos/heading/sector from the
+// latest valid sample, or 0 when there is no live sample yet. Reads via the
+// seqlock so it never returns a torn (half-updated) sample.
+extern "C" __declspec(dllexport) int FreyaEnbmodShipState(float pos[3], float heading[3],
+                                                          unsigned int* sector) {
+    for (int tries = 0; tries < 8; ++tries) {
+        unsigned int s1 = g_ship_sample.seq;
+        __atomic_signal_fence(__ATOMIC_ACQ_REL);
+        if (s1 & 1u)
+            continue; // write in progress
+        float p[3] = {g_ship_sample.pos[0], g_ship_sample.pos[1], g_ship_sample.pos[2]};
+        float h[3] = {g_ship_sample.heading[0], g_ship_sample.heading[1], g_ship_sample.heading[2]};
+        unsigned int sec = g_ship_sample.sector;
+        unsigned int val = g_ship_sample.valid;
+        __atomic_signal_fence(__ATOMIC_ACQ_REL);
+        unsigned int s2 = g_ship_sample.seq;
+        if (s1 != s2)
+            continue; // sample changed under us -> retry
+        if (!val)
+            return 0;
+        pos[0] = p[0];
+        pos[1] = p[1];
+        pos[2] = p[2];
+        heading[0] = h[0];
+        heading[1] = h[1];
+        heading[2] = h[2];
+        if (sector)
+            *sector = sec;
+        return 1;
+    }
+    return 0;
+}
+
 // enb.target_ctrl() -> int. Diagnostic: the captured targeting/HUD controller pointer
 // (hooks::target_ctrl()), 0 until the target-frame refresh has run.
 static int l_target_ctrl(lua_State* L) {

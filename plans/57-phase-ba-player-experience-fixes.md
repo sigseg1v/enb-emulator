@@ -305,7 +305,7 @@ griever via chat, Accept on devusertt) and confirmed live:
    `ShieldPercent+0x248` resolves from the other box) -- no faked full-bar. [x]
    built, verified live grouped (see the VERIFIED GROUPED note above).
 
-### BA-2c -- same-sector position/MVAS overlap (owner report, 2026-06-30) [!] REOPENED 2026-07-01
+### BA-2c -- same-sector position/MVAS overlap (owner report, 2026-06-30) [~] ROOT-CAUSED + FIXED 2026-07-01 (pending real-client verify CV-BA-2c)
 
 Part of the same "multibox HUD derps hard" report: with both boxes in ONE sector,
 the owner saw them "keep teleporting to each other's positions" and the MVAS
@@ -337,29 +337,57 @@ missed it.
 - The multibox client hook (`FreyaMultiboxHook.cpp`) only IAT-patches
   `CreateMutexA` (single-instance bypass). It does NOT touch position or render.
 
-**Working diagnosis (NOT yet proven): a client-side one-frame render re-anchor,
-not server-data corruption.** The decisive clue is the "~15ms then back." Server
-position updates are ~200ms apart (0x1004 is change-gated at a 200ms poll) or
-500ms (starbase broadcast). A bad position DELIVERED over the wire would persist
-until the next packet (~200ms), not snap back in ~15ms. ~15ms is ~one render
-frame at 60fps -- i.e. the remote avatar is DRAWN at the local ship's position for
-a single frame and is correct again the very next frame, with no network packet
-involved in the correction. That points at the CLIENT's per-frame transform for
-the remote object, MVAS-specific, on a ~4s client-side cadence -- not at the
-server or proxy emitting wrong coordinates.
+**ROOT CAUSE (confirmed 2026-07-01): FreyaPosFeed's render-loop transform hijack
+captures ANY player hull, so each box periodically ships the OTHER player's
+position stamped as its own.** The earlier "pure client render re-anchor"
+diagnosis (below, superseded) had the frame-scale intuition right but the source
+wrong: the bad position IS delivered over the wire -- the server/proxy audit above
+is correct, the server faithfully relayed a wrong position the client SENT.
 
-**Next step (decisive, needs a brief client bounce): instrument the client.** Add
-`enb.obj_pos(gid)` to enbmod's lua_api (wrap the already-fault-guarded
-`entity_by_gid` + `world_pos`), rebuild the DLL (`just build-enbmod`), reinject
-(restart ONE box), then sample devusertt's world position vs self's from a
-bounded self-terminating on_tick and flag the frame where they coincide. That
-localizes it to "the position data really flips" (server/proxy) vs "data is fine,
-pure client render" (client). A pure-Lua probe via `enb.read.*` was rejected:
-`world_pos` needs an UNguarded thiscall from Lua, which could fault the client the
-owner is actively playing. The DLL wrapper keeps the setjmp guard.
+The old feed (`ClientEngineOffsets.h`) sourced position by hijacking the engine's
+per-ship render loop and stashing the transform pointer of any object matching a
+shared player-hull signature (a fixed byte marker every player hull carries) into
+a scratch slot every frame. That signature matches
+EVERY player hull, not just the local ship. With a grouped teammate rendered in
+range, the slot alternates between the local and the remote ship depending on
+render order; whenever the ~100ms feed poll lands on a frame whose last-rendered
+hull was the teammate, that box sends the TEAMMATE's coordinates under its own
+`hdr->player_id`. The server sets that box's position accordingly and broadcasts
+it -> the other player sees this box snap onto them for ~one update, then the next
+(correct) sample corrects it. Confirmed by server-side PFLICK instrumentation:
+each box's session relayed BOTH players' coordinates anti-phase. It only appears
+after grouping + co-location because that is the only time a second player hull is
+rendered in range of the local one.
 
-Doing this bounces the owner's live grouped session (~30s to relog one box), so
-it is teed up for a window the owner is OK with rather than done unilaterally.
+**FIX (implemented 2026-07-01): retire the render hijack; source position +
+orientation from enbmod's per-GameID ship resolution.** There is no static
+local-ship global in this build (verified), so the feed cannot correctly identify
+"our ship" on its own. enbmod already does --
+it resolves the local ship via the captured targeting/HUD controller and reads it
+under a VEH fault guard. So:
+- **enbmod** (`lua_api.cpp` `publish_ship_state()`, called each tick from
+  `dllmain.cpp on_tick`): resolves the local ship, publishes its world position
+  (`world_pos(targeting_data_obj())`, the same getter the target frame trusts) +
+  orientation (the ship-entity affine transform at `*(entity+0x14)+0x48`, validated
+  by matching its translation column against `world_pos` before trusting its
+  orientation column) into a seqlock-guarded sample, and exposes it via a new
+  `FreyaEnbmodShipState` export (MIT, `Freya`-named).
+- **FreyaPosFeed** (`ClientEngineOffsets.h`): all code-patching DELETED. The read
+  seam now binds `enbmod.dll!FreyaEnbmodShipState` (`GetModuleHandle`/`GetProcAddress`)
+  and returns its sample. No client memory is touched by this DLL any more; the
+  code-corruption risk the old header warned about is gone.
+- **Launcher** (`Launcher.cs ConfigureInjection`): injects enbmod whenever the
+  position feed is enabled (not only when Lua mods are on), since the feed's
+  resolver now lives in enbmod. If enbmod is somehow absent the feed stays inert
+  (sends nothing) rather than crashing.
+
+Position is now sourced from a single, GameID-unambiguous local-ship resolution,
+so a box can never ship another player's coordinates. Built clean:
+`just build-enbmod` + `just build-posfeed-dll` (both 32-bit MinGW, `-Wall
+-Wextra`). Needs a real-client grouped relog to confirm end-to-end -- see
+`plans/29` CV-BA-2c. Heading validation (transform offset for this build) is
+best-effort with a position-only fallback, so worst case a wrong offset yields a
+neutral facing, never a wrong one; confirm remote-ship rotation on the same test.
 
 <details><summary>Struck-through: the earlier (wrong) "resolved" writeup</summary>
 

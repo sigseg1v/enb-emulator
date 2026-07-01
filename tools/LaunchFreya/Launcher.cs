@@ -887,7 +887,15 @@ namespace LaunchFreya
                 var dos = StagePositionFeedDll();
                 if (dos != null) _injectDlls.Add(dos);
             }
-            if (_setting.EnableClientMods || autoLogin)
+            // enbmod is also the SOURCE of the MVAS position feed: FreyaPosFeed.dll
+            // reads the local ship's position/orientation from enbmod's
+            // FreyaEnbmodShipState export (BA-2c), because only enbmod resolves
+            // "our ship" unambiguously (per-GameID, under its fault guard). So
+            // inject enbmod whenever the position feed is on, even with the Lua
+            // mods toggle off -- the native publisher runs regardless of whether
+            // any Lua mod is active. Without this the feed would have no resolver
+            // and send nothing.
+            if (_setting.EnableClientMods || autoLogin || _setting.EnablePositionFeed)
             {
                 var dos = StageClientMods();
                 if (dos != null) _injectDlls.Add(dos);

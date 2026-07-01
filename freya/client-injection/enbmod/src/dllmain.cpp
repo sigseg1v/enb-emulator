@@ -115,6 +115,11 @@ void on_tick() {
         return;
     enb::autologin::tick(); // front-end auto-login driver (no-op once in-game / unconfigured)
     enb::lua::tick(g_L);
+    // Publish the local ship's world position + orientation for the MVAS
+    // position feed (FreyaPosFeed.dll reads it via FreyaEnbmodShipState). Native
+    // -- runs whenever enbmod is loaded, independent of whether any Lua mod is
+    // active. See plans/57 BA-2c.
+    enb::lua::publish_ship_state();
     // hot-reload: poll init.lua mtime every ~120 ticks
     if (++g_tick_count >= 120) {
         g_tick_count = 0;

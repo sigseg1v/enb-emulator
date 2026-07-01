@@ -2201,7 +2201,7 @@ moot; the SOLVED block above is the truth):**
 
 ---
 
-### [ ] CV-25 -- Position feed keeps updating after a sector change (planets / gating): can dock at a planet base
+### [~] CV-25 -- Position feed keeps updating after a sector change (planets / gating): can dock at a planet base -- SUPERSEDED 2026-07-01 by CV-BA-2c (the trampoline this verified was deleted; re-verify the concern via the new enbmod-sourced feed under CV-BA-2c)
 
 - **What changed**: `freya/client-injection/ClientEngineOffsets.h` -- the in-client
   position-feed trampoline no longer LATCHES the ship transform pointer on first
@@ -2849,3 +2849,41 @@ moot; the SOLVED block above is the truth):**
   mismatch.
 - **Setup**: owner's Windows environment; press Play twice (the launcher autodetects
   the next free 127.0.0.1 port block per instance).
+
+## [ ] CV-BA-2c -- grouped/co-located MVAS position no longer flickers between players
+
+- **What changed**: the MVAS position feed's source. The old in-client feed
+  (`freya/client-injection/ClientEngineOffsets.h`) hijacked the engine per-ship
+  render loop and captured the transform of ANY object matching a shared
+  player-hull signature (`BYTE[EAX]=='S'` + `BYTE[EAX+2]==0x48`), which matches
+  every player hull. With a grouped teammate rendered in range, each box's feed
+  periodically shipped the OTHER player's coordinates under its own `player_id`,
+  so the other client saw the box teleport onto the teammate for ~one update
+  every few seconds ("flickers the other player on top for ~15ms then back").
+  The render hijack is now DELETED. Position + orientation are sourced from
+  enbmod's per-GameID local-ship resolution: `enbmod.dll` publishes the sample
+  (`lua_api.cpp publish_ship_state()`, `world_pos(targeting_data_obj())` for
+  position, the validated ship-entity transform for heading) and exports
+  `FreyaEnbmodShipState`; `FreyaPosFeed.dll` reads that export instead of patching
+  client code; the launcher injects enbmod whenever the position feed is enabled.
+- **Why a CV is needed**: in-client (FreyaPosFeed.dll + enbmod.dll) change reading
+  live engine memory over the loopback MVAS datagram path; the CLI integration
+  suite cannot exercise the client engine or two grouped clients, so only the real
+  client proves it. Not a server/proxy wire change -- the server-side MVAS handler
+  is unchanged (it faithfully relayed whatever the client sent; the bug was the
+  client sending the wrong ship's coordinates).
+- **What to look for (real client)**: two boxes logged in, grouped, in the SAME
+  sector. From each box, watch the other player's avatar/HUD marker for ~60s of
+  normal flight: it must track the teammate's real position smoothly with NO
+  periodic snap onto your own ship (or between two positions). Also confirm the
+  remote ship's FACING rotates as it turns (heading is being fed) rather than
+  staying locked -- if it never rotates, the build's transform offset for the
+  orientation matrix needs revisiting (position is unaffected either way).
+- **Also re-verify (supersedes CV-25's mechanism)**: the old trampoline this
+  change removed was the subject of CV-25 (position must keep updating after a
+  sector change / entering a planet sub-sector, so you can still dock at a planet
+  base). Re-confirm that with the new source: gate to a new sector and fly to a
+  planet base -- your position must keep updating server-side and you must be able
+  to dock. enbmod's `targeting_data_obj()` must keep resolving across the zone.
+- **Setup**: `just play-cli` (or the multibox launch) for two accounts in one
+  sector; group them; fly. Runtime launch only -- credentials are not committed.
