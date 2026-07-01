@@ -132,7 +132,9 @@ Still open in Half 1:
   WINE's internal rect from the X position and breaks the skills' absolute-coord
   click translation) -- leave Window X/Y BLANK on any profile the screen-driven
   automation (login-to-client / explore-sector) will drive; the placement is for
-  human multibox play.
+  human multibox play. Layout rearranged 2026-07-01 (owner ask): Window Pos X/Y
+  now sit inline right of Username (where Password was); Password moved to its
+  own row under Username, Character under Password.
 - [ ] play-local MVAS: native-proxy play-local impossible on rootless docker;
   MVAS works with the docker proxy. (Record + verify.)
 - [~] **Multibox now self-logs per window; the only open piece is which SERVER to

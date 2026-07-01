@@ -2926,6 +2926,15 @@ moot; the SOLVED block above is the truth):**
 - **Known caveat recorded**: making GroupAction 12 actually retarget is a server
   change under the full CLAUDE.md gate (primary source + CLI parse/tests first +
   its own CV entry); not part of this change.
+- **Live-verify 2026-07-01 (agent-driven, two multibox clients on the new DLL)**:
+  group formed via the native command path (invite = avatar-command 0x0a with the
+  member's explicit GameID via CmdBuild -- note the `/group invite <name>` slash
+  verb submitted through chat_send never reached the server; accept = 0x0b);
+  `enb.group()` rosters correct on both boxes, `enb.is_leader()` true on the
+  leader / false on the member (and false solo, no fault); `enb.group_action(12)`
+  sent clean from the leader, server log clean. Items 2/3/5 (click-through
+  behaviour, disband/leave/formation via the ON-SCREEN buttons) + the visual
+  row check remain for the owner.
 
 ## CV-AZ-DUPCHAR -- duplicate-login kick is now per-CHARACTER, not per-account
 

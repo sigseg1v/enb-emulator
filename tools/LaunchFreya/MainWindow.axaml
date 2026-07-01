@@ -105,29 +105,30 @@
                     ToolTip.Tip="Confine the mouse cursor to the client window while it has focus (helpful for multiboxing)." />
         </StackPanel>
 
-        <!-- Optional login (BA-5) -->
+        <!-- Optional login (BA-5) + optional client-window placement. Window Pos:
+             both blank -> leave the window where the game opens it; both set ->
+             reposition to (X,Y) once it appears. -->
         <TextBlock Grid.Row="2" Grid.Column="0" Text="Username:" Classes="label" VerticalAlignment="Center" Margin="0,8,0,0" />
         <StackPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="14" Margin="0,8,0,0">
           <TextBox Name="c_TextBox_Username" Width="190" Watermark="optional" />
-          <TextBlock Text="Password:" Classes="label" VerticalAlignment="Center" />
-          <TextBox Name="c_TextBox_Password" Width="190" PasswordChar="*" Watermark="optional" />
+          <TextBlock Text="Window Pos:" Classes="label" VerticalAlignment="Center" />
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBlock Text="X" Classes="label" VerticalAlignment="Center" />
+            <TextBox Name="c_TextBox_WindowX" Width="80" Watermark="optional"
+                     ToolTip.Tip="Screen X to move the client window to after launch. Leave blank to leave it where the game opens it." />
+            <TextBlock Text="Y" Classes="label" VerticalAlignment="Center" Margin="8,0,0,0" />
+            <TextBox Name="c_TextBox_WindowY" Width="80" Watermark="optional"
+                     ToolTip.Tip="Screen Y to move the client window to after launch. Leave blank to leave it where the game opens it." />
+          </StackPanel>
         </StackPanel>
 
-        <TextBlock Grid.Row="3" Grid.Column="0" Text="Character:" Classes="label" VerticalAlignment="Center" Margin="0,8,0,0" />
-        <TextBox   Grid.Row="3" Grid.Column="1" Name="c_TextBox_Character" Width="190"
+        <TextBlock Grid.Row="3" Grid.Column="0" Text="Password:" Classes="label" VerticalAlignment="Center" Margin="0,8,0,0" />
+        <TextBox   Grid.Row="3" Grid.Column="1" Name="c_TextBox_Password" Width="190"
+                   HorizontalAlignment="Left" Margin="0,8,0,0" PasswordChar="*" Watermark="optional" />
+
+        <TextBlock Grid.Row="4" Grid.Column="0" Text="Character:" Classes="label" VerticalAlignment="Center" Margin="0,8,0,0" />
+        <TextBox   Grid.Row="4" Grid.Column="1" Name="c_TextBox_Character" Width="190"
                    HorizontalAlignment="Left" Margin="0,8,0,0" Watermark="optional" />
-
-        <!-- Optional client-window placement. Both blank -> leave the window where
-             the game opens it; both set -> reposition to (X,Y) once it appears. -->
-        <TextBlock Grid.Row="4" Grid.Column="0" Text="Window Pos:" Classes="label" VerticalAlignment="Center" Margin="0,8,0,0" />
-        <StackPanel Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
-          <TextBlock Text="X" Classes="label" VerticalAlignment="Center" />
-          <TextBox Name="c_TextBox_WindowX" Width="80" Watermark="optional"
-                   ToolTip.Tip="Screen X to move the client window to after launch. Leave blank to leave it where the game opens it." />
-          <TextBlock Text="Y" Classes="label" VerticalAlignment="Center" Margin="8,0,0,0" />
-          <TextBox Name="c_TextBox_WindowY" Width="80" Watermark="optional"
-                   ToolTip.Tip="Screen Y to move the client window to after launch. Leave blank to leave it where the game opens it." />
-        </StackPanel>
       </Grid>
     </Border>
 
