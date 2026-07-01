@@ -39,8 +39,12 @@ namespace LaunchFreya
     public partial class MainWindow : Window
     {
         readonly LaunchSetting _setting = new LaunchSetting();
-        readonly UserSettings _user;
+        UserSettings _user;
         LauncherConfig _config;
+        // Guards the profile combo while we (re)populate it / swap profiles, so
+        // the SelectionChanged handler does not fire a spurious profile switch or
+        // re-entrantly save during setup.
+        bool _loadingProfile;
         HostConfig _lastSelectedHost;
         Launcher _activeLauncher;
 
@@ -159,15 +163,13 @@ namespace LaunchFreya
                 _config = new LauncherConfig();
             }
 
-            // Restore user prefs
-            if (!string.IsNullOrEmpty(_user.AuthenticationPort))
-                c_TextBox_Port.Text = _user.AuthenticationPort;
+            // Window position is launcher-global (not per profile).
             if (_user.FormMainPositionX > 0 && _user.FormMainPositionY > 0)
                 Position = new Avalonia.PixelPoint(_user.FormMainPositionX, _user.FormMainPositionY);
-            c_CheckBox_LuaMods.IsChecked = _user.UseClientMods;
 
-            FillEmulators();
-            FillClientPath();
+            FillResolutions();   // static system-resolution list (BA-4)
+            FillProfiles();      // populate the profile dropdown + select the active one (BA-3)
+            ApplyUserToUi();     // push the active profile's values into every control
             c_Status.Text = "Please select a server and hit Play.";
 
             _statusTimer = new DispatcherTimer { Interval = StatusRefreshInterval };
@@ -204,6 +206,7 @@ namespace LaunchFreya
         void OnClosing(object sender, EventArgs e)
         {
             _statusTimer?.Stop();
+            CaptureUiToUser();   // autosave the active profile's editable fields
             _user.FormMainPositionX = Position.X;
             _user.FormMainPositionY = Position.Y;
             _user.Save();
@@ -349,6 +352,225 @@ namespace LaunchFreya
                 _user.Save();
             }
         }
+
+        // ---- profiles (BA-3) ----
+
+        // Populate the profile dropdown and select the active profile. Guarded so
+        // the SelectionChanged handler does not treat this fill as a user switch.
+        void FillProfiles()
+        {
+            _loadingProfile = true;
+            try
+            {
+                c_ComboBox_Profiles.Items.Clear();
+                foreach (var name in UserSettings.ListProfiles())
+                    c_ComboBox_Profiles.Items.Add(name);
+                c_ComboBox_Profiles.SelectedItem = _user.Name;
+                if (c_ComboBox_Profiles.SelectedItem == null && c_ComboBox_Profiles.Items.Count > 0)
+                    c_ComboBox_Profiles.SelectedIndex = 0;
+            }
+            finally { _loadingProfile = false; }
+            c_Button_DelProfile.IsEnabled = !_user.IsDefaultProfile;
+        }
+
+        // User picked a different profile: persist the current one's edits, load the
+        // chosen profile, and refresh every control from it.
+        void OnProfileChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_loadingProfile) return;
+            var name = c_ComboBox_Profiles.SelectedItem as string;
+            if (string.IsNullOrEmpty(name) ||
+                string.Equals(name, _user.Name, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            CaptureUiToUser();
+            _user.Save();                       // keep the profile we are leaving
+
+            _user = UserSettings.LoadProfile(name);
+            _user.SetActive();                  // remember it for next launch
+            ApplyUserToUi();
+            c_Button_DelProfile.IsEnabled = !_user.IsDefaultProfile;
+        }
+
+        async void OnAddProfileClick(object sender, RoutedEventArgs e)
+        {
+            var name = await PromptForText("New Profile", "Name for the new profile:");
+            if (string.IsNullOrWhiteSpace(name)) return;
+            name = name.Trim();
+            if (string.Equals(name, UserSettings.DefaultProfileName, StringComparison.OrdinalIgnoreCase))
+            {
+                await Warn("\"Default\" is reserved. Choose another name.");
+                return;
+            }
+            if (UserSettings.ListProfiles().Contains(name, StringComparer.OrdinalIgnoreCase))
+            {
+                await Warn($"A profile named \"{name}\" already exists.");
+                return;
+            }
+
+            // Capture the current UI so the new profile is a copy of what is shown.
+            CaptureUiToUser();
+            var created = _user.CreateProfile(name);
+            if (created == null) { await Warn("Could not create that profile."); return; }
+
+            _user = created;
+            FillProfiles();      // includes the new one; selects _user.Name
+            ApplyUserToUi();
+        }
+
+        async void OnDeleteProfileClick(object sender, RoutedEventArgs e)
+        {
+            if (_user.IsDefaultProfile)
+            {
+                await Warn("The Default profile cannot be deleted.");
+                return;
+            }
+            var which = _user.Name;
+            var confirm = await MessageBoxManager.GetMessageBoxStandard(
+                "Freya - Delete profile",
+                $"Delete the profile \"{which}\"? This cannot be undone.",
+                ButtonEnum.YesNo, MsBoxIcon.Warning).ShowWindowDialogAsync(this);
+            if (confirm != ButtonResult.Yes) return;
+
+            UserSettings.DeleteProfile(which);
+            _user = UserSettings.LoadProfile(UserSettings.DefaultProfileName);
+            _user.SetActive();
+            FillProfiles();
+            ApplyUserToUi();
+        }
+
+        // Minimal modal text-input dialog (MsBox.Avalonia 3.x has no input box).
+        async Task<string> PromptForText(string title, string prompt)
+        {
+            var box = new TextBox { Width = 280 };
+            var ok = new Button { Content = "OK", IsDefault = true };
+            var cancel = new Button { Content = "Cancel", IsCancel = true };
+            string result = null;
+
+            var buttons = new StackPanel
+            {
+                Orientation = Avalonia.Layout.Orientation.Horizontal,
+                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                Spacing = 8,
+                Margin = new Avalonia.Thickness(0, 12, 0, 0),
+            };
+            buttons.Children.Add(cancel);
+            buttons.Children.Add(ok);
+
+            var panel = new StackPanel { Margin = new Avalonia.Thickness(14), Spacing = 8 };
+            panel.Children.Add(new TextBlock { Text = prompt });
+            panel.Children.Add(box);
+            panel.Children.Add(buttons);
+
+            var dlg = new Window
+            {
+                Title = title,
+                Content = panel,
+                SizeToContent = SizeToContent.WidthAndHeight,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                CanResize = false,
+            };
+            ok.Click += (_, __) => { result = box.Text; dlg.Close(); };
+            cancel.Click += (_, __) => { result = null; dlg.Close(); };
+            await dlg.ShowDialog(this);
+            return result;
+        }
+
+        // ---- profile <-> UI marshalling ----
+
+        // Push the active profile's stored values into every control. Re-fills the
+        // emulator/server selection and client path (those read _user too).
+        void ApplyUserToUi()
+        {
+            c_TextBox_Port.Text = _user.AuthenticationPort ?? "";
+            c_CheckBox_LuaMods.IsChecked = _user.UseClientMods;
+            c_TextBox_Username.Text = _user.AccountName ?? "";
+            c_TextBox_Character.Text = _user.CharacterName ?? "";
+            c_TextBox_Password.Text = "";          // never restored from disk
+            c_CheckBox_Fullscreen.IsChecked = _user.Fullscreen;
+            c_CheckBox_LockMouse.IsChecked = _user.LockMouseToWindow;
+            SelectResolution(_user.Resolution);
+
+            FillEmulators();   // reads _user.LastEmulatorName -> FillHosts reads LastServerName
+            FillClientPath();  // reads _user.ClientPath
+        }
+
+        // Read every editable control back into _user (everything except the
+        // password, which is never persisted).
+        void CaptureUiToUser()
+        {
+            _user.AuthenticationPort = c_TextBox_Port.Text ?? "";
+            _user.UseClientMods = c_CheckBox_LuaMods.IsChecked == true;
+            _user.AccountName = (c_TextBox_Username.Text ?? "").Trim();
+            _user.CharacterName = (c_TextBox_Character.Text ?? "").Trim();
+            _user.Resolution = SelectedResolution();
+            _user.Fullscreen = c_CheckBox_Fullscreen.IsChecked == true;
+            _user.LockMouseToWindow = c_CheckBox_LockMouse.IsChecked == true;
+            if (!string.IsNullOrEmpty(c_TextBox_Client.Text))
+                _user.ClientPath = c_TextBox_Client.Text;
+            if (CurrentEmulator != null) _user.LastEmulatorName = CurrentEmulator.Name;
+            var srv = (c_ComboBox_Servers.Text ?? "").Trim();
+            if (!string.IsNullOrEmpty(srv)) _user.LastServerName = srv;
+        }
+
+        // ---- resolutions (BA-4) ----
+
+        void FillResolutions()
+        {
+            c_ComboBox_Resolution.Items.Clear();
+            foreach (var r in EnumerateResolutions())
+                c_ComboBox_Resolution.Items.Add(r);
+        }
+
+        // Distinct "WxH" options: the EnB-friendly baselines plus whatever the
+        // system reports (xrandr on Linux/WINE), sorted largest-first.
+        static List<string> EnumerateResolutions()
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "2560x1440", "1920x1200", "1920x1080", "1600x1200",
+                "1680x1050", "1440x900", "1280x1024", "1280x960", "1024x768", "800x600",
+            };
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "xrandr",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                };
+                using var p = System.Diagnostics.Process.Start(psi);
+                if (p != null)
+                {
+                    string outp = p.StandardOutput.ReadToEnd();
+                    p.WaitForExit(3000);
+                    foreach (System.Text.RegularExpressions.Match m in
+                        System.Text.RegularExpressions.Regex.Matches(outp, @"(\d{3,5})x(\d{3,5})"))
+                        set.Add($"{m.Groups[1].Value}x{m.Groups[2].Value}");
+                }
+            }
+            catch { /* no xrandr (e.g. native Windows) -> baselines only */ }
+
+            return set.OrderByDescending(s =>
+            {
+                int x = s.IndexOf('x');
+                long w = long.TryParse(s.Substring(0, x), out var ww) ? ww : 0;
+                long h = long.TryParse(s.Substring(x + 1), out var hh) ? hh : 0;
+                return w * h;
+            }).ToList();
+        }
+
+        void SelectResolution(string res)
+        {
+            if (string.IsNullOrWhiteSpace(res)) { c_ComboBox_Resolution.SelectedIndex = -1; return; }
+            if (!c_ComboBox_Resolution.Items.Contains(res))
+                c_ComboBox_Resolution.Items.Add(res);
+            c_ComboBox_Resolution.SelectedItem = res;
+        }
+
+        string SelectedResolution() => c_ComboBox_Resolution.SelectedItem as string ?? "";
 
         // ---- event handlers ----
 
@@ -785,10 +1007,38 @@ namespace LaunchFreya
             _setting.EnableClientMods = _user.UseClientMods;     // enbmod Lua mods
             _setting.ModStates = _user.ModStates;         // per-mod enable/disable
 
-            // Persist (keep the raw typed value so the box redisplays it verbatim)
+            // BA-4: display settings, applied to the EnB registry before launch.
+            _setting.Resolution = SelectedResolution();
+            _setting.Fullscreen = c_CheckBox_Fullscreen.IsChecked == true;
+            _setting.LockMouseToWindow = c_CheckBox_LockMouse.IsChecked == true;
+
+            // BA-5: optional auto-login. Push the typed credentials into the env the
+            // client (enbmod's autologin.cpp) reads; clear each when blank so a prior
+            // launch's value never leaks into a later plain launch. The password is
+            // passed to the env for this launch but is NEVER written to disk.
+            string accName = (c_TextBox_Username.Text ?? "").Trim();
+            string accPass = c_TextBox_Password.Text ?? "";
+            string charName = (c_TextBox_Character.Text ?? "").Trim();
+            Environment.SetEnvironmentVariable("FREYA_ACC_NAME", accName.Length > 0 ? accName : null);
+            Environment.SetEnvironmentVariable("FREYA_ACC_PASS", accPass.Length > 0 ? accPass : null);
+            Environment.SetEnvironmentVariable("FREYA_CHARACTER", charName.Length > 0 ? charName : null);
+            // A supplied username means the user wants a hands-free login, which only
+            // proceeds once the EULA gate is cleared; assert it only when credentials
+            // are actually present so a plain launch still shows the EULA.
+            if (accName.Length > 0)
+                Environment.SetEnvironmentVariable("FREYA_EULA", "ACCEPT");
+
+            // Persist (keep the raw typed value so the box redisplays it verbatim).
+            // BA-5 autosaves the account + character (NOT the password); BA-4
+            // autosaves the resolution + fullscreen. All target the active profile.
             _user.AuthenticationPort = c_TextBox_Port.Text;
             _user.LastEmulatorName = emu.Name;
             _user.LastServerName = host.Hostname;
+            _user.AccountName = accName;
+            _user.CharacterName = charName;
+            _user.Resolution = _setting.Resolution;
+            _user.Fullscreen = _setting.Fullscreen;
+            _user.LockMouseToWindow = _setting.LockMouseToWindow;
             _user.Save();
 
 #if !CHECK_FOR_UPDATES

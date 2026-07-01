@@ -45,5 +45,24 @@ namespace LaunchFreya
                 "Built without the Microsoft.Win32.Registry package; rebuild with WINDOWS_BUILD if you need this code path.");
 #endif
         }
+
+        // BA-4: write the EnB client's render resolution + windowed flag to the
+        // Render key. windowed maps to RenderDeviceWindowed (1 = windowed,
+        // 0 = fullscreen). The WINE equivalent in Launcher.PatchRegistry writes
+        // both registry views; here .NET writes the native view, which the EnB
+        // launcher path is the canonical writer for on a real Windows install.
+        [SupportedOSPlatform("windows")]
+        public static void SetDisplay(int width, int height, bool windowed)
+        {
+#if WINDOWS_BUILD
+            const string render = "HKEY_LOCAL_MACHINE\\Software\\Westwood Studios\\Earth and Beyond\\Render";
+            Registry.SetValue(render, "RenderDeviceWidth", width, RegistryValueKind.DWord);
+            Registry.SetValue(render, "RenderDeviceHeight", height, RegistryValueKind.DWord);
+            Registry.SetValue(render, "RenderDeviceWindowed", windowed ? 1 : 0, RegistryValueKind.DWord);
+#else
+            throw new System.PlatformNotSupportedException(
+                "Built without the Microsoft.Win32.Registry package; rebuild with WINDOWS_BUILD if you need this code path.");
+#endif
+        }
     }
 }
