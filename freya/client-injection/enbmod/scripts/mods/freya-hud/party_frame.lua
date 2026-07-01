@@ -33,14 +33,15 @@ local CFG = {
     MARGIN_R_TUNE = 24,
     MARGIN_T_TUNE = 40,
 
-    PAD      = 7,     -- inner padding inside the glass panel
-    ROW_GAP  = 8,     -- gap between two member rows
-    NAME_H   = 14,    -- member-name line height
-    NAME_GAP = 2,     -- gap from the name down to the hull bar
-    BAR_H    = 8,     -- vital bar height (matches target_frame's thin bars)
-    BAR_GAP  = 0,     -- no gap between the stacked hull / shield bars
-    VAL_PAD  = 4,     -- inset of the cur/total value text from the bar's right edge
-    VAL_SCALE = 0.6,  -- value-text scale so it fits the thin bar
+    PAD      = 7,      -- inner padding inside the glass panel
+    ROW_GAP  = 8,      -- gap between two member rows
+    NAME_H   = 18,     -- member-name line height (grown to fit the bigger name font)
+    NAME_SCALE = 1.15, -- member-name font scale (bigger than the 1.0 default)
+    NAME_GAP = 3,      -- gap from the name down to the hull bar
+    BAR_H    = 12,     -- vital bar height (taller than target_frame's thin 6px bars)
+    BAR_GAP  = 1,      -- 1px gap between the stacked hull / shield bars
+    VAL_PAD  = 4,      -- inset of the cur/total value text from the bar's right edge
+    VAL_SCALE = 0.78,  -- value-text scale (bigger; the taller bar has room for it)
 }
 
 -- ---- one bar: track + gradient fill + border + optional cur/total text -------
@@ -70,9 +71,9 @@ end
 -- one member row, top edge at `y`, returns the y just below the row.
 local function draw_member(m, x, y, w, bar_h, val_scale)
     local name = (type(m.name) == "string" and m.name ~= "") and m.name or "Member"
-    -- clip an over-long name to the panel width.
-    while H.measure(name) > w and #name > 1 do name = name:sub(1, #name - 1) end
-    H.otext(x, y, name, H.INK)
+    -- clip an over-long name to the panel width (measured at the drawn scale).
+    while H.measure(name) * CFG.NAME_SCALE > w and #name > 1 do name = name:sub(1, #name - 1) end
+    H.otext(x, y, name, H.INK, CFG.NAME_SCALE)
     local hull_y   = y + CFG.NAME_H + CFG.NAME_GAP
     local shield_y = hull_y + bar_h + CFG.BAR_GAP
     draw_bar(x, hull_y,   w, H.HULL,   m.hull,   m.hull_max,   bar_h, val_scale)
