@@ -305,56 +305,72 @@ griever via chat, Accept on devusertt) and confirmed live:
    `ShieldPercent+0x248` resolves from the other box) -- no faked full-bar. [x]
    built, verified live grouped (see the VERIFIED GROUPED note above).
 
-### BA-2c -- same-sector position/MVAS overlap (owner report, 2026-06-30) [x] RESOLVED-by-existing-fix
+### BA-2c -- same-sector position/MVAS overlap (owner report, 2026-06-30) [!] REOPENED 2026-07-01
 
 Part of the same "multibox HUD derps hard" report: with both boxes in ONE sector,
 the owner saw them "keep teleporting to each other's positions" and the MVAS
 overlays overlapping.
 
-**Root cause (identified 2026-07-01): the pre-Phase-AZ shared posfeed intake
-port.** The in-client MVAS position hook (FreyaPosFeed / ClientPositionFeed.cpp)
-sends its 40-byte `FreyaClientPosDatagram` to a single hardcoded loopback intake
-port (`FREYA_CLIENT_POS_PORT` 3807). Before Phase AZ, EVERY co-located box sent
-to that ONE port, so whichever proxy owned 3807 drained ALL boxes' feeds and
-streamed them to the server as opcode 0x1004 keyed on ITS OWN player_id
-(`UDP_MVAS.cpp HandleMVASPosReturn` -> `GetPlayer(hdr->player_id)` ->
-`UpdatePositionFromMVAS` -> `SetPosition`). Result: box A's proxy pushed box B's
-coordinates onto box A's avatar -- exactly "characters teleporting to each other's
-positions." This was a SILENT failure (no error logged, avatars just snapped).
+**REOPENED 2026-07-01.** The owner reports the flicker STILL happens on the
+current isolated build: "every 4 seconds or so it flickers the other player on
+top for maybe 10-20 milliseconds then back ... they teleport to the other players
+position then back ... they arent in formation." My earlier "resolved-by-existing-
+fix" conclusion (below, struck through) was wrong: the "~7.5s rock-steady burst"
+observation that backed it could not have caught a ~15ms event that fires every
+~4s (1-2 sampling chances at <1% hit each). It did not disprove the bug; it just
+missed it.
 
-**Already fixed by Phase AZ per-instance posfeed port isolation** (plans/56, item
-"Position feed per-instance target"). Each co-located instance owns a contiguous
-127.0.0.1 port block base+0/+1/+2/+3; posfeed is base+3. Producer targets its own
-`FREYA_POS_FEED_PORT` (= base+3); consumer binds base+3
-(`proxy/UDPClient_linux.cpp:1052`, `g_proxy_port_base + 3`). No two boxes share
-the intake port, so no cross-feed.
+**What IS confirmed (re-verified at runtime this session):**
+- Posfeed intake ports ARE isolated per box. `/proc/<pid>/environ` on both live
+  `client.exe`: mbox2 (devusertt) has `FREYA_POS_FEED_PORT=23513`, griever has no
+  override -> stock 3807. The DLL (`ClientPositionFeed.cpp:117`) reads
+  `FREYA_POS_FEED_PORT` correctly and sends to `127.0.0.1:<that port>`. So the
+  pre-AZ shared-intake mechanism is genuinely NOT the cause of the residual
+  flicker -- a shared intake would corrupt CONSTANTLY, not in clean 4s pulses.
+- The proxy->server position path was audited end to end and is correctly keyed
+  per player: 0x1004 (`SendPositionIfChanged`) and 0x3005 keepalive (30s) both
+  stamp `hdr->player_id = m_PlayerID` (own id); server `HandleMVASPosReturn` /
+  `HandleCommReturn` / `HandleLoungeReady` all `GetPlayer(hdr->player_id)` +
+  `SetPlayerPortIP`. `SendToVisibilityList` -> `SendAdvancedPositionalUpdate`
+  builds per-viewer packets under the mover's `GameID()` with the mover's own
+  `m_Position_info`. No shared buffer, no cross-player field.
+- The multibox client hook (`FreyaMultiboxHook.cpp`) only IAT-patches
+  `CreateMutexA` (single-instance bypass). It does NOT touch position or render.
 
-**Live verification (2026-07-01), current isolated build, both boxes in one sector:**
-- Posfeed ports isolated per box: griever -> `127.0.0.1:3807` -> `freya-dev-proxy-1`;
-  devusertt -> `127.0.0.1:23513` -> `mbox2-proxy-1`. Separate proxy containers.
-- docker mbox topology confirmed consistent: `mbox2-proxy-1` has NO
-  `FREYA_PROXY_PORT_BASE` env, so `g_proxy_port_base=0` and it binds STOCK
-  container:3807; docker forwards host `23513` -> container `3807`
-  (docker-compose.mbox.yml). Client port base (23510) is deliberately decoupled
-  from the container's stock ports by docker's port map -- this is by design, not
-  a bug.
-- Server routes each MVAS/position packet by `hdr->player_id` (not source IP/port)
-  and broadcasts under `GameID()`; the two boxes have distinct player_id / GameID,
-  so with the feeds isolated there is no same-machine shared position channel left
-  (TCP sector/master/global planes are likewise port-block-isolated).
-- Empirical: the remote avatar's HUD marker stayed rock-steady over a ~7.5s burst,
-  the two avatars sat at distinct positions (~60k vs ~15k from Earth). The bug does
-  NOT reproduce on the current build.
+**Working diagnosis (NOT yet proven): a client-side one-frame render re-anchor,
+not server-data corruption.** The decisive clue is the "~15ms then back." Server
+position updates are ~200ms apart (0x1004 is change-gated at a 200ms poll) or
+500ms (starbase broadcast). A bad position DELIVERED over the wire would persist
+until the next packet (~200ms), not snap back in ~15ms. ~15ms is ~one render
+frame at 60fps -- i.e. the remote avatar is DRAWN at the local ship's position for
+a single frame and is correct again the very next frame, with no network packet
+involved in the correction. That points at the CLIENT's per-frame transform for
+the remote object, MVAS-specific, on a ~4s client-side cadence -- not at the
+server or proxy emitting wrong coordinates.
 
-**No new wire change made, and none warranted.** The replication path is correct;
-the defect was the shared intake port, and Phase AZ already isolates it. A
-"datagram carries an instance id, consumer rejects mismatches" hardening was
-considered and REJECTED: in the docker mbox topology the proxy's own port base (0,
-stock container) is intentionally decoupled from the client's `FREYA_GAME_PORT_BASE`
-(23510) by docker forwarding, so an `instance == my-port-base` check would
-false-reject the LEGITIMATE mbox feed and silently kill it -- a worse silent-drop
-bug than the one it guards. The owner's teleport observation predates running the
-properly-isolated build on both boxes; on the isolated build it is fixed.
+**Next step (decisive, needs a brief client bounce): instrument the client.** Add
+`enb.obj_pos(gid)` to enbmod's lua_api (wrap the already-fault-guarded
+`entity_by_gid` + `world_pos`), rebuild the DLL (`just build-enbmod`), reinject
+(restart ONE box), then sample devusertt's world position vs self's from a
+bounded self-terminating on_tick and flag the frame where they coincide. That
+localizes it to "the position data really flips" (server/proxy) vs "data is fine,
+pure client render" (client). A pure-Lua probe via `enb.read.*` was rejected:
+`world_pos` needs an UNguarded thiscall from Lua, which could fault the client the
+owner is actively playing. The DLL wrapper keeps the setjmp guard.
+
+Doing this bounces the owner's live grouped session (~30s to relog one box), so
+it is teed up for a window the owner is OK with rather than done unilaterally.
+
+<details><summary>Struck-through: the earlier (wrong) "resolved" writeup</summary>
+
+~~Already fixed by Phase AZ per-instance posfeed port isolation. Each co-located
+instance owns a contiguous 127.0.0.1 port block base+0/+1/+2/+3; posfeed is
+base+3. Empirical: the remote avatar's HUD marker stayed rock-steady over a ~7.5s
+burst; the bug does NOT reproduce on the current build.~~ -- The isolation facts
+are correct and re-confirmed, but the "does not reproduce" conclusion was a
+sampling artifact; the owner reproduces it live. See REOPENED analysis above.
+
+</details>
 
 ## BA-3 -- launcher Profile section
 
