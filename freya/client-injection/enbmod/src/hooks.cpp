@@ -628,8 +628,8 @@ bool init() {
     // Mouse unlock: only when the launcher explicitly asked for it. Non-fatal
     // if it fails -- the game just keeps its native pointer confinement.
     char lock[8] = {0};
-    if (GetEnvironmentVariableA("FREYA_LOCK_MOUSE", lock, sizeof(lock)) &&
-        lock[0] == '0' && lock[1] == '\0') {
+    if (GetEnvironmentVariableA("FREYA_LOCK_MOUSE", lock, sizeof(lock)) && lock[0] == '0' &&
+        lock[1] == '\0') {
         void* clip = (void*)GetProcAddress(u32, "ClipCursor");
         if (clip && MH_CreateHook(clip, (void*)&hk_ClipCursor, (void**)&real_ClipCursor) == MH_OK &&
             MH_EnableHook(clip) == MH_OK) {
