@@ -489,6 +489,8 @@ namespace LaunchFreya
             c_TextBox_Password.Text = "";          // never restored from disk
             c_CheckBox_Fullscreen.IsChecked = _user.Fullscreen;
             c_CheckBox_LockMouse.IsChecked = _user.LockMouseToWindow;
+            c_TextBox_WindowX.Text = _user.WindowX?.ToString() ?? "";
+            c_TextBox_WindowY.Text = _user.WindowY?.ToString() ?? "";
             SelectResolution(_user.Resolution);
 
             FillEmulators();   // reads _user.LastEmulatorName -> FillHosts reads LastServerName
@@ -506,11 +508,21 @@ namespace LaunchFreya
             _user.Resolution = SelectedResolution();
             _user.Fullscreen = c_CheckBox_Fullscreen.IsChecked == true;
             _user.LockMouseToWindow = c_CheckBox_LockMouse.IsChecked == true;
+            _user.WindowX = ParseOptionalInt(c_TextBox_WindowX.Text);
+            _user.WindowY = ParseOptionalInt(c_TextBox_WindowY.Text);
             if (!string.IsNullOrEmpty(c_TextBox_Client.Text))
                 _user.ClientPath = c_TextBox_Client.Text;
             if (CurrentEmulator != null) _user.LastEmulatorName = CurrentEmulator.Name;
             var srv = (c_ComboBox_Servers.Text ?? "").Trim();
             if (!string.IsNullOrEmpty(srv)) _user.LastServerName = srv;
+        }
+
+        // Parse an optional integer text box: blank / whitespace / unparseable -> null
+        // (meaning "unset"), so the caller leaves the corresponding behaviour untouched.
+        static int? ParseOptionalInt(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return null;
+            return int.TryParse(s.Trim(), out int v) ? v : (int?)null;
         }
 
         // ---- resolutions (BA-4) ----
@@ -1012,6 +1024,14 @@ namespace LaunchFreya
             _setting.Fullscreen = c_CheckBox_Fullscreen.IsChecked == true;
             _setting.LockMouseToWindow = c_CheckBox_LockMouse.IsChecked == true;
 
+            // Optional client-window placement: only reposition when BOTH X and Y are
+            // given (a half-set position is ambiguous, so we ignore it and leave the
+            // window where the game opens it).
+            int? winX = ParseOptionalInt(c_TextBox_WindowX.Text);
+            int? winY = ParseOptionalInt(c_TextBox_WindowY.Text);
+            _setting.WindowX = winX;
+            _setting.WindowY = winY;
+
             // BA-5: optional auto-login. Push the typed credentials into the env the
             // client (enbmod's autologin.cpp) reads; clear each when blank so a prior
             // launch's value never leaks into a later plain launch. The password is
@@ -1039,6 +1059,8 @@ namespace LaunchFreya
             _user.Resolution = _setting.Resolution;
             _user.Fullscreen = _setting.Fullscreen;
             _user.LockMouseToWindow = _setting.LockMouseToWindow;
+            _user.WindowX = winX;
+            _user.WindowY = winY;
             _user.Save();
 
 #if !CHECK_FOR_UPDATES

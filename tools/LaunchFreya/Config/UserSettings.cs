@@ -74,6 +74,15 @@ namespace LaunchFreya.Config
         public string AccountName { get; set; } = "";
         public string CharacterName { get; set; } = "";
 
+        // Optional client-window placement. When both are set the launcher waits for
+        // the client window to appear after launch and moves it to (WindowX, WindowY);
+        // when either is null the client window is left wherever the game opens it (the
+        // stock behaviour). Per-profile so each multibox profile can pin its own screen
+        // slot. Nullable (not a -1 sentinel) because a negative coordinate is a valid
+        // position on a monitor left of the primary.
+        public int? WindowX { get; set; }
+        public int? WindowY { get; set; }
+
         // Display name of THIS profile. The baseline file carries "Default".
         public string Name { get; set; } = DefaultProfileName;
 

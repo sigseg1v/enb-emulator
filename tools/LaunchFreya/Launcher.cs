@@ -65,6 +65,12 @@ namespace LaunchFreya
         // prefix's HKCU\Software\Wine\X11 Driver\DXGrab before launch.
         public bool LockMouseToWindow { get; set; }
 
+        // Optional client-window placement. When BOTH are set the launcher waits for
+        // the client window to appear after launch, then moves it to (WindowX, WindowY);
+        // either null means "leave the window where the game opens it".
+        public int? WindowX { get; set; }
+        public int? WindowY { get; set; }
+
         public string EffectiveRegistrationHostname
             => string.IsNullOrEmpty(RegistrationHostname) ? Hostname : RegistrationHostname;
     }
@@ -356,12 +362,23 @@ namespace LaunchFreya
                 info = WinExe(dir, _setting.ClientPath, clientArgs);
             }
 
+            // Snapshot the client windows already open BEFORE we launch, so the
+            // optional placer can tell ours apart from any other client (multibox).
+            bool place = _setting.WindowX.HasValue && _setting.WindowY.HasValue;
+            object winSnapshot = place ? ClientWindowPlacer.Snapshot(_setting.ClientPath) : null;
+
             try { Process.Start(info); }
             catch (Exception e)
             {
                 throw new ApplicationException(
                     $"Could not launch client.\nWorking Directory: {info.WorkingDirectory}\nFileName: {info.FileName}\nArguments: {info.Arguments}\nDetails: {e.Message}", e);
             }
+
+            // Optional window placement: wait (off-thread) for the freshly-launched
+            // client window to appear, then move it to the configured position.
+            if (place)
+                ClientWindowPlacer.PlaceAsync(_setting.ClientPath, winSnapshot,
+                    _setting.WindowX.Value, _setting.WindowY.Value, _warn);
         }
 
         void LaunchFreyaProxy()
