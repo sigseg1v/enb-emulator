@@ -3033,3 +3033,39 @@ moot; the SOLVED block above is the truth):**
      rects are tested first) and must NOT rotate/click the ship behind the frame.
   4. No new WARNING/fault lines in enbmod.log; server log shows the normal
      REQUEST_TARGET handling with no Error/WARNING.
+
+## [ ] CV-AS-LOOT -- Freya LEFT loot readout reads a real hulk byte-correct; native loot still works
+
+- **What changed**: new `mods/freya-hud/loot_frame.lua` (LEFT-anchored) + DLL
+  binding `enb.loot()`/`enb.loot_age()`. The binding captures the hulk cargo
+  CONTAINER read-only from a naked ECX hook on the per-slot ItemTemplateID accessor
+  (`game::addr::CargoTemplateID = 0x00689ca0`) and replays the three accessors
+  (`0x00689ca0` id / `0x00689d20` stack / `0x0068aaa0` template) to enumerate
+  occupied slots. Source: behavioural analysis of the retail client's hulk-inventory
+  panel path (the same accessors the native loot grid calls each repaint).
+- **No server/proxy/CLI wire change**: this is a client-side READ of an object the
+  client already builds; nothing new goes on the wire, so no CLI parse is required
+  for THIS entry. The panel is READ-ONLY -- it does not take/loot; the native loot
+  window is left visible + functional underneath.
+- **What to look for (real client, human at the mouse, at a prospected hulk)**:
+  1. Prospect/kill something to spawn a hulk, open its loot -- a LEFT-side Freya
+     "SALVAGE" panel appears listing one row per occupied slot: correct 1-based
+     Slot number, correct item Name, and "xN" stack for N>1. Cross-check every
+     field against the native loot grid on the right -- they must match exactly
+     (e.g. Copper Ore x5 in slot 1, Lead Ore x3 in slot 2).
+  2. The panel's header shows the container inventory-name in parentheses (dev
+     read-out of the `src` discriminator) -- note what a HULK reads vs what your
+     own SHIP INVENTORY reads, so the false-positive filter can be tightened.
+  3. Close the loot window: the Freya panel must DISAPPEAR within ~5s (the
+     `enb.loot_age()` staleness gate) and never read a freed container (no crash,
+     no fault line in enbmod.log).
+  4. Open your own ship inventory (NOT a hulk): confirm whether the panel wrongly
+     shows your cargo (it will, until step 2's `src` filter is applied) -- report
+     the `src` string so the gate can be finalized.
+  5. Clicking the Freya panel is swallowed (no target deselect / camera rotate);
+     it does not yet loot.
+- **DEFERRED (separate future CV)**: a Freya take/loot-all action. Looting rides
+  the generic inventory-move packet (client->server opcode 0x27). Its 5-field move
+  layout is not capture-pinned; pinning it needs a cleartext proxy<->server capture
+  of one native loot, after which the CLI must parse 0x27 and a test pin it BEFORE
+  the client emits it and the native window is hidden (full CLAUDE.md gate).

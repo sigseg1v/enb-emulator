@@ -428,6 +428,37 @@ extern "C" __attribute__((naked)) void hk_WorldMgrInit() {
                          "jmp *_real_WorldMgrInit_tramp\n\t");
 }
 
+// ---- hulk/loot cargo container capture ---------------------------------------
+// game.h::addr::CargoTemplateID (0x00689ca0) is the per-slot ItemTemplateID
+// accessor, __thiscall(ECX = the cargo CONTAINER, arg = slot). The client calls it
+// once per occupied slot every time a hulk/loot cargo grid repaints, so hooking it
+// read-only and latching ECX hands us the live container pointer the moment a loot
+// window is populated -- no UI-object offset walk, no vtable call (the low-risk
+// capture per the cargo analysis). We only READ ECX and forward untouched; lua_api
+// (enb.loot) replays this and the sibling accessors off the captured container to
+// enumerate the slots. NOTE the accessor fires for ANY inventory grid (ship cargo,
+// vault, ...), so lua_api re-reads the container's inventory-name (container +
+// cargo::inv_name_ptr) to confirm it is the hulk cargo before trusting the rows.
+static volatile unsigned g_loot_container = 0;      // ECX of the last cargo accessor call
+static volatile unsigned long g_loot_container_tick = 0; // GetTickCount of that latch (0 = never)
+extern "C" {
+void* real_CargoTemplateID_tramp = nullptr;
+void notify_loot_container(unsigned c) {
+    g_loot_container = c;
+    g_loot_container_tick = GetTickCount();
+}
+}
+extern "C" __attribute__((naked)) void hk_CargoTemplateID() {
+    // __thiscall: ECX = cargo container. Capture it read-only, then forward
+    // (identical shape to hk_WorldMgrInit). We do NOT touch the slot arg or EAX.
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl %ecx\n\t" // container (this) -> notify_loot_container
+                         "call _notify_loot_container\n\t"
+                         "addl $4, %esp\n\t"
+                         "popal\n\t"
+                         "jmp *_real_CargoTemplateID_tramp\n\t");
+}
+
 // ---- cockpit controller capture ---------------------------------------------
 // game.h::addr::CockpitThrottle (0x0057dd20) and CockpitCommands (0x0057be50) are
 // the two cockpit-widget CONSTRUCTORS (__fastcall, ECX = the controller). They run
@@ -732,6 +763,11 @@ bool enable_event_hooks() {
         logf("hook WorldMgrInit failed");
         ok = false;
     }
+    if (MH_CreateHook((void*)game::addr::CargoTemplateID, (void*)&hk_CargoTemplateID,
+                      &real_CargoTemplateID_tramp) != MH_OK) {
+        logf("hook CargoTemplateID failed");
+        ok = false;
+    }
     if (MH_CreateHook((void*)game::addr::ActionBarUse, (void*)&hk_ActionBar,
                       &real_ActionBar_tramp) != MH_OK) {
         logf("hook ActionBarUse failed");
@@ -785,6 +821,7 @@ bool enable_event_hooks() {
     MH_EnableHook((void*)game::addr::TargetFrameRefresh);
     MH_EnableHook((void*)game::addr::TargetEntitySet);
     MH_EnableHook((void*)game::addr::WorldMgrInit);
+    MH_EnableHook((void*)game::addr::CargoTemplateID);
     MH_EnableHook((void*)game::addr::ActionBarUse);
     MH_EnableHook((void*)game::addr::ActionBarCtor);
     MH_EnableHook((void*)game::addr::CockpitThrottle);
@@ -808,6 +845,7 @@ void disable_event_hooks() {
     MH_DisableHook((void*)game::addr::TargetFrameRefresh);
     MH_DisableHook((void*)game::addr::TargetEntitySet);
     MH_DisableHook((void*)game::addr::WorldMgrInit);
+    MH_DisableHook((void*)game::addr::CargoTemplateID);
     MH_DisableHook((void*)game::addr::ActionBarUse);
     MH_DisableHook((void*)game::addr::ActionBarCtor);
     MH_DisableHook((void*)game::addr::CockpitThrottle);
@@ -910,6 +948,12 @@ unsigned target_ctrl() {
 }
 unsigned world_mgr() {
     return g_world_mgr;
+}
+unsigned loot_container() {
+    return g_loot_container;
+}
+unsigned long loot_container_tick() {
+    return g_loot_container_tick;
 }
 unsigned actionbar() {
     return g_actionbar;

@@ -305,6 +305,28 @@ constexpr uintptr_t CredentialAccept = 0x005ae450;
 // login::sel_index to its galaxy id and requests entry into the world. Also
 // non-blocking.
 constexpr uintptr_t CharEnter = 0x00769400;
+
+// ---- hulk / loot cargo enumeration ------------------------------------------
+// When you prospect/loot a wreck or resource, the client shows a "hulk cargo"
+// grid. Its per-slot data is read through three inventory-container accessors,
+// all __thiscall with ECX = the cargo CONTAINER object (an embedded sub-object at
+// InvData+0x54). We do NOT reach the container by offset-walking a UI object;
+// instead we CAPTURE its pointer read-only from CargoTemplateID's ECX (it is
+// called once per occupied slot every time the grid repaints), then replay these
+// same accessors to enumerate. The container also carries its slot count
+// precomputed at container + cargo::slot_count, and a char* inventory-name
+// at container + cargo::inv_name_ptr (the discriminator between "Cargo"/hulk and
+// ship inventory).
+//   CargoTemplateID (ECX=container; arg: u32 slot) -> ItemTemplateID; 0xFFFFFFFF
+//     = empty slot, 0xFFFFFFFE = error (skip both). We also hook this for capture.
+//   CargoStackCount (ECX=container; arg: u32 slot) -> stack quantity (0 if empty).
+//   CargoTemplateAt (ECX=container; args: u32 slot, then char mode = 0 pushed as a
+//     dword) -> item-template object pointer, or 0 for an empty slot. The template
+//     holds the item name (char* at cargo::tmpl_name_ptr, length at
+//     cargo::tmpl_name_len) and a resolved icon asset at cargo::tmpl_icon_asset.
+constexpr uintptr_t CargoTemplateID = 0x00689ca0;
+constexpr uintptr_t CargoStackCount = 0x00689d20;
+constexpr uintptr_t CargoTemplateAt = 0x0068aaa0;
 } // namespace addr
 
 // Front-end LoginTask layout (build-constant field offsets, runtime-validated).
@@ -624,6 +646,20 @@ struct Offsets {
 
 // The single live offsets instance (defined in game.cpp). Mutated by Lua enb.calibrate{}.
 Offsets& offs();
+
+// Hulk / loot cargo container + item-template field offsets. The container pointer
+// is the ECX captured at addr::CargoTemplateID; the template pointer is what
+// addr::CargoTemplateAt returns for an occupied slot. All CONFIDENT from analysis.
+namespace cargo {
+constexpr int inv_name_ptr = 0x04;   // container -> char* inventory-name ("Cargo" for a hulk)
+constexpr int slot_count = 0x44;     // container -> uint precomputed slot count
+constexpr int tmpl_name_ptr = 0x18;  // item template -> char* narrow item name
+constexpr int tmpl_name_len = 0x1c;  // item template -> int name length
+constexpr int tmpl_type = 0x0c;      // item template -> ItemType/category
+constexpr int tmpl_icon_asset = 0x10; // item template -> resolved icon asset object
+constexpr unsigned tid_empty = 0xFFFFFFFFu; // CargoTemplateID sentinel: empty slot
+constexpr unsigned tid_error = 0xFFFFFFFEu; // CargoTemplateID sentinel: error
+} // namespace cargo
 
 } // namespace game
 } // namespace enb
