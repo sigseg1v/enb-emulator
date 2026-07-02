@@ -154,7 +154,7 @@ wrappers -- follow to the real function body; the real body is listed where know
 ### Browser / embedded IE (HTML UI surface)
 | Addr | Notes |
 |---|---|
-| `0x00412ed1` (`thunk_FUN_007e0070`) | Creates the WebBrowser COM object: `CoCreateInstance(&DAT_00ba0f90, …, &DAT_00ba0fa8)` + `OleRun`. |
+| `0x00412ed1` (`thunk_0x007e0070`) | Creates the WebBrowser COM object: `CoCreateInstance(&DAT_00ba0f90, …, &DAT_00ba0fa8)` + `OleRun`. |
 | `client.c:1123074`, `1328476` | Other `CoCreateInstance` sites (browser + a 2nd CLSID `DAT_00bb9c08`). |
 | Data: `DAT_00ba0f90` (CLSID), `DAT_00ba0fa8`/`DAT_00ba0f78` (IIDs) | `{2B2CC8B0-…}` FEBrowserEngine2. HTML lives in `..\data\client\htmldocs\` (packed in mixfiles). |
 
@@ -176,7 +176,7 @@ wrappers -- follow to the real function body; the real body is listed where know
 
 87 `*PacketClass::Process_Packet()` handlers (`app\Packets`, range `0x401b04`–`0x8acab0`). Each
 logs its name on entry, e.g. `s_AvatarDescPacketClass__Process_Packet_…`, registered via the
-logger `FUN_009ea930`. Hooking these is often the **cleanest** way to read game state because the
+logger `0x009ea930`. Hooking these is often the **cleanest** way to read game state because the
 data is already deserialized and typed. To map a handler name → function: follow the string's
 single data xref to the function. High-value examples seen:
 `AvatarDescPacketClass`, `AdvancedPositionalUpdatePacketClass` (position!), `StartPacketClass`,

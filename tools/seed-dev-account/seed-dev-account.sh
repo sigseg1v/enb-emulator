@@ -47,7 +47,36 @@ cd "$REPO_ROOT"
 
 # Lower-cased, compose-safe unit name for this seed's dedicated CLI proxy.
 UNIT="seed-$(printf '%s' "$USER" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')"
-export STACK_NETWORK="${COMPOSE_PROJECT_NAME:-enb-emulator}_default"
+
+# Resolve the compose project the GAME STACK is actually running under, and pin
+# EVERY docker-compose call below to it. A bare `docker compose` with no project
+# pin silently picks the directory-default project name -- which has bitten us:
+# the Argon2id password row got written to a DIFFERENT postgres than the one the
+# running server reads, and game auth then failed with no obvious cause. An
+# explicit COMPOSE_PROJECT_NAME always wins; otherwise auto-detect the single
+# running stack that has a `postgres` service, and fail LOUD on zero / ambiguous
+# rather than silently writing to the wrong database.
+if [ -z "${COMPOSE_PROJECT_NAME:-}" ]; then
+    pg_ids=$(docker ps -q --filter "label=com.docker.compose.service=postgres" 2>/dev/null || true)
+    projects=$(for id in $pg_ids; do
+        docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$id" 2>/dev/null
+    done | sort -u | grep -v '^$' || true)
+    n=$(printf '%s\n' "$projects" | grep -c . || true)
+    if [ "$n" -eq 0 ]; then
+        echo "seed-dev-account: no running compose stack with a 'postgres' service found." >&2
+        echo "  Bring the stack up first (just dev) or set COMPOSE_PROJECT_NAME explicitly." >&2
+        exit 1
+    elif [ "$n" -gt 1 ]; then
+        echo "seed-dev-account: multiple running compose stacks have a 'postgres' service:" >&2
+        printf '    %s\n' $projects >&2
+        echo "  Set COMPOSE_PROJECT_NAME to the one to seed (e.g. COMPOSE_PROJECT_NAME=$(printf '%s' $projects | head -1) ...)." >&2
+        exit 1
+    fi
+    COMPOSE_PROJECT_NAME="$projects"
+fi
+export COMPOSE_PROJECT_NAME
+echo "    (targeting compose project '$COMPOSE_PROJECT_NAME')"
+export STACK_NETWORK="${COMPOSE_PROJECT_NAME}_default"
 
 # suffix:CLASS_CODE  -- create order == character slot order.
 # Codes must be valid (TE TT TS / JD JS JE / PW PP PS); the suffix mirrors the

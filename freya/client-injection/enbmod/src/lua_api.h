@@ -9,6 +9,10 @@ void open(lua_State* L);
 void reset_callbacks(lua_State* L);
 // Run every registered enb.on_tick callback. Called from the PeekMessageA tick.
 void tick(lua_State* L);
+// Resolve the local ship and publish its world position + orientation for the
+// MVAS position feed (FreyaPosFeed.dll reads it via the FreyaEnbmodShipState
+// export). Called from the PeekMessageA tick, under enbmod's fault guard.
+void publish_ship_state();
 // Dispatch event-hook callbacks (called from the game-function hooks, marshalled onto the tick).
 void on_skill(unsigned thisptr, unsigned arg);
 void on_chat(unsigned thisptr, unsigned arg);

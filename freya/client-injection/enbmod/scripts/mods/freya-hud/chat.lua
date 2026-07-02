@@ -32,7 +32,7 @@ local SLOT_STRIDE = 0x14
 local SLOT_TYPE  = 0x00   -- uint channel/type id
 local SLOT_TEXT  = 0x08   -- char* (NUL-terminated ASCII)
 
--- line color by channel/type (decomp FUN_0074d990 + live observation). Unknown
+-- line color by channel/type (0x0074d990 + live observation). Unknown
 -- types fall back to the normal ink.
 local TYPE_RGB = {
     [0x00] = 0xc9d6e6,  -- COMPUTER / normal

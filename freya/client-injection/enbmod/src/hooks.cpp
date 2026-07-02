@@ -70,6 +70,31 @@ static BOOL WINAPI hk_PeekMessageA(LPMSG m, HWND h, UINT min, UINT max, UINT rm)
     return real_PeekMessageA(m, h, min, max, rm);
 }
 
+// ---- mouse-unlock hooks -----------------------------------------------------
+// The client keeps the pointer inside its window TWO ways, and unlocking needs
+// both neutered:
+//   1. ClipCursor(rect) -- a confinement rectangle. Modern wine honours it
+//      unconditionally (wine 11.x has no DXGrab/GrabPointer registry knob to
+//      override it), so we swallow it and clear any pre-existing clip.
+//   2. SetCursorPos(x,y) -- the client actively re-warps the pointer back to
+//      window-centre a few times a second while focused. Killing only the clip
+//      leaves this recenter, so the pointer still "teleports back in". We
+//      swallow it too. This inherently disables cursor-recenter camera look,
+//      which is the point: a free pointer (multibox: reach the other client)
+//      cannot coexist with a pointer the game keeps yanking to centre.
+// Both are gated on FREYA_LOCK_MOUSE=0 (launcher "Lock Mouse To Window" OFF).
+typedef BOOL(WINAPI* ClipCursor_t)(const RECT*);
+static ClipCursor_t real_ClipCursor = nullptr;
+static BOOL WINAPI hk_ClipCursor(const RECT*) {
+    return TRUE;
+}
+
+typedef BOOL(WINAPI* SetCursorPos_t)(int, int);
+static SetCursorPos_t real_SetCursorPos = nullptr;
+static BOOL WINAPI hk_SetCursorPos(int, int) {
+    return TRUE;
+}
+
 static BOOL WINAPI hk_GetMessageA(LPMSG m, HWND h, UINT min, UINT max) {
     BOOL r = real_GetMessageA(m, h, min, max);
     // r == -1 is an error, 0 is WM_QUIT; only a positive return removed a real
@@ -114,8 +139,8 @@ static BOOL WINAPI hk_GetMessageA(LPMSG m, HWND h, UINT min, UINT max) {
 
 // ---- chat send-line interception (__thiscall) -------------------------------
 // game::addr::ChatSend is a C++ member function, NOT cdecl: `this` in ECX, the
-// raw typed chat line as the one stack arg, callee-cleaned (`ret 4`, verified by
-// disassembly -- the prologue does `mov %ecx,%ebx` and the function ends in
+// raw typed chat line as the one stack arg, callee-cleaned (`ret 4`, verified at
+// the call boundary -- the prologue does `mov %ecx,%ebx` and the function ends in
 // `c2 04 00`). A plain `__cdecl` detour is WRONG twice over: it ends in `ret 0`,
 // leaking 4 stack bytes on every chat send until ESP climbs into a bad return
 // slot and the client jumps onto its own stack (the "/run" crash); and on the
@@ -211,6 +236,32 @@ void* real_InSpace_tramp = nullptr;
 // it each frame gives calibration tooling a live, valid root with no scanning.
 void notify_inspace(unsigned thisp) {
     g_last_inspace_tick = GetTickCount();
+    if (!thisp)
+        return;
+    // thisp is a live object (ECX of the call). Its +ctrl_data is the avatar
+    // object the bar is painting; 0 means this is not a real, backed vitals bar.
+    unsigned player = *(volatile unsigned*)(thisp + game::player::ctrl_data);
+    if (player == 0)
+        return;
+    // The SAME EnergyBar updater repaints the self HUD bar AND every party/group
+    // member bar, so a naive latch grabs whichever drew LAST -- in a group that is
+    // a teammate, and the self player-card then shows the teammate's
+    // hull/shield/name (the "reactor values get mixed up" multibox bug). A member
+    // bar's controller is NOT distinguishable by "+ctrl_data != 0": a grouped
+    // teammate's controller has a perfectly valid avatar object there. Gate on
+    // IDENTITY instead: the world manager holds the local avatar's GameID at
+    // M + world::player_id, and every bar controller's avatar carries its own
+    // GameID at player + world::tgt_gid. Latch ONLY the controller whose avatar is
+    // the local player. Before M is captured (pre-zone) or before the id is
+    // populated, fall back to latching any backed controller so a solo player's
+    // card still fills.
+    unsigned M = world_mgr();
+    if (M) {
+        unsigned localgid = *(volatile unsigned*)(M + game::world::player_id);
+        unsigned ctrlgid = *(volatile unsigned*)(player + game::world::tgt_gid);
+        if (localgid != 0 && ctrlgid != localgid)
+            return; // a teammate's member bar -- never clobber the local latch
+    }
     g_vitals_ctrl = thisp;
 }
 }
@@ -586,6 +637,31 @@ bool init() {
     } else {
         logf("WARNING: GetMessageA hook failed -- HUD input (clicks/key highlight) disabled");
     }
+
+    // Mouse unlock: only when the launcher explicitly asked for it. Non-fatal
+    // if it fails -- the game just keeps its native pointer confinement.
+    char lock[8] = {0};
+    if (GetEnvironmentVariableA("FREYA_LOCK_MOUSE", lock, sizeof(lock)) && lock[0] == '0' &&
+        lock[1] == '\0') {
+        void* clip = (void*)GetProcAddress(u32, "ClipCursor");
+        if (clip && MH_CreateHook(clip, (void*)&hk_ClipCursor, (void**)&real_ClipCursor) == MH_OK &&
+            MH_EnableHook(clip) == MH_OK) {
+            // Clear any confinement set before the hook landed (FreyaInject
+            // starts the client suspended, so normally there is none).
+            real_ClipCursor(nullptr);
+            logf("mouse unlock: ClipCursor neutered (FREYA_LOCK_MOUSE=0)");
+        } else {
+            logf("WARNING: ClipCursor hook failed -- mouse stays locked to the window");
+        }
+        void* scp = (void*)GetProcAddress(u32, "SetCursorPos");
+        if (scp &&
+            MH_CreateHook(scp, (void*)&hk_SetCursorPos, (void**)&real_SetCursorPos) == MH_OK &&
+            MH_EnableHook(scp) == MH_OK) {
+            logf("mouse unlock: SetCursorPos recenter neutered (FREYA_LOCK_MOUSE=0)");
+        } else {
+            logf("WARNING: SetCursorPos hook failed -- pointer still teleports back to centre");
+        }
+    }
     return true;
 }
 
@@ -762,6 +838,56 @@ bool enable_inspace_hook() {
     g_inspace_hook_on = true;
     logf("inspace heartbeat hook installed on EnergyBar @ %p", (void*)game::addr::EnergyBar);
     return true;
+}
+
+// ---- front-end LoginTask capture (env-driven auto-login) --------------------
+// game.h::addr::LoginRunLoop (0x00767f50) is the front-end run loop,
+// __fastcall(ECX = LoginTask). It dispatches the EULA/login/charselect state
+// machine every frame while we are on the pre-game screens. We capture its `this`
+// (ECX) read-only -- the exact pattern of hk_WorldMgrInit, but for the front end --
+// so autologin.cpp has the LoginTask pointer to drive credential submit + character
+// select. Capture only; forwards every argument untouched via the trampoline.
+// Installed ONLY when an auto-login env var is set (enable_login_hook), so an
+// ordinary launch never gains this hook.
+static volatile unsigned g_login_task = 0; // ECX (LoginTask) of the front-end run loop
+extern "C" {
+void* real_LoginRunLoop_tramp = nullptr;
+void notify_login_task(unsigned thisp) {
+    g_login_task = thisp;
+}
+}
+extern "C" __attribute__((naked)) void hk_LoginRunLoop() {
+    // __fastcall: ECX = LoginTask. Preserve ECX across the cdecl notify call, forward.
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl %ecx\n\t" // LoginTask (this) -> notify_login_task
+                         "call _notify_login_task\n\t"
+                         "addl $4, %esp\n\t"
+                         "popal\n\t"
+                         "jmp *_real_LoginRunLoop_tramp\n\t");
+}
+
+static bool g_login_hook_on = false;
+bool enable_login_hook() {
+    if (g_login_hook_on)
+        return true;
+    MH_STATUS s = MH_CreateHook((void*)game::addr::LoginRunLoop, (void*)&hk_LoginRunLoop,
+                                &real_LoginRunLoop_tramp);
+    if (s != MH_OK) {
+        logf("hook LoginRunLoop MH_CreateHook failed: %s", MH_StatusToString(s));
+        return false;
+    }
+    s = MH_EnableHook((void*)game::addr::LoginRunLoop);
+    if (s != MH_OK) {
+        logf("enable LoginRunLoop MH_EnableHook failed: %s", MH_StatusToString(s));
+        return false;
+    }
+    g_login_hook_on = true;
+    logf("login capture hook installed on LoginRunLoop @ %p", (void*)game::addr::LoginRunLoop);
+    return true;
+}
+
+unsigned login_task() {
+    return g_login_task;
 }
 
 unsigned long last_inspace_tick() {

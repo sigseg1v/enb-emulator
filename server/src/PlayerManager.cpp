@@ -405,46 +405,6 @@ void PlayerManager::CheckForDuplicatePlayers(Player *player)
     }
 }
 
-bool PlayerManager::CheckAccountInUse(char *username)
-{
-	Player * p = (0);
-    
-	while (GetNextPlayerOnList(p, m_GlobalPlayerList))    
-	{
-		// strncmp changed to strcasecmp here to prevent multiple 
-		// useraccount logins by changing caps
-		if (strcasecmp(p->AccountUsername(), username) == 0)
-		{
-			if (p->Active())
-			{			
-				//this player's account is already active 
-				//this needs to be here due to extreme abuse which is harming the server.
-
-				LogMessage("Account user %s trying to log in twice, removed.\n", username);
-				//ErrorBroadcast("Account user %s [%s] trying to log in twice!\n", username, p->Name());
-				p->Dialog("Your account has tried to login twice. Disconnected.",0);			
-				p->ForceLogout();
-				DropPlayerFromGalaxy(p);
-
-				//IMPORTANT: DO NOT CHANGE THIS.
-				return true;
-				//p->ForceLogout();
-			}
-			else
-			{
-				if ((p->LastAccessTime() + 30000) < GetNet7TickCount())
-				{
-					LogMessage("Account user %s has dead player on server, remove\n", username);
-					p->ForceLogout();
-					DropPlayerFromGalaxy(p);
-				}
-				//ErrorBroadcast("Account user %s trying to log in twice!\n", username);
-			}
-		}
-    }
-	return false;
-}
-
 //Remove all players
 void PlayerManager::TerminateAllPlayers()
 {
@@ -753,11 +713,14 @@ void PlayerManager::BroadcastChat(long GameID, char *message, bool copy_to_origi
             EmitExternalStatusEvent(EXT_STATUS_BROADCAST, line);
         }
 
-        if (s && s->GetSectorPlayerList())
+        if (s)
         {
 			char Channel[] = "Broadcast";		// Channel
-            
-			while (GetNextPlayerOnList(p, s->GetSectorPlayerList()))   
+
+			// Broadcast reaches the entire server (every online player), the same
+			// reach as ChatSendEveryone. "To Local Area" (LocalChat) is the
+			// sector/range-scoped channel.
+			while (GetNextPlayerOnList(p, m_GlobalPlayerList))
 			{
 				//only send to originating player if directed to.
 				if (((p->GameID() != GameID) || copy_to_originator) 

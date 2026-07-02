@@ -27,6 +27,7 @@
 #include <windows.h>
 #include <cstring>
 #include "ClientPositionFeed.h"
+#include "FreyaMultiboxHook.h"
 
 // True only when the current process image is client.exe. AppInit_DLLs is
 // prefix-global, so without this the feed thread would also spin up inside any
@@ -60,6 +61,11 @@ BOOL APIENTRY DllMain(HANDLE hModule, DWORD ul_reason_for_call, LPVOID lpReserve
             // before the engine read is filled (when the feed sends nothing).
             OutputDebugStringA(
                 "[FreyaPosFeed] attached to client.exe; starting MVAS position feed\n");
+            // Defeat the single-instance mutex guard FIRST (opt-in via
+            // FREYA_MULTIBOX) so a multi-box launch gets past it. We run before
+            // the client's startup guard because injection resumes the client
+            // only after this DllMain returns.
+            FreyaMultiboxHook_Install();
             FreyaClientPosFeed_Start(); // inert until the owner seam is filled
         }
         break;

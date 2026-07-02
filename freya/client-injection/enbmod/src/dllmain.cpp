@@ -7,6 +7,8 @@
 #include "lua_api.h"
 #include "mem.h"
 #include "overlay.h"
+#include "autologin.h"
+#include "netredirect.h"
 
 extern "C" {
 #include "lua.h"
@@ -111,7 +113,13 @@ void run_init_script() {
 void on_tick() {
     if (!g_ready.load())
         return;
+    enb::autologin::tick(); // front-end auto-login driver (no-op once in-game / unconfigured)
     enb::lua::tick(g_L);
+    // Publish the local ship's world position + orientation for the MVAS
+    // position feed (FreyaPosFeed.dll reads it via FreyaEnbmodShipState). Native
+    // -- runs whenever enbmod is loaded, independent of whether any Lua mod is
+    // active. See plans/57 BA-2c.
+    enb::lua::publish_ship_state();
     // hot-reload: poll init.lua mtime every ~120 ticks
     if (++g_tick_count >= 120) {
         g_tick_count = 0;
@@ -173,6 +181,17 @@ DWORD WINAPI worker(LPVOID) {
     // overlay needs MinHook initialized (hooks::init did MH_Initialize) before it hooks Flip.
     if (!enb::overlay::init())
         enb::logf("overlay::init failed -- no drawing");
+
+    // env-driven auto-login: reads ENB_*/FREYA_* and, only when an account or
+    // character is requested, installs the read-only LoginTask capture hook
+    // (MinHook is up by now). No-op for an ordinary launch.
+    enb::autologin::init();
+
+    // local multibox: when FREYA_GAME_PORT_BASE names a per-instance port block,
+    // hook ws2_32 connect() so this client's fixed 127.0.0.1 game dials are
+    // remapped to its OWN proxy's port block on 127.0.0.1. No-op for an ordinary
+    // launch (env unset or the stock base 3500).
+    enb::netredirect::init();
 
     enb::logf("enbmod ready");
     return 0;

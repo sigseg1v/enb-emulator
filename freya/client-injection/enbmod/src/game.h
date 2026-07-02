@@ -84,14 +84,14 @@ constexpr uintptr_t ChatLocalLine = 0x0074d990; // local chat-window line printe
     // __thiscall(ECX = chat panel, int channel, const char* msg, char flag):
     // channel 0x11=error 0x13=system 0x15=warning 6=usage.
     // The client uses it for its own notices; prefixes COMPUTER/SYSTEM/WARNING then
-    // routes down to ChatLineAppend. (ECX=this confirmed by disasm of its call
+    // routes down to ChatLineAppend. (ECX=this confirmed at its call
     // sites -- the panel comes from a vtable getter, not a global.)
 // Chat line RING-BUFFER append -- the single choke point every displayed chat-panel
-// line passes through. Call graph: ChatLocalLine(0x0074d990) -> FUN_00563760 (chat-log
+// line passes through. Call graph: ChatLocalLine(0x0074d990) -> 0x00563760 (chat-log
 // + add) -> this. System, computer, warning, and network chat (Broadcast/Tell/Guild)
 // all funnel here, because the only path that fills the panel's ring is via
 // ChatLocalLine. __thiscall, ECX = the RING-BUFFER object (== *(chatpanel + 0x13c),
-// confirmed by disasm of FUN_00563760's call site: `mov 0x13c(edi),ecx; call thunk`).
+// confirmed at 0x00563760's call site: `mov 0x13c(edi),ecx; call thunk`).
 // We hook it READ-ONLY to capture that ECX -- the exact capture pattern of the
 // cockpit/xp/rpg hooks -- so the Freya chat window can poll the ring from Lua with no
 // further game calls. Lines land in the ring in call order (== chronological), which
@@ -154,10 +154,10 @@ constexpr uintptr_t CockpitCommands =
 
 // ---- PDA / micro-menu screen dispatcher (bottom-left button band) ----------
 // The micro-menu buttons (Inventory / Character Info / Galaxy Map / Skills / Vault)
-// are driven by the PDA panel controller (Ghidra srcfile "pdain", layout TSI14A).
+// are driven by the PDA panel controller (layout TSI14A).
 // PdaSwitch is the unified "make PDA child screen N active" dispatcher,
 // __thiscall(ECX = the PDA controller, int index): 0=Inventory, 1=Skills,
-// 2=Character Info, 3=Vault, 4=Galaxy Map -- verified from FUN_006956c0's
+// 2=Character Info, 3=Vault, 4=Galaxy Map -- verified from 0x006956c0's
 // child-pointer switch over controller +0x9c..0xa8. PdaCtor is the controller
 // CONSTRUCTOR, __fastcall(ECX = the controller); it builds the child screens and
 // stores the TSI14A screen at controller+0x94. We hook the CTOR read-only to
@@ -171,12 +171,12 @@ constexpr uintptr_t PdaSwitch = 0x00695780;
 // The bottom-left Options button does NOT open a PDA child; it opens the in-game
 // OPTIONS_MAIN screen (layout fa_opt01a.ini). That screen is owned by the screen
 // SHELL controller, which holds the currently-shown screen at +0x104 and a
-// "pending screen id" at +0x108. ShellApply (FUN_00565f80, __fastcall(ECX = the
+// "pending screen id" at +0x108. ShellApply (0x00565f80, __fastcall(ECX = the
 // shell)) is the per-frame "apply the pending screen change" pump: when +0x108
 // is non-zero it tears down the old screen and builds the requested one --
 // id 1 = Options (verified: case 1 constructs the fa_opt01a screen class). It is
 // called every frame by the in-game HUD updater, so hooking it captures the LIVE
-// shell `this` continuously. ShellRequest (FUN_00565f30, __thiscall(ECX = the
+// shell `this` continuously. ShellRequest (0x00565f30, __thiscall(ECX = the
 // shell, int id)) just stores the pending id (+0x108 = id) -- exactly what every
 // native "Options" button does; the next ShellApply frame opens it. We hook
 // ShellApply read-only for the `this`, and drive ShellRequest to open a screen.
@@ -246,10 +246,91 @@ constexpr uintptr_t WorldMgrInit = 0x00741180;
 //   CmdSend (__thiscall, ECX = M, command buffer) routes the built command through
 //     *(M + world::connection)->vtable[2]. Same address as ChatMsgSend (chat uses the
 //     identical "build object, push through the manager's Connection" path).
+//   CtaBuild (__thiscall, ECX = buffer; args: uint source_id, uint target_id, uint
+//     action) is the builder for the group call-to-arms / formation request (wire
+//     opcode 0x00BC, CTARequest{SourceID, TargetID, Action} -- see
+//     common/include/net7/PacketStructures.h). It writes 6 dwords (0x18 bytes), so the
+//     same zeroed 0x20-byte buffer works, and the built object goes through CmdSend
+//     like every other outgoing command. This is the packet behind the native group
+//     window's Formation / "Target my target" controls. action routes the server's
+//     GroupAction switch: 4 Slot Back, 5 Block, 6 Pipe (set formation, leader-only),
+//     7 Form Up, 8 Leave Formation, 9 Break Formation (leader), 12 target-my-target.
+//     target_id -1 = the whole group (the builder's own no-arg default).
 constexpr uintptr_t CmdBuild = 0x00876360;
 constexpr uintptr_t AutoFollowBuild = 0x0089d070;
 constexpr uintptr_t CmdSend = 0x00728150;
+constexpr uintptr_t CtaBuild = 0x0086f070;
+
+// RequestTarget (__thiscall, ECX = M; arg: a live contact-object pointer) is the
+// client's own "make this object my target" call -- the same path a click on an
+// object in space takes. It reads the object's GameID (obj + world::tgt_gid) into a
+// REQUEST_TARGET (wire opcode 0x17) packet and pushes it through M's sector-server
+// Connection (M + world::connection). The server validates the target is real / in
+// range and replies SET_TARGET (0x19), which the client applies natively (target
+// frame, threat text, highlight). We replicate it from enb.request_target: resolve a
+// GameID to its contact object with the same gid->object lookup enb.group uses, then
+// hand that object here. Pass ONLY an object the lookup returned (never a raw address).
+constexpr uintptr_t RequestTarget = 0x00723230;
+
+// ---- front-end login flow (EULA / login / character select) -----------------
+// The pre-game screens are driven by a single LoginTask object and its state
+// machine. We capture the LoginTask `this` (ECX) read-only from the per-frame
+// run loop and drive the env-fed auto-login (see namespace login + autologin.cpp).
+//
+// LoginRunLoop (__fastcall(ECX = LoginTask)): the main front-end
+// loop. Runs EVERY frame while on the EULA/login/charselect screens and dispatches
+// the state machine. We hook it READ-ONLY to capture the LoginTask `this` -- the
+// exact capture pattern of WorldMgrInit, but for the front end. It is the one
+// place the LoginTask pointer is reliably available before we are in the world.
+constexpr uintptr_t LoginRunLoop = 0x00767f50;
+// EulaAccepted (no args) -> nonzero when the EULA has been accepted (reads the
+// "Trial" registry value; 0 == accepted/not-a-trial). We do not call it; we set
+// the registry value it reads (autologin EULA accept).
+constexpr uintptr_t EulaAccepted = 0x005fade0;
+// EditSetText (__thiscall(this = edit widget, char* text, int append)): replaces
+// (append == 0) the text of a login edit widget. The credential view's username
+// and password widgets (login::view_user_widget / login::view_pass_widget) take
+// this; setting the password widget shows the masked dots, exactly as typing does.
+constexpr uintptr_t EditSetText = 0x006aa570;
+// CredentialAccept (__thiscall(this = credential view), no args): the work the
+// Login button does -- reads the two edit widgets and kicks off authentication.
+// NON-BLOCKING: it returns immediately and the client's own per-frame run loop
+// pumps the result. Safe to call from the tick (a blocking handler would wedge
+// it). Driven with the credential-view `this`, NOT the LoginTask. NOTE: this path
+// does NOT advance the front-end state off login::state_login (1) -- the
+// char-select screen never renders; the avatar list instead arrives and populates
+// the inline name slots, which is the signal auto-login waits on (see autologin.cpp).
+constexpr uintptr_t CredentialAccept = 0x005ae450;
+// CharEnter (__thiscall(this = LoginTask), no args): resolves the character at
+// login::sel_index to its galaxy id and requests entry into the world. Also
+// non-blocking.
+constexpr uintptr_t CharEnter = 0x00769400;
 } // namespace addr
+
+// Front-end LoginTask layout (build-constant field offsets, runtime-validated).
+// Only the LoginTask pointer and the per-run credential-view pointer vary per
+// launch; these offsets do not. The credential view is a child object located by
+// signature each run (see autologin.cpp): its back-pointer (view_owner) equals the
+// LoginTask, and its two edit-widget slots point at objects whose first dword is
+// the edit-widget vtable. The username/password text lives in the widgets, not in
+// any LoginTask copy, so auth only sees text written through EditSetText.
+namespace login {
+constexpr unsigned state = 0x24; // int front-end state
+constexpr int state_login = 1;   //   login / pre-game screen up
+// NOTE on the state field: when credentials are submitted programmatically, this
+// client build authenticates and fills the character-name slots below WITHOUT
+// flipping +0x24 off the login value (the character-select screen never renders).
+// So the avatar list arriving is detected by the NAME SLOTS becoming populated,
+// not by a state change -- the auto-enter gate watches the slots, not +0x24.
+constexpr unsigned view_owner = 0x9c;                // credential view -> back-ptr to LoginTask
+constexpr unsigned view_user_widget = 0xa4;          // credential view -> username edit widget
+constexpr unsigned view_pass_widget = 0xa8;          // credential view -> password edit widget
+constexpr uintptr_t edit_widget_vtable = 0x00afda10; // first dword of an edit widget
+constexpr unsigned char_name_base = 0x424;           // char[0] name slot
+constexpr unsigned char_name_stride = 0x10c;         // stride between char name slots
+constexpr int char_max = 8;                          // character slots to scan
+constexpr unsigned sel_index = 0x1080;               // selected character index (int)
+} // namespace login
 
 // Vitals-bar fill chain. Unlike the Offsets struct below (runtime hypotheses),
 // these are CONFIRMED build-constant field offsets, observed at runtime: the
@@ -306,10 +387,26 @@ constexpr int aux_container = 0x88; // *(dataObj + 0x88) -> aux container (threa
 // properties/aux bag (hull/shield/name) hangs off +tgt_container. The native verb
 // dispatcher sends the +tgt_gid GameID directly; it is NOT a field of the aux bag.
 namespace world {
-constexpr int player_id = 0x112c;   // M -> local player game id (command actor)
-constexpr int connection = 0x1124;  // M -> sector-server Connection (command sink)
-constexpr int tgt_container = 0x88;  // target contact object -> properties/aux bag (hull/shield/name)
-constexpr int tgt_gid = 0x90;        // target contact object + 0x90 -> its own GameID (command target)
+constexpr int player_id = 0x112c;  // M -> local player game id (command actor)
+constexpr int connection = 0x1124; // M -> sector-server Connection (command sink)
+constexpr int tgt_container =
+    0x88;                     // target contact object -> properties/aux bag (hull/shield/name)
+constexpr int tgt_gid = 0x90; // target contact object + 0x90 -> its own GameID (command target)
+// M also holds the session ENTITY TABLE keyed by GameID -- the same map the native
+// group HUD resolves each member through to reach its render object and read its
+// vitals. It is a fixed 0x101-bucket chained hash on M + ent_buckets: bucket =
+// gid % ent_modulus; each node links to the next via ent_node_next, keys on
+// ent_node_gid, and points to the contact object at ent_node_obj. Walk it with
+// pure guarded reads (no native call -- avoids any calling-convention hazard on
+// the live client), matching ent_node_gid and taking ent_node_obj; a GameID with
+// no live entity (member in another sector / not yet in scene) simply misses. The
+// resolved contact object's +tgt_container aux bag then yields hull/shield exactly
+// as enb.target() reads them.
+constexpr int ent_buckets = 0x38;       // M -> base of the GameID hash bucket array
+constexpr unsigned ent_modulus = 0x101; // bucket index = gid % ent_modulus
+constexpr int ent_node_next = 0x04;     // node -> next node in its bucket chain
+constexpr int ent_node_obj = 0x10;      // node -> resolved contact object
+constexpr int ent_node_gid = 0x14;      // node -> key (GameID)
 } // namespace world
 
 // Target/player WORLD position, for the straight-line range shown on the frame. The
@@ -348,6 +445,15 @@ constexpr uintptr_t get_value = 0x00546710;
 constexpr int val_off = 0x84;   // entry + 0x84 -> float value
 constexpr int valid_off = 0x70; // entry + 0x70 -> nonzero when value is set
 constexpr int keybuf_sz = 0x40; // zeroed scratch key-object buffer
+// get_shared(container, keybuf) -> entry|0: __cdecl. Resolves a SHARED /
+// network-replicated, delta-interpolated auxdata entry (a different list than
+// get_value's) -- this is where ShieldPercent lives. get_value returns 0 for
+// these keys (their +val_off slot is empty); the live value is a 0..1 float at
+// entry + shared_val_off, guarded by the same valid_off flag. Present for both
+// the local player and any in-range remote (so a group member's current shield
+// is readable client-side).
+constexpr uintptr_t get_shared = 0x005bf2b0;
+constexpr int shared_val_off = 0x248; // entry + 0x248 -> float (0..1) live value
 } // namespace aux
 
 // Discipline levels (RPGInfo Combat/Trade/Explore) -- a property bag like aux,
@@ -369,10 +475,43 @@ constexpr uintptr_t get_entry = 0x00514b60; // __cdecl(container, keybuf) -> ent
 constexpr uintptr_t get_string = 0x00514bd0; // __cdecl(container, keybuf) -> entry|0 (string-typed)
 } // namespace rpg
 
+// Party/group roster -- the "GroupInfo" entry in the SAME property-bag container
+// the RPGInfo levels live in (rpg::container_off, +0x12c0, off the avatar object).
+// Unlike the value/level entries (get_value / get_entry, which return an ENTRY whose
+// data is at entry+val_off), GroupInfo is an OBJECT-typed entry: get_object returns
+// the group object DIRECTLY (no val_off indirection). get_object is __cdecl(container,
+// keybuf) like the others -- internally it routes the container to a __fastcall index
+// builder (container+0x94) and the keybuf to a __thiscall red-black-tree search, but the
+// public entry point takes both on the stack, so the same typedef as get_value applies.
+// The group object holds the roster:
+//   +0x70  active flag (nonzero when the local player is in a group)
+//   +0x674 member-array begin ptr   +0x678 member-array end ptr
+//          member count = (end - begin) / 4, capped at max_members
+// Each member is a heap object pointer:
+//   +0x120 name (char*)   +0x1a8 GameID (uint32)
+// Keys are built with aux::build_key. Read under the VEH fault guard.
+namespace group {
+constexpr uintptr_t get_object = 0x005927e0; // __cdecl(container, keybuf) -> group object|0
+constexpr int active_off = 0x70;             // group + this -> nonzero when in a group
+constexpr int members_begin = 0x674;         // group + this -> member-array begin ptr
+constexpr int members_end = 0x678;           // group + this -> member-array end ptr
+constexpr int member_name = 0x120;           // member + this -> name char*
+constexpr int member_gameid = 0x1a8;         // member + this -> GameID (uint32)
+constexpr int max_members = 5;               // roster cap (UI shows at most 5 rows)
+// The client's own "am I the group leader?" check -- the exact function the native
+// group window runs at init to decide whether its top button reads GRP DISBAND
+// (leader) or GRP LEAVE (member). __fastcall(avatar object) -- the same
+// container-holding avatar base the roster read uses (it looks up the GroupInfo
+// entry off base+rpg::container_off itself, so a single-ECX call_thiscall with no
+// stack args is the right calling shape). Returns nonzero when the local player
+// leads their current group; zero when member / solo. Call under the VEH guard.
+constexpr uintptr_t is_leader = 0x0074d690; // __fastcall(avatar base) -> leader?
+} // namespace group
+
 // Chat line RING-BUFFER layout, off the ring object captured at addr::ChatLineAppend
-// (hooks::chat_buf() == FUN_0067d780's ECX). NOT a sorted vector -- it is a fixed-size
-// ring of 0x14-byte slots, indexed (write_count % capacity). Confirmed by reading
-// FUN_0067d780's body:
+// (hooks::chat_buf() == 0x0067d780's ECX). NOT a sorted vector -- it is a fixed-size
+// ring of 0x14-byte slots, indexed (write_count % capacity). Confirmed from
+// 0x0067d780's body:
 //   slot = ring[+0xc] + (ring[+8]++ % ring[+4]) * 0x14
 //   slot+0x00 = uint type/channel   slot+0x08 = char* text   slot+0x0c = uint len
 // To read chronologically: i from max(0, count-capacity) to count-1, slot[(i%cap)].

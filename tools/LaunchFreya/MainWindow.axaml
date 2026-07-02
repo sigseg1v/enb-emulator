@@ -4,7 +4,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         x:Class="LaunchFreya.MainWindow"
-        Width="1280" Height="680"
+        Width="1280" Height="820"
         Title="Freya Launcher"
         FontFamily="{StaticResource FreyaBodyFont}"
         CanResize="True">
@@ -34,7 +34,7 @@
       <TextBlock Text="ONLINE" Classes="wordmarkSub" Margin="3,7,0,0" />
     </StackPanel>
 
-  <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,*,Auto">
+  <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*,Auto">
 
     <!-- Row 0: Server picker (emulator/host) -->
     <Border Grid.Row="0" Classes="panel">
@@ -72,25 +72,76 @@
       </Grid>
     </Border>
 
-    <!-- Row 1: Client path -->
+    <!-- Row 1: Profile (between the server section and the client section) -->
     <Border Grid.Row="1" Classes="panel" Margin="0,8,0,0">
-      <Grid ColumnDefinitions="100,*,Auto">
-        <TextBlock Grid.Column="0" Text="Client EXE:" Classes="label" VerticalAlignment="Center" />
-        <TextBox   Grid.Column="1" Name="c_TextBox_Client" />
-        <Button    Grid.Column="2" Margin="8,0,0,0" Content="Browse..." Click="OnBrowseClient" />
+      <Grid ColumnDefinitions="100,*,Auto,Auto">
+        <TextBlock Grid.Column="0" Text="Profile:" Classes="label" VerticalAlignment="Center" />
+        <ComboBox  Grid.Column="1" Name="c_ComboBox_Profiles" HorizontalAlignment="Stretch"
+                   SelectionChanged="OnProfileChanged" />
+        <Button    Grid.Column="2" Margin="8,0,0,0" Width="36" Content="+"
+                   HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                   Name="c_Button_AddProfile" Click="OnAddProfileClick"
+                   ToolTip.Tip="Create a new profile (copies the current settings)." />
+        <Button    Grid.Column="3" Margin="8,0,0,0" Width="36" Content="X"
+                   HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                   Name="c_Button_DelProfile" Click="OnDeleteProfileClick"
+                   ToolTip.Tip="Delete the selected profile. The Default profile cannot be deleted." />
       </Grid>
     </Border>
 
-    <!-- Row 2: Authentication -->
+    <!-- Row 2: Client path + display settings + optional login -->
     <Border Grid.Row="2" Classes="panel" Margin="0,8,0,0">
+      <Grid ColumnDefinitions="100,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Client EXE:" Classes="label" VerticalAlignment="Center" />
+        <TextBox   Grid.Row="0" Grid.Column="1" Name="c_TextBox_Client" />
+        <Button    Grid.Row="0" Grid.Column="2" Margin="8,0,0,0" Content="Browse..." Click="OnBrowseClient" />
+
+        <!-- Display (BA-4) -->
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="Resolution:" Classes="label" VerticalAlignment="Center" Margin="0,8,0,0" />
+        <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="14" Margin="0,8,0,0">
+          <ComboBox Name="c_ComboBox_Resolution" Width="190" />
+          <CheckBox Name="c_CheckBox_Fullscreen" Content="Fullscreen" VerticalAlignment="Center" />
+          <CheckBox Name="c_CheckBox_LockMouse" Content="Lock Mouse to Window" VerticalAlignment="Center"
+                    ToolTip.Tip="The game confines the mouse to its window while it has focus (its native behaviour). Untick to free the pointer so it can leave the window, e.g. to reach another client while multiboxing." />
+        </StackPanel>
+
+        <!-- Optional login (BA-5) + optional client-window placement. Window Pos:
+             both blank -> leave the window where the game opens it; both set ->
+             reposition to (X,Y) once it appears. -->
+        <TextBlock Grid.Row="2" Grid.Column="0" Text="Username:" Classes="label" VerticalAlignment="Center" Margin="0,8,0,0" />
+        <StackPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="14" Margin="0,8,0,0">
+          <TextBox Name="c_TextBox_Username" Width="190" Watermark="optional" />
+          <TextBlock Text="Window Pos:" Classes="label" VerticalAlignment="Center" />
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBlock Text="X" Classes="label" VerticalAlignment="Center" />
+            <TextBox Name="c_TextBox_WindowX" Width="80" Watermark="optional"
+                     ToolTip.Tip="Screen X to move the client window to after launch. Leave blank to leave it where the game opens it." />
+            <TextBlock Text="Y" Classes="label" VerticalAlignment="Center" Margin="8,0,0,0" />
+            <TextBox Name="c_TextBox_WindowY" Width="80" Watermark="optional"
+                     ToolTip.Tip="Screen Y to move the client window to after launch. Leave blank to leave it where the game opens it." />
+          </StackPanel>
+        </StackPanel>
+
+        <TextBlock Grid.Row="3" Grid.Column="0" Text="Password:" Classes="label" VerticalAlignment="Center" Margin="0,8,0,0" />
+        <TextBox   Grid.Row="3" Grid.Column="1" Name="c_TextBox_Password" Width="190"
+                   HorizontalAlignment="Left" Margin="0,8,0,0" PasswordChar="*" Watermark="optional" />
+
+        <TextBlock Grid.Row="4" Grid.Column="0" Text="Character:" Classes="label" VerticalAlignment="Center" Margin="0,8,0,0" />
+        <TextBox   Grid.Row="4" Grid.Column="1" Name="c_TextBox_Character" Width="190"
+                   HorizontalAlignment="Left" Margin="0,8,0,0" Watermark="optional" />
+      </Grid>
+    </Border>
+
+    <!-- Row 3: Authentication -->
+    <Border Grid.Row="3" Classes="panel" Margin="0,8,0,0">
       <Grid ColumnDefinitions="220,*">
         <TextBlock Grid.Column="0" Text="Upstream Auth Port (TLS):" Classes="label" VerticalAlignment="Center" />
         <TextBox   Grid.Column="1" Name="c_TextBox_Port" Width="80" HorizontalAlignment="Left" />
       </Grid>
     </Border>
 
-    <!-- Row 3: Options -->
-    <Border Grid.Row="3" Classes="panel" Margin="0,8,0,0">
+    <!-- Row 4: Options -->
+    <Border Grid.Row="4" Classes="panel" Margin="0,8,0,0">
       <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
         <CheckBox Name="c_CheckBox_LuaMods" Content="Enable Lua Mods (experimental)"
                   VerticalAlignment="Center"
@@ -103,8 +154,8 @@
       </StackPanel>
     </Border>
 
-    <!-- Row 4: Status line + (Phase AN) indeterminate update/download spinner -->
-    <StackPanel Grid.Row="4" Orientation="Horizontal" Spacing="10" Margin="0,14,0,4">
+    <!-- Row 5: Status line + (Phase AN) indeterminate update/download spinner -->
+    <StackPanel Grid.Row="5" Orientation="Horizontal" Spacing="10" Margin="0,14,0,4">
       <TextBlock Name="c_Status" VerticalAlignment="Center"
                  Foreground="{StaticResource FreyaTextDimBrush}"
                  Text="Please select a server and hit Play." />
@@ -112,12 +163,12 @@
                    IsVisible="False" VerticalAlignment="Center" />
     </StackPanel>
 
-    <!-- Row 5: filler so the button row hugs the bottom -->
-    <Border Grid.Row="5" />
+    <!-- Row 6: filler so the button row hugs the bottom -->
+    <Border Grid.Row="6" />
 
-    <!-- Row 6: Buttons. The log pane is hidden; its contents are -->
+    <!-- Row 7: Buttons. The log pane is hidden; its contents are -->
     <!-- surfaced through the Advanced... dialog.                  -->
-    <Grid Grid.Row="6">
+    <Grid Grid.Row="7">
       <TextBox Name="c_LogPane" IsVisible="False" />
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
         <Button Name="c_Button_Advanced" Content="Advanced..." Click="OnAdvancedClick" />

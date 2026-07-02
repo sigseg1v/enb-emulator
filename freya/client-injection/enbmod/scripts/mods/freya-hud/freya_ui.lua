@@ -50,7 +50,7 @@ for i, k in ipairs(KEYS) do VK_TO_IDX[k.vk] = i end
 -- three slots, bank1 the next three -- six slots total, our keys 1-6. Each bank
 -- holds its three box pointers at +0x10/+0x14/+0x18.
 --
--- The dispatcher FUN_006120e0(controller, id) is PRESS/RELEASE-keyed, not
+-- The dispatcher 0x006120e0(controller, id) is PRESS/RELEASE-keyed, not
 -- primary/alternate. A bank exposes a press-id base (+0x50) and a release-id
 -- base (+0x54); box k (k in 0..2) has press id (v50+k) and release id (v54+k):
 --   * press  (id in [v50, v50+3)) fires the action ONLY when the box is idle
@@ -62,7 +62,7 @@ for i, k in ipairs(KEYS) do VK_TO_IDX[k.vk] = i end
 -- and a second activation must use the RELEASE id to turn it off. So replaying a
 -- keypress means: read the box's live +0x6c and pick press-or-release exactly as
 -- the native keybind handler does. Calling a press id on an already-active box
--- (or a release id on an idle box) hits neither branch and FUN_006120e0 returns
+-- (or a release id on an idle box) hits neither branch and 0x006120e0 returns
 -- 0 -- a silent no-op. That mis-pick (computing an id outside both ranges) is why
 -- the previous mapping never actually dispatched. The id+box layout here is read
 -- live from the controller and verified against the running client.
@@ -107,7 +107,7 @@ local function slot_bank_box(i)
     return bank, box, k
 end
 
--- The native keybind drives slot i (1..6) through the dispatcher FUN_006120e0 with
+-- The native keybind drives slot i (1..6) through the dispatcher 0x006120e0 with
 -- a PRESS id on key-down and a RELEASE id on key-up: the ability fires on the
 -- press, and the release just resets the box's pressed flag (+0x6c) back to 0. The
 -- dispatcher gates each branch on that byte (press acts only when byte==0 then sets
@@ -305,6 +305,11 @@ local CFG = {
     BOTTOM        = 18,    -- gap from screen bottom to the hotbar (design bottom:18)
 
     PC_W          = 224,   -- player-card width (design)
+    -- Low-res rightward nudge so the card clears the bottom-left chat box. FULL at
+    -- the 1280x960 reference (card left edge 416 vs chat right edge 482 -> ~66px
+    -- overlap; 72 clears it with a small gap), decaying to 0 by 2560x1440 where the
+    -- centerline has moved right enough that the card no longer touches the chat.
+    PC_LOWRES_DX  = 72,
     PC_PAD_X      = 7,
     PC_PAD_Y      = 5,
     HEAD_H        = 16,    -- name/level header row
@@ -347,7 +352,14 @@ local function layout()
                + #VITALS * CFG.VITAL_H + (#VITALS - 1) * CFG.VITAL_GAP + CFG.PC_PAD_Y
     -- The player card is anchored so its RIGHT edge meets the screen centerline
     -- (owner layout): back off from the centre by the card's fixed design width.
-    local pc = { x = math.floor(sw / 2) - CFG.PC_W,
+    -- On a small screen that puts its left edge over the bottom-left chat box, so
+    -- nudge it RIGHT. The nudge is full at the 1280x960 reference and decays
+    -- linearly to 0 by 2560x1440: H.sx(N) grows the OPPOSITE way (0 at ref, N at
+    -- the tuned res), so `N - H.sx(N)` is N at the reference and 0 at 2560x1440
+    -- (clamped so it never goes negative past the tuned res). Larger screens keep
+    -- the current centered position exactly.
+    local pc_dx = math.max(0, CFG.PC_LOWRES_DX - H.sx(CFG.PC_LOWRES_DX))
+    local pc = { x = math.floor(sw / 2) - CFG.PC_W + pc_dx,
                  y = base_bar_y - CFG.PC_GAP - pc_h - H.sy(12),
                  w = CFG.PC_W, h = pc_h }
 

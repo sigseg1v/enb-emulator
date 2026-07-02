@@ -46,11 +46,28 @@ namespace LaunchFreya.Network
         readonly CancellationTokenSource _cts = new();
         readonly Action<string> _log;
 
+        // Returns null when the relay port is already bound -- a sibling launcher
+        // (multi-box) owns the one shared relay, and since it terminates on
+        // 127.0.0.1:4180 and re-wraps to the same upstream for everyone, every
+        // instance's client uses it. The caller treats null as "relay already
+        // provided" and carries on.
         public static LocalAuthRelay Start(string upstreamHost, int upstreamPort, Action<string> log = null)
         {
             var r = new LocalAuthRelay(upstreamHost, upstreamPort, log);
-            r._v4.Start();
-            r._v6.Start();
+            try
+            {
+                r._v4.Start();
+                r._v6.Start();
+            }
+            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
+            {
+                try { r._v4.Stop(); } catch { }
+                try { r._v6.Stop(); } catch { }
+                (log ?? (_ => { }))(
+                    $"auth relay: 127.0.0.1:{ListenPort} already bound -- reusing the " +
+                    "sibling launcher's shared relay (multi-box)");
+                return null;
+            }
             _ = Task.Run(() => r.AcceptLoop(r._v4));
             _ = Task.Run(() => r.AcceptLoop(r._v6));
             r._log($"auth relay: listening on 127.0.0.1:{ListenPort} and [::1]:{ListenPort} -> {upstreamHost}:{upstreamPort} (verify={(r._upstreamIsLoopback ? "skip" : "full")})");

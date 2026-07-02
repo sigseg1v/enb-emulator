@@ -95,11 +95,11 @@ public static class SectorHandshake
         public async ValueTask DisposeAsync()
         {
             // Clean logoff before closing the sockets. A bare socket close
-            // strands the server's Player as Active() forever: the 30s
-            // account-in-use reap (UDP_Global.cpp ProcessTicketInfo ->
-            // PlayerManager::CheckAccountInUse) only frees players already
-            // flagged inactive, and a dirty disconnect never flips that
-            // flag. Across a serial run these stranded Active players pile
+            // strands the server's Player as Active() until the 2-minute
+            // idle reaper in SendUDPOpcodes gets around to it (the old 30s
+            // account-in-use reap left with the account-level duplicate-
+            // login guard, owner-directed 2026-06-30). Across a serial run
+            // these stranded Active players pile
             // up until the server's player pool is exhausted and the global
             // plane stops issuing 0x0070 GLOBAL_AVATAR_LIST -- the
             // session-accumulation "wedge" that only a server restart

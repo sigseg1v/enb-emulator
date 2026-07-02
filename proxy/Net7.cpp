@@ -27,6 +27,41 @@ char* g_server_addr = (0);
 char* default_addr = "127.0.0.1";
 char* g_internal_addr = (0);
 
+// Client-facing bind address (network byte order). INADDR_ANY by default; a
+// multi-box launch sets FREYA_PROXY_BIND_ADDRESS to 127.0.0.1 so N proxies stay
+// off the external interfaces. Resolved in main() from the env var. See Net7.h.
+unsigned long g_proxy_bind_addr = INADDR_ANY;
+
+// Per-instance client-facing PORT-block base. 0 = stock ports (single-client +
+// docker). A native multi-box launch sets FREYA_PROXY_PORT_BASE so each
+// co-located proxy listens on its own contiguous block on the SAME loopback IP,
+// and the in-client connect() hook remaps the client's fixed dials to match. See
+// proxy_client_port() and Net7.h.
+unsigned short g_proxy_port_base = 0;
+
+// Map a stock client-facing port to this proxy instance's port-block slot. With
+// no base set (single-client / docker) every port is returned unchanged, so
+// those paths are byte-identical. The slot order matches the in-client connect()
+// hook in freya/client-injection/enbmod/src/netredirect.cpp:
+//   sector PROXY_LOCAL_TCP_PORT(3500) -> base+0
+//   master MASTER_SERVER_PORT(3801)   -> base+1
+//   global GLOBAL_SERVER_PORT(3805)   -> base+2
+// (the posfeed UDP intake, base+3, is remapped at its own bind site).
+unsigned short proxy_client_port(unsigned short stock) {
+    if (g_proxy_port_base == 0)
+        return stock;
+    switch (stock) {
+    case PROXY_LOCAL_TCP_PORT:
+        return (unsigned short)(g_proxy_port_base + 0);
+    case MASTER_SERVER_PORT:
+        return (unsigned short)(g_proxy_port_base + 1);
+    case GLOBAL_SERVER_PORT:
+        return (unsigned short)(g_proxy_port_base + 2);
+    default:
+        return stock;
+    }
+}
+
 bool g_Debug = false;
 bool g_ServerShutdown = false; // Terminated the global Server
 
@@ -235,15 +270,64 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // Client-facing bind address for the TCP listeners + the in-client
+    // position-feed intake. INADDR_ANY unless a native launch pins this proxy
+    // to loopback (127.0.0.1) via FREYA_PROXY_BIND_ADDRESS, keeping the
+    // client-facing ports off the external interfaces. Co-located multi-box
+    // proxies no longer differ by bind IP -- they all bind 127.0.0.1 and are
+    // separated by PORT (FREYA_PROXY_PORT_BASE, below). The docker proxy never
+    // sets the env (it must keep INADDR_ANY so docker's published-port forward
+    // reaches the container), so the single-client + docker paths are
+    // unchanged. inet_addr returns INADDR_NONE (0xffffffff) on a malformed
+    // value -- treat that as "unset" rather than binding to a bogus address.
+    {
+        const char* env_bind = getenv("FREYA_PROXY_BIND_ADDRESS");
+        if (env_bind && *env_bind) {
+            unsigned long parsed = inet_addr(env_bind);
+            if (parsed != INADDR_NONE) {
+                g_proxy_bind_addr = parsed;
+                LogMessage("Net7Proxy: client-facing bind address = %s "
+                           "(loopback-only)\n",
+                           env_bind);
+            } else {
+                LogMessage("Net7Proxy: ignoring malformed "
+                           "FREYA_PROXY_BIND_ADDRESS '%s'; using INADDR_ANY\n",
+                           env_bind);
+            }
+        }
+    }
+
+    // Per-instance client-facing port block (native multi-box). Each co-located
+    // proxy listens on base+0..base+3 on the same loopback IP; the in-client
+    // connect() hook remaps the client's fixed 3500/3801/3805 dials to match.
+    // Unset -> stock ports (single-client + docker unchanged). The base must
+    // leave room for the 4-port block.
+    {
+        const char* env_base = getenv("FREYA_PROXY_PORT_BASE");
+        if (env_base && *env_base) {
+            long base = atol(env_base);
+            if (base > 0 && base <= 65535 - 3) {
+                g_proxy_port_base = (unsigned short)base;
+                LogMessage("Net7Proxy: client-facing port block = %d..%d "
+                           "(multi-box per-instance)\n",
+                           g_proxy_port_base, g_proxy_port_base + 3);
+            } else {
+                LogMessage("Net7Proxy: ignoring out-of-range "
+                           "FREYA_PROXY_PORT_BASE '%s'; using stock ports\n",
+                           env_base);
+            }
+        }
+    }
+
     // Bind on 0.0.0.0 by default so the container is reachable from the
-    // host. The TcpListener actually uses INADDR_ANY (TcpListener.cpp:80)
-    // regardless of m_IpAddress.
+    // host. The TcpListener uses g_proxy_bind_addr (INADDR_ANY unless the
+    // multi-box env above pinned it) regardless of m_IpAddress.
     unsigned long ip_address_internal = inet_addr(g_internal_addr);
 
-    LogMessage("Net7Proxy: binding TCP %d (MASTER_SERVER_PORT) on %s\n", MASTER_SERVER_PORT,
-               g_internal_addr);
-    LogMessage("Net7Proxy: binding TCP %d (GLOBAL_SERVER_PORT) on %s\n", GLOBAL_SERVER_PORT,
-               g_internal_addr);
+    LogMessage("Net7Proxy: binding TCP %d (MASTER_SERVER_PORT) on %s\n",
+               proxy_client_port(MASTER_SERVER_PORT), g_internal_addr);
+    LogMessage("Net7Proxy: binding TCP %d (GLOBAL_SERVER_PORT) on %s\n",
+               proxy_client_port(GLOBAL_SERVER_PORT), g_internal_addr);
 
     // Phase AH: resolve the proxy<->server DTLS policy BEFORE any UDPClient is
     // constructed. Fail-closed (exit) on misconfiguration unless the operator

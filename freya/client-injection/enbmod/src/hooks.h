@@ -63,6 +63,15 @@ void disable_event_hooks();
 bool enable_inspace_hook();
 unsigned long last_inspace_tick();
 
+// Front-end LoginTask capture (env-driven auto-login). enable_login_hook()
+// installs a READ-ONLY capture hook on the front-end run loop
+// (game::addr::LoginRunLoop) -- called by autologin::init() only when an
+// auto-login env var is set, so an ordinary launch never gains it. login_task()
+// returns the captured LoginTask `this` (0 until the run loop has fired, i.e.
+// until the pre-game screens are up); autologin.cpp drives login off it.
+bool enable_login_hook();
+unsigned login_task();
+
 // ECX (this) captured from the most recent vitals-updater call: the live root of
 // the hull/shield/energy gadget chain. 0 until the hook has fired in space.
 // Calibration tooling (autocalib) uses this instead of scanning memory.

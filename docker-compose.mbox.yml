@@ -1,0 +1,89 @@
+# docker-compose.mbox.yml -- one IN-DOCKER proxy for ONE local WINE game client.
+# N of them give N clients each a private bridge to the shared local server.
+# Driven by `just play-multibox-local`.
+#
+# WHY in-docker (NOT a native WINE proxy): the server's control plane is a
+# multi-port UDP scheme (master 3808, global 3810, sector 3501-3800, MVAS 3806).
+# A native proxy running OUTSIDE docker reaches those ports through docker's
+# published-port DNAT, but the server's PUSHED replies (sector Ack, global
+# ticket) get MASQUERADE'd to the bridge gateway (172.x.0.1) and never reverse
+# back to the proxy's flow -- so the sector handshake times out at "login stage
+# 3" for even a SINGLE client. Keeping the proxy IN docker (its own container IP
+# on the stack network) removes the NAT entirely, exactly like the shared
+# play-local proxy and the per-unit play-cli proxy.
+#
+# WHY same IP + different PORTS (NOT distinct 127.0.0.N host IPs): the EnB
+# client.exe dials the proxy on FIXED ports compiled into the binary
+# (3500/3801/3805 + posfeed 3807), but the in-client connect() hook (enbmod
+# netredirect) remaps those onto a per-instance contiguous block base+0..base+3
+# on 127.0.0.1. So each unit just publishes its block on 127.0.0.1 and forwards
+# host base..base+3 -> the proxy's STOCK container ports (3500/3801/3805/3807).
+# Distinct loopback IPs (127.0.0.2:3500, ...) would be the naive alternative, BUT
+# rootless docker collapses all of 127.0.0.0/8 to 127.0.0.1 in its port-conflict
+# allocator -- a non-starter -- and they are not portable to native Windows. The
+# port-block scheme needs no socat, no distinct IPs, no host-interface changes.
+#
+# TOPOLOGY (per unit `-p mboxN`, host port block MBOX_*_PORT on 127.0.0.1)
+#   client.exe (WINE) --TCP--> 127.0.0.1:{base+0,base+1,base+2}  (connect hook remap)
+#                                  `--> docker publish --> proxy 3500/3801/3805 --UDP--> server
+#   FreyaPosFeed.dll  --UDP--> 127.0.0.1:base+3
+#                                  `--> docker publish --> proxy 3807 --UDP--> server
+#   client.exe        --TLS--> 127.0.0.1:4180 (shared LocalAuthRelay) --> freya-online
+#
+# USAGE (see `just play-multibox-local COUNT`)
+#   # shared stack up first (creates the `<project>_default` net); default proxy DOWN:
+#   docker compose up -d server net7go freya-online
+#   docker compose rm -sf proxy
+#   # then one proxy unit per client, each publishing its 127.0.0.1 port block:
+#   MBOX_SECTOR_PORT=23500 MBOX_MASTER_PORT=23501 MBOX_GLOBAL_PORT=23502 MBOX_POS_PORT=23503 \
+#     STACK_NETWORK=<project>_default docker compose -f docker-compose.mbox.yml -p mbox1 up -d
+#   # and launch the client with FREYA_GAME_PORT_BASE=23500 so its hook remaps onto it.
+#
+# The server force-kicks a duplicate login PER ACCOUNT
+# (PlayerManager::CheckAccountInUse) -- correct retail behaviour, NOT bypassed.
+# Use a distinct account per concurrent client.
+
+networks:
+  # The shared stack's network, created by `docker compose up` on
+  # docker-compose.yml. External so this file attaches to it rather than
+  # creating its own. Name is `<COMPOSE_PROJECT_NAME>_default`; pass it via
+  # STACK_NETWORK (the recipe derives it from the active project).
+  stack:
+    external: true
+    name: ${STACK_NETWORK:-freya_default}
+
+services:
+  proxy:
+    build:
+      # Repo root context so the Dockerfile can COPY common/ alongside proxy/.
+      context: .
+      dockerfile: proxy/Dockerfile
+    networks:
+      stack: {}
+    environment:
+      # Upstream game server on the shared stack network (resolved by docker DNS).
+      - NET7_GAME_SERVER_HOST=server
+      # Trusted dev bridge: match the shared stack's opt-out of proxy<->server
+      # DTLS (a DTLS-on proxy against an opted-out server cannot handshake). An
+      # explicit empty in the host env flips both ends to DTLS together.
+      - NET7_DTLS_ALLOW_PLAINTEXT=${NET7_DTLS_ALLOW_PLAINTEXT-i-accept-unencrypted-udp}
+      - NET7_GAME_SERVER_DOMAIN=${NET7_GAME_SERVER_DOMAIN-localhost}
+      - NET7_DTLS_CA=${NET7_DTLS_CA-}
+    ports:
+      # Client-facing TCP planes + the posfeed UDP intake, published as a
+      # contiguous 127.0.0.1 host PORT BLOCK per unit (defaults are the stock
+      # single-unit values). The container keeps its STOCK ports; docker forwards
+      # host base..base+3 onto them, and the in-client connect() hook remaps the
+      # client's fixed dials onto base+0/+1/+2 (posfeed base+3). See the header
+      # for why a port block beats distinct 127.0.0.N IPs.
+      - "127.0.0.1:${MBOX_SECTOR_PORT:-3500}:3500/tcp"
+      - "127.0.0.1:${MBOX_MASTER_PORT:-3801}:3801/tcp"
+      - "127.0.0.1:${MBOX_GLOBAL_PORT:-3805}:3805/tcp"
+      - "127.0.0.1:${MBOX_POS_PORT:-3807}:3807/udp"
+    volumes:
+      # GalaxyMap.dat for UDPClient::SendCachedGalaxyMap (served when the in-game
+      # galaxy map opens). SERVER_DATABASE_PATH = "./database/" relative to the
+      # proxy CWD (/app), so mount the repo's server/data there -- same as the
+      # shared proxy in docker-compose.yml.
+      - ./server/data:/app/database:ro
+    restart: unless-stopped

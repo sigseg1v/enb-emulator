@@ -57,19 +57,22 @@ void ServerManager::RunMasterServer() {
     // (it's plain TCP, not SSL). The SSL listener is gated separately on
     // cert availability since the Linux SSL_Connection class is currently
     // a stub.
-    global_server_listener = new TcpListener(m_IpAddressInternal, GLOBAL_SERVER_PORT, *this,
-                                             CONNECTION_TYPE_CLIENT_TO_GLOBAL_SERVER);
+    // proxy_client_port() applies the per-instance multi-box port offset (0 for
+    // single-client / docker, so the stock ports are used unchanged there).
+    global_server_listener =
+        new TcpListener(m_IpAddressInternal, proxy_client_port(GLOBAL_SERVER_PORT), *this,
+                        CONNECTION_TYPE_CLIENT_TO_GLOBAL_SERVER);
     if (g_LocalCert) {
         ssl_listener = new SSL_Listener(m_IpAddressInternal, ssl_port, *this);
     }
 #endif
 
     // Instantiate the TCP Listener object for the Master (galaxy) Server
-    TcpListener master_tcp_listener(m_IpAddressInternal, MASTER_SERVER_PORT, *this,
-                                    CONNECTION_TYPE_CLIENT_TO_MASTER_SERVER);
+    TcpListener master_tcp_listener(m_IpAddressInternal, proxy_client_port(MASTER_SERVER_PORT),
+                                    *this, CONNECTION_TYPE_CLIENT_TO_MASTER_SERVER);
 
     //give ourselves 1 port for sector serving.
-    TcpListener sector_comms(m_IpAddressInternal, PROXY_LOCAL_TCP_PORT, *this,
+    TcpListener sector_comms(m_IpAddressInternal, proxy_client_port(PROXY_LOCAL_TCP_PORT), *this,
                              CONNECTION_TYPE_CLIENT_TO_SECTOR_SERVER);
 
     MainLoop();

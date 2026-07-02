@@ -160,8 +160,13 @@ bool UDP_Connection::ProcessTicketInfo(char *msg, EnbUdpHeader *hdr, const long 
 
     long account_id = g_AccountMgr->GetAccountID(account_name);
 	long account_status = g_AccountMgr->GetAccountStatus(account_name);
-	//check accounts in player list and logins
-	bool account_in_use = g_PlayerMgr->CheckAccountInUse(account_name);
+
+	// NOTE: no account-level "already logged in" gate here. Multiboxing is allowed
+	// -- two DIFFERENT characters on the same account may be online at once. Only a
+	// duplicate of the SAME character is prevented, and that is enforced later at
+	// character-select time (Player::SetCharacterID -> CheckForDuplicatePlayers,
+	// keyed on CharacterID), where the chosen avatar is finally known. The account
+	// is not known to be "in use" by a character until then.
 
 	//block people entering while stress server down
 	if (account_status == 0)
@@ -188,13 +193,6 @@ bool UDP_Connection::ProcessTicketInfo(char *msg, EnbUdpHeader *hdr, const long 
 	{
 		LogDebug("HandleGlobalConnect() - Inactive Account\n");
 		SendGlobalError(G_ERROR_INACTIVE_ACCOUNT, source_addr, source_port);
-		return false;
-	}
-
-	if (account_in_use)
-	{
-		LogMessage("Attempt to log into 2 accounts? %s\n", account_name);
-		SendGlobalError(G_ERROR_ACCOUNT_IN_USE, source_addr, source_port);
 		return false;
 	}
 

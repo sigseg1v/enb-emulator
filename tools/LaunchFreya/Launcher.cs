@@ -55,6 +55,22 @@ namespace LaunchFreya
         // UserSettings.ModStates; copied across in MainWindow before launch.
         public System.Collections.Generic.Dictionary<string, bool> ModStates { get; set; } = new();
 
+        // BA-4: display settings applied to the EnB Render registry key before
+        // launch. Resolution is "WxH" (empty = leave the registry untouched);
+        // Fullscreen=false maps to RenderDeviceWindowed=1.
+        public string Resolution { get; set; } = "";
+        public bool Fullscreen { get; set; }
+
+        // Confine the cursor to the client window while it has focus. Applied to the
+        // prefix's HKCU\Software\Wine\X11 Driver\DXGrab before launch.
+        public bool LockMouseToWindow { get; set; }
+
+        // Optional client-window placement. When BOTH are set the launcher waits for
+        // the client window to appear after launch, then moves it to (WindowX, WindowY);
+        // either null means "leave the window where the game opens it".
+        public int? WindowX { get; set; }
+        public int? WindowY { get; set; }
+
         public string EffectiveRegistrationHostname
             => string.IsNullOrEmpty(RegistrationHostname) ? Hostname : RegistrationHostname;
     }
@@ -81,10 +97,32 @@ namespace LaunchFreya
         // the proxy's own _YYYY_MM_DD.log instead.
         Process _proxyProcess;
 
+        // This launcher's multi-box instance slot, resolved at Launch() time when
+        // a proxy is in play. PortBase 3500 = ordinary single-client launch
+        // (stock ports, multibox off); any other base = a second/third/...
+        // instance on its own contiguous port block on 127.0.0.1. Null until a
+        // multi-box-capable launch (native proxy, or docker with a pinned port
+        // base) resolves it.
+        MultiboxSlot _slot;
+
         public Launcher(LaunchSetting setting, Action<string> warn = null)
         {
             _setting = setting ?? throw new ArgumentNullException(nameof(setting));
             _warn = warn ?? (_ => { });
+
+            // Per-instance client path (local multibox): when each window runs in its
+            // own WINE prefix (~/.wine-enb-mboxN), the recipe points it at that
+            // prefix's client.exe via FREYA_CLIENT_PATH. Overriding ClientPath here
+            // re-derives BaseFolder, so every per-instance path the launcher patches
+            // and reads -- auth.ini, regdata, authlogin.dll, the staged DLLs, and
+            // each instance's own enbmod.log / enbmod.cmd -- lands in that instance's
+            // own prefix instead of clobbering a shared one. (The per-instance MASTER
+            // server target is handled at dial time by the in-client connect() hook,
+            // not by any per-prefix config file.) The settings ClientPath stays the
+            // single-client default.
+            var cp = Environment.GetEnvironmentVariable("FREYA_CLIENT_PATH");
+            if (!string.IsNullOrWhiteSpace(cp))
+                _setting.ClientPath = cp.Trim();
         }
 
         // Kill a previously-spawned proxy (if any) and forget it. Safe to call
@@ -124,22 +162,47 @@ namespace LaunchFreya
             {
                 var launch = (_setting.LaunchName ?? "").ToUpperInvariant();
 
-                // Where the CLIENT dials for the game servers (master/global/
-                // sector/chat/...). When we spawn a local Net7Proxy (SP and MP
-                // online play), that is ALWAYS loopback: the proxy listens on
-                // 127.0.0.1 for the client's TCP and bridges it to the real
-                // server over UDP. Pointing the client straight at the public
-                // host fails -- only the server's UDP game ports are reachable
-                // there, not the client-facing TCP listeners (3801/3805/3500),
-                // which exist solely on the local proxy. When no local proxy is
-                // spawned (the Net7Local docker dev stack) the client dials
-                // Hostname directly, which is the docker-published proxy.
-                //
-                // The proxy's UPSTREAM and the auth relay/registration host stay
-                // _setting.Hostname (the real server) -- see LaunchFreyaProxy /
-                // StartLocalAuthRelay / EffectiveRegistrationHostname.
+                // When we spawn a local Net7Proxy (SP and MP online play) the
+                // client dials loopback: the proxy listens there for the client's
+                // TCP and bridges it to the real server over UDP. Pointing the
+                // client straight at the public host fails -- only the server's
+                // UDP game ports are reachable there, not the client-facing TCP
+                // listeners (3801/3805/3500), which exist solely on the local
+                // proxy. When no local proxy is spawned (the Net7Local docker dev
+                // stack) the client dials Hostname directly (the docker-published
+                // proxy). The proxy's UPSTREAM and the auth relay/registration
+                // host stay _setting.Hostname (the real server) -- see
+                // LaunchFreyaProxy / StartLocalAuthRelay / EffectiveRegistrationHostname.
                 bool spawnsLocalProxy = launch == "NET7SP" || launch == "NET7MP";
-                string gameHost = spawnsLocalProxy ? "127.0.0.1" : _setting.Hostname;
+
+                // Resolve the multi-box PORT BLOCK. Multi-box now means "same
+                // 127.0.0.1, a different contiguous port block per instance"
+                // (base+0..base+3); the in-client connect() hook remaps the
+                // client's fixed dials onto it, and the proxy listens there.
+                //
+                //  - Native local proxy (SP/MP): autodetect a free block by
+                //    probing 127.0.0.1 -- the launcher and the proxy it spawns
+                //    share this host, so a free stock block == first instance.
+                //  - Docker dev stack: the recipe pins FREYA_GAME_PORT_BASE to
+                //    match the per-unit container's PUBLISHED ports, so honour
+                //    that env explicitly. We must NOT autodetect here: the docker
+                //    proxy already holds 127.0.0.1:3500 for a normal single-client
+                //    launch, which would look "busy" and wrongly trigger a remap.
+                bool dockerPortBase = !spawnsLocalProxy &&
+                    !string.IsNullOrWhiteSpace(
+                        Environment.GetEnvironmentVariable("FREYA_GAME_PORT_BASE"));
+                _slot = (spawnsLocalProxy || dockerPortBase)
+                    ? MultiboxSlot.Resolve(_warn) : null;
+
+                // Where the CLIENT dials for the game's master server. It is
+                // ALWAYS 127.0.0.1 when a local or per-unit docker proxy is in
+                // play: the proxy listens on 127.0.0.1 (native: its port block;
+                // docker: its published block) and stamps 127.0.0.1 into every
+                // sector ServerRedirect, and the connect() hook remaps the fixed
+                // ports onto this instance's block. Only the single-client docker
+                // dev stack with no port base falls back to Hostname.
+                string gameHost = (spawnsLocalProxy || _slot != null)
+                    ? "127.0.0.1" : _setting.Hostname;
 
                 PatchAuthLoginFile();
                 PatchRegDataFileNames();
@@ -222,6 +285,31 @@ namespace LaunchFreya
             if (addrs.Length == 0)
                 throw new InvalidOperationException($"Could not resolve hostname '{gameHost}'.");
 
+            // Multi-box client-side wiring (read by the injected DLL; WINE
+            // forwards host env to the Win32 process). FREYA_MULTIBOX arms the
+            // single-instance mutex bypass so a second client gets past the
+            // "already running" guard; FREYA_GAME_PORT_BASE tells the connect()
+            // hook which port block to remap the client's fixed 127.0.0.1 dials
+            // onto (base+0/+1/+2), and FREYA_POS_FEED_PORT (= base+3) tells the
+            // in-client position feed which loopback port to send to. Same scheme
+            // for native and docker multibox -- only the proxy side differs. A
+            // non-multibox launch clears all three so the stock ports + guard are
+            // untouched.
+            if (_slot != null && _slot.Multibox)
+            {
+                Environment.SetEnvironmentVariable("FREYA_MULTIBOX", "1");
+                Environment.SetEnvironmentVariable("FREYA_GAME_PORT_BASE",
+                    _slot.PortBase.ToString());
+                Environment.SetEnvironmentVariable("FREYA_POS_FEED_PORT",
+                    _slot.PosFeedPort.ToString());
+            }
+            else
+            {
+                Environment.SetEnvironmentVariable("FREYA_MULTIBOX", null);
+                Environment.SetEnvironmentVariable("FREYA_GAME_PORT_BASE", null);
+                Environment.SetEnvironmentVariable("FREYA_POS_FEED_PORT", null);
+            }
+
             var dir = Path.GetDirectoryName(_setting.ClientPath);
             var clientArgs = $"-SERVER_ADDR {addrs[0]} -PROTOCOL TCP";
 
@@ -274,12 +362,23 @@ namespace LaunchFreya
                 info = WinExe(dir, _setting.ClientPath, clientArgs);
             }
 
+            // Snapshot the client windows already open BEFORE we launch, so the
+            // optional placer can tell ours apart from any other client (multibox).
+            bool place = _setting.WindowX.HasValue && _setting.WindowY.HasValue;
+            object winSnapshot = place ? ClientWindowPlacer.Snapshot(_setting.ClientPath) : null;
+
             try { Process.Start(info); }
             catch (Exception e)
             {
                 throw new ApplicationException(
                     $"Could not launch client.\nWorking Directory: {info.WorkingDirectory}\nFileName: {info.FileName}\nArguments: {info.Arguments}\nDetails: {e.Message}", e);
             }
+
+            // Optional window placement: wait (off-thread) for the freshly-launched
+            // client window to appear, then move it to the configured position.
+            if (place)
+                ClientWindowPlacer.PlaceAsync(_setting.ClientPath, winSnapshot,
+                    _setting.WindowX.Value, _setting.WindowY.Value, _warn);
         }
 
         void LaunchFreyaProxy()
@@ -324,6 +423,24 @@ namespace LaunchFreya
             // A proxy from a previous Play is still bound to the loopback listen
             // ports; relaunching over it collides. Kill it first.
             StopProxy();
+
+            // The proxy always runs co-located with the client on 127.0.0.1.
+            // /ADDRESS is the address it stamps into sector ServerRedirects (so the
+            // client reconnects to this same proxy) -- ALWAYS loopback; the
+            // redirect carries the stock sector port (PROXY_LOCAL_TCP_PORT 3500)
+            // which the in-client connect() hook then remaps onto this instance's
+            // block. FREYA_PROXY_BIND_ADDRESS pins the client-facing listeners to
+            // 127.0.0.1 (off the external interfaces). Multi-box instances no
+            // longer differ by IP -- they differ by PORT: FREYA_PROXY_PORT_BASE
+            // offsets this proxy's 4 client-facing listeners to base+0..base+3, so
+            // N co-located proxies share 127.0.0.1 without colliding. A
+            // single-client launch leaves the port base unset (stock ports).
+            Environment.SetEnvironmentVariable("FREYA_PROXY_BIND_ADDRESS", "127.0.0.1");
+            if (_slot != null && _slot.Multibox)
+                Environment.SetEnvironmentVariable("FREYA_PROXY_PORT_BASE",
+                    _slot.PortBase.ToString());
+            else
+                Environment.SetEnvironmentVariable("FREYA_PROXY_PORT_BASE", null);
 
             var info = WinExe(dir, exe, "/ADDRESS:127.0.0.1");
 
@@ -655,7 +772,12 @@ namespace LaunchFreya
         {
             if (OnWindows)
             {
-                try { WindowsRegistryHelpers.EnsureRegistered(); }
+                try
+                {
+                    WindowsRegistryHelpers.EnsureRegistered();
+                    if (TryParseResolution(out int w, out int h))
+                        WindowsRegistryHelpers.SetDisplay(w, h, !_setting.Fullscreen);
+                }
                 catch (Exception e)
                 {
                     throw new ApplicationException("Could not patch registry-settings.", e);
@@ -677,6 +799,23 @@ namespace LaunchFreya
                 (@"HKLM\Software\Westwood Studios\Earth and Beyond\Registration",
                                                                         "Registered",           "REG_DWORD","1"),
             };
+            // BA-4: the EnB client reads its render resolution + windowed flag from
+            // HKLM\Software\Westwood Studios\Earth and Beyond\Render. The 32-bit
+            // client sees these in Wow6432Node, which WineRegAdd covers by writing
+            // both the 32- and 64-bit views. Only written when the launcher's
+            // Resolution box is set; otherwise the installer-baked baseline stands.
+            if (TryParseResolution(out int rw, out int rh))
+            {
+                const string render = @"HKLM\Software\Westwood Studios\Earth and Beyond\Render";
+                var display = new (string key, string value, string type, string data)[]
+                {
+                    (render, "RenderDeviceWidth",    "REG_DWORD", rw.ToString()),
+                    (render, "RenderDeviceHeight",   "REG_DWORD", rh.ToString()),
+                    (render, "RenderDeviceWindowed", "REG_DWORD", _setting.Fullscreen ? "0" : "1"),
+                };
+                entries = System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Concat(entries, display));
+            }
+
             foreach (var e in entries)
             {
                 try { WineRegAdd(e.key, e.value, e.type, e.data); }
@@ -685,6 +824,20 @@ namespace LaunchFreya
                     _warn($"WINE registry write failed for {e.key}\\{e.value}: {ex.Message}");
                 }
             }
+        }
+
+        // Parse the launcher's "WxH" Resolution setting into pixel dimensions.
+        // Returns false (and skips the display write) when unset or malformed.
+        bool TryParseResolution(out int w, out int h)
+        {
+            w = h = 0;
+            var s = _setting.Resolution;
+            if (string.IsNullOrWhiteSpace(s)) return false;
+            int x = s.IndexOf('x');
+            if (x <= 0 || x >= s.Length - 1) return false;
+            return int.TryParse(s.Substring(0, x).Trim(), out w)
+                && int.TryParse(s.Substring(x + 1).Trim(), out h)
+                && w > 0 && h > 0;
         }
 
         // ---- in-client DLL injection (position feed + enbmod Lua mods) ----
@@ -705,7 +858,36 @@ namespace LaunchFreya
             _injectorExe = null;
             _injectDlls.Clear();
 
-            if (!_setting.EnablePositionFeed && !_setting.EnableClientMods)
+            // Hands-free auto-login (ENB_ACC_NAME / ENB_EULA env) lives in enbmod.dll
+            // (autologin.cpp), which is normally injected only when the user enables
+            // Lua mods. Decouple them: if an auto-login is requested via the env, we
+            // inject enbmod regardless of the mods checkbox, so `just play-local
+            // <acc> <pass> <char>` works without the user first toggling Lua mods on.
+            // enbmod's autologin.cpp reads FREYA_* first and falls back to ENB_*,
+            // so the gate that decides whether to inject enbmod must recognise
+            // BOTH prefixes -- the launcher's login fields (BA-5) set FREYA_*.
+            bool autoLogin =
+                !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ENB_ACC_NAME"))
+                || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("FREYA_ACC_NAME"))
+                || Environment.GetEnvironmentVariable("ENB_EULA") == "ACCEPT"
+                || Environment.GetEnvironmentVariable("FREYA_EULA") == "ACCEPT";
+
+            // The single-instance mutex bypass (FreyaMultiboxHook, armed by the
+            // FREYA_MULTIBOX env) lives in FreyaPosFeed.dll, so a multi-box slot
+            // (instance 2+, _slot.Multibox) needs that DLL injected to get past the
+            // "Earth & Beyond is already running" guard -- even if the user has the
+            // position-feed toggle OFF. Without this, double-launching the launcher
+            // on Windows with the feed off would stall the second client on the
+            // mutex. Same decoupling as auto-login above.
+            bool multibox = _slot != null && _slot.Multibox;
+
+            // Unchecking "Lock Mouse To Window" needs enbmod's ClipCursor hook
+            // (hooks.cpp, gated on FREYA_LOCK_MOUSE=0): the game confines the
+            // pointer itself via ClipCursor and modern wine honours that
+            // unconditionally -- there is no registry knob to override it.
+            bool mouseUnlock = !_setting.LockMouseToWindow;
+
+            if (!_setting.EnablePositionFeed && !_setting.EnableClientMods && !autoLogin && !multibox && !mouseUnlock)
                 return;
 
             // FreyaInject.exe and the DLLs are Win32 PEs that run natively on Windows
@@ -719,12 +901,20 @@ namespace LaunchFreya
                 return;
             }
 
-            if (_setting.EnablePositionFeed)
+            if (_setting.EnablePositionFeed || multibox)
             {
                 var dos = StagePositionFeedDll();
                 if (dos != null) _injectDlls.Add(dos);
             }
-            if (_setting.EnableClientMods)
+            // enbmod is also the SOURCE of the MVAS position feed: FreyaPosFeed.dll
+            // reads the local ship's position/orientation from enbmod's
+            // FreyaEnbmodShipState export (BA-2c), because only enbmod resolves
+            // "our ship" unambiguously (per-GameID, under its fault guard). So
+            // inject enbmod whenever the position feed is on, even with the Lua
+            // mods toggle off -- the native publisher runs regardless of whether
+            // any Lua mod is active. Without this the feed would have no resolver
+            // and send nothing.
+            if (_setting.EnableClientMods || autoLogin || _setting.EnablePositionFeed || mouseUnlock)
             {
                 var dos = StageClientMods();
                 if (dos != null) _injectDlls.Add(dos);

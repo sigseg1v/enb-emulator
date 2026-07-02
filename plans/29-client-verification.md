@@ -701,7 +701,7 @@ format & byte order", Trap 2).
 > **VERIFIED 2026-06-07** against `enb.sigsegv.land` with the real Win32 client.
 > Proxy console showed the previously-absent `accept on port 3500 from 127.0.0.1`
 > -> `<client> SectorServer LOGIN -- connection active` -> `START_ACK -> server`
-> (player griever, sector 10151). Sector entry succeeds; no +15s kick.
+> (player boxB, sector 10151). Sector entry succeeds; no +15s kick.
 
 - **Change**: the launcher (`tools/LaunchFreya/Launcher.cs::LaunchNet7Proxy`)
   now spawns Net7Proxy with `/ADDRESS:127.0.0.1` for ALL upstreams, instead of
@@ -2201,7 +2201,7 @@ moot; the SOLVED block above is the truth):**
 
 ---
 
-### [ ] CV-25 -- Position feed keeps updating after a sector change (planets / gating): can dock at a planet base
+### [~] CV-25 -- Position feed keeps updating after a sector change (planets / gating): can dock at a planet base -- SUPERSEDED 2026-07-01 by CV-BA-2c (the trampoline this verified was deleted; re-verify the concern via the new enbmod-sourced feed under CV-BA-2c)
 
 - **What changed**: `freya/client-injection/ClientEngineOffsets.h` -- the in-client
   position-feed trampoline no longer LATCHES the ship transform pointer on first
@@ -2792,3 +2792,244 @@ moot; the SOLVED block above is the truth):**
   space, the Freya Dock button must additionally invoke the client landing sequence
   (the dispatcher's `0x20000` path runs `FUN_006...` landing init after the op).
 - **Setup**: same as CV-AS-VERBDISPATCH.
+
+## [ ] CV-AZ-1 -- Multibox port-block: docker COUNT=2 re-verify on the new code
+
+- **Change**: multibox redesigned from distinct loopback IPs (127.0.0.N) + socat
+  facade to SAME IP (127.0.0.1) + a contiguous 4-port block per instance. The
+  in-client ws2_32 `connect()` hook (`netredirect.cpp`) now remaps the client's
+  fixed 3500/3801/3805 dials to `FREYA_GAME_PORT_BASE`+0/+1/+2 (posfeed -> base+3
+  via `FREYA_POS_FEED_PORT`); `docker-compose.mbox.yml` publishes the block on
+  127.0.0.1 and the proxy container keeps stock ports. The earlier socat/distinct-IP
+  cut was live-verified COUNT=2, but this new code path has NOT been re-verified.
+- **Why a CV entry**: the proxy gained a client-facing listener offset
+  (`proxy_client_port()` in `Net7.cpp`/`ServerManager.cpp`/`UDPClient_linux.cpp`).
+  On the docker path it stays a no-op (stock ports + docker publish), but the whole
+  port-remap chain (client hook -> docker publish -> proxy -> server) must be proven
+  end-to-end against the real client, and the server anti-hijack IP-match check must
+  still pass with ZERO `Player IP mismatch`.
+- **What to look for (real client)**: `just play-multibox-local 2` with two
+  accounts. `ss -tnp` shows client 1 dialing `127.0.0.1:{3500,3801,3805}` and client
+  2 dialing `127.0.0.1:{23510,23511,23512}` (its block). Both reach `enb.self()==
+  table` in-world; server log has ZERO `Player IP mismatch`; each client's position
+  feed reaches its own proxy. Single-client (`just play-local`) is byte-identical to
+  before (base 3500, hook + offset both no-ops).
+- **Setup**: `just build-enbmod && just rebuild proxy`, two seeded accounts
+  (boxA/devuser2), `ENB_ACC_1=... ENB_ACC_2=... just play-multibox-local 2`.
+
+## [ ] CV-AZ-2 -- Multibox port-block: NATIVE WINE proxy (play-online) multibox
+
+- **Change**: on the NATIVE proxy path (play-online -- proxy runs in WINE, not
+  docker, so there is no docker publish layer), the proxy reads
+  `FREYA_PROXY_PORT_BASE` and offsets its OWN 4 client-facing listeners to
+  base+0..base+3, matching the client hook's block. `FREYA_PROXY_BIND_ADDRESS` is
+  always 127.0.0.1 now. This path CANNOT be tested on the Linux dev box (no native
+  WINE-proxy multibox here) -- owner verification required.
+- **What to look for (real client)**: two play-online clients on one machine, each
+  with its own native FreyaProxy on its own port block, both reach in-world against
+  the cloud server with no IP mismatch and independent position feeds.
+- **Setup**: owner's play-online multibox path with per-instance
+  `FREYA_GAME_PORT_BASE`/`FREYA_PROXY_PORT_BASE` (launcher autodetects a free block
+  per instance when unset).
+- **Recipe fix (2026-06-30)**: `just play-online N` (N>=2) now also clones a
+  per-instance WINE prefix (`~/.wine-enb-mboxN`, cached) and launches each with its
+  own `WINEPREFIX`+`FREYA_CLIENT_PATH`, matching `play-multibox-local`. Before this
+  it shared one prefix across all instances, which would have interleaved each
+  client's enbmod cmd/log channel and clobbered per-instance registry/config -- so
+  this is part of what owner verification must confirm actually multiboxes cleanly.
+
+## [ ] CV-AZ-3 -- Multibox port-block: native Windows multibox
+
+- **Change**: the port-block scheme was chosen partly because it is portable to
+  native Windows (no 127.0.0.N loopback aliasing, which the old distinct-IP design
+  needed). Same client hook + native proxy port offset as CV-AZ-2, but on real
+  Windows rather than WINE. Untestable on this Linux box.
+- **What to look for (real client)**: two clients on one Windows box multibox
+  cleanly with the autodetected per-instance port blocks; both in-world, no IP
+  mismatch.
+- **Setup**: owner's Windows environment; press Play twice (the launcher autodetects
+  the next free 127.0.0.1 port block per instance).
+
+## [ ] CV-BA-2c -- grouped/co-located MVAS position no longer flickers between players
+
+- **What changed**: the MVAS position feed's source. The old in-client feed
+  (`freya/client-injection/ClientEngineOffsets.h`) hijacked the engine per-ship
+  render loop and captured the transform of ANY object matching a shared
+  player-hull signature (`BYTE[EAX]=='S'` + `BYTE[EAX+2]==0x48`), which matches
+  every player hull. With a grouped teammate rendered in range, each box's feed
+  periodically shipped the OTHER player's coordinates under its own `player_id`,
+  so the other client saw the box teleport onto the teammate for ~one update
+  every few seconds ("flickers the other player on top for ~15ms then back").
+  The render hijack is now DELETED. Position + orientation are sourced from
+  enbmod's per-GameID local-ship resolution: `enbmod.dll` publishes the sample
+  (`lua_api.cpp publish_ship_state()`, `world_pos(targeting_data_obj())` for
+  position, the validated ship-entity transform for heading) and exports
+  `FreyaEnbmodShipState`; `FreyaPosFeed.dll` reads that export instead of patching
+  client code; the launcher injects enbmod whenever the position feed is enabled.
+- **Why a CV is needed**: in-client (FreyaPosFeed.dll + enbmod.dll) change reading
+  live engine memory over the loopback MVAS datagram path; the CLI integration
+  suite cannot exercise the client engine or two grouped clients, so only the real
+  client proves it. Not a server/proxy wire change -- the server-side MVAS handler
+  is unchanged (it faithfully relayed whatever the client sent; the bug was the
+  client sending the wrong ship's coordinates).
+- **What to look for (real client)**: two boxes logged in, grouped, in the SAME
+  sector. From each box, watch the other player's avatar/HUD marker for ~60s of
+  normal flight: it must track the teammate's real position smoothly with NO
+  periodic snap onto your own ship (or between two positions). Also confirm the
+  remote ship's FACING rotates as it turns (heading is being fed) rather than
+  staying locked -- if it never rotates, the build's transform offset for the
+  orientation matrix needs revisiting (position is unaffected either way).
+- **Also re-verify (supersedes CV-25's mechanism)**: the old trampoline this
+  change removed was the subject of CV-25 (position must keep updating after a
+  sector change / entering a planet sub-sector, so you can still dock at a planet
+  base). Re-confirm that with the new source: gate to a new sector and fly to a
+  planet base -- your position must keep updating server-side and you must be able
+  to dock. enbmod's `targeting_data_obj()` must keep resolving across the zone.
+- **Setup**: `just play-cli` (or the multibox launch) for two accounts in one
+  sector; group them; fly. Runtime launch only -- credentials are not committed.
+
+## CV-AS-GRPBTN -- group frame action buttons (Freya-drawn, native packet paths)
+
+- **What changed (client-only, MIT)**: `freya-hud/party_frame.lua` now draws an
+  action-button row ABOVE the party frame (leader `[D]isband [F]ormation [T]arget`;
+  member `[L]eave [F] [T]`; F expands a formation sub-row -- leader
+  `S`lot-Back/`B`lock/`P`ipe/`X` break, member `U` form-up/`X` leave-formation) and
+  the roster panel shifted down below it. Two new DLL calls back it:
+  `enb.group_action(action[,target_gid])` builds the group call-to-arms /
+  formation request with the client's own constructor and pushes it through the
+  Connection (wire opcode 0x00BC `CTARequest{SourceID, TargetID, Action}`,
+  TargetID -1 = whole group), and `enb.is_leader()` runs the client's own
+  leader check (the one the native group window uses to pick GRP DISBAND vs
+  GRP LEAVE). Disband/Leave fire the existing avatar-command path
+  (`enb.target_action` 0x0d / 0x0e self-targeted -- byte-identical to the
+  `/group disband` / `/group remove` slash verbs). NO server or proxy change.
+- **Why a CV is needed**: DLL change (needs a client relaunch to load; Lua alone
+  hot-reloads but the buttons gate on the new `enb.is_leader`). The CLI suite
+  covers the server's 0xBC handling but cannot click the overlay or prove the
+  in-client constructor/leader-check calls are stable across sessions; only the
+  real client does.
+- **What to look for (real client, two grouped multibox boxes)**:
+  1. Leader box shows D/F/T above the party frame; member box shows L/F/T; the
+     roster sits just below the row on both.
+  2. Leader D disbands the group on BOTH boxes (rosters vanish); re-group, member
+     L removes only the member.
+  3. F opens the sub-row; leader S/B/P sets the formation type (server chat
+     confirms / formation HUD updates), member U forms up, X leaves; leader X
+     breaks the formation.
+  4. T ("Target my target") makes each OTHER member receive the group chat line
+     "Target my target." -- and NOTHING more: the server's GroupAction 12 is a
+     stub upstream (the actual retarget push is commented out), so an automatic
+     target switch on the other box would be a surprise, not the expectation.
+  5. Clicks on the buttons must NOT leak into the 3D scene behind them; no
+     crash/fault lines in enbmod.log from `is_leader` polling while solo, docked,
+     or during a sector gate.
+- **Known caveat recorded**: making GroupAction 12 actually retarget is a server
+  change under the full CLAUDE.md gate (primary source + CLI parse/tests first +
+  its own CV entry); not part of this change.
+- **Live-verify 2026-07-01 (agent-driven, two multibox clients on the new DLL)**:
+  group formed via the native command path (invite = avatar-command 0x0a with the
+  member's explicit GameID via CmdBuild -- note the `/group invite <name>` slash
+  verb submitted through chat_send never reached the server; accept = 0x0b);
+  `enb.group()` rosters correct on both boxes, `enb.is_leader()` true on the
+  leader / false on the member (and false solo, no fault); `enb.group_action(12)`
+  sent clean from the leader, server log clean. Items 2/3/5 (click-through
+  behaviour, disband/leave/formation via the ON-SCREEN buttons) + the visual
+  row check remain for the owner.
+- **RESOLVED 2026-07-01**: owner confirmed the on-screen rows work on the live
+  grouped pair ("works great").
+
+## CV-AZ-DUPCHAR -- duplicate-login kick is now per-CHARACTER, not per-account
+
+- **What changed (server, owner-directed 2026-06-30)**: the login path no longer
+  rejects a second ONLINE session on the same ACCOUNT. The account-level guard
+  (`CheckAccountInUse` in `PlayerManager`, its call in `UDP_Global.cpp`, and the
+  IssueTicket-time account check in `AccountManager.cpp`) is removed; the
+  per-CHARACTER duplicate check (`CheckForDuplicatePlayers` at SetCharacterID
+  time, which force-kicks the OLDER session of the SAME avatar) is retained
+  unchanged. Owner call: multiboxing two DIFFERENT characters of one account is
+  wanted dev/live behaviour; only the same character twice must still be kicked.
+  Recorded in plans/99 as an owner-directed divergence (no retail capture governs
+  the account-scoped kick; upstream's guard was itself a fork-era addition).
+- **What to look for (real client)**:
+  1. Launch two multibox clients on the SAME account, pick two DIFFERENT
+     characters: both must reach in-space and stay online simultaneously (no
+     force-kick of the first).
+  2. On a third launch (or relog of box 2) pick the SAME character as box 1: the
+     older session MUST still be force-kicked (the per-character check).
+  3. Server log shows no account-in-use rejects; no new Error/WARNING lines on
+     the login path.
+
+## CV-BA-MOUSEUNLOCK -- "Lock Mouse to Window" OFF now neuters the client's ClipCursor
+
+- **What changed (client-side enbmod DLL, 2026-07-01)**: unticking the launcher's
+  "Lock Mouse to Window" checkbox (BA-4b rework, plans/57) sets FREYA_LOCK_MOUSE=0
+  and injects enbmod, whose new hook (`enbmod/src/hooks.cpp`) swallows every
+  user32 ClipCursor(rect) call with TRUE and frees any pre-injection grab once at
+  init. The old DXGrab registry write was a dead knob (wine-11.8 winex11 has no
+  such option) and is deleted; ticked (the default) means the game's native
+  confinement runs untouched -- no hook, no injection on its account.
+- **Second hook (2026-07-01)**: ClipCursor alone left the pointer still
+  teleporting back to centre a few times a second while focused (owner: unlock
+  "only half works") -- the client also actively re-warps the pointer with
+  SetCursorPos. Added a second MinHook on user32 SetCursorPos under the same
+  FREYA_LOCK_MOUSE=0 gate that swallows it. This deliberately disables
+  cursor-recenter camera look (a free pointer and a recentering pointer are
+  mutually exclusive).
+- **Verified so far (throwaway client, 2026-07-01)**: with the box unticked,
+  enbmod.log prints "mouse unlock: ClipCursor neutered (FREYA_LOCK_MOUSE=0)"
+  and "mouse unlock: SetCursorPos recenter neutered (FREYA_LOCK_MOUSE=0)"; the
+  client boots normally to the login screen.
+- **What to look for (real client, human at the mouse)**:
+  1. Box UNTICKED: while the client has focus (windowed), the pointer must cross
+     freely OUT of the client window -- e.g. straight onto the second multibox
+     client -- during login, char select, in-space, and while a station UI is up,
+     AND must NOT snap/teleport back inside a fraction of a second later.
+  2. Box TICKED (default): confinement behaves exactly as it always did (pointer
+     held inside the focused window); no enbmod injection happens if Lua mods,
+     auto-login, and the position feed are all off.
+  3. No new WARNING/fault lines in enbmod.log from the hooks.
+  4. UNTICKED, camera behaviour: right-drag camera-look that relied on
+     cursor-recenter will change (the pointer no longer snaps back). Confirm this
+     is acceptable for the unlock use case -- if the owner wants recenter look
+     preserved while unlocked, the SetCursorPos swallow needs a look-drag gate.
+     TICKED: camera-drag unchanged.
+
+## CV-BA-PARTYTARGET -- clicking a party-frame member row targets that member
+
+- **What changed (client-side enbmod DLL + freya-hud, 2026-07-01)**: clicking a
+  member row in the Freya party frame now selects that member as the target, as
+  long as they are targetable (in the same sector / in scanner range); a member
+  who is not present is skipped (no-op, click still swallowed).
+- **How it works (no server or proxy change)**: a new DLL primitive
+  `enb.request_target(gid)` (`enbmod/src/lua_api.cpp`) resolves the GameID to its
+  live contact object via the same gid->object hash walk `enb.group` uses, then
+  calls the client's own target-request routine (`addr::RequestTarget = 0x00723230`,
+  `enbmod/src/game.h`). That builds a REQUEST_TARGET (wire opcode 0x17) packet from
+  the object's GameID and pushes it through M's sector-server Connection -- byte-for
+  -byte the same path a click on the object in space takes. The server's stock
+  `HandleRequestTarget` (server/src/PlayerConnection.cpp) validates the target via
+  `GetObjectManager()->GetObjectFromID()` and replies SET_TARGET (0x19), which the
+  client applies natively (target frame, threat text, highlight). "Skip if not
+  targetable" falls out for free: a member in another sector resolves to no live
+  entity, so `enb.request_target` returns false and sends nothing.
+  `party_frame.lua` records one clickable rect per drawn roster row (buttons above
+  keep priority) and calls the primitive on left-button-down.
+- **Verified so far (static, 2026-07-01)**: `FUN_00723230` reads `obj + 0x90`
+  (== `world::tgt_gid`, the contact object's own GameID) into the packet and sends
+  via `CmdSend` -- the same M and Connection enb.target_action/enb.group_action
+  already drive. enbmod builds clean (`just build-enbmod`, no warnings). Server side
+  is stock EnB targeting (unchanged), so no server/proxy/CLI wire change and no new
+  opcode -- the CLI already need not parse anything new.
+- **What to look for (real client, human at the mouse, two grouped chars)**:
+  1. Group two characters in the SAME sector. Click the other member's row in the
+     party frame: they must become your selected target (target frame populates
+     with their name/level/threat, ship highlights), exactly as clicking them in
+     space would.
+  2. Move the other member to a DIFFERENT sector (still grouped). Their row either
+     drops from the roster (no live entity) or, if still listed, clicking it does
+     nothing and the click is swallowed (no crash, no wrong-target, no fall-through
+     to the 3D scene). enbmod.log shows "target: <name> (not in range)".
+  3. Clicking a member row must NOT also fire a group action button (the button
+     rects are tested first) and must NOT rotate/click the ship behind the frame.
+  4. No new WARNING/fault lines in enbmod.log; server log shows the normal
+     REQUEST_TARGET handling with no Error/WARNING.

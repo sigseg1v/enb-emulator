@@ -105,7 +105,23 @@ void FreyaClientPosFeed_Start() {
 
     memset(&g_ProxyAddr, 0, sizeof(g_ProxyAddr));
     g_ProxyAddr.sin_family = AF_INET;
-    g_ProxyAddr.sin_port = htons(FREYA_CLIENT_POS_PORT);
+    // The posfeed intake is loopback-only in every configuration (single-client,
+    // docker-published, and native multibox), so the target IP is always
+    // 127.0.0.1. Only the PORT varies for multibox: each co-located proxy owns
+    // its own contiguous port block, and the posfeed slot is base+3. A multi-box
+    // launch passes that port via FREYA_POS_FEED_PORT; unset / malformed leaves
+    // the stock FREYA_CLIENT_POS_PORT, so single-box is unchanged.
+    unsigned short feed_port = FREYA_CLIENT_POS_PORT;
+    {
+        char envPort[16];
+        DWORD n = GetEnvironmentVariableA("FREYA_POS_FEED_PORT", envPort, sizeof(envPort));
+        if (n > 0 && n < sizeof(envPort)) {
+            long p = strtol(envPort, NULL, 10);
+            if (p > 0 && p <= 65535)
+                feed_port = (unsigned short)p;
+        }
+    }
+    g_ProxyAddr.sin_port = htons(feed_port);
     g_ProxyAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK); // 127.0.0.1
 
     g_Run = true;

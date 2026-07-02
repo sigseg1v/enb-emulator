@@ -35,12 +35,12 @@
 -- Help and Message both route through the native chat/cockpit nav-bar dispatcher
 -- (see cockpit() below). Command 0x10 (Help) builds the native Online Manual
 -- window, which renders fine on its own. Command 4 (Message) runs the native
--- mission-message consume path (FUN_00750800): it pops the next pending entry off
+-- mission-message consume path (0x00750800): it pops the next pending entry off
 -- the chat uiRoot's confirmed-message list and opens that message's dialog -- the
 -- exact path the native Message button fires. This one is CONDITIONAL and load-
 -- bearing for quests: some missions only advance when the player opens the pending
 -- message dialog. The native code raises a per-message flag at controller+0x264
--- (set by FUN_0056baa0 when a message arrives, cleared on consume); we read that
+-- (set by 0x0056baa0 when a message arrives, cleared on consume); we read that
 -- same flag each frame, so the Freya Message button is drawn ONLY while a message
 -- is pending and GLOWS (pulsing amber) the whole time it is up, then disappears
 -- once clicked/consumed -- mirroring the native lit indicator.

@@ -443,6 +443,7 @@ static int l_unpatch(lua_State* L) {
 // declared so l_target can read the target entity's vitals.
 static uintptr_t player_entity();
 static bool aux_read_f(uintptr_t entity, const char* key, double& out);
+static bool aux_read_shared_f(uintptr_t container, const char* key, double& out);
 static int aux_entry_guarded(uintptr_t entity, const char* key);
 static int target_level_live();
 static uintptr_t targeting_data_obj();
@@ -529,7 +530,7 @@ static int l_target(lua_State* L) {
         lua_pushnumber(L, d);
         lua_setfield(L, -2, "shield_max");
     }
-    if (container && aux_read_f(container, "ShieldPercent", d))
+    if (container && aux_read_shared_f(container, "ShieldPercent", d))
         spct = d;
     if (smax >= 0.0 && spct >= 0.0) {
         lua_pushnumber(L, smax * spct);
@@ -799,6 +800,36 @@ static bool aux_read_f(uintptr_t entity, const char* key, double& out) {
     out = v;
     return true;
 }
+
+// Read a SHARED / network-replicated auxdata float (ShieldPercent lives here, not
+// in the plain get_value list). Builds the key, resolves the entry through
+// aux::get_shared, checks the valid flag, and returns the live 0..1 value at
+// entry + shared_val_off. Fully fault-guarded like aux_entry_guarded: a fault in
+// the key build or resolve longjmps back and yields "no value".
+static bool aux_read_shared_f(uintptr_t container, const char* key, double& out) {
+    if (!container || !mem::readable((void*)container, 4))
+        return false;
+    unsigned char keybuf[game::aux::keybuf_sz];
+    memset(keybuf, 0, sizeof(keybuf));
+    int entry = 0;
+    if (__builtin_setjmp(mem::g_guard_jmp)) {
+        mem::g_guard_on = 0;
+        return false;
+    }
+    mem::g_guard_on = 1;
+    ((AuxBuildKey_t)game::aux::build_key)(keybuf, key);
+    entry = ((AuxGetValue_t)game::aux::get_shared)((int)container, keybuf);
+    mem::g_guard_on = 0;
+    if (!entry || !mem::readable((void*)(uintptr_t)entry, game::aux::shared_val_off + 4))
+        return false;
+    if (mem::i32((uintptr_t)entry + game::aux::valid_off) == 0)
+        return false; // value not set
+    float v = mem::f32((uintptr_t)entry + game::aux::shared_val_off);
+    if (v != v)
+        return false; // NaN guard
+    out = v;
+    return true;
+}
 static uintptr_t aux_value_addr(lua_State* L, int key_arg, int entity_arg) {
     const char* key = luaL_checkstring(L, key_arg);
     uintptr_t entity;
@@ -860,6 +891,180 @@ static int l_rpg_level(lua_State* L) {
     if (mem::i32((uintptr_t)entry + game::aux::valid_off) == 0)
         return 0; // not set
     lua_pushinteger(L, (lua_Integer)mem::i32((uintptr_t)entry + game::aux::val_off));
+    return 1;
+}
+
+// enb.group() -> { count = N, members = { {name=, gameid=, [hull=, hull_max=,
+// shield=, shield_max=]}, ... } } | empty table.
+// Reads the party roster from the "GroupInfo" object-typed aux entry, which lives in
+// the same property-bag container as the RPGInfo levels (avatar object + container_off).
+// The container-holding avatar object is captured two ways in this DLL; we try the RPG
+// manager first (the proven holder of that container) and fall back to the vitals-chain
+// ship entity, using whichever actually yields a group object -- both are guarded reads,
+// so a wrong base just misses. Returns an empty table when not in a group, out of space,
+// or before either object has been captured.
+// The member struct stores only name + GameID (+ formation/position); per-member
+// hull/shield are NOT on it. We get them the way the native group window did: resolve
+// each member's GameID to its live contact object via the world manager's entity table
+// (entity_by_gid) and read HullPoints / MaxHullPoints / MaxShieldPower / ShieldPercent
+// off its aux bag, identical to enb.target(). That only works for members in the current
+// sector / scanner range; members elsewhere have no live entity and come back name+id
+// only (their vital keys are simply absent).
+//
+// Convention is load-bearing (same trap as enb.aux): build_key is __thiscall(ECX=keybuf),
+// group::get_object is __cdecl(container, keybuf). The get_object call and the member-array
+// walk run under the VEH fault guard so a stale/half-built roster yields an empty table
+// instead of faulting the client.
+struct GroupMember {
+    uintptr_t namep; // member name char* (resolved to a string outside the guard)
+    unsigned gameid;
+};
+
+// Resolve a GameID to its live in-scene contact object via the world manager's GameID
+// hash table (game::world::ent_*). The member struct stores no vitals, so a party
+// member's hull/shield must be read off the SAME render/contact object the rest of the
+// HUD uses, found by GameID. This is a pure guarded walk -- no native call, so no
+// calling-convention hazard on the live client; a GameID with no live entity (member in
+// another sector / not yet in scene) returns 0, and the bounded hop count guards against
+// a corrupt or cyclic bucket chain. The bucket for gid % ent_modulus holds the node whose
+// ent_node_gid keys the entity; match the key and take ent_node_obj. Self-guarded (own
+// setjmp); call it with no other fault guard active.
+static uintptr_t entity_by_gid(unsigned gameid) {
+    uintptr_t M = hooks::world_mgr();
+    if (!M || !gameid)
+        return 0;
+    uintptr_t result = 0;
+    if (__builtin_setjmp(mem::g_guard_jmp)) {
+        mem::g_guard_on = 0;
+        return 0; // a read faulted while walking the table -- treat as "no entity"
+    }
+    mem::g_guard_on = 1;
+    uintptr_t head = M + game::world::ent_buckets + (gameid % game::world::ent_modulus) * 4;
+    if (mem::readable((void*)head, 4)) {
+        uintptr_t node = mem::ptr(head);
+        for (int hops = 0; node && hops < 256; ++hops) {
+            if (!mem::readable((void*)(node + game::world::ent_node_gid), 4))
+                break;
+            // Match the key FIRST. (An earlier version broke the walk on a
+            // "deleted/skip" bit at node+0x18 before comparing the key -- but that
+            // byte reads back non-zero on perfectly LIVE nodes, so it aborted the
+            // walk on the first, matching node and every avatar resolved to 0.
+            // That was the "party-frame hull/shield stay empty" bug: the member's
+            // real contact object was right there under a matching key.)
+            if ((unsigned)mem::i32(node + game::world::ent_node_gid) == gameid) {
+                result = mem::ptr(node + game::world::ent_node_obj);
+                break;
+            }
+            if (!mem::readable((void*)(node + game::world::ent_node_next), 4))
+                break;
+            node = mem::ptr(node + game::world::ent_node_next);
+        }
+    }
+    mem::g_guard_on = 0;
+    return result;
+}
+
+static int l_group(lua_State* L) {
+    uintptr_t bases[2] = {hooks::rpg_mgr(), player_entity()};
+    unsigned char keybuf[game::aux::keybuf_sz];
+    memset(keybuf, 0, sizeof(keybuf));
+
+    // Collect raw member pointers/ids UNDER the fault guard with NO Lua stack ops, so a
+    // mid-walk longjmp can never leave a half-built table on the Lua stack (it just
+    // truncates the C++ vector). The Lua table is built afterwards from these locals.
+    GroupMember raw[game::group::max_members];
+    int n = 0;
+    if (__builtin_setjmp(mem::g_guard_jmp)) {
+        mem::g_guard_on = 0; // a read faulted mid-walk: keep what we gathered so far
+    } else {
+        mem::g_guard_on = 1;
+        ((AuxBuildKey_t)game::aux::build_key)(keybuf, "GroupInfo");
+        uintptr_t group = 0;
+        for (uintptr_t base : bases) {
+            if (!base || !mem::readable((void*)(base + game::rpg::container_off), 4))
+                continue;
+            uintptr_t cont = mem::ptr(base + game::rpg::container_off);
+            if (!cont || !mem::readable((void*)cont, 4))
+                continue;
+            uintptr_t g = (uintptr_t)((AuxGetValue_t)game::group::get_object)((int)cont, keybuf);
+            if (g && mem::readable((void*)(g + game::group::members_end), 4) &&
+                mem::i32(g + game::group::active_off) != 0) {
+                group = g;
+                break;
+            }
+        }
+        if (group) {
+            uintptr_t begin = mem::ptr(group + game::group::members_begin);
+            uintptr_t end = mem::ptr(group + game::group::members_end);
+            for (uintptr_t p = begin; p && p < end && n < game::group::max_members; p += 4) {
+                uintptr_t m = mem::ptr(p);
+                if (!m || !mem::readable((void*)m, 4))
+                    continue;
+                // The member array is a FIXED max_members-slot block; unused slots read
+                // back with a zero GameID (and no name). Skip those so `count` is the
+                // number of REAL party members -- otherwise a solo player (or a small
+                // party) reports the empty trailing slots and the party frame paints
+                // blank "Member" rows for them.
+                unsigned gid = (unsigned)mem::i32(m + game::group::member_gameid);
+                if (gid == 0)
+                    continue;
+                raw[n].namep = mem::ptr(m + game::group::member_name);
+                raw[n].gameid = gid;
+                ++n;
+            }
+        }
+        mem::g_guard_on = 0;
+    }
+
+    lua_newtable(L); // result
+    lua_newtable(L); // members
+    for (int i = 0; i < n; ++i) {
+        lua_newtable(L); // member row
+        if (raw[i].namep && mem::readable((void*)raw[i].namep, 1)) {
+            std::string nm = mem::cstr(raw[i].namep); // self-guarding
+            if (!nm.empty()) {
+                lua_pushlstring(L, nm.data(), nm.size());
+                lua_setfield(L, -2, "name");
+            }
+        }
+        lua_pushinteger(L, (lua_Integer)raw[i].gameid);
+        lua_setfield(L, -2, "gameid");
+        // Per-member hull/shield: the member struct holds none, so resolve the member's
+        // GameID to its live contact object and read vitals off its +tgt_container aux bag
+        // EXACTLY as enb.target() does (HullPoints / MaxHullPoints absolute, shield =
+        // MaxShieldPower * ShieldPercent). Only members in the current sector / scanner
+        // range have a live entity; the rest stay name+id and party_frame draws their bars
+        // as empty tracks. entity_by_gid + each aux_read_f are independently fault-guarded.
+        uintptr_t ent = entity_by_gid(raw[i].gameid);
+        if (ent && mem::readable((void*)(ent + game::world::tgt_container), 4)) {
+            uintptr_t cont = mem::ptr(ent + game::world::tgt_container);
+            double d;
+            if (cont && aux_read_f(cont, "HullPoints", d)) {
+                lua_pushnumber(L, d);
+                lua_setfield(L, -2, "hull");
+            }
+            if (cont && aux_read_f(cont, "MaxHullPoints", d)) {
+                lua_pushnumber(L, d);
+                lua_setfield(L, -2, "hull_max");
+            }
+            double smax = -1.0, spct = -1.0;
+            if (cont && aux_read_f(cont, "MaxShieldPower", d)) {
+                smax = d;
+                lua_pushnumber(L, d);
+                lua_setfield(L, -2, "shield_max");
+            }
+            if (cont && aux_read_shared_f(cont, "ShieldPercent", d))
+                spct = d;
+            if (smax >= 0.0 && spct >= 0.0) {
+                lua_pushnumber(L, smax * spct);
+                lua_setfield(L, -2, "shield");
+            }
+        }
+        lua_rawseti(L, -2, i + 1); // members[i+1] = row
+    }
+    lua_setfield(L, -2, "members");
+    lua_pushinteger(L, n);
+    lua_setfield(L, -2, "count");
     return 1;
 }
 
@@ -973,6 +1178,152 @@ static bool world_pos(uintptr_t obj, double out[3]) {
     return ok;
 }
 
+// ---------------------------------------------------------------------------
+// MVAS position-feed publisher (BA-2c).
+//
+// FreyaPosFeed.dll relays the LOCAL ship's world position + orientation to the
+// server as MVAS opcode 0x1004 so other clients can render us. Its old source
+// was a render-loop transform hijack that captured ANY player hull matching a
+// shared engine signature -- so with a grouped teammate rendered in range it
+// periodically shipped the OTHER ship's transform stamped as ours, and the
+// remote ship "teleported" between two positions every few seconds.
+//
+// enbmod already resolves the LOCAL ship unambiguously (targeting_data_obj(),
+// which the native target frame uses as "our ship") and reads it under the VEH
+// fault guard, so we compute the sample here on the tick and publish it for
+// FreyaPosFeed to pick up over a process-local export -- no code patching, no
+// signature guessing, and never another ship's transform. See plans/57 BA-2c
+// and plans/29 CV-MVAS-POS.
+//
+// Position comes from world_pos() (the same struct-returning locatable getter
+// the target frame trusts for our position). Orientation comes from the ship's
+// affine transform at *(ship+0x14)+0x48 -- a row-major 3x4 matrix whose
+// translation column (bytes 12/28/44) we validate against world_pos() before
+// trusting its orientation column (bytes 0/16/32); a mismatch means that offset
+// is not this build's transform, so we publish position-only (zero heading)
+// rather than a wrong facing.
+struct FreyaShipSample {
+    volatile unsigned int seq; // seqlock: odd = write in progress
+    float pos[3];
+    float heading[3];
+    unsigned int sector;
+    unsigned int valid; // 1 = fresh in-space sample
+};
+static FreyaShipSample g_ship_sample = {0, {0, 0, 0}, {0, 0, 0}, 0, 0};
+
+// Try to read the ship orientation from one candidate object's affine transform
+// at *(obj+0x14)+0x48, validating the matrix translation column (bytes 12/28/44)
+// against the world_pos we already trust. Returns true and fills heading_out
+// only on a validated matrix; leaves heading_out untouched otherwise. All reads
+// are self-guarding (mem::ptr / mem::f32 pre-check + VEH), so a bad pointer
+// during a sector change just fails the read, never faults.
+static bool try_read_transform_heading(uintptr_t obj, const float pos[3], float heading_out[3]) {
+    if (!obj)
+        return false;
+    uintptr_t t = mem::ptr(obj + 0x14);
+    if (!t)
+        return false;
+    uintptr_t m = t + 0x48;
+    if (!mem::readable((const void*)m, 48))
+        return false;
+    float tx = mem::f32(m + 12), ty = mem::f32(m + 28), tz = mem::f32(m + 44);
+    float dx = tx - pos[0], dy = ty - pos[1], dz = tz - pos[2];
+    // >2 units apart -> this matrix is not the ship world_pos resolved: don't
+    // trust its orientation. Also rejects NaN (a compare with NaN is false).
+    if (!(dx * dx + dy * dy + dz * dz <= 4.0f))
+        return false;
+    heading_out[0] = mem::f32(m + 0);
+    heading_out[1] = mem::f32(m + 16);
+    heading_out[2] = mem::f32(m + 32);
+    return true;
+}
+
+// Best-effort ship orientation, validated against the position world_pos gave
+// us. The affine transform lives on the ship ENTITY (the render-loop object), so
+// try player_entity() first; fall back to the targeting data object the position
+// came from. Leaves heading_out at {0,0,0} if neither candidate's matrix
+// validates -- so a wrong offset yields a neutral heading, never a wrong facing.
+static void read_ship_heading(uintptr_t ship, const float pos[3], float heading_out[3]) {
+    heading_out[0] = heading_out[1] = heading_out[2] = 0.0f;
+    if (try_read_transform_heading(player_entity(), pos, heading_out))
+        return;
+    try_read_transform_heading(ship, pos, heading_out);
+}
+
+// Called every tick from on_tick (the pump thread), under enbmod's fault guard.
+// Resolves the local ship and publishes {pos, heading, valid} via a seqlock so
+// FreyaPosFeed's feed thread can read a consistent sample without touching any
+// client memory itself.
+void publish_ship_state() {
+    uintptr_t ship = targeting_data_obj();
+    double wp[3];
+    if (!ship || !world_pos(ship, wp)) {
+        // No live in-space ship (loading / docked / char-select / pre-capture).
+        g_ship_sample.seq++; // begin write (odd)
+        __atomic_signal_fence(__ATOMIC_ACQ_REL);
+        g_ship_sample.valid = 0;
+        __atomic_signal_fence(__ATOMIC_ACQ_REL);
+        g_ship_sample.seq++; // end write (even)
+        return;
+    }
+    float pos[3] = {(float)wp[0], (float)wp[1], (float)wp[2]};
+    float heading[3];
+    read_ship_heading(ship, pos, heading);
+
+    // seqlock write. The compiler fences keep the field stores between the two
+    // seq bumps -- x86 preserves store order in hardware, so a pure compiler
+    // barrier is all the reader (FreyaEnbmodShipState, other thread) needs.
+    g_ship_sample.seq++; // begin write (odd)
+    __atomic_signal_fence(__ATOMIC_ACQ_REL);
+    g_ship_sample.pos[0] = pos[0];
+    g_ship_sample.pos[1] = pos[1];
+    g_ship_sample.pos[2] = pos[2];
+    g_ship_sample.heading[0] = heading[0];
+    g_ship_sample.heading[1] = heading[1];
+    g_ship_sample.heading[2] = heading[2];
+    // The proxy attributes the sample to its own session; the historical feed
+    // never carried a sector id, so leave it 0.
+    g_ship_sample.sector = 0;
+    g_ship_sample.valid = 1;
+    __atomic_signal_fence(__ATOMIC_ACQ_REL);
+    g_ship_sample.seq++; // end write (even)
+}
+
+// Process-local export FreyaPosFeed.dll binds to (GetModuleHandleA("enbmod.dll")
+// -> GetProcAddress). extern "C" gives it the unqualified symbol name regardless
+// of this namespace nesting. Returns 1 and fills pos/heading/sector from the
+// latest valid sample, or 0 when there is no live sample yet. Reads via the
+// seqlock so it never returns a torn (half-updated) sample.
+extern "C" __declspec(dllexport) int FreyaEnbmodShipState(float pos[3], float heading[3],
+                                                          unsigned int* sector) {
+    for (int tries = 0; tries < 8; ++tries) {
+        unsigned int s1 = g_ship_sample.seq;
+        __atomic_signal_fence(__ATOMIC_ACQ_REL);
+        if (s1 & 1u)
+            continue; // write in progress
+        float p[3] = {g_ship_sample.pos[0], g_ship_sample.pos[1], g_ship_sample.pos[2]};
+        float h[3] = {g_ship_sample.heading[0], g_ship_sample.heading[1], g_ship_sample.heading[2]};
+        unsigned int sec = g_ship_sample.sector;
+        unsigned int val = g_ship_sample.valid;
+        __atomic_signal_fence(__ATOMIC_ACQ_REL);
+        unsigned int s2 = g_ship_sample.seq;
+        if (s1 != s2)
+            continue; // sample changed under us -> retry
+        if (!val)
+            return 0;
+        pos[0] = p[0];
+        pos[1] = p[1];
+        pos[2] = p[2];
+        heading[0] = h[0];
+        heading[1] = h[1];
+        heading[2] = h[2];
+        if (sector)
+            *sector = sec;
+        return 1;
+    }
+    return 0;
+}
+
 // enb.target_ctrl() -> int. Diagnostic: the captured targeting/HUD controller pointer
 // (hooks::target_ctrl()), 0 until the target-frame refresh has run.
 static int l_target_ctrl(lua_State* L) {
@@ -987,6 +1338,15 @@ static int l_target_ctrl(lua_State* L) {
 // needs to build and push a target-action command. Diagnostic + the dispatch root.
 static int l_worldmgr(lua_State* L) {
     lua_pushinteger(L, (lua_Integer)hooks::world_mgr());
+    return 1;
+}
+
+// enb.login_task() -> int. The front-end LoginTask `this` captured read-only from
+// the login run-loop hook (hooks::login_task()); 0 until the pre-game screens are
+// up. The auto-login driver and live probing read the login-field/char-list state
+// off it. Only non-zero when an auto-login env var armed the capture hook.
+static int l_login_task(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)hooks::login_task());
     return 1;
 }
 
@@ -1050,7 +1410,7 @@ static int l_target_action(lua_State* L) {
     }
     uint32_t target;
     if (std::strcmp(mode, "self") == 0) {
-        target = player;   // the command target is the player's own game id
+        target = player; // the command target is the player's own game id
     } else {
         // The target's GameID sits directly on the captured contact object at
         // +tgt_gid (the object stores its own GameID there -- the same field the
@@ -1070,6 +1430,97 @@ static int l_target_action(lua_State* L) {
         send_target_cmd(m, player, 0x08, target);
     }
     lua_pushboolean(L, 1);
+    return 1;
+}
+
+// enb.request_target(gid) -> bool. Make the given GameID the local player's target,
+// exactly as clicking that object in space does. We resolve the GameID to its live
+// contact object (entity_by_gid -- the same gid->object hash walk enb.group uses for
+// member hull/shield) and hand it to the client's own target-request call
+// (addr::RequestTarget). That builds a REQUEST_TARGET (wire opcode 0x17) packet from
+// the object's GameID and pushes it through M's sector-server Connection; the server
+// validates the target is real / in range and replies SET_TARGET (0x19), which the
+// client applies natively. Returns false -- and sends NOTHING -- when M is not
+// captured yet or the GameID has no live entity in this sector (a group member in
+// another sector / not yet in scene), which is precisely the "skip if not targetable"
+// case the party frame wants. Game-thread only (callers run from on_input);
+// entity_by_gid is fault-guarded, and the native call only touches M and the object
+// that walk just validated (same posture as enb.target_action / enb.group_action).
+static int l_request_target(lua_State* L) {
+    unsigned gid = (unsigned)(uint32_t)luaL_checkinteger(L, 1);
+    uintptr_t m = hooks::world_mgr();
+    if (!m) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    uintptr_t obj = entity_by_gid(gid);
+    if (!obj) {
+        lua_pushboolean(L, 0); // no live entity for this GameID -- not targetable, skip
+        return 1;
+    }
+    uint32_t args[1] = {(uint32_t)obj};
+    actions::call_thiscall(game::addr::RequestTarget, m, args, 1);
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+// enb.group_action(action [, target_gid]) -> bool. Send a group call-to-arms /
+// formation request (wire opcode 0x00BC, CTARequest{SourceID, TargetID, Action}) --
+// the packet behind the native group window's Formation and "Target my target"
+// controls. Built with the client's own request constructor (addr::CtaBuild) into
+// the shared command buffer and pushed through M's Connection exactly like
+// enb.target_action. action codes (the server's GroupAction switch): 4 Slot Back,
+// 5 Block, 6 Pipe (set formation, leader-only), 7 Form Up, 8 Leave Formation,
+// 9 Break Formation (leader), 12 ask the group to target my target. target_gid
+// defaults to -1 = the whole group (the constructor's own default). Returns false
+// (no send) when M is not captured yet. Game-thread only (callers run from
+// on_input), same single-writer g_cmd_obj contract as send_target_cmd.
+static int l_group_action(lua_State* L) {
+    int action = (int)luaL_checkinteger(L, 1);
+    uint32_t target = (uint32_t)(int32_t)luaL_optinteger(L, 2, -1);
+    uintptr_t m = hooks::world_mgr();
+    if (!m || !mem::readable((void*)(m + game::world::player_id), 4)) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    uint32_t player = mem::u32(m + game::world::player_id);
+    std::memset(g_cmd_obj, 0, sizeof(g_cmd_obj));
+    uint32_t b[3] = {player, target, (uint32_t)action};
+    actions::call_thiscall(game::addr::CtaBuild, (unsigned)(uintptr_t)g_cmd_obj, b, 3);
+    uint32_t snd[1] = {(uint32_t)(uintptr_t)g_cmd_obj};
+    actions::call_thiscall(game::addr::CmdSend, m, snd, 1);
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+// enb.is_leader() -> bool. Whether the local player LEADS their current group --
+// the client's own leader check (group::is_leader), the same one the native group
+// window runs to choose GRP DISBAND (leader) vs GRP LEAVE (member). Called with
+// the same candidate avatar bases the roster read (enb.group) walks; false when
+// solo, member, out of space, or before the bases are captured. VEH-guarded like
+// every other native call.
+static int l_is_leader(lua_State* L) {
+    uintptr_t bases[2] = {hooks::rpg_mgr(), player_entity()};
+    int lead = 0;
+    if (__builtin_setjmp(mem::g_guard_jmp)) {
+        mem::g_guard_on = 0; // the native check faulted: report not-leader
+    } else {
+        mem::g_guard_on = 1;
+        for (uintptr_t base : bases) {
+            if (!base || !mem::readable((void*)(base + game::rpg::container_off), 4))
+                continue;
+            if (!mem::ptr(base + game::rpg::container_off))
+                continue;
+            // The check returns a char in AL -- the rest of EAX is callee scratch,
+            // so mask to the low byte before testing.
+            if ((actions::call_thiscall(game::group::is_leader, base, nullptr, 0) & 0xff) != 0) {
+                lead = 1;
+                break;
+            }
+        }
+        mem::g_guard_on = 0;
+    }
+    lua_pushboolean(L, lead);
     return 1;
 }
 
@@ -1243,7 +1694,7 @@ static int l_pda_ctrl(lua_State* L) {
 }
 
 // enb.pda_switch(index) -> uint. Open / switch the PDA to child screen `index`
-// through the game's own dispatcher (game::addr::PdaSwitch == FUN_00695780),
+// through the game's own dispatcher (game::addr::PdaSwitch == 0x00695780),
 // exactly as a native micro-menu button click would: 0=Inventory, 1=Skills,
 // 2=Character Info, 3=Vault, 4=Galaxy Map. __thiscall(ECX = the PDA controller,
 // int index) -- it dereferences `this` immediately, so we pass the captured
@@ -1271,7 +1722,7 @@ static int l_shell_ctrl(lua_State* L) {
 
 // enb.shell_screen(id) -> uint. Request the in-game screen shell show screen `id`,
 // exactly as a native "Options" button does: ShellRequest (game::addr::ShellRequest
-// == FUN_00565f30) just stores the pending id at shell+0x108, and the shell's own
+// == 0x00565f30) just stores the pending id at shell+0x108, and the shell's own
 // per-frame apply pump opens it next frame. Id 1 = the in-game OPTIONS_MAIN screen
 // (the one micro-menu button that is not a PDA child). __thiscall(ECX = the shell,
 // int id); it writes through `this`, so we pass the captured shell. Returns 0 if
@@ -1290,7 +1741,7 @@ static int l_shell_screen(lua_State* L) {
 }
 
 // enb.chat_send(line [, channel]) -> uint. Submit a typed chat line exactly the way
-// the native chat-input box does (mirrors FUN_0065ccd0), so the Freya chat box owns
+// the native chat-input box does (mirrors 0x0065ccd0), so the Freya chat box owns
 // text entry while the real send path stays the game's:
 //   * A '/'-prefixed line goes to the game's command dispatcher (addr::ChatCmdDispatch,
 //     the chat manager's vtable+0x34 entry): /tell <name> <msg> = whisper, /gen /ooc
@@ -1752,6 +2203,26 @@ static int l_hwnd(lua_State* L) {
     lua_pushinteger(L, (lua_Integer)(uintptr_t)actions::game_hwnd());
     return 1;
 }
+// enb.strbuf(s) -> address of a persistent client-memory copy of the string.
+// collect_args marshals only integers, so a game function that takes a char*
+// (e.g. a UI edit-control text setter) cannot be fed a Lua string directly. This
+// copies the bytes into one of a small rotating pool of static buffers (so a few
+// pending arguments do not clobber each other) and returns the buffer address,
+// which IS a valid pointer inside client.exe. Truncates to the buffer size.
+static int l_strbuf(lua_State* L) {
+    size_t len = 0;
+    const char* s = luaL_checklstring(L, 1, &len);
+    static char pool[8][256];
+    static int slot = 0;
+    char* b = pool[slot];
+    slot = (slot + 1) & 7;
+    if (len > sizeof(pool[0]) - 1)
+        len = sizeof(pool[0]) - 1;
+    memcpy(b, s, len);
+    b[len] = '\0';
+    lua_pushinteger(L, (lua_Integer)(uintptr_t)b);
+    return 1;
+}
 
 // enb.list_dir(path) -> { name, name, ... }
 // Directory entry names (files + subdirs, excluding "." and ".."). Used by the
@@ -1799,6 +2270,7 @@ static void push_addr_table(lua_State* L) {
     A(CmdBuild);
     A(AutoFollowBuild);
     A(CmdSend);
+    A(CtaBuild);
     A(ChatGadget);
     A(ChatRender);
     A(ChatChannel);
@@ -1847,6 +2319,9 @@ void open(lua_State* L) {
                                    {"target_ctrl", l_target_ctrl},
                                    {"worldmgr", l_worldmgr},
                                    {"target_action", l_target_action},
+                                   {"request_target", l_request_target},
+                                   {"group_action", l_group_action},
+                                   {"is_leader", l_is_leader},
                                    {"aux_entry", l_aux_entry},
                                    {"state", l_state},
                                    {"cursor", l_cursor},
@@ -1864,10 +2339,12 @@ void open(lua_State* L) {
                                    {"inspace", l_inspace},
                                    {"vitals_ctrl", l_vitals_ctrl},
                                    {"vitals", l_vitals},
+                                   {"login_task", l_login_task},
                                    {"aux", l_aux},
                                    {"aux_i", l_aux_i},
                                    {"rpg_level", l_rpg_level},
                                    {"rpg_mgr", l_rpg_mgr},
+                                   {"group", l_group},
                                    {"xp_frac", l_xp_frac},
                                    {"xp_ctrl", l_xp_ctrl},
                                    {"actionbar", l_actionbar},
@@ -1893,6 +2370,7 @@ void open(lua_State* L) {
                                    {"char", l_char},
                                    {"call", l_call},
                                    {"call_cdecl", l_call_cdecl},
+                                   {"strbuf", l_strbuf},
                                    {"hwnd", l_hwnd},
                                    {"list_dir", l_list_dir},
                                    {nullptr, nullptr}};
