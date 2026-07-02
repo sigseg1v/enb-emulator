@@ -749,12 +749,18 @@ namespace LaunchFreya
                 return;
             }
 
-            // Reconcile OUR Lua mods against the server's published set whenever
-            // the user has client mods enabled. This is orthogonal to the binary
-            // version gate below (mods never gate Play) and best-effort: a mod
-            // download/extract failure is logged, never fatal. Skipped on the
-            // background auto-refresh so a timer tick never downloads.
-            if (!auto && _user.UseClientMods)
+            // Reconcile OUR Lua mods against the server's published set on every
+            // manual check. This POPULATES the local store (the "available mods"
+            // catalog the Configure Mods UI lists) -- it is deliberately NOT gated
+            // on UseClientMods: that toggle governs whether mods get STAGED into
+            // the client at launch, not whether the catalog exists. Gating the
+            // download on the toggle was a chicken-and-egg trap -- a fresh install
+            // has an empty store, the toggle is off by default, so enabling it
+            // showed "No mods found" because nothing had ever downloaded them.
+            // Orthogonal to the binary version gate below (mods never gate Play)
+            // and best-effort: a download/extract failure is logged, never fatal.
+            // Skipped on the background auto-refresh so a timer tick never downloads.
+            if (!auto)
             {
                 try
                 {
