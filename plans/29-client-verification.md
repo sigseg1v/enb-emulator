@@ -3043,29 +3043,35 @@ moot; the SOLVED block above is the truth):**
   (`0x00689ca0` id / `0x00689d20` stack / `0x0068aaa0` template) to enumerate
   occupied slots. Source: behavioural analysis of the retail client's hulk-inventory
   panel path (the same accessors the native loot grid calls each repaint).
-- **No server/proxy/CLI wire change**: this is a client-side READ of an object the
-  client already builds; nothing new goes on the wire, so no CLI parse is required
-  for THIS entry. The panel is READ-ONLY -- it does not take/loot; the native loot
-  window is left visible + functional underneath.
+- **READ path: no server/proxy/CLI wire change** -- a client-side READ of an object
+  the client already builds; nothing new goes on the wire. **LIVE-VALIDATED
+  2026-07-02**: a prospected asteroid read "Copper Ore x5" byte-correct with
+  `src=HarvestableResources`. Header simplified to "Loot"; a `src`-prefix filter now
+  drops the player's own holds (`Inventory*`) so only lootable containers show.
+- **TAKE path (added 2026-07-02)**: clicking a Freya row's icon tile calls
+  `enb.loot_take(slot)`, which builds + sends the SAME command the native loot
+  window's take emits -- the compact loot command, **wire opcode 0x005D**
+  `[ctx:u32][inv_type:u8][slot:u8]`, in-place ctor `LootBuild 0x008ae810`, pushed via
+  `CmdSend 0x00728150`. Primary source: behavioural analysis of the retail client's
+  take handler (`FUN_005a0740` loot branch), which does exactly `new + LootBuild(ctx,
+  inv_type, slot) + CmdSend(M, cmd)`. This is NOT a new packet and NOT a server/proxy
+  change -- the client already sends this exact command on a native loot click; the
+  DLL only drives the same builder + sender. ctx = local player game id
+  (`M+world::player_id`); inv_type from the container name (`Harvest...`=0x12, else
+  hulk cargo 0x06); the command object is allocated with the client operator new
+  (`0x004e9cb0`) and NOT freed so the Connection send path frees it through the
+  matching heap (cross-heap free would crash).
 - **What to look for (real client, human at the mouse, at a prospected hulk)**:
   1. Prospect/kill something to spawn a hulk, open its loot -- a LEFT-side Freya
-     "SALVAGE" panel appears listing one row per occupied slot: correct 1-based
-     Slot number, correct item Name, and "xN" stack for N>1. Cross-check every
-     field against the native loot grid on the right -- they must match exactly
-     (e.g. Copper Ore x5 in slot 1, Lead Ore x3 in slot 2).
-  2. The panel's header shows the container inventory-name in parentheses (dev
-     read-out of the `src` discriminator) -- note what a HULK reads vs what your
-     own SHIP INVENTORY reads, so the false-positive filter can be tightened.
+     "Loot" panel appears listing one row per occupied slot: correct 1-based Slot
+     number, correct item Name, and "xN" stack for N>1. Cross-check every field
+     against the native loot grid on the right -- they must match exactly
+     (VALIDATED: Copper Ore x5). 
+  2. Click a Freya row's icon tile -> that slot is looted into your hold (the item
+     leaves the hulk grid / your cargo gains it), exactly as clicking the native
+     loot entry does. No crash, no fault line in enbmod.log. Loot each of several
+     slots to confirm the slot index maps correctly (loot slot 2, not slot 1).
   3. Close the loot window: the Freya panel must DISAPPEAR within ~5s (the
-     `enb.loot_age()` staleness gate) and never read a freed container (no crash,
-     no fault line in enbmod.log).
-  4. Open your own ship inventory (NOT a hulk): confirm whether the panel wrongly
-     shows your cargo (it will, until step 2's `src` filter is applied) -- report
-     the `src` string so the gate can be finalized.
-  5. Clicking the Freya panel is swallowed (no target deselect / camera rotate);
-     it does not yet loot.
-- **DEFERRED (separate future CV)**: a Freya take/loot-all action. Looting rides
-  the generic inventory-move packet (client->server opcode 0x27). Its 5-field move
-  layout is not capture-pinned; pinning it needs a cleartext proxy<->server capture
-  of one native loot, after which the CLI must parse 0x27 and a test pin it BEFORE
-  the client emits it and the native window is hidden (full CLAUDE.md gate).
+     `enb.loot_age()` staleness gate) and never read a freed container.
+  4. Open your own ship inventory (NOT a hulk): confirm the panel does NOT appear
+     (the `src` `Inventory*` filter now suppresses it).

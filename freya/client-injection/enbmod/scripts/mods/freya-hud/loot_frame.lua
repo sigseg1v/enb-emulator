@@ -21,12 +21,13 @@
 -- the latch is FRESH -- enb.loot_age() reports ms since the grid last repainted;
 -- a closed loot window goes stale and the panel disappears.
 --
--- READ-ONLY for now: this panel DISPLAYS loot; the actual take/loot-all still
--- runs through the native window (kept alive underneath). Wiring a Freya
--- take-action means emitting the generic inventory-move packet (opcode 0x27),
--- whose field order is not yet capture-pinned -- so we do NOT fabricate it blind
--- against a live session, and we do NOT hide the native window until it is. See
--- plans/49 (loot-UI) + plans/29 client-verification.
+-- Clicking a row's icon tile LOOTS that slot via enb.loot_take(slot): the DLL
+-- builds and sends the exact command the native loot window's take emits (the
+-- compact loot command, wire opcode 0x005D) through the same Connection path the
+-- verb buttons use. It is not a new packet -- the client already sends this when
+-- you click a native loot item; we only drive the same builder + sender. The
+-- native window stays alive underneath (not hidden) until this is confirmed
+-- against the real client. See plans/49 (loot-UI) + plans/29 CV-AS-LOOT.
 
 local H = require("freya_hud")
 
@@ -55,10 +56,17 @@ local CFG = {
     MAX_ROWS = 24,    -- hard cap on drawn rows (a hulk never carries this many; guards a bad read)
 }
 
+-- per-row icon-tile click rects (rebuilt every draw), so a click on a tile can
+-- loot that slot. Kept in lockstep with the draw so geometry never drifts.
+local slot_rects = {}
+
 -- one loot row, top edge at `y`; returns the y just below the row. `slot_disp` is
 -- the 1-based slot number shown to the user (enb.loot() reports 0-based indices).
 local function draw_row(r, x, y, w, slot_disp)
     local icon = CFG.ICON + H.sy(6)
+    -- the icon tile IS the loot button: record its rect + the row's 0-based slot.
+    slot_rects[#slot_rects + 1] = { x = x, y = y, w = icon, h = icon,
+                                    slot = r.slot or (slot_disp - 1), name = r.name }
     -- icon box: a glass tile. The item's icon texture is blitted here once its
     -- offset off row.asset is confirmed live; until then it is an empty tile so
     -- the layout is final and only the pixels drop in later.
@@ -113,6 +121,13 @@ local function draw_loot()
     local rows = enb.loot()
     if type(rows) ~= "table" or #rows == 0 then return end
 
+    -- only a lootable container: prospected resources + corpse/hulk cargo. Exclude
+    -- the player's own holds (self and other players), whose inventory-name begins
+    -- "Inventory" (e.g. "InventoryEquipped"); a real loot reads e.g.
+    -- "HarvestableResources". A nameless container is not a trustworthy loot source.
+    local src = (type(rows.src) == "string") and rows.src or ""
+    if src == "" or src:sub(1, 9):lower() == "inventory" then return end
+
     local sw, sh = enb.screen()
     if not sw or sw == 0 then sw, sh = 1280, 960 end
 
@@ -121,12 +136,7 @@ local function draw_loot()
     local icon = CFG.ICON + H.sy(6)
     local n = math.min(#rows, CFG.MAX_ROWS)
 
-    -- header text: "SALVAGE" plus, during bring-up, the container's inventory-name
-    -- so a live read can confirm the hulk-vs-ship-inventory discriminator (`src`).
-    local hdr = "SALVAGE"
-    if type(rows.src) == "string" and rows.src ~= "" then
-        hdr = "SALVAGE  (" .. rows.src .. ")"
-    end
+    local hdr = "Loot"
     local hdr_h = CFG.HDR_H + H.sy(4)
 
     local body_h = n * icon + (n - 1) * CFG.ROW_GAP
@@ -155,6 +165,7 @@ end
 -- ===========================================================================
 enb.on_tick(function()
     panel_rect = nil        -- clear so a stale rect never eats a click while hidden
+    slot_rects = {}         -- rebuilt by draw_loot; empty when hidden so no stale hits
     if not H.vis() then return end
     draw_loot()
 end)
@@ -179,6 +190,23 @@ enb.on_input(function(msg, wparam, lparam)
         return false
     end
     local mx, my = mouse_xy(lparam)
+    -- click an item's icon tile -> loot that slot (the take binding lands with the
+    -- next DLL; until then the click is swallowed and logged, never a no-op fall-through).
+    for _, s in ipairs(slot_rects) do
+        if mx >= s.x and mx < s.x + s.w and my >= s.y and my < s.y + s.h then
+            if msg == M.LBUTTONDOWN then
+                if enb.loot_take then
+                    local ok = enb.loot_take(s.slot)
+                    enb.log("loot: " .. (s.name or "slot " .. s.slot) ..
+                            (ok and "" or " (take failed)"))
+                else
+                    enb.log("loot: take not wired in this DLL yet (" ..
+                            (s.name or ("slot " .. s.slot)) .. ")")
+                end
+            end
+            return true
+        end
+    end
     local r = panel_rect
     if mx >= r.x and mx < r.x + r.w and my >= r.y and my < r.y + r.h then
         return true  -- swallow: keep clicks off the scene behind the panel

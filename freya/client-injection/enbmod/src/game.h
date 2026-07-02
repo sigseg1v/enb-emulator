@@ -327,6 +327,14 @@ constexpr uintptr_t CharEnter = 0x00769400;
 constexpr uintptr_t CargoTemplateID = 0x00689ca0;
 constexpr uintptr_t CargoStackCount = 0x00689d20;
 constexpr uintptr_t CargoTemplateAt = 0x0068aaa0;
+// LootBuild (__thiscall, ECX = command object; args: u32 ctx, u8 inv_type, u8 slot)
+// -- the in-place constructor for the loot-take command (wire opcode 0x005D). See
+// namespace cargo for the full contract. The built object is pushed via CmdSend.
+constexpr uintptr_t LootBuild = 0x008ae810;
+// ClientOperatorNew (__cdecl(size_t) -> void*) -- the client CRT's operator new.
+// The loot command object is allocated here so the Connection send path can free
+// it through the matching client heap (never our DLL heap; never a static buffer).
+constexpr uintptr_t ClientOperatorNew = 0x004e9cb0;
 } // namespace addr
 
 // Front-end LoginTask layout (build-constant field offsets, runtime-validated).
@@ -659,6 +667,30 @@ constexpr int tmpl_type = 0x0c;      // item template -> ItemType/category
 constexpr int tmpl_icon_asset = 0x10; // item template -> resolved icon asset object
 constexpr unsigned tid_empty = 0xFFFFFFFFu; // CargoTemplateID sentinel: empty slot
 constexpr unsigned tid_error = 0xFFFFFFFEu; // CargoTemplateID sentinel: error
+
+// ---- loot TAKE (send a single slot into your own cargo) ---------------------
+// Looting one slot is the exact command the native loot window's take emits: a
+// compact 3-field command (wire opcode 0x005D, payload [ctx:u32][inv_type:u8]
+// [slot:u8]), built in place by LootBuild then pushed through M's Connection by
+// CmdSend -- the identical "construct object, hand to Connection" path the verb
+// commands use. There is no quantity or destination on the wire: looting takes
+// the whole slot and the server routes it into your hold; the specific hulk is
+// bound out of band by the loot-permission handshake already in effect while the
+// grid is open. ctx is the local player's game id (M + world::player_id -- the
+// same actor id the verbs use; the client stores it at both +0x112c and +0x1130).
+//   LootBuild (__thiscall, ECX = a caller-owned command object; args: u32 ctx,
+//     u8 inv_type, u8 slot) is an IN-PLACE constructor: it installs the command
+//     vtable and writes ctx/inv_type/slot, spanning 0x12 bytes. inv_type is the
+//     source container's wire kind: HULK CARGO = 0x06, HARVEST CARGO = 0x12
+//     (derived from the container's inventory-name -- "Harvest..." => harvest).
+//   The command object MUST be allocated with the CLIENT's own operator new
+//     (ClientOperatorNew) and NOT freed here: the Connection send path takes
+//     ownership (its scalar deleting dtor frees through the client CRT heap), so
+//     a DLL-heap or static buffer would be a cross-heap free. Allocating with the
+//     client allocator and never freeing mirrors the native handler byte-for-byte.
+constexpr unsigned char inv_type_hulk = 0x06;    // hulk cargo container wire kind
+constexpr unsigned char inv_type_harvest = 0x12; // harvestable-resource container wire kind
+constexpr uint32_t loot_cmd_size = 0x14;         // bytes to allocate for the 0x5D command object
 } // namespace cargo
 
 } // namespace game
