@@ -1433,6 +1433,37 @@ static int l_target_action(lua_State* L) {
     return 1;
 }
 
+// enb.request_target(gid) -> bool. Make the given GameID the local player's target,
+// exactly as clicking that object in space does. We resolve the GameID to its live
+// contact object (entity_by_gid -- the same gid->object hash walk enb.group uses for
+// member hull/shield) and hand it to the client's own target-request call
+// (addr::RequestTarget). That builds a REQUEST_TARGET (wire opcode 0x17) packet from
+// the object's GameID and pushes it through M's sector-server Connection; the server
+// validates the target is real / in range and replies SET_TARGET (0x19), which the
+// client applies natively. Returns false -- and sends NOTHING -- when M is not
+// captured yet or the GameID has no live entity in this sector (a group member in
+// another sector / not yet in scene), which is precisely the "skip if not targetable"
+// case the party frame wants. Game-thread only (callers run from on_input);
+// entity_by_gid is fault-guarded, and the native call only touches M and the object
+// that walk just validated (same posture as enb.target_action / enb.group_action).
+static int l_request_target(lua_State* L) {
+    unsigned gid = (unsigned)(uint32_t)luaL_checkinteger(L, 1);
+    uintptr_t m = hooks::world_mgr();
+    if (!m) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    uintptr_t obj = entity_by_gid(gid);
+    if (!obj) {
+        lua_pushboolean(L, 0); // no live entity for this GameID -- not targetable, skip
+        return 1;
+    }
+    uint32_t args[1] = {(uint32_t)obj};
+    actions::call_thiscall(game::addr::RequestTarget, m, args, 1);
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
 // enb.group_action(action [, target_gid]) -> bool. Send a group call-to-arms /
 // formation request (wire opcode 0x00BC, CTARequest{SourceID, TargetID, Action}) --
 // the packet behind the native group window's Formation and "Target my target"
@@ -2288,6 +2319,7 @@ void open(lua_State* L) {
                                    {"target_ctrl", l_target_ctrl},
                                    {"worldmgr", l_worldmgr},
                                    {"target_action", l_target_action},
+                                   {"request_target", l_request_target},
                                    {"group_action", l_group_action},
                                    {"is_leader", l_is_leader},
                                    {"aux_entry", l_aux_entry},

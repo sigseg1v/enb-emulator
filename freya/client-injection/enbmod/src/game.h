@@ -261,6 +261,17 @@ constexpr uintptr_t AutoFollowBuild = 0x0089d070;
 constexpr uintptr_t CmdSend = 0x00728150;
 constexpr uintptr_t CtaBuild = 0x0086f070;
 
+// RequestTarget (__thiscall, ECX = M; arg: a live contact-object pointer) is the
+// client's own "make this object my target" call -- the same path a click on an
+// object in space takes. It reads the object's GameID (obj + world::tgt_gid) into a
+// REQUEST_TARGET (wire opcode 0x17) packet and pushes it through M's sector-server
+// Connection (M + world::connection). The server validates the target is real / in
+// range and replies SET_TARGET (0x19), which the client applies natively (target
+// frame, threat text, highlight). We replicate it from enb.request_target: resolve a
+// GameID to its contact object with the same gid->object lookup enb.group uses, then
+// hand that object here. Pass ONLY an object the lookup returned (never a raw address).
+constexpr uintptr_t RequestTarget = 0x00723230;
+
 // ---- front-end login flow (EULA / login / character select) -----------------
 // The pre-game screens are driven by a single LoginTask object and its state
 // machine. We capture the LoginTask `this` (ECX) read-only from the per-frame

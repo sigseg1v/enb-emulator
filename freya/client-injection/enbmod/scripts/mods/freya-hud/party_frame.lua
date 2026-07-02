@@ -106,6 +106,7 @@ end
 -- on_input hit-test and the draw agree on geometry without recomputing it. The
 -- same pattern as target_frame's verb row.
 local btn_rects = {}
+local member_rects = {}  -- one per drawn roster row: { x,y,w,h, gid, name } -- click to target
 local flash = {}         -- [id] = remaining ticks of the click-acknowledge glow
 local form_open = false  -- F toggles the formation sub-row
 
@@ -221,7 +222,17 @@ local function draw_party()
     local x = px + pad
     local y = py + pad
     for _, m in ipairs(members) do
-        y = draw_member(m, x, y, w, bar_h, val_scale) + CFG.ROW_GAP
+        local top = y
+        local bot = draw_member(m, x, y, w, bar_h, val_scale)
+        -- Record the row rect so a click can target this member. Only members with a
+        -- live GameID are recorded; the on_input hit-test lets enb.request_target
+        -- decide targetability (a member in another sector resolves to no entity and
+        -- is skipped there).
+        if m.gameid and m.gameid ~= 0 then
+            member_rects[#member_rects + 1] =
+                { x = x, y = top, w = w, h = bot - top, gid = m.gameid, name = m.name }
+        end
+        y = bot + CFG.ROW_GAP
     end
 end
 
@@ -229,8 +240,8 @@ end
 -- DRAW -- only while the HUD is visible AND the player is in a group.
 -- ===========================================================================
 enb.on_tick(function()
-    btn_rects = {}   -- repopulated by draw_party; empty when hidden/ungrouped,
-                     -- so stale rects never eat clicks
+    btn_rects = {}      -- repopulated by draw_party; empty when hidden/ungrouped,
+    member_rects = {}   -- so stale rects never eat clicks
     if not H.vis() then return end
     draw_party()
 end)
@@ -269,6 +280,17 @@ enb.on_input(function(msg, wparam, lparam)
                 enb.log("group: " .. r.label)
             end
             return true   -- swallow any button event over a group button
+        end
+    end
+    -- A click on a member row targets that member (buttons above take priority).
+    for _, r in ipairs(member_rects) do
+        if point_in(mx, my, r.x, r.y, r.w, r.h) then
+            if msg == M.LBUTTONDOWN and enb.request_target then
+                local ok = enb.request_target(r.gid)
+                enb.log("target: " .. (r.name or "member") ..
+                        (ok and "" or " (not in range)"))
+            end
+            return true   -- swallow so the click never falls through to the 3D scene
         end
     end
     return false

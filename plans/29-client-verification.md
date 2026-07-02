@@ -2993,3 +2993,43 @@ moot; the SOLVED block above is the truth):**
      is acceptable for the unlock use case -- if the owner wants recenter look
      preserved while unlocked, the SetCursorPos swallow needs a look-drag gate.
      TICKED: camera-drag unchanged.
+
+## CV-BA-PARTYTARGET -- clicking a party-frame member row targets that member
+
+- **What changed (client-side enbmod DLL + freya-hud, 2026-07-01)**: clicking a
+  member row in the Freya party frame now selects that member as the target, as
+  long as they are targetable (in the same sector / in scanner range); a member
+  who is not present is skipped (no-op, click still swallowed).
+- **How it works (no server or proxy change)**: a new DLL primitive
+  `enb.request_target(gid)` (`enbmod/src/lua_api.cpp`) resolves the GameID to its
+  live contact object via the same gid->object hash walk `enb.group` uses, then
+  calls the client's own target-request routine (`addr::RequestTarget = 0x00723230`,
+  `enbmod/src/game.h`). That builds a REQUEST_TARGET (wire opcode 0x17) packet from
+  the object's GameID and pushes it through M's sector-server Connection -- byte-for
+  -byte the same path a click on the object in space takes. The server's stock
+  `HandleRequestTarget` (server/src/PlayerConnection.cpp) validates the target via
+  `GetObjectManager()->GetObjectFromID()` and replies SET_TARGET (0x19), which the
+  client applies natively (target frame, threat text, highlight). "Skip if not
+  targetable" falls out for free: a member in another sector resolves to no live
+  entity, so `enb.request_target` returns false and sends nothing.
+  `party_frame.lua` records one clickable rect per drawn roster row (buttons above
+  keep priority) and calls the primitive on left-button-down.
+- **Verified so far (static, 2026-07-01)**: `FUN_00723230` reads `obj + 0x90`
+  (== `world::tgt_gid`, the contact object's own GameID) into the packet and sends
+  via `CmdSend` -- the same M and Connection enb.target_action/enb.group_action
+  already drive. enbmod builds clean (`just build-enbmod`, no warnings). Server side
+  is stock EnB targeting (unchanged), so no server/proxy/CLI wire change and no new
+  opcode -- the CLI already need not parse anything new.
+- **What to look for (real client, human at the mouse, two grouped chars)**:
+  1. Group two characters in the SAME sector. Click the other member's row in the
+     party frame: they must become your selected target (target frame populates
+     with their name/level/threat, ship highlights), exactly as clicking them in
+     space would.
+  2. Move the other member to a DIFFERENT sector (still grouped). Their row either
+     drops from the roster (no live entity) or, if still listed, clicking it does
+     nothing and the click is swallowed (no crash, no wrong-target, no fall-through
+     to the 3D scene). enbmod.log shows "target: <name> (not in range)".
+  3. Clicking a member row must NOT also fire a group action button (the button
+     rects are tested first) and must NOT rotate/click the ship behind the frame.
+  4. No new WARNING/fault lines in enbmod.log; server log shows the normal
+     REQUEST_TARGET handling with no Error/WARNING.

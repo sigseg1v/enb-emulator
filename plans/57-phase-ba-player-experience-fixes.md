@@ -400,6 +400,35 @@ sampling artifact; the owner reproduces it live. See REOPENED analysis above.
 
 </details>
 
+### BA-2d -- click a party-frame member row to target them (owner, 2026-07-01) [~] IMPLEMENTED, pending real-client verify CV-BA-PARTYTARGET
+
+Owner: "fix the party frame to make it so if you click on another player in the
+party frame it targets them (as long as they are able to be targetted eg in same
+sector, if they dont exist then skip)."
+
+Implemented as the client's OWN native target path -- no server or proxy change,
+no new opcode, stock EnB targeting end to end:
+
+- New DLL primitive `enb.request_target(gid)` (`enbmod/src/lua_api.cpp` +
+  `addr::RequestTarget = 0x00723230` in `enbmod/src/game.h`). It resolves the
+  GameID to its live contact object with the same gid->object hash walk
+  `enb.group` uses (`entity_by_gid`), then calls the client's own target-request
+  routine, which builds a REQUEST_TARGET (wire opcode 0x17) packet from the
+  object's GameID (`obj + 0x90`, == `world::tgt_gid`) and pushes it through M's
+  sector-server Connection -- byte-identical to clicking the object in space.
+- The server's stock `HandleRequestTarget` (server/src/PlayerConnection.cpp)
+  validates the target via `GetObjectManager()->GetObjectFromID()` and replies
+  SET_TARGET (0x19); the client applies it natively. "Skip if not targetable"
+  falls out for free -- a member in another sector has no live entity, so
+  `entity_by_gid` returns 0, `request_target` returns false, and NOTHING is sent.
+- `scripts/mods/freya-hud/party_frame.lua` records one clickable rect per drawn
+  roster row (`member_rects`, reset each tick alongside `btn_rects`; the action
+  buttons above keep hit-test priority) and calls `enb.request_target(gameid)` on
+  left-button-down, swallowing the click so it never falls through to the 3D scene.
+
+Built clean (`just build-enbmod`, no warnings). Server/proxy/CLI untouched (no wire
+change). Needs the two-grouped-character real-client check: CV-BA-PARTYTARGET.
+
 ## BA-3 -- launcher Profile section
 
 New section BETWEEN the Emulator/Server section and the Client EXE section:
