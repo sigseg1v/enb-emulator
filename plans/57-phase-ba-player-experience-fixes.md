@@ -20,6 +20,7 @@ primary-source proof + CLI parse/test first + plans/29 CV entry).
 | BA-4 | Launcher Resolution dropdown + Fullscreen checkbox under Client EXE, applied on Play | [x] done (builds clean) |
 | BA-5 | Launcher optional Username / Password / Character fields -> auto-login env; autosave (not password) | [x] done (builds clean) |
 | BA-6 | Broadcast chat does not reach other players (only echoes to sender) | [x] fixed |
+| BA-7 | Beam weapons (need facing) won't fire until spacebar auto-face -> server sees a wrong/neutral ship heading; MVAS rotation not being sent correctly | [ ] OPEN -- new owner report 2026-07-02. Suspect the posfeed orientation source (BA-2c) is publishing a neutral/stale heading. Investigation phase below. |
 
 ## BA-1 -- multibox HUD reads the wrong process
 
@@ -567,3 +568,67 @@ had an old/inaccurate `BroadcastChat` that walked only the sender's sector list
 Fixed `PlayerManager::BroadcastChat` to walk `m_GlobalPlayerList`, identical
 reach to `ChatSendEveryone`. Owner-confirmed correct retail behaviour
 (broadcast == global, sector == local); not a divergence.
+
+## BA-7 -- beam weapons need spacebar auto-face -> MVAS heading wrong/not sent (owner report, 2026-07-02) [ ] OPEN
+
+**Symptom (owner):** "MVAS might not be sending ROTATION quaternion/etc properly.
+If I try to shoot an enemy with a beam weapon (requires facing) it doesn't appear
+to shoot, but with a press of spacebar (auto-face target) it fires immediately.
+This suggests the rotations are wrong or not being updated."
+
+**Working hypothesis (to be proven, not assumed):** the server gates beam fire on
+the attacker facing the target, and it derives the attacker's heading from the
+MVAS position feed. If the feed publishes a wrong or **neutral** heading, the
+server thinks the ship never faces the target, so the beam is rejected -- until
+spacebar sends the client's native auto-face command, which updates the server's
+notion of facing directly and the beam then fires. This lines up precisely with
+the BA-2c posfeed rewrite, whose own note warns: *"Heading validation (transform
+offset for this build) is best-effort with a position-only fallback, so worst
+case a wrong offset yields a neutral facing, never a wrong one; confirm remote-ship
+rotation."* A neutral-facing fallback firing every update is exactly this bug.
+
+**This is a SEPARATE phase from the loot fix and does NOT start until the loot
+take (AS-17) is confirmed.** Scope below is the investigation plan only; nothing
+implemented yet.
+
+### Step 1 -- prove where facing is actually checked (before touching anything)
+- Confirm server-side: find the beam/weapon fire path and the facing/cone gate it
+  applies to the attacker's orientation, and confirm which field it reads (the
+  MVAS-fed `m_Position_info` orientation vs a separately-tracked facing). Cite the
+  server function + line. Determine whether spacebar auto-face writes that same
+  field by a different path (that asymmetry is the tell, same shape as the
+  0x007F manufacture-id byte-order bug write-up).
+- Confirm the feed side: is orientation even present in the 0x1004
+  `SendPositionIfChanged` payload the posfeed drives, and what does the server do
+  with it? (`HandleMVASPosReturn` -> `SendAdvancedPositionalUpdate`.)
+
+### Step 2 -- prove the published heading is wrong (measurement, read-only)
+- enbmod `publish_ship_state()` reads orientation from the ship-entity affine
+  transform at `*(entity+0x14)+0x48`, gated by matching the transform's
+  translation column against `world_pos`. Instrument (read-only, NOT on a client
+  the owner is actively flying -- see the no-live-instrumentation memory) whether
+  the orientation column is being trusted or the position-only neutral fallback is
+  firing on this build. If the fallback is firing, the transform offset for this
+  build is wrong and every update ships a neutral heading = root cause.
+- Cross-check the published quaternion/matrix against the ship's actual facing
+  (rotate in place, watch the published heading track or not).
+
+### Step 3 -- fix + verify
+- If the transform-orientation offset is wrong: correct it (decomp-guided; the
+  same entity->`*(+0x14)+0x48` chain), re-validate the translation-column match
+  guard so a wrong offset still degrades to no-orientation rather than a garbage
+  one.
+- Understanding-before-change: the 0x1004 orientation field must be parsed +
+  byte-pinned in the CLI (CliClient.Core) with a test, per CLAUDE.md, BEFORE any
+  server-side change. If the fix is purely client-side (posfeed publishes the
+  correct heading the server already reads correctly), no server change is needed
+  and this is just an enbmod/posfeed offset correction (Win32/WINE, CC dirs).
+- Real-client verify entry in `plans/29` (new CV-BA-7): beam weapon fires at a
+  target the ship is manually facing, without needing spacebar auto-face; confirm
+  remote-ship rotation tracks in a grouped 2-box test (shares the BA-2c rig).
+
+**Buckets:** posfeed orientation source lives in enbmod (`lua_api.cpp`
+`publish_ship_state`) + FreyaPosFeed; both Win32/WINE, CC/Net7-licensed dirs.
+A server-side facing-gate change (if Step 1 shows the server is actually wrong)
+is gated by the full CLAUDE.md server-integrity rules (primary source + CLI
+parse/test first + CV entry).
