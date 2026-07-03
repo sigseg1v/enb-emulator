@@ -431,7 +431,7 @@ constexpr int connection = 0x1124; // M -> sector-server Connection (command sin
 // the sink via M's own connection does NOT transmit the inventory command -- it must
 // go through the container-owner SClient, so we fetch C off the container exactly as
 // the native commit does rather than off M.
-constexpr int sub_client_gid = 0x1130;  // SClient -> InvMove GameID field (the take actor id)
+constexpr int sub_client_gid = 0x1130; // SClient -> InvMove GameID field (the take actor id)
 constexpr int tgt_container =
     0x88;                     // target contact object -> properties/aux bag (hull/shield/name)
 constexpr int tgt_gid = 0x90; // target contact object + 0x90 -> its own GameID (command target)
@@ -672,12 +672,12 @@ Offsets& offs();
 // is the ECX captured at addr::CargoTemplateID; the template pointer is what
 // addr::CargoTemplateAt returns for an occupied slot. All CONFIDENT from analysis.
 namespace cargo {
-constexpr int inv_name_ptr = 0x04;   // container -> char* inventory-name ("Cargo" for a hulk)
-constexpr int view_client = 0x4c;    // container -> owning SClient (the InvMove send holder)
-constexpr int slot_count = 0x44;     // container -> uint precomputed slot count
-constexpr int tmpl_name_ptr = 0x18;  // item template -> char* narrow item name
-constexpr int tmpl_name_len = 0x1c;  // item template -> int name length
-constexpr int tmpl_type = 0x0c;      // item template -> ItemType/category
+constexpr int inv_name_ptr = 0x04;    // container -> char* inventory-name ("Cargo" for a hulk)
+constexpr int view_client = 0x4c;     // container -> owning SClient (the InvMove send holder)
+constexpr int slot_count = 0x44;      // container -> uint precomputed slot count
+constexpr int tmpl_name_ptr = 0x18;   // item template -> char* narrow item name
+constexpr int tmpl_name_len = 0x1c;   // item template -> int name length
+constexpr int tmpl_type = 0x0c;       // item template -> ItemType/category
 constexpr int tmpl_icon_asset = 0x10; // item template -> resolved icon asset object
 constexpr unsigned tid_empty = 0xFFFFFFFFu; // CargoTemplateID sentinel: empty slot
 constexpr unsigned tid_error = 0xFFFFFFFEu; // CargoTemplateID sentinel: error
@@ -705,9 +705,11 @@ constexpr unsigned tid_error = 0xFFFFFFFEu; // CargoTemplateID sentinel: error
 //     ownership and frees it through the client CRT heap, so a DLL/static buffer
 //     would be a cross-heap free. The built object is pushed on the sub-client's
 //     Connection via CmdSend (see world::sub_client_vtbl).
-constexpr unsigned char inv_type_hulk = 0x06;    // FromInv: loot/husk window (server case 6)
-constexpr unsigned char inv_type_harvest = 0x12; // FromInv: mining window / harvestable (server case 18)
-constexpr uint32_t inv_move_size = 0x2c; // InvMove command object span (ctor writes to +0x20; >=0x24)
+constexpr unsigned char inv_type_hulk = 0x06; // FromInv: loot/husk window (server case 6)
+constexpr unsigned char inv_type_harvest =
+    0x12; // FromInv: mining window / harvestable (server case 18)
+constexpr uint32_t inv_move_size =
+    0x2c; // InvMove command object span (ctor writes to +0x20; >=0x24)
 } // namespace cargo
 
 } // namespace game
