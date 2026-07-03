@@ -58,7 +58,7 @@ int g_view_throttle = 0;  // frames since last credential-view search
 int g_view_attempts = 0;  // bounded credential-view searches (cost guard)
 bool g_view_gaveup = false;
 DWORD g_view_found_tick = 0; // GetTickCount when the credential view first appeared (0 = not yet)
-int g_char_attempts = 0; // bounded character-name searches
+int g_char_attempts = 0;     // bounded character-name searches
 bool g_char_gaveup = false;
 
 // Bound the cost of the credential-view search so a future client build that moved

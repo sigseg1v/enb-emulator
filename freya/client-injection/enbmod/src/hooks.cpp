@@ -439,7 +439,7 @@ extern "C" __attribute__((naked)) void hk_WorldMgrInit() {
 // enumerate the slots. NOTE the accessor fires for ANY inventory grid (ship cargo,
 // vault, ...), so lua_api re-reads the container's inventory-name (container +
 // cargo::inv_name_ptr) to confirm it is the hulk cargo before trusting the rows.
-static volatile unsigned g_loot_container = 0;      // ECX of the last cargo accessor call
+static volatile unsigned g_loot_container = 0;           // ECX of the last cargo accessor call
 static volatile unsigned long g_loot_container_tick = 0; // GetTickCount of that latch (0 = never)
 extern "C" {
 void* real_CargoTemplateID_tramp = nullptr;
