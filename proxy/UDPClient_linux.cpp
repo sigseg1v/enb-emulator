@@ -1162,30 +1162,26 @@ void UDPClient::SendPositionIfChanged() {
     if (m_HaveFedOnce && memcmp(pos, m_LastFedPos, sizeof(pos)) == 0)
         return;
 
-    // POSITION-ONLY feed. We deliberately do NOT send the orientation block.
-    // The server's HandleMVASPosReturn applies the orientation triple as a raw
-    // VELOCITY (Player::UpdatePositionFromMVAS -> SetVelocityVector) whenever the
-    // packet is > 28 bytes. Our engine read supplies the ship's orientation
-    // X-axis basis there -- a unit vector that is non-zero even at a dead stop --
-    // so feeding it pins a permanent phantom velocity on the server: the avatar
-    // is never "stopped", which blocks warp engagement and destabilizes target
-    // locks. Orientation/velocity already arrive via the client's normal 0x0014
-    // MOVE path; the MVAS feed only needs to correct ABSOLUTE POSITION (the PB-2
-    // divergence). So we emit the 12-byte position payload only (total 24 bytes,
-    // <= 28), which keeps HandleMVASPosReturn on its position-only branch -- a
-    // protocol-legal 0x1004 variant the server's `size > 28` gate exists to
-    // support. (The one live capture we have -- live_mvas_position_1004.hex -- is
-    // 40 bytes incl. heading; we have NO primary source that the retail "heading"
-    // triple is the orientation basis our engine read yields rather than a true
-    // velocity vector, so until that is captured we feed position only and let the
-    // 0x0014 MOVE path carry motion. CV-MVAS-POS tracks the real-client check.)
-    unsigned char buf[sizeof(EnbUdpHeader) + 12];
+    // POSITION + HEADING feed (36-byte payload, total > 28 so the server takes its
+    // heading branch). The heading triple is the ship's orientation X-axis basis --
+    // its NOSE direction -- read from the client engine. The server's
+    // HandleMVASPosReturn -> Player::UpdatePositionFromMVAS no longer applies this
+    // as a velocity (that pinned a phantom velocity and blocked warp): it now stores
+    // the normalized nose vector in a decoupled facing field (m_ClientHeading) used
+    // ONLY by the firing-arc check (Equipable::CheckOrientation). It never touches
+    // m_Velocity / m_Position_info.Velocity / the broadcast, so warp engagement and
+    // target locks are unaffected. Sending the nose direction is what lets the server
+    // detect "pointed at the enemy" while orbiting -- GetAngleTo() alone measures the
+    // velocity direction, which is tangential mid-orbit, so manual fire never armed.
+    // (See server PlayerClass GetClientHeadingAngleTo + CV-MVAS-ORIENT.)
+    unsigned char buf[sizeof(EnbUdpHeader) + 24];
     EnbUdpHeader* h = (EnbUdpHeader*)buf;
     h->size = (short)sizeof(buf);
     h->opcode = ENB_OPCODE_1004_MVAS_SEND_POSITION_C_S;
     h->player_id = m_PlayerID;
     h->packet_sequence = ++m_PosFeedSeq; // server-ignored; real proxy increments
     memcpy(buf + sizeof(EnbUdpHeader), pos, 12);
+    memcpy(buf + sizeof(EnbUdpHeader) + 12, heading, 12);
 
     // Emit on THIS UDPClient's m_Listen_Socket (UDP_Send). The feed/keepalive is
     // started ONLY on m_UDPGlobalClient (the global/unconnected plane) -- the

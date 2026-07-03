@@ -1547,7 +1547,14 @@ bool Equipable::CheckOrientation(Object * Target)
 	Player *p = g_PlayerMgr->GetPlayerFromIndex(m_PlayerID);
     if (m_ItemBase->SubCategory() == IB_SUBCATEGORY_BEAM_WEAPON || m_ItemBase->SubCategory() == IB_SUBCATEGORY_PROJECTILE_LAUNCHER)
     {
-        return (fabsf(p->GetAngleTo(Target->Position())) < (PI/4.5f));
+        // Firing-arc gate uses the ship NOSE direction. GetAngleTo() derives facing
+        // from velocity DIRECTION (Heading()), which points tangentially (~90 deg off)
+        // while orbiting a target -- so the arc never closes and manual fire never
+        // triggers even though the ship is pointed straight at the enemy. When the
+        // MVAS heading feed has given us the client's true nose vector, use it.
+        float angle = p->HaveClientHeading() ? p->GetClientHeadingAngleTo(Target->Position())
+                                             : p->GetAngleTo(Target->Position());
+        return (fabsf(angle) < (PI/4.5f));
     }
 
     return true;

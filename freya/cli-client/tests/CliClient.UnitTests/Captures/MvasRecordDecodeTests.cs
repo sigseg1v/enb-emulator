@@ -82,6 +82,23 @@ public sealed class MvasRecordDecodeTests
     }
 
     [Fact]
+    public void MvasSendPosition_Heading_IsUnitOrientationVector_NotVelocity()
+    {
+        // Primary source for the server firing-arc fix: the 0x1004 heading triple
+        // is a UNIT vector (the ship's nose / orientation X-axis basis), magnitude
+        // == 1.0, NOT a velocity (whose magnitude scales with speed). This is what
+        // licenses the server to consume it as a pure facing direction
+        // (Player::m_ClientHeading, used only by Equipable::CheckOrientation) rather
+        // than feeding it to SetVelocityVector. See UDP_MVAS.cpp / PlayerClass.cpp.
+        byte[] full = Frames["mvas_send_position_full"].Payload;
+        float hx = BitConverter.ToSingle(full, 12);
+        float hy = BitConverter.ToSingle(full, 16);
+        float hz = BitConverter.ToSingle(full, 20);
+        double mag = System.Math.Sqrt((double)hx * hx + (double)hy * hy + (double)hz * hz);
+        Assert.Equal(1.0, mag, 3); // unit vector to 3 decimal places
+    }
+
+    [Fact]
     public void MvasSendPosition_ShorterForms_DecodeWithoutHeading()
     {
         // 12-byte position-only form: pos[3], nothing after.

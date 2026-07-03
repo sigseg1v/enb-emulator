@@ -8436,3 +8436,41 @@ CLAUDE.md correctness gate does not bind -- but it is recorded here as a
 deliberate divergence with a real-client check tracked as plans/29 CV-AZ-DUPCHAR
 (two different chars of one account stay online together; the same char twice
 still kicks the older session).
+
+## 2026-07-03 -- Firing-arc gate uses client NOSE heading, not velocity (PB-33)
+
+Owner-reported bug (PB-33): orbiting an enemy while pointed straight at it, the
+weapon key does nothing; auto-follow (spacebar) fires instantly. Diagnosed as a
+real bug, not retail-matching: the beam/projectile arc gate
+`Equipable::CheckOrientation` measures the target bearing with `Object::GetAngleTo`,
+which derives "facing" from the VELOCITY direction (`Heading()` =
+`m_Position_info.Velocity`). Mid-orbit, velocity is tangential (~90 deg off the
+line to the target) while the ship's nose is on-target, so the `< PI/4.5` arc
+never closes. Auto-follow steers the nose onto the target server-side, which
+re-aligns velocity with facing -- hence the instant fire.
+
+Decision: forward the client's true nose direction (already present in the
+position-feed datagram) via the MVAS `0x1004` heading triple and have the server
+apply it to the firing-arc check. Two design guardrails:
+
+1. The heading is stored in a NEW DECOUPLED facing field (`Player::m_ClientHeading`,
+   normalized in `UpdatePositionFromMVAS`) consumed ONLY by `CheckOrientation`
+   through `Player::GetClientHeadingAngleTo`. It never touches `m_Velocity` /
+   `m_Position_info.Velocity` / the position broadcast, so it CANNOT reintroduce
+   the CV-MVAS-POS phantom-velocity warp regression. The earlier
+   `SetVelocityVector(heading)` path (which broke warp) is deliberately NOT used.
+2. The owner asked for "a rotation quaternion applied server-side." I pushed back:
+   the retail `0x1004` heading is a 3-float UNIT vector (nose / orientation X-axis
+   basis, |h|==1.0), capture-proven by fixture `mvas_send_position_full`
+   (`-0.864, 0.289, 0.412`). A quaternion is not what the wire carries, and the
+   arc check only needs the nose direction. Implemented as the capture-proven
+   vector rather than a quaternion, to stay retail-faithful.
+
+Server-integrity gate satisfied: (A) primary source = the capture fixture, now
+asserted unit-magnitude in `MvasRecordDecodeTests`; (B) CLI parse + tests precede
+the server change (the 0x1004 heading variant was already understood and pinned;
+added the unit-vector assertion); (C) real-client check tracked as plans/29
+CV-MVAS-ORIENT (fires while orbiting-and-facing; warp still engages; target locks
+stay stable). Three-places-in-sync: server (`CMobEquippable.cpp`, `PlayerClass.*`,
+`UDP_MVAS.cpp` unchanged parse), proxy (`UDPClient_linux.cpp` now emits pos+heading),
+CLI (already parses/encodes the heading variant).

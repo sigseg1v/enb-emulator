@@ -88,6 +88,8 @@ void Player::ResetPlayer()
     m_NumFormulas = 0;
     m_MVAS_frequency = 10;
     m_FollowObject = false;
+    m_HaveClientHeading = false;
+    m_ClientHeading[0] = m_ClientHeading[1] = m_ClientHeading[2] = 0.0f;
     m_Prospecting = false;
 	m_Looting = false;
     m_AttackMusic = false;
@@ -231,6 +233,8 @@ void Player::SectorReset()
     m_DistToNav = 0.0f;
     m_OverrunCount = 0;
     m_FollowObject = false;
+    m_HaveClientHeading = false;
+    m_ClientHeading[0] = m_ClientHeading[1] = m_ClientHeading[2] = 0.0f;
     m_Prospecting = false;
 	m_Looting = false;
     m_AttackMusic = false;
@@ -1401,6 +1405,30 @@ bool Player::RestoreDockingCoords()
     }
 }
 
+// Angle between the client-reported ship NOSE direction (m_ClientHeading, set
+// from the MVAS heading feed) and the bearing to pos. Mirrors Object::GetAngleTo
+// so the firing-arc threshold (PI/4.5) keeps its exact meaning; the only change
+// is the facing source -- true nose direction instead of the velocity-derived
+// Heading(), which is tangential (~90 deg off) while orbiting a target.
+float Player::GetClientHeadingAngleTo(float *pos)
+{
+    float dx = pos[0] - PosX();
+    float dy = pos[1] - PosY();
+    float dz = pos[2] - PosZ();
+    float distance = sqrtf(dx * dx + dy * dy + dz * dz);
+    if (distance < 0.0001f)
+        return 0.0f;
+
+    float ex = PosX() + distance * m_ClientHeading[0];
+    float ey = PosY() + distance * m_ClientHeading[1];
+    float ez = PosZ() + distance * m_ClientHeading[2];
+    float d2 = sqrtf(powf(pos[0] - ex, 2) + powf(pos[1] - ey, 2) + powf(pos[2] - ez, 2));
+    float ratio = d2 / (2.0f * distance);
+    if (ratio > 1.0f)
+        ratio = 1.0f; // clamp for asinf domain (numeric slop)
+    return 2.0f * asinf(ratio);
+}
+
 u16 Player::UpdatePositionFromMVAS(float *position, float *heading, bool heading_sent)
 {
 	unsigned long current_tick = GetNet7TickCount();
@@ -1460,10 +1488,30 @@ u16 Player::UpdatePositionFromMVAS(float *position, float *heading, bool heading
             SetPosition(position); //take player position from MVAS feed
             m_Mutex.Unlock();
 
-            if (heading_sent) //take new heading from MVAS feed
+            if (heading_sent) //take new ship facing (nose direction) from MVAS feed
             {
-                SetVelocityVector(heading); //take heading from MVAS feed
-                LevelOrientation(); //postfix our orientation from the heading data
+                // The MVAS heading triple is the client ship's NOSE / orientation
+                // X-axis basis -- a unit direction vector (proven by capture:
+                // mvas_send_position_full carries |heading|==1 at flight speed, so
+                // it is orientation, not a speed-scaled velocity). Store it as the
+                // player's true facing for the firing-arc check (CheckOrientation).
+                //
+                // Deliberately NOT applied via SetVelocityVector()/LevelOrientation()
+                // here: routing it into m_Position_info.Velocity / Orientation()
+                // feeds the position broadcast (SendLocationAndSpeed) and previously
+                // destabilised warp/target-lock (the "phantom velocity" regression
+                // that made the proxy fall back to a position-only feed). The
+                // firing-arc check is the only consumer that needs true nose facing,
+                // so we keep it in a dedicated field off the movement/warp path.
+                float mag = sqrtf(heading[0] * heading[0] + heading[1] * heading[1] +
+                                  heading[2] * heading[2]);
+                if (mag > 0.0001f)
+                {
+                    m_ClientHeading[0] = heading[0] / mag;
+                    m_ClientHeading[1] = heading[1] / mag;
+                    m_ClientHeading[2] = heading[2] / mag;
+                    m_HaveClientHeading = true;
+                }
             }
 
             UpdateLastPosition(current_tick);
