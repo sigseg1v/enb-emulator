@@ -1,6 +1,7 @@
 #include "hooks.h"
 #include "game.h"
 #include "log.h"
+#include "mem.h"
 #include <windows.h>
 #include "MinHook.h"
 
@@ -436,14 +437,48 @@ extern "C" __attribute__((naked)) void hk_WorldMgrInit() {
 // window is populated -- no UI-object offset walk, no vtable call (the low-risk
 // capture per the cargo analysis). We only READ ECX and forward untouched; lua_api
 // (enb.loot) replays this and the sibling accessors off the captured container to
-// enumerate the slots. NOTE the accessor fires for ANY inventory grid (ship cargo,
-// vault, ...), so lua_api re-reads the container's inventory-name (container +
-// cargo::inv_name_ptr) to confirm it is the hulk cargo before trusting the rows.
+// enumerate the slots. NOTE the accessor fires for ANY cargo grid, INCLUDING the
+// player's own always-visible "Inventory.*" holds, which repaint every frame. A
+// single global latch is therefore dominated by the player inventory and never
+// settles on a targeted hulk/harvestable loot container (measured live: with a
+// resource selected the latch sat on "Inventory.Equipped" 10/10). So we filter at
+// the latch: a container whose inventory-name (container + cargo::inv_name_ptr)
+// begins "Inventory" is the player's own hold and is NOT allowed to take the latch,
+// mirroring the Freya loot panel's own src filter (loot_frame.lua). Real loot
+// containers ("Cargo" hulk, "Harvestable..." resource) still latch, so once the
+// harvestable grid paints even once the latch sticks to the rock instead of being
+// clobbered by the next inventory repaint.
 static volatile unsigned g_loot_container = 0;           // ECX of the last cargo accessor call
 static volatile unsigned long g_loot_container_tick = 0; // GetTickCount of that latch (0 = never)
 extern "C" {
 void* real_CargoTemplateID_tramp = nullptr;
 void notify_loot_container(unsigned c) {
+    // Skip the player's own "Inventory.*" holds so they can never steal the loot
+    // latch from a targeted hulk/resource. A container whose name we cannot read is
+    // latched as before (no worse than the prior unconditional behaviour); only a
+    // confirmed "Inventory" prefix is rejected. Direct byte compare (no mem::cstr) to
+    // avoid the setjmp fault-guard on this per-frame render-thread hot path -- the
+    // mem::readable check bounds the 9-byte read.
+    uintptr_t cc = (uintptr_t)c;
+    if (cc && mem::readable((void*)(cc + game::cargo::inv_name_ptr), 4)) {
+        uintptr_t namep = mem::ptr(cc + game::cargo::inv_name_ptr);
+        if (namep && mem::readable((void*)namep, 9)) {
+            static const char inv[9] = {'i', 'n', 'v', 'e', 'n', 't', 'o', 'r', 'y'};
+            const char* nm = (const char*)namep;
+            bool is_inv = true;
+            for (int i = 0; i < 9; ++i) {
+                char ch = nm[i];
+                if (ch >= 'A' && ch <= 'Z')
+                    ch = (char)(ch + 32);
+                if (ch != inv[i]) {
+                    is_inv = false;
+                    break;
+                }
+            }
+            if (is_inv)
+                return; // player's own hold -- do not take the loot latch
+        }
+    }
     g_loot_container = c;
     g_loot_container_tick = GetTickCount();
 }
