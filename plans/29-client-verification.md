@@ -975,6 +975,23 @@ format & byte order", Trap 2).
   touches `m_Velocity` / `m_Position_info.Velocity` / the broadcast, so it CANNOT
   reintroduce the CV-MVAS-POS phantom-velocity warp regression. This is deliberately
   NOT the earlier `SetVelocityVector(heading)` path that broke warp.
+- **Client-side SECOND fix (2026-07-03) -- the "same problem" cause**: after the
+  server/proxy change the bug persisted because the position feed (`enbmod.dll`,
+  `freya/client-injection/enbmod/src/lua_api.cpp` `try_read_transform_heading`) was
+  reading the ship's world transform from the WRONG offset (`*(obj+0x14)+0x48`), which
+  on the live client is a static near-identity matrix with translation `(-36, 0, -7)`
+  -- ~160k units off the real ship position. The feed's own translation-validation
+  (`dx^2+dy^2+dz^2 <= 4`) correctly REJECTED it, so it published heading `{0,0,0}`;
+  the server then saw `mag==0`, never set `m_HaveClientHeading`, and fell back to the
+  velocity-based `GetAngleTo` -- reproducing the bug exactly. Proven live via the
+  enbmod cmd channel: the CORRECT world transform is `*(obj+0xac)+0x1c` (obj =
+  `targeting_data_obj()`), whose translation column read `(-83605.6, 137262.1, 931.6)`
+  EXACTLY matching the vtable world_pos getter, and whose X (nose) column swung from
+  `(-0.687,-0.722,0.085)` to `(0.984,-0.125,-0.125)` while the ship turned onto the
+  target under auto-follow (translation tracking the flight). `try_read_transform_heading`
+  now walks a candidate list `{(0xac,0x1c),(0x14,0x48)}`, each still translation-validated,
+  and publishes the X column of the first that resolves -- so a wrong offset can only ever
+  yield a neutral heading, never a wrong facing. enbmod DLL rebuilt (`just build-enbmod`).
 - **Primary source**: the retail `0x1004` heading is a UNIT orientation vector (the
   nose / X-axis basis), magnitude 1.0 -- proven by the capture fixture
   `mvas_send_position_full` (heading `-0.864, 0.289, 0.412`, |h| == 1.000), pinned

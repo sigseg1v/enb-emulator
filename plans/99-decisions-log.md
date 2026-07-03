@@ -8474,3 +8474,42 @@ CV-MVAS-ORIENT (fires while orbiting-and-facing; warp still engages; target lock
 stay stable). Three-places-in-sync: server (`CMobEquippable.cpp`, `PlayerClass.*`,
 `UDP_MVAS.cpp` unchanged parse), proxy (`UDPClient_linux.cpp` now emits pos+heading),
 CLI (already parses/encodes the heading variant).
+
+### 2026-07-03 -- PB-33 client-heading SECOND fix: the position feed read the wrong transform offset
+
+The 2026-07-03 server+proxy firing-arc change above (commit 5f5902c5) did NOT fix
+the reported bug: the owner retested and got "same problem". Root-caused live via
+the enbmod cmd channel against the running play-local client, following the owner's
+directed empirical method (read orientation memory, drive the ship, re-read, confirm
+the read tracks rotation AND the server matches):
+
+1. The client position feed (`enbmod.dll`, `try_read_transform_heading` in
+   `freya/client-injection/enbmod/src/lua_api.cpp`) read the ship world transform
+   from `*(obj+0x14)+0x48`. On the live client that resolves to a STATIC near-identity
+   matrix with translation `(-36, 0, -7)` -- ~160k units off the real ship position.
+   The feed's own translation-validation (`dx^2+dy^2+dz^2 <= 4` against world_pos)
+   CORRECTLY rejected it, so it published heading `{0,0,0}`. Zero heading -> server
+   `mag==0` -> `m_HaveClientHeading` never set -> `CheckOrientation` fell back to the
+   velocity-based `GetAngleTo` -> the exact original bug. The server/proxy fix was
+   correct but starved of input.
+2. The CORRECT world transform is `*(obj+0xac)+0x1c` (obj = `targeting_data_obj()`):
+   its translation column read `(-83605.6, 137262.1, 931.6)`, matching the vtable
+   world_pos getter to the decimal (wrong-memory reads do not coincidentally equal
+   world_pos), and its X (nose) column swung from `(-0.687,-0.722,0.085)` to
+   `(0.984,-0.125,-0.125)` while the ship rotated onto the target under auto-follow,
+   with translation tracking the flight. This PROVES it is the live orientation
+   memory and that the nose is the matrix X column. Cross-checked against the decomp:
+   the client's own positional-update packet lays out pos[3] + orientation[4]
+   (quaternion) + velocity[3], confirming orientation is a first-class stored field.
+3. Fix: `try_read_transform_heading` now walks a candidate list `{(0xac,0x1c),
+   (0x14,0x48)}`, each still translation-validated, and publishes the X column of the
+   first that resolves. A wrong candidate can only ever yield a neutral heading, never
+   a wrong facing. enbmod DLL rebuilt with `just build-enbmod`.
+
+Note: the offset `0xac` was observed on ONE ship in ONE session; it is the primary
+candidate with the old offset kept as a validated fallback. If a future ship/build
+does not resolve either, the feed degrades to zero heading (velocity fallback) -- the
+pre-fix behaviour, no regression. Live end-to-end re-verification (heading nonzero on
+the wire, server `m_ClientHeading` matches, weapon fires while orbiting) is tracked
+under plans/29 CV-MVAS-ORIENT; the client exited during the diagnostic (auto-follow
+into a target) and needs relaunching to complete that check.

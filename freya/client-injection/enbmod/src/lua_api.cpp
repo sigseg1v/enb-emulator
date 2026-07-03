@@ -1197,11 +1197,17 @@ static bool world_pos(uintptr_t obj, double out[3]) {
 //
 // Position comes from world_pos() (the same struct-returning locatable getter
 // the target frame trusts for our position). Orientation comes from the ship's
-// affine transform at *(ship+0x14)+0x48 -- a row-major 3x4 matrix whose
-// translation column (bytes 12/28/44) we validate against world_pos() before
-// trusting its orientation column (bytes 0/16/32); a mismatch means that offset
-// is not this build's transform, so we publish position-only (zero heading)
-// rather than a wrong facing.
+// Ship orientation comes from the affine world transform reachable off the ship
+// object: *(obj + PTR_OFF) points at a row-major 3x4 matrix at + MAT_OFF whose
+// translation column (bytes 12/28/44) equals the ship world_pos and whose X
+// (nose) column is bytes 0/16/32. We validate the translation column against the
+// world_pos we already trust BEFORE reading the nose, so a candidate offset that
+// does not resolve to this build's transform is rejected and we publish
+// position-only (zero heading) rather than a wrong facing. The primary candidate
+// (*(obj+0xac) + 0x1c) is the one observed live to carry the moving ship's nose;
+// a second candidate covers a differing object/build layout. Both are validated,
+// so listing more than one can never yield a wrong heading -- only the matching
+// one is ever trusted.
 struct FreyaShipSample {
     volatile unsigned int seq; // seqlock: odd = write in progress
     float pos[3];
@@ -1211,31 +1217,45 @@ struct FreyaShipSample {
 };
 static FreyaShipSample g_ship_sample = {0, {0, 0, 0}, {0, 0, 0}, 0, 0};
 
-// Try to read the ship orientation from one candidate object's affine transform
-// at *(obj+0x14)+0x48, validating the matrix translation column (bytes 12/28/44)
-// against the world_pos we already trust. Returns true and fills heading_out
-// only on a validated matrix; leaves heading_out untouched otherwise. All reads
-// are self-guarding (mem::ptr / mem::f32 pre-check + VEH), so a bad pointer
-// during a sector change just fails the read, never faults.
+// One (pointer-offset, matrix-offset) candidate for the world transform.
+struct FreyaTransformCandidate {
+    uintptr_t ptr_off; // *(obj + ptr_off) -> matrix base
+    uintptr_t mat_off; // matrix starts at base + mat_off
+};
+static const FreyaTransformCandidate kFreyaTransformCandidates[] = {
+    {0xac, 0x1c}, // observed live to carry the moving ship's nose (X column)
+    {0x14, 0x48}, // alternate object/build layout
+};
+
+// Try to read the ship orientation from one candidate object, walking each
+// (ptr_off, mat_off) transform candidate and validating the matrix translation
+// column (bytes 12/28/44) against the world_pos we already trust. Returns true
+// and fills heading_out with the X (nose) column (bytes 0/16/32) on the first
+// validated matrix; leaves heading_out untouched otherwise. All reads are
+// self-guarding (mem::ptr / mem::f32 pre-check + VEH), so a bad pointer during a
+// sector change just fails the read, never faults.
 static bool try_read_transform_heading(uintptr_t obj, const float pos[3], float heading_out[3]) {
     if (!obj)
         return false;
-    uintptr_t t = mem::ptr(obj + 0x14);
-    if (!t)
-        return false;
-    uintptr_t m = t + 0x48;
-    if (!mem::readable((const void*)m, 48))
-        return false;
-    float tx = mem::f32(m + 12), ty = mem::f32(m + 28), tz = mem::f32(m + 44);
-    float dx = tx - pos[0], dy = ty - pos[1], dz = tz - pos[2];
-    // >2 units apart -> this matrix is not the ship world_pos resolved: don't
-    // trust its orientation. Also rejects NaN (a compare with NaN is false).
-    if (!(dx * dx + dy * dy + dz * dz <= 4.0f))
-        return false;
-    heading_out[0] = mem::f32(m + 0);
-    heading_out[1] = mem::f32(m + 16);
-    heading_out[2] = mem::f32(m + 32);
-    return true;
+    for (const auto& cand : kFreyaTransformCandidates) {
+        uintptr_t t = mem::ptr(obj + cand.ptr_off);
+        if (!t)
+            continue;
+        uintptr_t m = t + cand.mat_off;
+        if (!mem::readable((const void*)m, 48))
+            continue;
+        float tx = mem::f32(m + 12), ty = mem::f32(m + 28), tz = mem::f32(m + 44);
+        float dx = tx - pos[0], dy = ty - pos[1], dz = tz - pos[2];
+        // >2 units apart -> this matrix is not the ship world_pos resolved: don't
+        // trust its orientation. Also rejects NaN (a compare with NaN is false).
+        if (!(dx * dx + dy * dy + dz * dz <= 4.0f))
+            continue;
+        heading_out[0] = mem::f32(m + 0);
+        heading_out[1] = mem::f32(m + 16);
+        heading_out[2] = mem::f32(m + 32);
+        return true;
+    }
+    return false;
 }
 
 // Best-effort ship orientation, validated against the position world_pos gave
