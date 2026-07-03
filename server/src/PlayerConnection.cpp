@@ -2616,8 +2616,18 @@ void Player::HandleInventoryMove(unsigned char *data)
 		 (InvMo.FromInv == 4 && InvMo.ToInv == 1) ||
 		 (InvMo.FromInv == 14 && InvMo.ToInv == 1));
 
+	// The husk-loot (6) and loot/mine (18) source codes place the looted/mined
+	// item via LootItem/MineResource -> CargoAddItem, which auto-selects a free
+	// cargo slot; their branch bodies never index ToSlot, so the wire ToSlot
+	// (the client sends -1) carries no meaning for them and must not be
+	// range-checked. AJ-3 originally whitelisted only the cargo/vault/vendor/manu
+	// auto-select combos above and so silently rejected every mine / husk-loot
+	// take here (ToSlot == -1 failed the range check before ever reaching the
+	// case 6 / case 18 body).
+	bool dest_not_indexed = (InvMo.FromInv == 6 || InvMo.FromInv == 18);
+
 	long dst_slots = InventorySlotCount(InvMo.ToInv, true);
-	if (dst_slots > 0 && !auto_select_dest &&
+	if (dst_slots > 0 && !auto_select_dest && !dest_not_indexed &&
 		(InvMo.ToSlot < 0 || InvMo.ToSlot >= dst_slots))
 	{
 		LogDebug("Rejected InventoryMove: ToSlot %ld out of range [0,%ld) for ToInv %ld\n",

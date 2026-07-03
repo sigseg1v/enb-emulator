@@ -1517,20 +1517,25 @@ static int l_loot_age(lua_State* L) {
 }
 
 // enb.loot_take(slot) -> bool. Loot one occupied slot out of the currently-open
-// hulk/harvestable cargo grid into the player's own hold. This is byte-for-byte the
-// command the native loot window's take emits: build the compact loot command
-// (wire opcode 0x005D, [ctx:u32][inv_type:u8][slot:u8]) and push it through M's
-// sector-server Connection (game::addr::CmdSend) -- the same "construct object, hand
-// to Connection" path enb.target_action uses for the verbs. No server change and no
-// new wire behaviour: the client already sends this exact packet when you click a
-// native loot item; we only invoke the same builder + sender from Lua.
+// hulk/harvestable cargo grid into the player's own hold. This is the exact command
+// the native loot/mining window's take emits: an INVENTORY_MOVE command (wire opcode
+// 0x0027) built by game::addr::InvMoveBuild and pushed through the container-owner
+// SClient's Connection (game::addr::CmdSend) -- the same "construct object, hand to
+// Connection" path enb.target_action uses for the verbs. No server change and no new
+// wire behaviour: the client already sends this exact packet when you click a native
+// loot/mining item; we only invoke the same builder + sender from Lua.
 //
 // The command object is allocated with the CLIENT's operator new and deliberately
 // NOT freed: the Connection send path owns it and frees it through the client CRT
-// heap (a DLL-heap or static buffer would be a cross-heap free -> crash). ctx is the
-// local player game id (M + world::player_id). inv_type is derived from the captured
-// container's inventory-name (a "Harvest..." container is a harvestable = 0x12; a
-// hulk "Cargo" container = 0x06). Game-thread only (native __thiscall calls).
+// heap (a DLL-heap or static buffer would be a cross-heap free -> crash). The send
+// holder is the SClient that OWNS the open container (C = *(container +
+// cargo::view_client)), NOT the world-manager M -- routing an InvMove through M's
+// connection does not transmit. GameID is read off that SClient (C +
+// world::sub_client_gid), exactly as the native commit does.
+// FromInv is derived from the captured container's inventory-name (a "Harvest..."
+// container is the mining window = 0x12; a hulk "Cargo"/husk container = 0x06); the
+// server's InvMove handler routes FromInv=18 to the mining/resource take and
+// FromInv=6 to the husk loot take. Game-thread only (native __thiscall calls).
 static int l_loot_take(lua_State* L) {
     int slot = (int)luaL_checkinteger(L, 1);
     uintptr_t m = hooks::world_mgr();
@@ -1538,7 +1543,6 @@ static int l_loot_take(lua_State* L) {
         lua_pushboolean(L, 0);
         return 1;
     }
-    uint32_t ctx = mem::u32(m + game::world::player_id);
     uintptr_t c = hooks::loot_container();
     if (!c || !mem::readable((void*)c, 0x48)) {
         lua_pushboolean(L, 0);
@@ -1551,25 +1555,31 @@ static int l_loot_take(lua_State* L) {
         lua_pushboolean(L, 0);
         return 1;
     }
-    // inv_type: harvestable-resource container vs hulk cargo, off the container name.
-    uint32_t inv_type = game::cargo::inv_type_hulk;
+    // FromInv: mining window (harvestable resource) vs loot/husk window, off the name.
+    uint32_t from_inv = game::cargo::inv_type_hulk;
+    std::string src;
     uintptr_t namep = mem::ptr(c + game::cargo::inv_name_ptr);
     if (namep) {
-        std::string src = mem::cstr(namep, 64);
+        src = mem::cstr(namep, 64);
         if (src.rfind("Harvest", 0) == 0)
-            inv_type = game::cargo::inv_type_harvest;
+            from_inv = game::cargo::inv_type_harvest;
     }
-    // Allocate the command object with the client's own operator new so the send
-    // path can free it through the matching heap; validate before touching it.
-    uint32_t na[1] = {game::cargo::loot_cmd_size};
-    uintptr_t obj = actions::call_cdecl(game::addr::ClientOperatorNew, na, 1);
-    if (!obj || !mem::readable((void*)obj, game::cargo::loot_cmd_size)) {
+    uint32_t m_gid = mem::readable((void*)(m + game::world::sub_client_gid), 4)
+                         ? mem::u32(m + game::world::sub_client_gid)
+                         : 0xDEADBEEF;
+    // Holder: the verb path (enb.target_action, live-validated) sends through M's
+    // Connection (M + 0x1124), so M is a proven CmdSend holder. GameID for the
+    // resource (FromInv=18) path is IGNORED by the server (it keys off the target),
+    // so use M's own GameID -- valid and non-zero.
+    uint32_t gid = (m_gid != 0xDEADBEEF) ? m_gid : 0;
+    uint32_t sz[1] = {game::cargo::inv_move_size};
+    uintptr_t obj = actions::call_cdecl(game::addr::ClientOperatorNew, sz, 1);
+    if (!obj) {
         lua_pushboolean(L, 0);
         return 1;
     }
-    std::memset((void*)obj, 0, game::cargo::loot_cmd_size);
-    uint32_t b[3] = {ctx, inv_type, (uint32_t)slot};
-    actions::call_thiscall(game::addr::LootBuild, obj, b, 3);
+    uint32_t b[6] = {gid, from_inv, (uint32_t)slot, 1u, 0xFFFFFFFFu, 1u};
+    actions::call_thiscall(game::addr::InvMoveBuild, obj, b, 6);
     uint32_t snd[1] = {(uint32_t)obj};
     actions::call_thiscall(game::addr::CmdSend, m, snd, 1);
     lua_pushboolean(L, 1);
@@ -2434,8 +2444,7 @@ static void push_addr_table(lua_State* L) {
     A(CargoTemplateID);
     A(CargoStackCount);
     A(CargoTemplateAt);
-    A(LootBuild);
-    A(ClientOperatorNew);
+    A(InvMoveBuild);
 #undef A
 }
 

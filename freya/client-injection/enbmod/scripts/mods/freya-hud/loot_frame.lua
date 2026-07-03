@@ -22,8 +22,8 @@
 -- a closed loot window goes stale and the panel disappears.
 --
 -- Clicking a row's icon tile LOOTS that slot via enb.loot_take(slot): the DLL
--- builds and sends the exact command the native loot window's take emits (the
--- compact loot command, wire opcode 0x005D) through the same Connection path the
+-- builds and sends the exact command the native loot/mining window's take emits (an
+-- INVENTORY_MOVE command, wire opcode 0x0027) through the same Connection path the
 -- verb buttons use. It is not a new packet -- the client already sends this when
 -- you click a native loot item; we only drive the same builder + sender. The
 -- native window stays alive underneath (not hidden) until this is confirmed
@@ -52,7 +52,7 @@ local CFG = {
     STACK_SCALE = 0.95,
     STACK_PAD = 4,    -- inset of the "xN" stack text from the row's right edge
 
-    STALE_MS = 5000,  -- hide the panel once the container latch is this stale (window closed)
+    STALE_MS = 800,   -- hide the panel once the container latch is this stale (window closed)
     MAX_ROWS = 24,    -- hard cap on drawn rows (a hulk never carries this many; guards a bad read)
 }
 
@@ -60,18 +60,34 @@ local CFG = {
 -- loot that slot. Kept in lockstep with the draw so geometry never drifts.
 local slot_rects = {}
 
+-- last cursor position (window-rel), tracked from WM_MOUSEMOVE so the draw pass
+-- can light up the tile under the pointer (hover affordance for the loot button).
+local hover_x, hover_y = -1, -1
+
 -- one loot row, top edge at `y`; returns the y just below the row. `slot_disp` is
--- the 1-based slot number shown to the user (enb.loot() reports 0-based indices).
+-- the 1-based DISPLAY position in the list (1., 2., 3. down the panel), NOT the
+-- container slot index -- the take still keys off r.slot, so the number the user
+-- sees stays a tidy 1..N even when the underlying container has gaps (e.g. the
+-- last remaining item lives at container slot 1 but shows as "1." because it is
+-- the only row left).
 local function draw_row(r, x, y, w, slot_disp)
     local icon = CFG.ICON + H.sy(6)
     -- the icon tile IS the loot button: record its rect + the row's 0-based slot.
     slot_rects[#slot_rects + 1] = { x = x, y = y, w = icon, h = icon,
                                     slot = r.slot or (slot_disp - 1), name = r.name }
-    -- icon box: a glass tile. The item's icon texture is blitted here once its
-    -- offset off row.asset is confirmed live; until then it is an empty tile so
-    -- the layout is final and only the pixels drop in later.
-    enb.draw.rrect_grad(x, y, icon, icon, H.RADIUS, H.PANEL_TOP, H.PANEL_BOT, 200)
-    enb.draw.rrect(x, y, icon, icon, H.RADIUS, H.LINE, 90, false)
+    -- icon box: a glass tile that doubles as the loot button. The item's icon
+    -- texture is blitted here once its offset off row.asset is confirmed live;
+    -- until then it is an empty tile so the layout is final and only the pixels
+    -- drop in later. When the cursor is over the tile, brighten it (hover
+    -- affordance) so it reads as a clickable button.
+    local hot = hover_x >= x and hover_x < x + icon and hover_y >= y and hover_y < y + icon
+    if hot then
+        enb.draw.rrect_grad(x, y, icon, icon, H.RADIUS, H.SHIELD, H.PANEL_TOP, 235)
+        enb.draw.rrect(x, y, icon, icon, H.RADIUS, H.INK, 200, false)
+    else
+        enb.draw.rrect_grad(x, y, icon, icon, H.RADIUS, H.PANEL_TOP, H.PANEL_BOT, 200)
+        enb.draw.rrect(x, y, icon, icon, H.RADIUS, H.LINE, 90, false)
+    end
 
     local tx = x + icon + CFG.ICON_GAP
     local tw = w - icon - CFG.ICON_GAP
@@ -118,6 +134,12 @@ local function draw_loot()
     local age = enb.loot_age and enb.loot_age() or -1
     if age < 0 or age > CFG.STALE_MS then return end
 
+    -- clear the panel the moment the target is dropped: a loot window belongs to
+    -- the hulk/rock you have selected, so with no target there is nothing to loot.
+    -- (enb.target_obj() is 0 on de-target.) This fixes the panel lingering after
+    -- you clear or switch away the target.
+    if enb.target_obj and enb.target_obj() == 0 then return end
+
     local rows = enb.loot()
     if type(rows) ~= "table" or #rows == 0 then return end
 
@@ -156,7 +178,7 @@ local function draw_loot()
 
     for i = 1, n do
         local r = rows[i]
-        y = draw_row(r, x, y, w, (r.slot or (i - 1)) + 1) + CFG.ROW_GAP
+        y = draw_row(r, x, y, w, i) + CFG.ROW_GAP  -- number by list position, not container slot
     end
 end
 
@@ -185,6 +207,13 @@ end
 
 enb.on_input(function(msg, wparam, lparam)
     local M = enb.msg
+    -- track the cursor for the tile hover affordance -- do this even when the panel
+    -- is hidden (so hover_x/y is current the instant it appears) and never swallow
+    -- the move.
+    if msg == M.MOUSEMOVE then
+        hover_x, hover_y = mouse_xy(lparam)
+        return false
+    end
     if not H.vis() or not panel_rect then return false end
     if msg ~= M.LBUTTONDOWN and msg ~= M.LBUTTONUP and msg ~= M.LBUTTONDBLCLK then
         return false
