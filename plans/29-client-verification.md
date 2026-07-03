@@ -953,6 +953,64 @@ format & byte order", Trap 2).
   cadence. If position still diverges, the engine read offsets are wrong -- the
   wire half is already byte-pinned, so debug `ReadEngineShipState`, not the proxy.
 
+### [ ] CV-MVAS-ORIENT -- Manual weapon fire works while orbiting a target (firing-arc uses client nose)
+
+- **Bug**: fly up to an enemy, circle it for 10s while pointed straight at it, press
+  the weapon key (`1`) -- nothing fires. Press spacebar (auto-follow) and it fires
+  instantly. Not retail-matching; a real bug.
+- **Root cause**: the beam/projectile firing-arc gate (`Equipable::CheckOrientation`,
+  `server/src/CMobEquippable.cpp`) measures the target bearing against
+  `Object::GetAngleTo`, which derives "facing" from the velocity DIRECTION
+  (`Heading()` = `m_Position_info.Velocity`). While orbiting, velocity is TANGENTIAL
+  (~90 deg off the line to the target) even though the ship's NOSE is on-target, so
+  the `< PI/4.5` arc never closes and manual fire never arms. Auto-follow makes the
+  server steer the nose onto the target, which re-aligns velocity with facing -- which
+  is why spacebar fires immediately. The client's TRUE nose direction was available
+  (it already flows to the proxy in the position-feed datagram) but was being dropped.
+- **Change**: the proxy now sends the MVAS `0x1004` heading triple (36-byte payload,
+  server heading branch) instead of position-only (`proxy/UDPClient_linux.cpp`
+  `SendPositionIfChanged`). The server stores the normalized nose vector in a new
+  DECOUPLED facing field (`Player::m_ClientHeading`, set in `UpdatePositionFromMVAS`)
+  used ONLY by `CheckOrientation` via `Player::GetClientHeadingAngleTo` -- it never
+  touches `m_Velocity` / `m_Position_info.Velocity` / the broadcast, so it CANNOT
+  reintroduce the CV-MVAS-POS phantom-velocity warp regression. This is deliberately
+  NOT the earlier `SetVelocityVector(heading)` path that broke warp.
+- **Client-side SECOND fix (2026-07-03) -- the "same problem" cause**: after the
+  server/proxy change the bug persisted because the position feed (`enbmod.dll`,
+  `freya/client-injection/enbmod/src/lua_api.cpp` `try_read_transform_heading`) was
+  reading the ship's world transform from the WRONG offset (`*(obj+0x14)+0x48`), which
+  on the live client is a static near-identity matrix with translation `(-36, 0, -7)`
+  -- ~160k units off the real ship position. The feed's own translation-validation
+  (`dx^2+dy^2+dz^2 <= 4`) correctly REJECTED it, so it published heading `{0,0,0}`;
+  the server then saw `mag==0`, never set `m_HaveClientHeading`, and fell back to the
+  velocity-based `GetAngleTo` -- reproducing the bug exactly. Proven live via the
+  enbmod cmd channel: the CORRECT world transform is `*(obj+0xac)+0x1c` (obj =
+  `targeting_data_obj()`), whose translation column read `(-83605.6, 137262.1, 931.6)`
+  EXACTLY matching the vtable world_pos getter, and whose X (nose) column swung from
+  `(-0.687,-0.722,0.085)` to `(0.984,-0.125,-0.125)` while the ship turned onto the
+  target under auto-follow (translation tracking the flight). `try_read_transform_heading`
+  now walks a candidate list `{(0xac,0x1c),(0x14,0x48)}`, each still translation-validated,
+  and publishes the X column of the first that resolves -- so a wrong offset can only ever
+  yield a neutral heading, never a wrong facing. enbmod DLL rebuilt (`just build-enbmod`).
+- **Primary source**: the retail `0x1004` heading is a UNIT orientation vector (the
+  nose / X-axis basis), magnitude 1.0 -- proven by the capture fixture
+  `mvas_send_position_full` (heading `-0.864, 0.289, 0.412`, |h| == 1.000), pinned
+  by `MvasRecordDecodeTests.MvasSendPosition_Heading_IsUnitOrientationVector_NotVelocity`
+  and the 36-byte wire encoding by `MvasClientTests.BuildDatagram_WithHeading_*`.
+- **Why the CLI/integration suite does NOT close this**: the CLI proves the wire
+  FORMAT and that the server accepts the heading variant, but there is no headless
+  combat/arc path -- only the real client, orbiting a live mob, exercises
+  `CheckOrientation`. That is what this entry verifies.
+- **Setup (owner)**: `just play-local` (position feed already enabled). Undock, find
+  an enemy, fly circles around it while keeping the nose pointed at it.
+- **What to look for**:
+  1. Pressing `1` (or any beam/projectile weapon) FIRES while orbiting-and-facing,
+     without needing spacebar/auto-follow first.
+  2. Warp STILL engages normally (the decoupled facing field must not pin a phantom
+     velocity -- this is the CV-MVAS-POS regression this design specifically avoids).
+  3. Target LOCKS stay stable while the feed is active.
+  4. Missiles (arc-exempt) behave unchanged.
+
 ### [ ] CV-CAP-1 -- `/capitalize` flips the class-suffix case and persists (Phase AO)
 
 - **Change**: new non-retail player command `/capitalize` toggles the case of the

@@ -389,6 +389,9 @@ public:
     void        SectorLogin();
     void        CheckNavs();
     bool        Following()                     { return (m_FollowObject); }
+    // Client-reported ship facing (nose direction) from the MVAS heading feed.
+    bool        HaveClientHeading()             { return (m_HaveClientHeading); }
+    float       GetClientHeadingAngleTo(float *pos);
     void        StoreDockingCoords(float *position, float *heading);
     bool        RestoreDockingCoords();
     void        SetOrient(float o)              { m_Orient = o; }
@@ -1239,6 +1242,14 @@ private:
 
     //MVAS members
     bool              m_ReceivedMVAS;
+    // Client-reported ship facing (nose / orientation X-axis unit vector) from the
+    // MVAS 0x1004 heading feed. The firing-arc check needs the ship's true NOSE
+    // direction, which is decoupled from velocity: an orbiting ship's velocity is
+    // tangential (~90 deg off the target) while its nose is on-target. Kept OUT of
+    // m_Position_info.Velocity / Orientation() on purpose so it never reaches the
+    // position broadcast or the warp/motion gate (see UpdatePositionFromMVAS).
+    float             m_ClientHeading[3];
+    bool              m_HaveClientHeading;
     float             m_LastPos[3];
     unsigned long     m_LastRead;
     long              m_MVAS_index; //if -1 then use Server forced positioning, rather than client based positioning
