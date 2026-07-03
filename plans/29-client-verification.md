@@ -3033,3 +3033,90 @@ moot; the SOLVED block above is the truth):**
      rects are tested first) and must NOT rotate/click the ship behind the frame.
   4. No new WARNING/fault lines in enbmod.log; server log shows the normal
      REQUEST_TARGET handling with no Error/WARNING.
+
+## [ ] CV-AS-LOOT -- Freya LEFT loot readout reads a real hulk byte-correct; native loot still works
+
+- **What changed**: new `mods/freya-hud/loot_frame.lua` (LEFT-anchored) + DLL
+  binding `enb.loot()`/`enb.loot_age()`. The binding captures the hulk cargo
+  CONTAINER read-only from a naked ECX hook on the per-slot ItemTemplateID accessor
+  (`game::addr::CargoTemplateID = 0x00689ca0`) and replays the three accessors
+  (`0x00689ca0` id / `0x00689d20` stack / `0x0068aaa0` template) to enumerate
+  occupied slots. Source: behavioural analysis of the retail client's hulk-inventory
+  panel path (the same accessors the native loot grid calls each repaint).
+- **READ path: no server/proxy/CLI wire change** -- a client-side READ of an object
+  the client already builds; nothing new goes on the wire. **LIVE-VALIDATED
+  2026-07-02**: a prospected asteroid read "Copper Ore x5" byte-correct with
+  `src=HarvestableResources`. Header simplified to "Loot"; a `src`-prefix filter now
+  drops the player's own holds (`Inventory*`) so only lootable containers show.
+- **TAKE path (added 2026-07-02; premise re-corrected same day)**: clicking a Freya
+  row's icon tile calls `enb.loot_take(slot)`, which builds + sends the SAME command
+  the native mining/loot take emits -- an **INVENTORY_MOVE, wire opcode 0x0027**
+  (six u32 fields: GameID, FromInv, FromSlot, ToInv, ToSlot, Num), in-place ctor
+  `InvMoveBuild 0x00894ca0` (serializer `0x00894e30` stamps 0x27), pushed via
+  `CmdSend 0x00728150`. For a prospected asteroid `FromInv=18 (0x12)` -> server
+  `HandleInventoryMove` case 18 -> MineResource. Primary source: behavioural analysis
+  of the retail client's inventory-transaction commit (start `0x00690aa0` -> commit
+  `0x00690d20`), which does `InvMoveBuild(*(C+0x1130), FromInv, FromSlot, ToInv,
+  ToSlot, Num) + CmdSend(C, cmd)` where `C = *(container+0x4c)` is the SClient that
+  owns the open container. This is NOT a new packet and NOT a server/proxy change --
+  the client already sends this exact command on a native mining take; the DLL only
+  drives the same builder + sender. **The abandoned first attempt used the compact
+  loot command 0x005D (`LootBuild 0x008ae810`) AND routed the send through M's
+  connection -- both wrong: the mining take is 0x0027, and an inventory command sent
+  through M (the world-manager) does NOT transmit; it must go through the
+  container-owner SClient's Connection.** GameID + holder now derived off the
+  container per the native commit; inv_type from the container name (`Harvest...`=0x12,
+  else hulk cargo 0x06); command object allocated with the client operator new
+  (`0x004e9cb0`) and NOT freed so the Connection send path frees it through the
+  matching heap (cross-heap free would crash).
+- **What to look for (real client, human at the mouse, at a prospected hulk)**:
+  1. Prospect/kill something to spawn a hulk, open its loot -- a LEFT-side Freya
+     "Loot" panel appears listing one row per occupied slot: correct 1-based Slot
+     number, correct item Name, and "xN" stack for N>1. Cross-check every field
+     against the native loot grid on the right -- they must match exactly
+     (VALIDATED: Copper Ore x5). 
+  2. Click a Freya row's icon tile -> that slot is looted into your hold (the item
+     leaves the hulk grid / your cargo gains it), exactly as clicking the native
+     loot entry does. No crash, no fault line in enbmod.log. Loot each of several
+     slots to confirm the slot index maps correctly (loot slot 2, not slot 1).
+  3. Close the loot window: the Freya panel must DISAPPEAR within ~5s (the
+     `enb.loot_age()` staleness gate) and never read a freed container.
+  4. Open your own ship inventory (NOT a hulk): confirm the panel does NOT appear
+     (the `src` `Inventory*` filter now suppresses it).
+
+## [ ] CV-BA-LOOT -- server accepts the mine/husk-loot INVENTORY_MOVE (AJ-3 regression fix)
+
+- **What changed (SERVER)**: `server/src/PlayerConnection.cpp` `HandleInventoryMove`
+  (opcode 0x0027). The AJ-3 security hardening added a destination-slot range check
+  that silently rejected every mine/husk-loot take: source codes `FromInv==18`
+  (mine/harvest -> MineResource) and `FromInv==6` (husk-loot -> LootItem) send
+  `ToSlot==-1` and never index it (the case body places the item via `CargoAddItem`,
+  which auto-selects a free cargo slot), but the `auto_select_dest` sentinel
+  whitelist only covered the cargo/vault/vendor/manu combos, so `ToSlot==-1` failed
+  the `>=0 && < dst_slots` check and returned early via the dead `LogDebug` no-op
+  (= silent). Fix: `bool dest_not_indexed = (FromInv==6 || FromInv==18);` added to
+  the guard so those two source codes skip the destination range check.
+- **Why this is a correctness change, not a weakening**: it RESTORES pre-AJ-3
+  behaviour (the real retail server accepted these takes). ToSlot is never used as
+  an index for source codes 6/18, so exempting them from the destination range
+  check cannot violate any bound -- it only stops rejecting a legitimate take. The
+  FromSlot range check and every other AJ-3 bound remain in force. Primary source:
+  the client's native mining/loot take emits exactly this 0x0027 with `ToSlot==-1`
+  (see CV-AS-LOOT behavioural analysis of commit `0x00690d20`), and the server's
+  own case 18/6 bodies never read ToSlot -- so rejecting it on ToSlot was the bug.
+- **Understanding-before-change (CLAUDE.md B)**: the 0x0027 INVENTORY_MOVE wire
+  format is already parsed + pinned in the CLI (`SectorInventoryMoveTests`, the AJ-3
+  OOB tests). **Follow-up owed**: add the positive mirror -- a `FromInv=18,
+  ToSlot=-1` move is ACCEPTED and round-trips -- so the regression cannot recur
+  silently. (Deferred; not yet written.)
+- **What to look for (real client, human at the mouse, devuserje the LV75 miner)**:
+  1. Prospect an IN-RANGE asteroid, open the Freya loot panel, click a loot row.
+     The ore is added to your cargo (stack count rises / hold gains the item), the
+     same as clicking the native loot entry. Before the fix this did nothing at all
+     (silent server-side drop).
+  2. If a take still fails, it now fails VISIBLY: MineResource's range/condition
+     gates `SendMessageString` a reason to the client (e.g. out of prospect range),
+     never a silent no-op. A visible message = a DIFFERENT, diagnosable condition,
+     not this bug.
+  3. No dupe / no crash across repeated takes; cargo count matches the ore actually
+     mined.

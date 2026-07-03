@@ -1433,6 +1433,159 @@ static int l_target_action(lua_State* L) {
     return 1;
 }
 
+// enb.loot() -> array of occupied hulk/loot cargo rows (empty table if none). Each
+// row is { slot=<0-based int>, name=<string>, stack=<qty int>, tid=<ItemTemplateID>,
+// tmpl=<template ptr>, asset=<template+icon-asset ptr> }; the array also carries a
+// top-level `src` = the container's inventory-name ("Cargo" for a hulk), the caller's
+// discriminator against a ship-inventory grid.
+//
+// Reads the cargo CONTAINER captured read-only from addr::CargoTemplateID
+// (hooks::loot_container) and replays the three inventory accessors off it. The
+// captured pointer can be stale (a closed loot window) or belong to a different
+// inventory grid, so before ANY accessor call we validate structurally: the container
+// header + its item-DB pointer (container+0, which the accessors dereference) must be
+// readable and the precomputed slot count sane. The residual risk is a freed container
+// that still passes those reads; the caller mitigates it by only asking while a
+// hulk/harvestable is targeted (and enb.loot_age() reports how fresh the latch is).
+// Game-thread only (the accessors are native __thiscall calls).
+static int l_loot(lua_State* L) {
+    lua_newtable(L); // result array -- returned empty on any bail
+    uintptr_t c = hooks::loot_container();
+    if (!c || !mem::readable((void*)c, 0x48))
+        return 1;
+    uintptr_t db = mem::ptr(c + 0); // item-DB the accessors deref via *container
+    if (!db || !mem::readable((void*)db, 4))
+        return 1;
+    uint32_t n = mem::u32(c + game::cargo::slot_count);
+    if (n == 0 || n > 256) // sane slot-count guard (a wrong object rarely lands here)
+        return 1;
+    uintptr_t namep = mem::ptr(c + game::cargo::inv_name_ptr);
+    if (namep) {
+        std::string src = mem::cstr(namep, 64);
+        lua_pushstring(L, src.c_str());
+        lua_setfield(L, -2, "src");
+    }
+    int row = 0;
+    for (uint32_t slot = 0; slot < n; ++slot) {
+        uint32_t a1[1] = {slot};
+        uint32_t tid = actions::call_thiscall(game::addr::CargoTemplateID, c, a1, 1);
+        if (tid == game::cargo::tid_empty || tid == game::cargo::tid_error)
+            continue; // empty / invalid slot -- skip, exactly as the client does
+        uint32_t qty = actions::call_thiscall(game::addr::CargoStackCount, c, a1, 1);
+        uint32_t a2[2] = {slot, 0}; // slot, then char mode = 0 (pushed as a dword)
+        uint32_t tmpl = actions::call_thiscall(game::addr::CargoTemplateAt, c, a2, 2);
+        if (!tmpl || !mem::readable((void*)(uintptr_t)tmpl, 0x20))
+            continue;
+        std::string name;
+        uintptr_t np = mem::ptr((uintptr_t)tmpl + game::cargo::tmpl_name_ptr);
+        if (np)
+            name = mem::cstr(np, 96);
+        if (name.empty())
+            name = "Unknown Item";
+        uint32_t asset = mem::u32((uintptr_t)tmpl + game::cargo::tmpl_icon_asset);
+
+        lua_newtable(L);
+        lua_pushinteger(L, (lua_Integer)slot);
+        lua_setfield(L, -2, "slot");
+        lua_pushstring(L, name.c_str());
+        lua_setfield(L, -2, "name");
+        lua_pushinteger(L, (lua_Integer)qty);
+        lua_setfield(L, -2, "stack");
+        lua_pushinteger(L, (lua_Integer)(int32_t)tid);
+        lua_setfield(L, -2, "tid");
+        lua_pushinteger(L, (lua_Integer)tmpl);
+        lua_setfield(L, -2, "tmpl");
+        lua_pushinteger(L, (lua_Integer)asset);
+        lua_setfield(L, -2, "asset");
+        lua_rawseti(L, -2, ++row);
+    }
+    return 1;
+}
+
+// enb.loot_age() -> milliseconds since the cargo container was last latched by the
+// per-slot accessor (i.e. since the loot grid last repainted), or -1 if never latched.
+// The Freya loot panel uses this to decide when the captured container has gone stale
+// (window closed) and should no longer be read.
+static int l_loot_age(lua_State* L) {
+    unsigned long t = hooks::loot_container_tick();
+    if (t == 0) {
+        lua_pushinteger(L, -1);
+        return 1;
+    }
+    lua_pushinteger(L, (lua_Integer)(GetTickCount() - t));
+    return 1;
+}
+
+// enb.loot_take(slot) -> bool. Loot one occupied slot out of the currently-open
+// hulk/harvestable cargo grid into the player's own hold. This is the exact command
+// the native loot/mining window's take emits: an INVENTORY_MOVE command (wire opcode
+// 0x0027) built by game::addr::InvMoveBuild and pushed through the container-owner
+// SClient's Connection (game::addr::CmdSend) -- the same "construct object, hand to
+// Connection" path enb.target_action uses for the verbs. No server change and no new
+// wire behaviour: the client already sends this exact packet when you click a native
+// loot/mining item; we only invoke the same builder + sender from Lua.
+//
+// The command object is allocated with the CLIENT's operator new and deliberately
+// NOT freed: the Connection send path owns it and frees it through the client CRT
+// heap (a DLL-heap or static buffer would be a cross-heap free -> crash). The send
+// holder is the SClient that OWNS the open container (C = *(container +
+// cargo::view_client)), NOT the world-manager M -- routing an InvMove through M's
+// connection does not transmit. GameID is read off that SClient (C +
+// world::sub_client_gid), exactly as the native commit does.
+// FromInv is derived from the captured container's inventory-name (a "Harvest..."
+// container is the mining window = 0x12; a hulk "Cargo"/husk container = 0x06); the
+// server's InvMove handler routes FromInv=18 to the mining/resource take and
+// FromInv=6 to the husk loot take. Game-thread only (native __thiscall calls).
+static int l_loot_take(lua_State* L) {
+    int slot = (int)luaL_checkinteger(L, 1);
+    uintptr_t m = hooks::world_mgr();
+    if (!m || !mem::readable((void*)(m + game::world::player_id), 4)) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    uintptr_t c = hooks::loot_container();
+    if (!c || !mem::readable((void*)c, 0x48)) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    // Bound the slot against the container's own precomputed slot count so a bad
+    // index can never reach the builder.
+    uint32_t n = mem::u32(c + game::cargo::slot_count);
+    if (n == 0 || n > 256 || slot < 0 || (uint32_t)slot >= n) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    // FromInv: mining window (harvestable resource) vs loot/husk window, off the name.
+    uint32_t from_inv = game::cargo::inv_type_hulk;
+    std::string src;
+    uintptr_t namep = mem::ptr(c + game::cargo::inv_name_ptr);
+    if (namep) {
+        src = mem::cstr(namep, 64);
+        if (src.rfind("Harvest", 0) == 0)
+            from_inv = game::cargo::inv_type_harvest;
+    }
+    uint32_t m_gid = mem::readable((void*)(m + game::world::sub_client_gid), 4)
+                         ? mem::u32(m + game::world::sub_client_gid)
+                         : 0xDEADBEEF;
+    // Holder: the verb path (enb.target_action, live-validated) sends through M's
+    // Connection (M + 0x1124), so M is a proven CmdSend holder. GameID for the
+    // resource (FromInv=18) path is IGNORED by the server (it keys off the target),
+    // so use M's own GameID -- valid and non-zero.
+    uint32_t gid = (m_gid != 0xDEADBEEF) ? m_gid : 0;
+    uint32_t sz[1] = {game::cargo::inv_move_size};
+    uintptr_t obj = actions::call_cdecl(game::addr::ClientOperatorNew, sz, 1);
+    if (!obj) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    uint32_t b[6] = {gid, from_inv, (uint32_t)slot, 1u, 0xFFFFFFFFu, 1u};
+    actions::call_thiscall(game::addr::InvMoveBuild, obj, b, 6);
+    uint32_t snd[1] = {(uint32_t)obj};
+    actions::call_thiscall(game::addr::CmdSend, m, snd, 1);
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
 // enb.request_target(gid) -> bool. Make the given GameID the local player's target,
 // exactly as clicking that object in space does. We resolve the GameID to its live
 // contact object (entity_by_gid -- the same gid->object hash walk enb.group uses for
@@ -2288,6 +2441,10 @@ static void push_addr_table(lua_State* L) {
     A(SkillButton);
     A(MsgPump_Get);
     A(MsgPump_Peek);
+    A(CargoTemplateID);
+    A(CargoStackCount);
+    A(CargoTemplateAt);
+    A(InvMoveBuild);
 #undef A
 }
 
@@ -2320,6 +2477,9 @@ void open(lua_State* L) {
                                    {"worldmgr", l_worldmgr},
                                    {"target_action", l_target_action},
                                    {"request_target", l_request_target},
+                                   {"loot", l_loot},
+                                   {"loot_age", l_loot_age},
+                                   {"loot_take", l_loot_take},
                                    {"group_action", l_group_action},
                                    {"is_leader", l_is_leader},
                                    {"aux_entry", l_aux_entry},

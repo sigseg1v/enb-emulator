@@ -109,6 +109,17 @@ unsigned target_ctrl();
 // session (i.e. once you are in space).
 unsigned world_mgr();
 
+// loot_container() is the hulk/loot cargo CONTAINER pointer, captured (ECX)
+// read-only from the per-slot ItemTemplateID accessor (game::addr::CargoTemplateID),
+// which the client calls once per occupied slot every time a loot/hulk cargo grid
+// repaints. 0 until a cargo grid has been drawn this session. Because the accessor
+// fires for ANY inventory grid, lua_api (enb.loot) re-reads the container's
+// inventory-name to confirm it is the hulk cargo before trusting the rows.
+// loot_container_tick() is GetTickCount() of the most recent latch (0 = never), a
+// freshness signal for whether the grid is actively being drawn.
+unsigned loot_container();
+unsigned long loot_container_tick();
+
 // ECX (this) of the in-space action-bar controller that owns the numbered
 // ability/weapon slots (primary + alternate). Captured from the bank constructor
 // the moment a bank exists (entering space) and refreshed on every slot dispatch,

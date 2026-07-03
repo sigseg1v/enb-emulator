@@ -110,7 +110,11 @@ end
 local function is_gate(t)     return cls_has(t, "gate") end
 local function is_planet(t)   return cls_has(t, "planet") end
 local function is_resource(t)
-    return cls_has(t, "asteroid") or cls_has(t, "resource")
+    -- The generic class the client reports for a prospectable body is "Harvestable"
+    -- (asteroids, gas/dust clouds, ore fields all share it); the specific words below
+    -- are kept as belt-and-suspenders for any object that names its class differently.
+    return cls_has(t, "harvestable")
+        or cls_has(t, "asteroid") or cls_has(t, "resource")
         or cls_has(t, "field") or cls_has(t, "ore") or cls_has(t, "cloud")
 end
 -- "ship-like" = a mob/player ship: anything with a hull (or an explicit Ship class)

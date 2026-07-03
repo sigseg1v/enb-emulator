@@ -749,12 +749,18 @@ namespace LaunchFreya
                 return;
             }
 
-            // Reconcile OUR Lua mods against the server's published set whenever
-            // the user has client mods enabled. This is orthogonal to the binary
-            // version gate below (mods never gate Play) and best-effort: a mod
-            // download/extract failure is logged, never fatal. Skipped on the
-            // background auto-refresh so a timer tick never downloads.
-            if (!auto && _user.UseClientMods)
+            // Reconcile OUR Lua mods against the server's published set on every
+            // manual check. This POPULATES the local store (the "available mods"
+            // catalog the Configure Mods UI lists) -- it is deliberately NOT gated
+            // on UseClientMods: that toggle governs whether mods get STAGED into
+            // the client at launch, not whether the catalog exists. Gating the
+            // download on the toggle was a chicken-and-egg trap -- a fresh install
+            // has an empty store, the toggle is off by default, so enabling it
+            // showed "No mods found" because nothing had ever downloaded them.
+            // Orthogonal to the binary version gate below (mods never gate Play)
+            // and best-effort: a download/extract failure is logged, never fatal.
+            // Skipped on the background auto-refresh so a timer tick never downloads.
+            if (!auto)
             {
                 try
                 {
@@ -1044,14 +1050,32 @@ namespace LaunchFreya
             string accName = (c_TextBox_Username.Text ?? "").Trim();
             string accPass = c_TextBox_Password.Text ?? "";
             string charName = (c_TextBox_Character.Text ?? "").Trim();
-            Environment.SetEnvironmentVariable("FREYA_ACC_NAME", accName.Length > 0 ? accName : null);
-            Environment.SetEnvironmentVariable("FREYA_ACC_PASS", accPass.Length > 0 ? accPass : null);
-            Environment.SetEnvironmentVariable("FREYA_CHARACTER", charName.Length > 0 ? charName : null);
-            // A supplied username means the user wants a hands-free login, which only
-            // proceeds once the EULA gate is cleared; assert it only when credentials
-            // are actually present so a plain launch still shows the EULA.
-            if (accName.Length > 0)
-                Environment.SetEnvironmentVariable("FREYA_EULA", "ACCEPT");
+
+            // Hands-free auto-login needs BOTH an account AND a password. The username
+            // is persisted and auto-restored on launch, but the password is never
+            // saved (cleared on load, security) -- so the Username box can look "ready"
+            // while Password is actually blank. Arming auto-login on the username alone
+            // then fires the client's login with an EMPTY password: the avatar list
+            // still arrives but the front-end wedges before character select (observed
+            // as a hang with autologin logging pass=(unset)). So require both; with an
+            // account but no password, fall back to a MANUAL launch (the user lands on
+            // the login screen and types the password) -- never a silent half-login.
+            // Mirrors the play-local recipe's "account without password -> MANUAL".
+            bool autoLogin = accName.Length > 0 && accPass.Length > 0;
+            if (accName.Length > 0 && accPass.Length == 0)
+                AppendLog("Auto-login needs a password (it is never saved) -- launching MANUAL; "
+                          + "type your password on the login screen.");
+            Environment.SetEnvironmentVariable("FREYA_ACC_NAME", autoLogin ? accName : null);
+            Environment.SetEnvironmentVariable("FREYA_ACC_PASS", autoLogin ? accPass : null);
+            // Character auto-enter only makes sense once we are actually driving a
+            // hands-free login; otherwise leave it unset so a manual launch stops at
+            // character select for the user to pick.
+            Environment.SetEnvironmentVariable("FREYA_CHARACTER",
+                (autoLogin && charName.Length > 0) ? charName : null);
+            // Auto-accept the EULA only when we are driving a hands-free login; a plain
+            // launch must still show the EULA. Set BOTH ways so a prior launch's ACCEPT
+            // never leaks into a later manual launch in this same process.
+            Environment.SetEnvironmentVariable("FREYA_EULA", autoLogin ? "ACCEPT" : null);
 
             // Persist (keep the raw typed value so the box redisplays it verbatim).
             // BA-5 autosaves the account + character (NOT the password); BA-4

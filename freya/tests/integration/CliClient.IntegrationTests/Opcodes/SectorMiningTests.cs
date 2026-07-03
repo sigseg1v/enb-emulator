@@ -270,10 +270,22 @@ public sealed class SectorMiningTests : SectorIntegrationTest
                 await Task.Delay(250, cts.Token);
 
                 // --- 2. INVENTORY_MOVE FromInv=18 ("from mining window"), FromSlot=0
-                //        (first ore stack) -> MineResource. ---
+                //        (first ore stack) -> MineResource.
+                //
+                // These are the EXACT bytes the in-client mine/loot take builds
+                // (enbmod l_loot_take: b[6]={gid, from_inv, slot, ToInv=1, ToSlot=-1,
+                //  Num=1}) -- ToInv=1 (CargoInv), ToSlot=-1 (auto-select a free slot).
+                // This doubles as the AJ-3 regression guard (plans/37, CV-BA-LOOT):
+                // the AJ-3 destination-bounds check in HandleInventoryMove rejects a
+                // move when dst_slots>0 && ToSlot<0, and InventorySlotCount(ToInv=1)=40.
+                // Without the FromInv 6/18 `dest_not_indexed` exemption the take is
+                // silently dropped BEFORE MineResource -- no 0x2012/0x000B beam -- and
+                // this test fails. So it must send the client's real ToInv=1/ToSlot=-1,
+                // NOT a synthetic ToInv=0 (which yields dst_slots=0 and never trips the
+                // guard, passing on both the buggy and fixed server). ---
                 byte[] mine = new InventoryMoveCodec().EncodeOutbound(
                     new InventoryMoveMessage(rejoin.GameId, FromInv: 18, FromSlot: 0,
-                        ToInv: 0, ToSlot: 0, Num: 0));
+                        ToInv: 1, ToSlot: -1, Num: 1));
                 await spaceConn.SendAsync(
                     Packet.ForOpcode(OpcodeId.Known.InventoryMove.Value, mine), cts.Token);
 

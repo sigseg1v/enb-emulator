@@ -81,6 +81,23 @@ direct re-read before fixing) and **LIVE** (compiles on the Linux build) or
   sends a concrete in-range slot). CLI OOB test landed
   (`SectorInventoryMoveTests.InventoryMove_OutOfBoundsFromSlot_IsDropped_ConnectionSurvives`),
   all 5 inventory tests green (no legit-move regression). plans/29 CV-16.
+  **REGRESSION FOUND + FIXED 2026-07-02 (AS-17 loot work).** The AJ-3 destination
+  range check silently rejected every mine/husk-loot take: the loot/mine source
+  codes `FromInv==18` (mine/harvest -> MineResource) and `FromInv==6` (husk-loot
+  -> LootItem) send `ToSlot==-1` and NEVER index it -- their case bodies place the
+  item via `CargoAddItem`, which auto-selects a free cargo slot -- but the
+  `auto_select_dest` sentinel whitelist only covered the cargo/vault/vendor/manu
+  combos, so `ToSlot==-1` failed the `>=0 && < dst_slots` check and returned early
+  (via the dead `LogDebug` no-op = silent). This is exactly the "nothing happens on
+  a loot click" symptom the owner hit. Fix: `bool dest_not_indexed = (FromInv==6 ||
+  FromInv==18);` added to the guard so those two source codes skip the destination
+  range check. NOT a security weakening -- ToSlot is never used as an index for
+  6/18 (destination auto-selected), so no bound can be violated; it only stops
+  rejecting a take the real server always accepted. Any residual failure is now a
+  VISIBLE `SendMessageString` (MineResource range/condition gates), not a silent
+  drop. plans/29 CV-BA-LOOT (real-client mining confirm). **Follow-up owed:** add a
+  CLI/integration test that a `FromInv=18, ToSlot=-1` move is ACCEPTED (the mirror
+  of the existing OOB-rejection test), so this regression cannot recur silently.
 
 - [x] **AJ-4. Chat sender GameID spoofing.** CONFIRMED / LIVE. FIXED 2026-06-07
   (task #91, CV-15). `server/src/PlayerConnection.cpp HandleClientChat` (opcode

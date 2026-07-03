@@ -57,7 +57,8 @@ bool g_entered = false;   // character enter requested
 int g_view_throttle = 0;  // frames since last credential-view search
 int g_view_attempts = 0;  // bounded credential-view searches (cost guard)
 bool g_view_gaveup = false;
-int g_char_attempts = 0; // bounded character-name searches
+DWORD g_view_found_tick = 0; // GetTickCount when the credential view first appeared (0 = not yet)
+int g_char_attempts = 0;     // bounded character-name searches
 bool g_char_gaveup = false;
 
 // Bound the cost of the credential-view search so a future client build that moved
@@ -65,6 +66,7 @@ bool g_char_gaveup = false;
 constexpr int kViewSearchPeriod = 15; // run the search at most every N frames
 constexpr int kViewSearchMax = 60;    // ~15s of retries, then give up (logged once)
 constexpr int kCharSearchMax = 1800;  // ~30s for the avatar list to arrive + populate
+constexpr DWORD kViewSettleMs = 1000; // let the located form finish wiring before we submit
 
 // FREYA_* alias wins over ENB_* when both are set.
 std::string env_either(const char* freya_name, const char* enb_name) {
@@ -283,12 +285,37 @@ void drive_submit(uintptr_t lt) {
     ++g_view_attempts;
 
     uintptr_t view = find_credential_view(lt);
-    if (!view)
-        return; // widgets not built yet -- retry on the next throttled tick
+    if (!view) {
+        g_view_found_tick = 0; // view not present -- restart the settle timer
+        return;                // widgets not built yet -- retry on the next throttled tick
+    }
+
+    // Settle before submitting. The credential form can be located a beat before the
+    // front-end has finished wiring it; firing CredentialAccept in that window drives
+    // a half-initialized form and the login wedges (the avatar list still arrives but
+    // the client never advances to character select). Wait for the view to remain
+    // present for ~1s, THEN fill + submit.
+    DWORD now = GetTickCount();
+    if (g_view_found_tick == 0) {
+        g_view_found_tick = now;
+        return;
+    }
+    if (now - g_view_found_tick < kViewSettleMs)
+        return;
 
     set_widget_text(mem::ptr(view + game::login::view_user_widget), g_acc);
-    if (!g_pass.empty())
-        set_widget_text(mem::ptr(view + game::login::view_pass_widget), g_pass);
+    // Never fire the login with an EMPTY password: the client accepts the submit and
+    // the avatar list arrives, but the front-end wedges before character select
+    // (observed as a hang with autologin logging pass=(unset)). Fill the username and
+    // stop -- the user types the password and submits by hand. The launcher already
+    // refuses to arm hands-free login without a password; this is the DLL-side guard
+    // for a raw ENB_ACC_NAME-without-PASS env.
+    if (g_pass.empty()) {
+        logf("autologin: no password supplied -- filled username, leaving submit to the user");
+        g_view_gaveup = true;
+        return;
+    }
+    set_widget_text(mem::ptr(view + game::login::view_pass_widget), g_pass);
     actions::call_thiscall(game::addr::CredentialAccept, view, nullptr, 0);
     g_submitted = true;
     logf("autologin: credentials submitted (view=%08x)", (unsigned)view);

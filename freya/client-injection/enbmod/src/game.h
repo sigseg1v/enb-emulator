@@ -305,6 +305,40 @@ constexpr uintptr_t CredentialAccept = 0x005ae450;
 // login::sel_index to its galaxy id and requests entry into the world. Also
 // non-blocking.
 constexpr uintptr_t CharEnter = 0x00769400;
+
+// ---- hulk / loot cargo enumeration ------------------------------------------
+// When you prospect/loot a wreck or resource, the client shows a "hulk cargo"
+// grid. Its per-slot data is read through three inventory-container accessors,
+// all __thiscall with ECX = the cargo CONTAINER object (an embedded sub-object at
+// InvData+0x54). We do NOT reach the container by offset-walking a UI object;
+// instead we CAPTURE its pointer read-only from CargoTemplateID's ECX (it is
+// called once per occupied slot every time the grid repaints), then replay these
+// same accessors to enumerate. The container also carries its slot count
+// precomputed at container + cargo::slot_count, and a char* inventory-name
+// at container + cargo::inv_name_ptr (the discriminator between "Cargo"/hulk and
+// ship inventory).
+//   CargoTemplateID (ECX=container; arg: u32 slot) -> ItemTemplateID; 0xFFFFFFFF
+//     = empty slot, 0xFFFFFFFE = error (skip both). We also hook this for capture.
+//   CargoStackCount (ECX=container; arg: u32 slot) -> stack quantity (0 if empty).
+//   CargoTemplateAt (ECX=container; args: u32 slot, then char mode = 0 pushed as a
+//     dword) -> item-template object pointer, or 0 for an empty slot. The template
+//     holds the item name (char* at cargo::tmpl_name_ptr, length at
+//     cargo::tmpl_name_len) and a resolved icon asset at cargo::tmpl_icon_asset.
+constexpr uintptr_t CargoTemplateID = 0x00689ca0;
+constexpr uintptr_t CargoStackCount = 0x00689d20;
+constexpr uintptr_t CargoTemplateAt = 0x0068aaa0;
+// InvMoveBuild (__thiscall, ECX = a caller-allocated command object; args: u32
+// GameID, u32 FromInv, u32 FromSlot, u32 ToInv, u32 ToSlot, u32 Num) -- the in-place
+// constructor for the INVENTORY_MOVE command (wire opcode 0x0027). It stamps the
+// command vtable (whose serializer emits opcode 0x27 with every field in network
+// byte order) and the six fields, spanning 0x24 bytes. See namespace cargo for the
+// full contract. The built object is pushed via CmdSend.
+constexpr uintptr_t InvMoveBuild = 0x00894ca0;
+// ClientOperatorNew (__cdecl, arg: u32 size) -> heap block. The client's own
+// operator new. Command objects handed to the send path are freed by the client CRT
+// heap, so they MUST be allocated here (a DLL/static buffer would be a cross-heap
+// free -> crash).
+constexpr uintptr_t ClientOperatorNew = 0x004e9cb0;
 } // namespace addr
 
 // Front-end LoginTask layout (build-constant field offsets, runtime-validated).
@@ -389,6 +423,15 @@ constexpr int aux_container = 0x88; // *(dataObj + 0x88) -> aux container (threa
 namespace world {
 constexpr int player_id = 0x112c;  // M -> local player game id (command actor)
 constexpr int connection = 0x1124; // M -> sector-server Connection (command sink)
+// The INVENTORY/LOOT command channel is NOT M's connection. The native loot/mining
+// take commits the InvMove through the SClient that OWNS the open cargo container:
+// C = *(container + cargo::view_client), and the command is pushed on C's Connection
+// (C + connection == 0x1124, the same offset as on M). The InvMove GameID field is
+// the value the SClient stashes at C + sub_client_gid (0x1130) for the take. Reaching
+// the sink via M's own connection does NOT transmit the inventory command -- it must
+// go through the container-owner SClient, so we fetch C off the container exactly as
+// the native commit does rather than off M.
+constexpr int sub_client_gid = 0x1130; // SClient -> InvMove GameID field (the take actor id)
 constexpr int tgt_container =
     0x88;                     // target contact object -> properties/aux bag (hull/shield/name)
 constexpr int tgt_gid = 0x90; // target contact object + 0x90 -> its own GameID (command target)
@@ -624,6 +667,50 @@ struct Offsets {
 
 // The single live offsets instance (defined in game.cpp). Mutated by Lua enb.calibrate{}.
 Offsets& offs();
+
+// Hulk / loot cargo container + item-template field offsets. The container pointer
+// is the ECX captured at addr::CargoTemplateID; the template pointer is what
+// addr::CargoTemplateAt returns for an occupied slot. All CONFIDENT from analysis.
+namespace cargo {
+constexpr int inv_name_ptr = 0x04;    // container -> char* inventory-name ("Cargo" for a hulk)
+constexpr int view_client = 0x4c;     // container -> owning SClient (the InvMove send holder)
+constexpr int slot_count = 0x44;      // container -> uint precomputed slot count
+constexpr int tmpl_name_ptr = 0x18;   // item template -> char* narrow item name
+constexpr int tmpl_name_len = 0x1c;   // item template -> int name length
+constexpr int tmpl_type = 0x0c;       // item template -> ItemType/category
+constexpr int tmpl_icon_asset = 0x10; // item template -> resolved icon asset object
+constexpr unsigned tid_empty = 0xFFFFFFFFu; // CargoTemplateID sentinel: empty slot
+constexpr unsigned tid_error = 0xFFFFFFFEu; // CargoTemplateID sentinel: error
+
+// ---- loot TAKE (send a single slot into your own cargo) ---------------------
+// Looting one slot is the exact command the native loot/mining window's take emits:
+// an INVENTORY_MOVE command (wire opcode 0x0027), NOT the compact 0x5D command (that
+// 0x5D "use-inventory-item" builder is never emitted on a harvestable take -- proven
+// by a read-only hook on it staying silent while a native resource take succeeded).
+// The InvMove payload is six u32s (all network byte order on the wire):
+//   GameID  -- the actor's game id (sub-client + world::sub_client_gid == 0x40000020)
+//   FromInv -- the source container's kind: LOOT/HUSK window = 0x06, MINING window
+//              (harvestable resource) = 0x12 (derived from the container's inventory-
+//              name -- "Harvest..." => mining window)
+//   FromSlot-- the slot to take
+//   ToInv   -- destination inventory: 1 (the player's cargo hold)
+//   ToSlot  -- 0xFFFFFFFF (server auto-selects a free cargo slot)
+//   Num     -- 1 (the harvest take moves the whole slot; the server's FromInv=18
+//              case reads only FromInv + FromSlot, so ToInv/ToSlot/Num are matched to
+//              the native emitter but not consumed for a mining-window take).
+//   InvMoveBuild (game::addr::InvMoveBuild) is an IN-PLACE constructor over a
+//     caller-allocated object; it installs the command vtable + the six fields,
+//     spanning inv_move_size bytes. The object MUST be allocated with the client's
+//     own operator new (game::addr::ClientOperatorNew) -- the send path takes
+//     ownership and frees it through the client CRT heap, so a DLL/static buffer
+//     would be a cross-heap free. The built object is pushed on the sub-client's
+//     Connection via CmdSend (see world::sub_client_vtbl).
+constexpr unsigned char inv_type_hulk = 0x06; // FromInv: loot/husk window (server case 6)
+constexpr unsigned char inv_type_harvest =
+    0x12; // FromInv: mining window / harvestable (server case 18)
+constexpr uint32_t inv_move_size =
+    0x2c; // InvMove command object span (ctor writes to +0x20; >=0x24)
+} // namespace cargo
 
 } // namespace game
 } // namespace enb
