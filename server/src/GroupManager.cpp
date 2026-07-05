@@ -1392,6 +1392,19 @@ bool PlayerManager::FormUp(long PID)
 			return false;
 		}
 
+		// The leader is the formation ANCHOR (slot 0, relative offset {0,0,0}):
+		// SetFormation already locked them there. Sending the leader a
+		// FormationPositionalUpdate anchored on THEMSELVES tells the client to fly
+		// formation relative to its own ship -- the client's formation solver then
+		// feeds its own position back into itself and overflows its stack, crashing
+		// the real client (observed: WINE virtual_setup_exception stack overflow the
+		// instant a leader issues Form Up). The anchor has nothing to fly to, so
+		// forming up slot 0 is a no-op.
+		if (i == 0)
+		{
+			return true;
+		}
+
 		int Form = g->Member[0].Formation;
 		// Lock formation
 		g->Member[i].Formation = Form;

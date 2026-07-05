@@ -3352,7 +3352,29 @@ moot; the SOLVED block above is the truth):**
   moving client A itself: warp still engages, target locks stay stable, no phantom
   drift -- i.e. the broadcast-only override did not leak into A's motion path.
 
-## [ ] CV-BC-FORMATION-GATE -- group formation auto-carries + auto-reforms through a gate
+## [~] CV-BC-FORMATION-GATE -- group formation auto-carries + auto-reforms through a gate
+
+- **VALIDATED (2026-07-05, two LOCAL dev clients, `just play-multibox-local 2`)**: leader
+  `devuserjd` [40000021] + member `devuser2jd` [40000035], grouped, Block formation, both in
+  Europa (sector 10551). Leader targeted "Gate to Sirius System" and gated. Server log proof:
+  both `Master handoff player devuserjd ... to sector 4120` AND `Master handoff player
+  devuser2jd ... to sector 4120` -- the member was carried through the SAME gate with NO
+  member-side gate command (behaviour 1, auto-carry, CONFIRMED). On the far side both did
+  `Sector login`, group stayed intact (leader still leads), and the member snapped to
+  `dist=200.0004` from the leader -- exactly the Block member offset `{0,-200,0}` -- so the
+  formation auto-re-established (behaviours 2+3, leader re-forms + member rejoins, CONFIRMED).
+- **STILL TO VERIFY (not covered by the 2-formed-char run above)**:
+  - A grouped-but-UNFORMED third char is left behind (needs a 3rd client).
+  - A member gating on its own just leaves the formation (old behaviour intact).
+  - Break Formation, then gate -- confirm it does NOT auto-reform on arrival (sub-check 4).
+- **Bug found + fixed during this test**: `PlayerManager::FormUp` sent the LEADER (formation
+  anchor, slot 0, relative offset {0,0,0}) a `SendFormationPositionalUpdate` anchored on
+  itself when the leader issued Form Up -- the client's formation solver fed its own position
+  back into itself and overflowed its stack (WINE `virtual_setup_exception stack overflow`,
+  instant leader-client crash). Guarded `FormUp` to no-op for slot 0 (the anchor has nothing
+  to fly to). NOT on the feature's reform path (`GroupReformOnGate` FormUps members only,
+  `for x=1`), but reachable by the native leader clicking Form Up. Fix verified: leader Form
+  Up now returns true with no crash. `server/src/GroupManager.cpp` FormUp.
 
 - **What changed (SERVER)**: `server/src/GroupManager.cpp` (`PlayerManager::GroupLeaderGate`,
   `GroupReformOnGate`, + `SavedFormation` maintenance in `SetFormation`/`BreakFormation`),
