@@ -2,13 +2,13 @@
 // overlay.h -- Direct3D 8 Present-hook overlay: textured-quad text/shapes/images.
 //
 // client.exe renders through d3d8.dll (NOT DirectDraw -- a previous ddraw Flip/Blt hook never
-// fired in-game). We resolve the IDirect3DDevice8 vtable from a throwaway probe device, hook
-// Present (vtable[15]) with MinHook, and in the hook draw a per-frame display list with the
-// GAME's device: state-blocked XYZRHW quads for rects/lines/images and a GDI-baked font-atlas
-// texture for text. All textures are D3DPOOL_MANAGED, so a device Reset cannot strand them.
-// The display list is rebuilt by Lua each tick (immediate-mode): the tick swaps a
-// freshly-staged list into the render list under a lock, so the Present thread always reads a
-// complete frame.
+// fired in-game). We resolve the IDirect3DDevice8 vtable from the GAME'S OWN device (the
+// engine's static device global -- see game::render::device), hook Present (vtable[15]) with
+// MinHook, and in the hook draw a per-frame display list with the GAME's device: state-blocked
+// XYZRHW quads for rects/lines/images and a GDI-baked font-atlas texture for text. All textures
+// are D3DPOOL_MANAGED, so a device Reset cannot strand them. The display list is rebuilt by Lua
+// each tick (immediate-mode): the tick swaps a freshly-staged list into the render list under a
+// lock, so the Present thread always reads a complete frame.
 
 #include <cstdint>
 #include <string>
@@ -16,7 +16,12 @@
 namespace enb {
 namespace overlay {
 
-bool init(); // probe-device vtable resolve + hook Present. false on failure (logged).
+// Install the Present hook if the game's D3D device exists yet; no-op once
+// installed (or after a hard hook failure, logged once). Called every tick on
+// the game thread -- the device global is null until the renderer starts, so
+// launch-time injection hooks a few frames in and hot-injection on the first
+// tick.
+void poll();
 void shutdown();
 
 // Backbuffer dimensions, observed by the Present hook each frame. {0,0} until

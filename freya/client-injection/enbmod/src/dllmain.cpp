@@ -113,6 +113,7 @@ void run_init_script() {
 void on_tick() {
     if (!g_ready.load())
         return;
+    enb::overlay::poll();   // hook Present once the game's D3D device exists (no-op after)
     enb::autologin::tick(); // front-end auto-login driver (no-op once in-game / unconfigured)
     enb::lua::tick(g_L);
     // Publish the local ship's world position + orientation for the MVAS
@@ -178,9 +179,9 @@ DWORD WINAPI worker(LPVOID) {
     if (!enb::hooks::init())
         enb::logf("hooks::init failed -- no tick");
 
-    // overlay needs MinHook initialized (hooks::init did MH_Initialize) before it hooks Flip.
-    if (!enb::overlay::init())
-        enb::logf("overlay::init failed -- no drawing");
+    // The overlay hooks Present lazily from on_tick (overlay::poll) once the
+    // game's D3D device exists -- MinHook is already initialized above, and the
+    // tick runs on the game thread, so the install is race-free with Present.
 
     // env-driven auto-login: reads ENB_*/FREYA_* and, only when an account or
     // character is requested, installs the read-only LoginTask capture hook

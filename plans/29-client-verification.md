@@ -3220,6 +3220,42 @@ moot; the SOLVED block above is the truth):**
   3. Both sessions play normally (movement, chat, combat) with no dropped gameplay
      datagrams -- i.e. each window's DTLS token matches what the server bound.
 
+## [ ] CV-BB-WINDOWS-CLIENTMODS -- Lua mods work on a native-Windows install (custom client path)
+
+- **What changed (CLIENT, freya/ MIT + launcher)**: two independent defects made the
+  Windows tester's Lua mods dead even though the Configure Mods UI listed them:
+  1. `tools/LaunchFreya/Launcher.cs` + `LaunchFreya.csproj`: staging skipped ENTIRELY
+     when the on-disk `bin/scripts` bundle was absent (installs from a zip predating
+     the bundle never get it -- the self-updater deliberately never re-delivers
+     scripts), so `enbmod.dll` was injected with no `scripts/init.lua` next to it
+     (`init.lua error: cannot open ...\scripts\init.lua`). Fix: the bootstrap
+     (init.lua + lib/*.lua, mods excluded) is now EMBEDDED in FreyaLauncher.exe and
+     staged from there; Release prefers the embedded copy (it self-updates in
+     lockstep with enbmod.dll, bin/scripts never does), DEBUG prefers the repo tree.
+     Store-mod staging now runs regardless of the bootstrap source.
+  2. `freya/client-injection/enbmod/src/overlay.cpp` (+ `game.h`, `dllmain.cpp`):
+     `overlay::init` probed for a Present pointer by creating its OWN throwaway
+     D3D8 device -- HAL windowed, then REF. On native Windows the game holds the
+     adapter fullscreen-exclusive (HAL probe can fail) and the REF rasterizer does
+     not exist outside SDK installs, so the probe died with 0x8876086c
+     D3DERR_NOTAVAILABLE and the HUD never drew. Fix: no probe device at all --
+     `overlay::poll()` (called from the tick, on the game thread) reads the game's
+     OWN `IDirect3DDevice8*` from its static global (`game::render::device`,
+     0x00c00660) and hooks vtable[15] (Present) once it is non-null.
+- **Why the CLI can't validate it**: both are in-client rendering/staging behaviour;
+  no wire format is involved.
+- **What to look for (native Windows install, custom exe path, e.g. the tester's
+  `D:\...\release\client.exe`)**:
+  1. Launch via FreyaLauncher.exe with Lua Mods on. `scripts/init.lua` + `lib/` +
+     enabled mods appear next to client.exe; `enbmod.log` shows `loaded ...init.lua`
+     (no "cannot open" error) and the launcher log shows the embedded-bootstrap or
+     disk staging line.
+  2. `enbmod.log` shows `overlay: hook installed -- IDirect3DDevice8::Present @ ...`
+     (no `probe CreateDevice failed` / `overlay::init failed` lines) and the HUD
+     actually draws in-game.
+  3. WINE regression: the same two log lines + a drawing HUD on a local
+     `just play-local` client (the lazy poll path is new for WINE too).
+
 ## [ ] CV-BC-GROUPINVITE-CRASH -- invitee client no longer crashes on group invite
 
 - **What changed (CLIENT, freya/ MIT)**: `freya/client-injection/enbmod/src/lua_api.cpp`,

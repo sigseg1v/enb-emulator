@@ -261,15 +261,15 @@ constexpr uintptr_t AutoFollowBuild = 0x0089d070;
 constexpr uintptr_t CmdSend = 0x00728150;
 constexpr uintptr_t CtaBuild = 0x0086f070;
 
-// RequestTarget (__thiscall, ECX = M; arg: a live contact-object pointer) is the
+// RequestTarget (__cdecl(M, obj) -- BOTH args on the stack, NOT thiscall) is the
 // client's own "make this object my target" call -- the same path a click on an
-// object in space takes. It reads the object's GameID (obj + world::tgt_gid) into a
-// REQUEST_TARGET (wire opcode 0x17) packet and pushes it through M's sector-server
-// Connection (M + world::connection). The server validates the target is real / in
+// object in space takes. It reads M's source GameID (M + 0x112c) and the object's
+// GameID (obj + 0x90) into a REQUEST_TARGET (wire opcode 0x17) packet and pushes it
+// through M's sector-server Connection. The server validates the target is real / in
 // range and replies SET_TARGET (0x19), which the client applies natively (target
 // frame, threat text, highlight). We replicate it from enb.request_target: resolve a
 // GameID to its contact object with the same gid->object lookup enb.group uses, then
-// hand that object here. Pass ONLY an object the lookup returned (never a raw address).
+// call cdecl(M, obj). Pass ONLY an object the lookup returned (never a raw address).
 constexpr uintptr_t RequestTarget = 0x00723230;
 
 // StationExit (__thiscall, ECX = M the world manager; args: char action, int, int)
@@ -403,6 +403,15 @@ constexpr unsigned char_name_stride = 0x10c;         // stride between char name
 constexpr int char_max = 8;                          // character slots to scan
 constexpr unsigned sel_index = 0x1080;               // selected character index (int)
 } // namespace login
+
+// Renderer globals. The engine creates one IDirect3DDevice8 at startup and
+// stores it in a static global (build-constant address, no ASLR). It is null
+// until the renderer initializes -- a few frames after process start -- so
+// readers must treat 0 as "not yet" and retry. The overlay takes the Present
+// vtable slot straight off this device (see overlay.cpp poll()).
+namespace render {
+constexpr uintptr_t device = 0x00c00660; // IDirect3DDevice8* (null until renderer up)
+} // namespace render
 
 // Vitals-bar fill chain. Unlike the Offsets struct below (runtime hypotheses),
 // these are CONFIRMED build-constant field offsets, observed at runtime: the
@@ -547,7 +556,19 @@ constexpr int keybuf_sz = 0x40; // zeroed scratch key-object buffer
 // the local player and any in-range remote (so a group member's current shield
 // is readable client-side).
 constexpr uintptr_t get_shared = 0x005bf2b0;
-constexpr int shared_val_off = 0x248; // entry + 0x248 -> float (0..1) live value
+// A shared entry is DELTA-INTERPOLATED, so it carries two floats: the settled
+// snapshot value at +0x23c (the last value the server replicated -- what the
+// interpolator eases TOWARD and clamps against) and a volatile per-frame
+// animation scratch at +0x248. +0x248 is written by the client's interpolator
+// each frame and, once an interpolation window elapses, is EXTRAPOLATED to the
+// draining/filling extreme (0.0 while a shield is dropping, 1.0 while rising) --
+// so a raw read of +0x248 catches a shield mid-drain reading 0 the instant the
+// target is fired on, even though its true shield is nonzero. We want the
+// authoritative snapshot, not the animation, so we read +0x23c. Reading it is a
+// pure side-effect-free read; running the interpolator ourselves would MUTATE
+// the entry (+0x240/+0x244/+0x248/+0x24c) and fight the client's own per-frame
+// pass. The settled read yields +0x23c directly, confirming it is the value.
+constexpr int shared_val_off = 0x23c; // entry + 0x23c -> float (0..1) settled snapshot value
 } // namespace aux
 
 // Discipline levels (RPGInfo Combat/Trade/Explore) -- a property bag like aux,
