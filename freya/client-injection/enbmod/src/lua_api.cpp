@@ -455,7 +455,10 @@ static bool world_pos(uintptr_t obj, double out[3]);
 // refreshed on every target switch and 0 when nothing is selected. Its hull/shield
 // AuxData and class name live on its properties container (object+0x88), not the contact
 // object; the game stores shield as a 0..1 percent (ShieldPercent) of MaxShieldPower,
-// with no absolute current-shield key. Its INSTANCE name is a char* on that same
+// with no absolute current-shield key -- and ShieldPercent is a DELTA-INTERPOLATED
+// shared value, so aux_read_shared_f reads its settled snapshot float (game::aux::
+// shared_val_off) rather than the per-frame animation scratch, which extrapolates to
+// 0 while a shield is draining (see game.h). Its INSTANCE name is a char* on that same
 // container at +0x124 (class name at +0x3c). The target's level is live-read off the
 // targeting subsystem (target_level_live()) -- the server-fed "TargetThreat" string.
 // enb.target_obj() -> live selected target object pointer (0 until the hook fires
@@ -1674,15 +1677,34 @@ static int l_group_action(lua_State* L) {
 // every other native call.
 static int l_is_leader(lua_State* L) {
     uintptr_t bases[2] = {hooks::rpg_mgr(), player_entity()};
+    unsigned char keybuf[game::aux::keybuf_sz];
+    memset(keybuf, 0, sizeof(keybuf));
     int lead = 0;
     if (__builtin_setjmp(mem::g_guard_jmp)) {
         mem::g_guard_on = 0; // the native check faulted: report not-leader
     } else {
         mem::g_guard_on = 1;
+        ((AuxBuildKey_t)game::aux::build_key)(keybuf, "GroupInfo");
         for (uintptr_t base : bases) {
             if (!base || !mem::readable((void*)(base + game::rpg::container_off), 4))
                 continue;
-            if (!mem::ptr(base + game::rpg::container_off))
+            uintptr_t cont = mem::ptr(base + game::rpg::container_off);
+            if (!cont || !mem::readable((void*)cont, 4))
+                continue;
+            // Only run the native leader check once a VALID, ACTIVE group object
+            // actually exists for this base. In the brief window right after a group
+            // INVITE the client already holds a GroupInfo entry (the invitee's GroupID
+            // is set server-side before they accept), but its internal pointers are not
+            // yet constructed. Calling native is_leader then walks that half-built
+            // object and dispatches through an uninitialized vtable -- control flow
+            // jumps into unmapped/zeroed memory, which the VEH read-guard below CANNOT
+            // recover (it only catches read/write faults, not a wild jump), so the
+            // client crashed the instant the invite arrived. Gate on the same signals
+            // the roster read (l_group) uses -- group active flag set and member-array
+            // end readable -- so we never touch a group the client is still building.
+            uintptr_t g = (uintptr_t)((AuxGetValue_t)game::group::get_object)((int)cont, keybuf);
+            if (!g || !mem::readable((void*)(g + game::group::members_end), 4) ||
+                mem::i32(g + game::group::active_off) == 0)
                 continue;
             // The check returns a char in AL -- the rest of EAX is callee scratch,
             // so mask to the low byte before testing.

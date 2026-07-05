@@ -63,6 +63,15 @@ struct Vtx {
 static IDirect3DDevice8* g_cacheDev = nullptr;
 static IDirect3DTexture8* g_white = nullptr; // 1x1 white: untextured prims
 
+// A single reusable D3DSBT_ALL state block, created lazily on first draw and
+// re-Captured/Applied each frame to snapshot+restore the game's device state
+// around our 2D pass. Creating (and deleting) a fresh full-device state block
+// EVERY frame -- the old draw_frame did -- churns a large heap allocation
+// through wined3d 30-60x/s, which is a HUD-gated memory-growth vector (the whole
+// point of a state block is to allocate once and reuse). 0 = not yet created;
+// released on device reset/unload alongside the texture caches.
+static DWORD g_stateBlock = 0;
+
 // Backbuffer size, sampled in the Present hook each frame (Reset can change it
 // without the device pointer changing). Read from the tick thread via screen_size.
 static std::atomic<int> g_screen_w{0}, g_screen_h{0};
@@ -132,6 +141,10 @@ static void release_caches() {
     if (g_white) {
         g_white->Release();
         g_white = nullptr;
+    }
+    if (g_stateBlock && g_cacheDev) {
+        g_cacheDev->DeleteStateBlock(g_stateBlock);
+        g_stateBlock = 0;
     }
     {
         std::lock_guard<std::mutex> lk(g_list_mx);
@@ -505,10 +518,14 @@ static void draw_frame(IDirect3DDevice8* dev) {
         return;
 
     // Snapshot the device state, draw, then restore -- the game's renderer
-    // must never see our 2D state leak into its next frame.
-    DWORD sb = 0;
-    if (FAILED(dev->CreateStateBlock(D3DSBT_ALL, &sb)))
-        sb = 0;
+    // must never see our 2D state leak into its next frame. Reuse ONE state
+    // block (created lazily, re-Captured each frame) rather than allocating a
+    // fresh D3DSBT_ALL block per frame: the per-frame Create/Delete churned a
+    // large wined3d heap allocation 30-60x/s, a HUD-gated memory-growth vector.
+    if (!g_stateBlock && FAILED(dev->CreateStateBlock(D3DSBT_ALL, &g_stateBlock)))
+        g_stateBlock = 0;
+    if (g_stateBlock)
+        dev->CaptureStateBlock(g_stateBlock);
 
     dev->SetVertexShader(FVF_VTX);
     dev->SetPixelShader(0);
@@ -625,10 +642,8 @@ static void draw_frame(IDirect3DDevice8* dev) {
 
     if (scene)
         dev->EndScene();
-    if (sb) {
-        dev->ApplyStateBlock(sb);
-        dev->DeleteStateBlock(sb);
-    }
+    if (g_stateBlock)
+        dev->ApplyStateBlock(g_stateBlock); // restore; block is reused, not deleted
 }
 
 // Sample the real render size from the device's backbuffer. Cheap (one COM call,

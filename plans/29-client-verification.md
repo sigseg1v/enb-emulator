@@ -3178,3 +3178,39 @@ moot; the SOLVED block above is the truth):**
      not this bug.
   3. No dupe / no crash across repeated takes; cargo count matches the ore actually
      mined.
+
+## [ ] CV-BC-GROUPINVITE-CRASH -- invitee client no longer crashes on group invite
+
+- **What changed (CLIENT, freya/ MIT)**: `freya/client-injection/enbmod/src/lua_api.cpp`,
+  `l_is_leader`. The freya-hud party frame calls `enb.is_leader()` every frame while a
+  group exists. `l_is_leader` called the client-native leader check
+  (`group::is_leader`, 0x0074d690) after only verifying `base+container_off` was a
+  readable non-null pointer. The instant a group INVITE lands, the invitee's client
+  holds a GroupInfo entry (server sets the invitee's GroupID before they accept -- see
+  `server/src/GroupManager.cpp` GroupInvite) whose internal pointers are not yet
+  constructed. The native check walked that half-built object and dispatched through an
+  uninitialized vtable -> control flow jumped into zeroed/unmapped memory
+  (`page fault on read at 0x00000001`, EIP in a zero page executing `00 00`). The
+  enbmod setjmp/VEH guard catches READ faults but NOT a wild jump, so it crashed the
+  client outright the moment the invite arrived.
+- **The fix**: gate the native call behind the SAME validation the proven-safe roster
+  read (`l_group`) uses -- resolve the group via `get_object(container, "GroupInfo")`
+  and require the group's active flag (`+0x70`) set AND its member-array end (`+0x678`)
+  readable BEFORE calling `is_leader`. Until the client finishes building the group,
+  `l_is_leader` reports not-leader (correct: you are not the leader of a group that is
+  not active yet). No wire/protocol change; pure client-side mod hardening.
+- **Root-cause evidence**: gdb backtrace of the crashed WINE `client.exe` (ptrace_scope
+  lifted), Wine's saved CONTEXT decoded off the crashing thread's stack; enbmod frames
+  resolved via `x86_64-w64-mingw32-nm` -- fault chain ran through enbmod's
+  `l_is_leader` -> `call_thiscall(group::is_leader,...)`. See memory
+  `group-invite-crash-is-enbmod-is-leader` + `reading-wine-crash-backtrace-on-this-box`.
+- **Why the CLI can't validate it**: this is client-side injected-mod UI logic driven
+  off the client's own message pump against live client memory; no server/proxy/CLI
+  packet is involved.
+- **What to look for (real client, TWO windows, multibox devuserte + devuserje)**:
+  1. From devuserte, `/invite devuserje` (in-game chat). devuserje's client must NOT
+     crash when the invite/half-built group state arrives.
+  2. Accept on devuserje. The group forms; both party frames render; `enb.is_leader()`
+     returns a sane value on both once the group is active.
+  3. Leader-only buttons appear only for the actual leader (no false leader while the
+     group is still building).
