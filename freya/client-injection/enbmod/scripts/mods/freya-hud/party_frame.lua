@@ -275,13 +275,6 @@ enb.on_input(function(msg, wparam, lparam)
                     enb.target_action(r.op, "self")
                 elseif r.cta and enb.group_action then
                     enb.group_action(r.cta)
-                    -- keep freya-groupbot's reform-after-gate formation in sync when
-                    -- the leader picks a type here (4/5/6). nil-guarded so party_frame
-                    -- never hard-depends on the groupbot mod being staged.
-                    if (r.cta == 4 or r.cta == 5 or r.cta == 6)
-                        and type(groupbot) == "table" and groupbot.formation then
-                        groupbot.formation(r.cta)
-                    end
                 end
                 flash[r.id] = CFG.FLASH_TICKS
                 enb.log("group: " .. r.label)

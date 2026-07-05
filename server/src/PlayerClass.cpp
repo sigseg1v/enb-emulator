@@ -3998,6 +3998,17 @@ void Player::FinishLogin(bool udp)
 
 	SetWormholed(false);
 
+	// Group-formation gate automation: re-establish the formation carried
+	// through a gate. Gate arrivals only (FromSector is the origin gate's
+	// sector, 900 < id <= 9999; a station undock is > 9999, a fresh login 0).
+	// The leader re-forms every member already here; each member rejoins as it
+	// lands -- covering any arrival order. No-op unless the group has a saved
+	// formation (GroupReformOnGate guards on it).
+	if (FromSector() > 900 && FromSector() <= 9999)
+	{
+		g_ServerMgr->m_PlayerMgr.GroupReformOnGate(this);
+	}
+
 	//player->m_Effects.SendEffects(player);
 
     //LogMessage("SECTOR login finish\n");

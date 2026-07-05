@@ -118,45 +118,47 @@ so each native-touching call gets a real-client check here:
 
 ## Group-formation automation (owner asked 2026-07-05: "auto gate in group formation +
 ## auto redo formation after gate on leader + auto rejoin formation after gate on members")
-BUILT (needs live validation) -- new mod `freya-groupbot` (scripts/mods/freya-groupbot/).
-Auto-discovered by the launcher ModCatalog (no registry edit); default-DISABLED in Configure
-Mods, and its follow-gate half is a further separate default-OFF switch. Design honesty: the
-exposed API forced a split -- reform-after-gate is solid, "member auto-gates when the LEADER
-gates" is NOT expressible as specified, so it ships as a heuristic user-designated follow.
-- [x] Reform-after-gate (LEADER, part 2) + rejoin-after-gate (MEMBER, part 3). SOLID. Keys on
-      the `enb.inspace()` false->true rising edge (a gate runs a loading screen, dropping the
-      in-space heartbeat, then resumes). Leader re-issues formation CTA (4/5/6, remembered);
-      member re-issues form-up CTA 7. Debounced to once per sector entry. LIGHT_DIV tick
-      sampling, no per-frame work. party_frame notifies groupbot.formation() when the leader
-      picks a type in the HUD (nil-guarded, no hard dep).
-- [x] Follow-gate (MEMBER, part 1). HEURISTIC + default-OFF. HARD API LIMIT: `enb.group()`
-      does NOT flag which roster member is the leader (only is_leader() = whether WE are), and
-      there is no leader-sector/position signal -- so "detect the LEADER gated" is impossible
-      directly. Implemented against a USER-DESIGNATED follow gid (groupbot.follow(gid)): watch
-      that ship via enb.objects(); when it was hugging a stargate (<6k) and drops out of
-      scanner range for >=2 heavy samples, target that gate + enb.gate(). Debounce + cooldown.
-      HEAVY_DIV sampling only while follow_on. Genuinely flaky (scanner-range race, wrong-gate
-      risk) -- that is why it is a separate opt-in, not on by default.
-- [ ] Depends on `enb.gate()` (CV-BOT-GATE) and the reform trigger's group state surviving a
-      gate -- both still UNVERIFIED. Building on them is provisional until those CV checks pass.
-- [ ] Plan 48 (CLI loses group/formation state after warp/sector-change): the client-side
-      enb.group()/is_leader() reader may hit the same. CV-BOT-FORMATION must confirm they read
-      correctly immediately after a gate before the reform trigger is trusted.
+BUILT ON THE SERVER (needs live validation). Owner override 2026-07-05: put the feature where
+it is most reliable, and "this doesnt need to be a mod" -- the server is authoritative for
+group + sector state, so it is the correct site. The first cut was a client-side mod
+(`freya-groupbot`); that was REMOVED once the server implementation landed (it would have
+double-fired the reform CTAs, and its follow-gate was a strictly-worse heuristic of what the
+server now does exactly). The server already had the whole group system: `Group` (leader =
+`Member[0]`), `SetFormation`/`FormUp`/`BreakFormation`, per-player `GetSectorNum()`, and the
+one sector-transition chokepoint `SectorManager::SectorServerHandoff`.
+- [x] Auto-gate members when the leader gates (part 1). `PlayerManager::GroupLeaderGate`
+      (GroupManager.cpp), called from the leader's gate-arm (PlayerConnection.cpp case 18)
+      AFTER GateActivate has set StargateDestination. Only the leader (Member[0]) carries the
+      group; only FORMED members (Position != -1) in the leader's sector are carried -- a
+      grouped-but-unformed ship is left alone (formation membership == opt-in to fly-together).
+      Each carried member is handed off via SectorServerHandoff to the same destination
+      (SectorServerHandoff alone is a complete transfer -- that is how TowToBase moves a
+      player). Formation flags are cleared across the gate (the client tears formation down
+      through the loading screen), but SavedFormation is retained for the restore.
+- [x] Auto-reform after gate (LEADER, part 2) + auto-rejoin (MEMBER, part 3).
+      `PlayerManager::GroupReformOnGate`, called from `Player::FinishLogin` on GATE arrivals
+      only (FromSector in 901..9999; station undock is >9999, fresh login 0). Leader landing
+      re-establishes the saved formation for every member already in the sector; each member
+      landing rejoins via FormUp if the leader is present. The two together cover any arrival
+      order (members are handed off at the leader's gate-arm and typically land ~5s before the
+      leader finishes the animation). New `Group::SavedFormation` (memset-0 at creation,
+      server-internal only -- the struct carries a `next` pointer, never on the wire) remembers
+      the formation type; set in SetFormation, cleared in a deliberate BreakFormation.
+- [x] No new wire format. Reuses packets the client already parses (SectorServerHandoff,
+      SendAuxPlayer, the formation positional updates SetFormation/FormUp already emit) to drive
+      new SERVER logic. Per the updated server rules (CLAUDE.md, owner 2026-07-05) that needs no
+      "retail did this" citation and no CLI byte-pin -- there are no new bytes.
 - [ ] CANNOT be truthfully marked "tested" without a live MULTI-CLIENT run (leader + members
       grouped, formed, crossing a gate together) on LOCAL dev clients -- the proxy is
       single-client (one per client). Never run this against the owner's live game client.
 
-Group-formation CV checks (real client.exe, owner confirms async):
-- [ ] CV-BOT-FORMATION: in a live group, immediately AFTER a gate, enb.group() still returns
-      the roster and enb.is_leader() still reads correctly (i.e. group state survived the gate,
-      NOT lost like plan 48's CLI). If lost, the reform trigger fires against a stale/empty
-      group and does nothing -- document the actual post-gate state.
-- [ ] CV-BOT-REFORM: with freya-groupbot enabled, a LEADER gating re-forms the group into the
-      remembered formation (visible formation offsets re-applied), and a MEMBER gating re-sends
-      form-up and snaps back into the formation. Once per sector entry, no CTA spam.
-- [ ] CV-BOT-FOLLOWGATE: with follow_on + a designated follow gid, when that ship gates the
-      watching client jumps the SAME gate (not a wrong one), fires at most once, and does
-      nothing when the designated ship merely warps off without gating.
+Group-formation CV checks (real client.exe, owner confirms async) -- CV-BC-FORMATION in
+plans/29:
+- [ ] CV-BC-FORMATION-GATE: in a live group flying a formation, the LEADER gating pulls the
+      formed same-sector members through the SAME gate (unformed members stay), and on the far
+      side the formation visibly re-establishes (leader re-forms, members snap back). Fires once
+      per gate, no CTA spam. A member gating solo just drops out of the formation, as before.
+      A deliberate Break Formation before gating suppresses the auto-reform.
 
 ## Skill rewrite (after the API lands + is live-validated)
 - [ ] `explore-sector`: replace W/D/C key enum + warp-orb click + map OCR with
@@ -191,15 +193,23 @@ Group-formation CV checks (real client.exe, owner confirms async):
   formation automation (auto-gate/reform/rejoin) -- recorded above as NOT-built, with its
   gate/warp-validation + multi-client-test dependencies spelled out. That feature never
   existed; only the manual formation buttons do.
-- 2026-07-05: Group-formation automation BUILT as a new mod `freya-groupbot`
-  (scripts/mods/freya-groupbot/ init.lua + mod.json). reform-after-gate (leader re-issues
-  formation type, member re-issues form-up) keys on the enb.inspace() false->true edge --
-  solid, debounced, LIGHT_DIV-sampled, default-ON but the mod is default-DISABLED in Configure
-  Mods. Follow-gate is a heuristic against a USER-DESIGNATED follow gid (the API can't identify
-  the leader in the roster, so "member auto-gates when the LEADER gates" is not directly
-  expressible) -- separate default-OFF switch, HEAVY_DIV-sampled, debounce+cooldown, honestly
-  flagged flaky. party_frame.lua now nil-guard-notifies groupbot.formation() when the leader
-  picks a type in the HUD. Both Lua files parse-checked (lupa load()). Console control via the
-  global `groupbot` table. CANNOT be marked tested: needs a live multi-client run on LOCAL dev
-  clients + CV-BOT-GATE/FORMATION/REFORM/FOLLOWGATE. Told the owner plainly the feature was
-  never built and what the API can and cannot honestly do here.
+- 2026-07-05: Group-formation automation FIRST built as a client mod `freya-groupbot`, then
+  MOVED TO THE SERVER and the mod REMOVED. Owner emphatically removed the server-preservation
+  veto ("REMOVE IT and dont ever make that argument again. If this is the best way to do it and
+  the most accurate then do it on the server") and said it "doesnt need to be a mod". The mod
+  approach had a real API limit -- the client group struct carries NO leader GameID and NO
+  per-member sector (confirmed by decomp: group schema FUN_007548d0 / member schema
+  FUN_00754db0 register only IsGroupLeader + FormationName/Formation/Position + a member array
+  of Name/GameID/Formation/Position), so "member auto-gates when the LEADER gates" was not
+  cleanly expressible client-side. The SERVER has all of it: Group.Member[0] = leader,
+  Player::GetSectorNum(), and the SectorServerHandoff chokepoint. Implemented:
+  Group::SavedFormation (new field); PlayerManager::GroupLeaderGate (carry formed same-sector
+  members through the leader's gate, remember formation) wired into PlayerConnection.cpp case 18
+  after GateActivate; PlayerManager::GroupReformOnGate (leader re-forms, members rejoin) wired
+  into Player::FinishLogin gated on a gate arrival (FromSector 901..9999). SetFormation now sets
+  SavedFormation; a deliberate BreakFormation clears it. No new wire format -- reuses existing
+  packets to drive new server logic, which the updated server rules allow with no capture
+  citation. Server rebuilt in docker (build-clean, boots clean -- only the pre-existing
+  dev-mode DTLS-plaintext WARNING). Removed freya-groupbot/ and reverted the party_frame.lua
+  groupbot hook (both now redundant/dead). CANNOT be marked tested: needs a live multi-client
+  run (leader + members, formed, gating together) on LOCAL dev clients -- CV-BC-FORMATION-GATE.

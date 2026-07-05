@@ -4144,13 +4144,8 @@ void Player::HandleAction(unsigned char *data)
 			{
 			
 				m_Gating = true;
-				if (this->GroupID() != -1)
-				{
-					g_ServerMgr->m_PlayerMgr.BreakFormation(GameID());
-					g_ServerMgr->m_PlayerMgr.LeaveFormation(GameID());
-				}
 				TerminateWarp();
-			
+
 				SendClientSound("1512_00_032Se.mp3",0,0);
 				if (sm)
 				{
@@ -4159,6 +4154,25 @@ void Player::HandleAction(unsigned char *data)
 				else
 				{
 					m_Gating = false;
+				}
+
+				if (this->GroupID() != -1)
+				{
+					// Group-formation gate handling. If the leader gates while
+					// the group is in formation, GroupLeaderGate carries the
+					// formed same-sector members through the same gate and
+					// remembers the formation for auto-restore on the far side
+					// (GroupReformOnGate at FinishLogin). It needs the leader's
+					// StargateDestination, which GateActivate has now set, and
+					// must read the per-member formation flags before clearing
+					// them -- so it runs here, after GateActivate. Returns false
+					// for a non-leader / failed gate, in which case this ship is
+					// just dropped from the formation as before.
+					if (!g_ServerMgr->m_PlayerMgr.GroupLeaderGate(this,
+					        m_Gating ? StargateDestination() : 0))
+					{
+						g_ServerMgr->m_PlayerMgr.LeaveFormation(GameID());
+					}
 				}
 			}
 		}

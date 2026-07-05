@@ -50,6 +50,11 @@ struct Group
 	_GroupMember Member[6];
 	bool AcceptedInvite[6];
 	int NextLooter;
+	// Formation type (4/5/6) the group had active when the leader last gated,
+	// so it auto-re-establishes on the far side of the gate. 0 = none. Purely
+	// server-internal bookkeeping (this struct carries a 'next' pointer and is
+	// never sent on the wire), memset to 0 at group creation.
+	long SavedFormation;
 	struct Group * next;
 } ATTRIB_PACKED;
 
@@ -154,6 +159,15 @@ public:
 	bool	CheckGroupFormation(Player *p);
 	bool	SendFormation(Player *SendP, Player *TargetP);
 	bool 	BreakFormation(long leaderID);
+	// Group-formation gate automation. GroupLeaderGate: when the group leader
+	// gates, carry every formed member in the leader's sector through the same
+	// gate and remember the formation for auto-restore. Returns true iff the
+	// player is the group leader and the gate is valid (caller then skips the
+	// lone-member LeaveFormation). GroupReformOnGate: called on sector arrival
+	// (FinishLogin) -- the leader re-establishes the saved formation and each
+	// member rejoins it, covering any arrival order.
+	bool 	GroupLeaderGate(Player *leader, long dest);
+	bool 	GroupReformOnGate(Player *p);
 	bool 	RequestTargetMyTarget(long leaderID, long targetID);
 	void	FormationEngineOperation(Player *p, bool engine);
 	void	TransferGroupBuffs();

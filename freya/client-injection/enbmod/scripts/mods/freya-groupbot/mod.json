@@ -1,7 +1,0 @@
-{
-  "id": "freya-groupbot",
-  "name": "Freya Group Bot",
-  "author": "Freya",
-  "description": "Group-formation automation: re-establish/rejoin formation after a gate, and (opt-in) follow a designated ship through a stargate.",
-  "entrypoint": "init.lua"
-}

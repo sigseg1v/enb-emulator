@@ -1532,6 +1532,10 @@ bool PlayerManager::SetFormation(long leaderID, long formation, char* formation_
 		}
 	}
 
+	// Remember the group's active formation so it auto-re-establishes after a
+	// gate (see GroupLeaderGate / GroupReformOnGate).
+	g->SavedFormation = formation;
+
 	return true;
 }
 
@@ -1568,6 +1572,9 @@ bool PlayerManager::BreakFormation(long leaderID)
 	strcpy_s(g->FormationName, sizeof(g->FormationName), "");
 	g->FormationName[sizeof(g->FormationName)-1] = '\0';
 
+	// A deliberate break stops the after-gate auto-reform (GroupReformOnGate).
+	g->SavedFormation = 0;
+
 	for (int i = 0; i < 6; ++i)
 	{
 		memberID = GetMemberID(groupid, i);
@@ -1592,6 +1599,150 @@ bool PlayerManager::BreakFormation(long leaderID)
 	}
 
 	return true;
+}
+
+// Map a formation type id to the name SetFormation stamps on the group.
+static const char* FormationTypeName(long f)
+{
+	switch (f)
+	{
+		case 4:  return "Slot Back";
+		case 5:  return "Block";
+		case 6:  return "Pipe";
+		default: return "";
+	}
+}
+
+bool PlayerManager::GroupLeaderGate(Player *leader, long dest)
+{
+	// Only the leader carries the group, and only for a valid destination. A
+	// non-leader / ungrouped / failed gate returns false so the caller drops
+	// just this ship out of the formation (the pre-existing lone-gater path).
+	if (!leader || dest <= 0)
+	{
+		return false;
+	}
+
+	Group *g = GetGroupFromID(leader->GroupID());
+	if (!g || g->Member[0].GameID != leader->GameID())
+	{
+		return false;
+	}
+
+	// Remember the active formation so the far side re-establishes it. If the
+	// group was not actually flying a formation there is nothing to carry or
+	// restore, but we still return true (we are the leader) so the caller does
+	// not run the lone-member LeaveFormation on us.
+	long formation = g->Member[0].Formation;
+	if (formation >= 4)
+	{
+		g->SavedFormation = formation;
+	}
+
+	long leaderSector = leader->PlayerIndex()->GetSectorNum();
+
+	for (int x = 0; x < 6; ++x)
+	{
+		if (g->Member[x].GameID == 0)
+		{
+			continue;
+		}
+
+		bool formed = (g->Member[x].Position != -1);
+		Player *m = GetPlayer(g->Member[x].GameID);
+
+		// Clear the formation flags across the gate. The client tears the
+		// formation down through the loading screen; GroupReformOnGate rebuilds
+		// it on the far side. (Mirrors BreakFormation, but leaves SavedFormation
+		// intact so the restore knows what to rebuild.)
+		g->Member[x].Formation = 0;
+		g->Member[x].Position  = -1;
+		if (m)
+		{
+			m->PlayerIndex()->GroupInfo.SetFormation(0);
+			m->PlayerIndex()->GroupInfo.SetPosition(-1);
+			if (x == 0)
+			{
+				m->PlayerIndex()->GroupInfo.SetFormationName("");
+			}
+			m->SendAuxPlayer();
+		}
+
+		// Carry a formed, same-sector, non-leader member through the same gate.
+		// SectorServerHandoff alone is a complete sector transfer (this is how
+		// TowToBase moves a player); the far-side FromSector is the leader's
+		// sector, so the member lands on the gate-arrival branch and rejoins.
+		if (x != 0 && formed && m &&
+		    m->PlayerIndex()->GetSectorNum() == leaderSector)
+		{
+			SectorManager *msm = m->GetSectorManager();
+			if (msm)
+			{
+				m->TerminateWarp();
+				m->SetStargateDestination(dest);
+				msm->SectorServerHandoff(m, dest);
+			}
+		}
+	}
+
+	return true;
+}
+
+bool PlayerManager::GroupReformOnGate(Player *p)
+{
+	if (!p)
+	{
+		return false;
+	}
+
+	Group *g = GetGroupFromID(p->GroupID());
+	if (!g || g->SavedFormation < 4)
+	{
+		return false;
+	}
+
+	if (g->Member[0].GameID == p->GameID())
+	{
+		// Leader landed: re-establish the formation type + lock the leader, then
+		// form up every member ALREADY in this sector. This is what covers the
+		// common ordering -- members are handed off at the leader's gate-arm and
+		// usually land ~5s before the leader finishes the gate animation, so
+		// their own FinishLogin ran while the leader was not yet here and their
+		// FormUp no-op'd. Members that have not landed yet form up on their own
+		// arrival (leader is now present). SetFormation only locks the leader
+		// (members get Position -1), so the explicit FormUp per present member
+		// is required.
+		long leaderSector = p->PlayerIndex()->GetSectorNum();
+		if (!SetFormation(p->GameID(), g->SavedFormation,
+		                  (char*)FormationTypeName(g->SavedFormation)))
+		{
+			return false;
+		}
+		for (int x = 1; x < 6; ++x)
+		{
+			if (g->Member[x].GameID == 0)
+			{
+				continue;
+			}
+			Player *m = GetPlayer(g->Member[x].GameID);
+			if (m && m->PlayerIndex()->GetSectorNum() == leaderSector)
+			{
+				FormUp(g->Member[x].GameID);
+			}
+		}
+		return true;
+	}
+
+	// Member landed: rejoin the formation if the leader is already here.
+	// Otherwise the leader's own arrival (above) will form this member.
+	Player *leader = GetPlayer(g->Member[0].GameID);
+	if (leader &&
+	    leader->PlayerIndex()->GetSectorNum() == p->PlayerIndex()->GetSectorNum())
+	{
+		return FormUp(p->GameID());
+	}
+
+	return false;
 }
 
 bool PlayerManager::RequestTargetMyTarget(long sourceID, long targetID)

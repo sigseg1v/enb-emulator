@@ -3351,3 +3351,34 @@ moot; the SOLVED block above is the truth):**
   correct (see the roll note above). CRUCIAL regressions to confirm ABSENT on the
   moving client A itself: warp still engages, target locks stay stable, no phantom
   drift -- i.e. the broadcast-only override did not leak into A's motion path.
+
+## [ ] CV-BC-FORMATION-GATE -- group formation auto-carries + auto-reforms through a gate
+
+- **What changed (SERVER)**: `server/src/GroupManager.cpp` (`PlayerManager::GroupLeaderGate`,
+  `GroupReformOnGate`, + `SavedFormation` maintenance in `SetFormation`/`BreakFormation`),
+  `server/src/PlayerConnection.cpp` (gate-arm case 18), `server/src/PlayerClass.cpp`
+  (`FinishLogin`), `server/src/PlayerManager.h` (new `Group::SavedFormation` + decls). New
+  behaviour the retail server did not have (owner-authorised 2026-07-05): when a group LEADER
+  gates while flying a formation, the server carries every FORMED member in the leader's sector
+  through the same stargate (`SectorServerHandoff` to the leader's destination), and on the far
+  side re-establishes the formation -- the leader re-forms every member present, each member
+  rejoins (FormUp) when it lands. Unformed group members are NOT carried. A member gating solo
+  still just drops out of the formation. A deliberate Break Formation clears the saved formation
+  so it does not auto-restore.
+- **Why no CLI byte-pin**: no new wire format. It reuses packets the client already parses
+  (SectorServerHandoff / SendAuxPlayer / the formation positional updates SetFormation+FormUp
+  already emit) to drive new server logic. Per the updated server rules (CLAUDE.md, owner
+  2026-07-05) that needs no capture citation -- there are no new bytes to pin.
+- **Why the CLI/integration suite can't validate it**: it needs a live MULTI-CLIENT group
+  (leader + members, formed, crossing a gate together). The proxy is single-client (one per
+  client) and the suite has no in-space movement/formation driver -- same wall as the two-player
+  group nav tests. Hence this real-client entry.
+- **What to look for (real client, >=2 chars, LOCAL dev clients only -- `just play-cli` per
+  client; NEVER the owner's live game)**:
+  1. Group two chars, leader initiates a Slot Back / Block / Pipe formation, member forms up.
+  2. Leader gates. The formed member is pulled through the SAME gate (no manual gate on the
+     member). Both land in the destination sector.
+  3. On the far side the formation visibly re-establishes (member snaps back into the slot),
+     once, with no CTA spam. Confirm a grouped-but-UNFORMED third char is left behind, and that
+     a member gating on its own just leaves the formation (old behaviour intact).
+  4. Break Formation, then gate -- confirm it does NOT auto-reform on arrival.
