@@ -6,11 +6,10 @@
 # lib.sh -- shared helpers for the login-to-client skill. Source it:
 #   SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; . "$SKILL_DIR/lib.sh"
 #
-# Everything talks to X11 via XTEST (xdotool) at ABSOLUTE root coordinates: we
-# raise the target window, read its real geometry from xwininfo, then move the
-# real pointer + click. XSendEvent (`xdotool --window`) is unreliable for WINE
-# and Avalonia, so we never use it. Screenshots come from `import -window` so a
-# window's screenshot pixel coords map 1:1 to window-relative click coords.
+# The skill is OCR-free (the client auto-logs-in; 08 confirms over the enbmod Lua
+# channel), so the only X11 use left is window DISCOVERY -- we look up the client /
+# launcher window and read its geometry from xwininfo to answer "is it up?". No
+# synthetic input, no screenshots, no ref matching.
 set -uo pipefail
 
 export DISPLAY="${DISPLAY:-:0}"
@@ -23,6 +22,11 @@ export DISPLAY="${DISPLAY:-:0}"
 export XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+
+# This skill is OCR-FREE. The client logs itself in via the injected enbmod
+# auto-login and we confirm in-game over the enbmod Lua channel (08-wait-ingame),
+# so there are no screenshot / ref-match / synthetic-input helpers here -- only
+# window discovery (for "is the client up?"), docker/psql, and the wait loop.
 
 # Docker compose project name is BRANCH-DERIVED by the justfile (so per-branch
 # stacks don't collide): main/master -> "freya", any other branch -> "freya-<branch>"
@@ -39,13 +43,12 @@ if [ -z "${COMPOSE_PROJECT_NAME:-}" ]; then
     fi
 fi
 export COMPOSE_PROJECT_NAME
-SHOTSH="$REPO_ROOT/.claude/skills/take-client-screenshot/scripts/screenshot.sh"
-DETECT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/detect.py"
-REFS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/refs"
-COORDS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/coords.json"
-
 LOGIN_USER="${ENB_LOGIN_USER:-devuser}"
 LOGIN_PASS="${ENB_LOGIN_PASS:-devpass}"
+# Character to auto-enter. seed-dev-account names characters <user><class-suffix>
+# and creates them te/je/jd/tt/ts in order, so slot 0 is "<user>te" (and 02-seed
+# forces slot 0 to start in space). Override with ENB_LOGIN_CHAR.
+LOGIN_CHAR="${ENB_LOGIN_CHAR:-${LOGIN_USER}te}"
 
 # Where the work screenshots land (timestamped run dir for post-mortems).
 WORKDIR="${ENB_LOGIN_WORKDIR:-/tmp/enblogin}"
@@ -92,10 +95,9 @@ win_by_class() {
 
 # Resolve the client window id, RETRYING briefly. Scene transitions (dock -> concourse,
 # undock, gate crossing) momentarily unmap/remap the WINE window, so a single search can
-# transiently miss it and return empty -- and an empty id flowing into a screenshot is
-# exactly what triggers the interactive `import` X-grab lockup (see shot_win). Retrying
-# for ~1.5s rides out the transition instead of conceding "no window" on a blink. A
-# genuinely dead/closed client still fails after the retries.
+# transiently miss it and return empty. Retrying for ~1.5s rides out the transition
+# instead of conceding "no window" on a blink. A genuinely dead/closed client still
+# fails after the retries.
 client_win() {
     # Multibox override: pin a specific client.exe window by id (two clients of
     # identical size are indistinguishable to the largest-viewable heuristic).
@@ -126,69 +128,6 @@ win_abs() {
     [ -n "$x" ] && echo "$x $y $w $h"
 }
 
-# Raise + focus a window so the click is not eaten by an occluding window.
-raise_win() {
-    local id="$1"
-    wmctrl -i -a "$id" 2>/dev/null
-    xdotool windowactivate "$id" 2>/dev/null
-    xdotool windowraise "$id" 2>/dev/null
-}
-
-# ---- input ------------------------------------------------------------------
-# Click at window-relative (relx,rely) using absolute XTEST. Raises first.
-#
-# We do NOT use `xdotool mousemove --sync`: --sync waits for a MotionNotify that the
-# WINE client never confirms here, so it blocked ~15s PER CLICK (the whole reason a
-# nav-cycle crawled at ~10s/nav). Plain mousemove lands in ~3ms. --sync was meant to
-# beat a pointer-warping VM, but the cure for THAT is pausing the VM (see the
-# login-to-client "QEMU/KVM pointer warp" note), not blocking on every click. We
-# instead move, verify the pointer actually landed (cheap XQueryPointer), retry once
-# if a stray warp bumped it, then click.
-click_win() {
-    local id="$1" rx="$2" ry="$3" g x y loc px py
-    local gx gy gw gh
-    raise_win "$id"
-    g="$(win_abs "$id")" || { err "click_win: no geometry for $id"; return 1; }
-    read -r gx gy gw gh <<< "$g"
-    x=$(( gx + rx ))
-    y=$(( gy + ry ))
-    log "click ($rx,$ry) -> abs ($x,$y) on win $id"
-    xdotool mousemove "$x" "$y" 2>/dev/null
-    # verify the pointer landed; one cheap retry covers a stray warp.
-    loc="$(xdotool getmouselocation --shell 2>/dev/null)"; eval "$loc" 2>/dev/null
-    px="${X:-}"; py="${Y:-}"
-    if [ "$px" != "$x" ] || [ "$py" != "$y" ]; then
-        xdotool mousemove "$x" "$y" 2>/dev/null
-    fi
-    xdotool click 1
-}
-
-click_abs() { xdotool mousemove --sync "$1" "$2"; sleep 0.12; xdotool click 1; sleep 0.15; }
-
-# Type into the currently-focused window (click a field first).
-type_text() { xdotool type --delay 60 -- "$1"; }
-send_key()  { xdotool key "$1"; }
-
-# ---- screenshots ------------------------------------------------------------
-# Full client window screenshot -> path. Returns 1 if no client window.
-shot() { local out="$1"; [ -x "$SHOTSH" ] || { err "no screenshot.sh"; return 1; }; "$SHOTSH" "$out" >/dev/null 2>&1; }
-
-# Screenshot an arbitrary window id (e.g. the launcher) -> path.
-# HARD GUARD: never run `import -window` with an EMPTY id. ImageMagick then drops into
-# interactive region-select mode -- it XGrabServer's the display, shows a "+" crosshair,
-# and FREEZES the entire desktop (nothing renders) until you click or it is killed. An
-# empty id means the caller's window lookup (client_win) failed; that is a bug, so
-# refuse it rather than lock the screen. Also bound the capture with a timeout and reap
-# any lingering `import` (it is what holds the grab) so a window destroyed mid-grab
-# cannot wedge X either.
-shot_win() {
-    local id="$1" out="$2"
-    [ -n "$id" ] || { err "shot_win: empty window id -- refusing (would interactive-grab X)"; return 1; }
-    timeout -k 2 10 import -window "$id" "$out" >/dev/null 2>&1 && return 0
-    pkill -9 import 2>/dev/null
-    return 1
-}
-
 # ---- waiting ----------------------------------------------------------------
 # Poll a command until it succeeds or timeout (seconds). Usage:
 #   wait_until <timeout> <interval> <cmd...>
@@ -201,48 +140,3 @@ wait_until() {
     done
     return 1
 }
-
-# ---- coordinates (coords.json) ----------------------------------------------
-# Echo "X Y" for a named coord, e.g. `coord login user` -> "300 232".
-coord() {
-    python3 -c "import json;d=json.load(open('$COORDS'));print(*d['$1']['$2'])" 2>/dev/null
-}
-# Click a named coord on a window: `click_coord <winid> login accept`.
-click_coord() {
-    local id="$1" rx ry
-    read -r rx ry <<< "$(coord "$2" "$3")"
-    [ -n "$rx" ] || { err "click_coord: no coord $2.$3"; return 1; }
-    click_win "$id" "$rx" "$ry"
-}
-
-# ---- detection (PIL+numpy via detect.py) ------------------------------------
-# All return 0/1 exit codes and may print a value.
-detect() { python3 "$DETECT" "$@"; }
-
-# Is the live client window currently showing screen <name>? Uses the ref crop
-# refs/<name>.png matched at its known (X,Y). Captures a fresh shot first.
-# Usage: is_screen <name> <x> <y> [tol]  -> exit 0 if matched.
-is_screen() {
-    local name="$1" x="$2" y="$3" tol="${4:-18}" w p
-    w="$(client_win)" || return 1
-    p="$WORKDIR/is_${name}.png"
-    shot_win "$w" "$p" || return 1
-    detect match "$p" "$REFS/$name.png" "$x" "$y" "$tol" >/dev/null 2>&1
-}
-# tol 12, NOT 22: the login_field crop at (165,228) is only a 90x24 opaque-UI
-# region, and an IN-SPACE frame's chat panel scores MAD ~18 there -- under 22 it
-# false-matched as "login" while genuinely in space (which made read-sector's
-# in-space gate refuse valid sectors). A real login screen scores ~3-4 against its
-# own ref (cf. charselect_frame at 3.68), so 12 cleanly separates real login (~4)
-# from in-space (~18) and from char-select (~37).
-on_login()      { is_screen login_field 165 228 "${1:-12}"; }
-# tol 12, NOT 22 (owner, 2026-06-22): same false-positive class as on_login. A real
-# char-select scores MAD ~3.68 against charselect_frame, but an IN-SPACE frame scores
-# ~20.9 at (70,50) -- under the old tol 22 that read as char-select, so detect_sector's
-# recovery ran 07-charselect-enter on a client that was actually in space and
-# blind-clicked the HUD ("still on character-select" loop). 12 cleanly separates real
-# char-select (~4) from in-space (~21).
-on_charselect() { is_screen charselect_frame 70 50 "${1:-12}"; }
-
-# Convenience: capture a fresh client shot to $WORKDIR/cur.png and echo path.
-cur_shot() { local p="$WORKDIR/cur.png"; shot "$p" && echo "$p"; }

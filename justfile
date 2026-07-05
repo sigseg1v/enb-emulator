@@ -816,6 +816,7 @@ play-local ACC='' PASS='' CHAR='' CLIENT_PATH='':
     python3 tools/LaunchFreya/merge-settings.py "$SETTINGS_DIR/FreyaLauncher.settings.json" "{
       \"ClientPath\": $cp_json,
       \"LastEmulatorName\": \"Net7Local\",
+      \"ActiveProfile\": \"Default\",
       \"LastServerName\": \"localhost\",
       \"UsePositionFeed\": true,
       \"UseLocalCert\": false,
@@ -1197,6 +1198,7 @@ play-multibox-local COUNT='2':
     python3 tools/LaunchFreya/merge-settings.py "$SETTINGS_DIR/FreyaLauncher.settings.json" "{
       \"ClientPath\": $cp_json,
       \"LastEmulatorName\": \"Net7Local\",
+      \"ActiveProfile\": \"Default\",
       \"LastServerName\": \"localhost\",
       \"Hostname\": \"localhost\",
       \"UsePositionFeed\": true,
