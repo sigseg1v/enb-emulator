@@ -3294,3 +3294,60 @@ moot; the SOLVED block above is the truth):**
   message as before, AND (b) now see that nav/gate appear on its own map, marked
   visited. Re-log the follower: the nav must persist (it was saved to the
   follower's explored list). Solo (ungrouped) exploration must be unchanged.
+
+### [ ] CV-MVAS-ORIENT-BCAST -- Other players' ships visibly TURN (nose facing) while flying, not just slide
+
+- **Bug (owner-observed, live multibox)**: when you watch another player fly past
+  in your sector, their ship's POSITION updates smoothly but its ORIENTATION never
+  changes -- the hull slides through space frozen at whatever facing it had when it
+  came into range. Their rotation is not replicated.
+- **Root cause**: under the MVAS position feed the server refreshes
+  `m_Position_info.Position` every frame (`UpdatePositionFromMVAS` -> `SetPosition`)
+  but NEVER refreshes `m_Position_info.Orientation`: `CalcNewHeading` is skipped
+  while `IS_PLAYER(m_MVAS_index)` (`CalcNewPosition`, `PlayerClass.cpp`), and the
+  MVAS feed deliberately stores the client nose vector only in the decoupled
+  `m_ClientHeading` (firing-arc use, see CV-MVAS-ORIENT). So the 0x003E
+  ADVANCED_POSITIONAL_UPDATE the server fans out to every in-range observer
+  (`Player::SendToVisibilityList` -> `SendAdvancedPositionalUpdate`) carries a
+  stale/spawn quaternion. Observers get correct position, frozen facing.
+- **Change (`server/src/PlayerClass.cpp` `SendToVisibilityList`)**: on the OUTBOUND
+  broadcast only, convert the already-fed nose vector (`m_ClientHeading`) to the wire
+  quaternion using the engine's own look-rotation (`Object::CalcOrientation(target,
+  self, set_heading=false)`, yaw+pitch, roll leveled) and send THAT, then restore
+  the stored orientation before returning -- exactly mirroring the existing transient
+  `RotZ`/`UpdatePeriod` mutate-restore in the same function. The override is strictly
+  on the broadcast copy: it never enters `Orientation()` persistently, never touches
+  `m_Velocity`/`m_Position_info.Velocity`, and cannot reintroduce the CV-MVAS-POS
+  phantom-velocity warp regression (the whole reason facing was decoupled).
+- **ROLL IS NOT AND CANNOT BE REPLICATED -- primary source**: the retail MVAS
+  `0x1004` position feed carries position xyz + nose-heading xyz and NOTHING ELSE
+  (live Net7Proxy capture, `proxy/local-debug` Combat-*.pcapng; the server reads
+  only the 6 floats -- `UDP_MVAS.cpp` / `proxy/UDPClient_linux.cpp` comment). There
+  is no roll component anywhere on the retail flying-client -> server wire, so no
+  observer in retail ever saw another ship's true roll either. Replicating nose
+  direction with roll leveled is the MOST any observer could faithfully have seen;
+  fabricating a roll channel would be a divergence from retail, not a fix, and is
+  therefore deliberately NOT done.
+- **Primary source (CLAUDE.md clause A)**: (1) internal inconsistency -- the server
+  advances a player's broadcast position every frame while broadcasting a frozen
+  orientation for the same player, which is self-contradictory; (2) the nose vector
+  is already present server-side (the same `m_ClientHeading` proven by the `0x1004`
+  heading capture, CV-MVAS-ORIENT) -- this change only routes existing data onto the
+  existing 0x003E Orientation slot for observers; (3) owner first-hand retail
+  testimony that other players' ships visibly turned. No new wire field, no widened
+  input acceptance, no loosened gate.
+- **Why the CLI can't fully validate it (clause B)**: the 0x003E byte layout is
+  already pinned (`SectorAdvancedPositionalUpdateHardeningTests`); this changes only
+  the VALUE of the Orientation quaternion for a moving player, observable solely at a
+  SECOND avatar within range while the first flies under the MVAS feed. Blocked by
+  Net7Proxy single-tenancy + the absence of an in-test movement driver -- identical
+  wall to `TwoPlayerGroupNavExploreShareTests`. Pinned in correct shape by
+  `TwoPlayerRemoteFacingReplicationTests` (`[Fact(Skip)]`) for when the proxy
+  multiplexes.
+- **What to look for (real client, TWO chars)**: put two characters in the same
+  sector within visual range. Fly char A in circles / bank turns while char B
+  watches. B must now see A's ship NOSE swing to match A's flight direction
+  (yaw+pitch), not merely translate. Roll will look leveled -- that is expected and
+  correct (see the roll note above). CRUCIAL regressions to confirm ABSENT on the
+  moving client A itself: warp still engages, target locks stay stable, no phantom
+  drift -- i.e. the broadcast-only override did not leak into A's motion path.
