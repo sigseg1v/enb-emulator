@@ -727,7 +727,7 @@ void poll() {
         return;
     uintptr_t dev = mem::ptr(game::render::device);
     if (!dev)
-        return; // renderer not up yet -- retry next tick
+        return;                   // renderer not up yet -- retry next tick
     uintptr_t vt = mem::ptr(dev); // IDirect3DDevice8 vtable
     if (!vt)
         return;
@@ -747,8 +747,8 @@ void poll() {
         g_present_hook_failed = true;
         return;
     }
-    logf("overlay: hook installed -- IDirect3DDevice8::Present @ %p (game device %p)",
-         present_addr, (void*)dev);
+    logf("overlay: hook installed -- IDirect3DDevice8::Present @ %p (game device %p)", present_addr,
+         (void*)dev);
     g_present_hooked = true;
 }
 
