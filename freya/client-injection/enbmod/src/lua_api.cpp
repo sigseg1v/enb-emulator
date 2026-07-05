@@ -1634,8 +1634,13 @@ static int l_request_target(lua_State* L) {
         lua_pushboolean(L, 0); // no live entity for this GameID -- not targetable, skip
         return 1;
     }
-    uint32_t args[1] = {(uint32_t)obj};
-    actions::call_thiscall(game::addr::RequestTarget, m, args, 1);
+    // RequestTarget is __cdecl(M, obj): it reads M+0x112c (our source GameID) and
+    // obj+0x90 (the target's GameID), builds REQUEST_TARGET, and sends. BOTH operands
+    // come off the stack -- it does NOT take M in ECX. Calling it thiscall-with-one-arg
+    // left param_2 (obj) pointing at an uninitialized stack slot, so obj+0x90 faulted
+    // the moment a party-member row was clicked. Pass both on the stack, in order.
+    uint32_t args[2] = {(uint32_t)m, (uint32_t)obj};
+    actions::call_cdecl(game::addr::RequestTarget, args, 2);
     lua_pushboolean(L, 1);
     return 1;
 }
