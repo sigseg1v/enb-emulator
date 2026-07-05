@@ -165,8 +165,54 @@ build-enbmod:
     make -C freya/client-injection/enbmod CC="$cc" CXX="$cxx" AR=i686-w64-mingw32-ar; \
     mkdir -p bin; \
     cp freya/client-injection/enbmod/build/enbmod.dll bin/enbmod.dll; \
+    cp freya/client-injection/enbmod/build/inject.exe bin/inject.exe; \
     rm -rf bin/scripts; cp -r freya/client-injection/enbmod/scripts bin/scripts
-    @echo ">>> done. bin/enbmod.dll + bin/scripts/. Enable in the launcher with UseClientMods=true."
+    @echo ">>> done. bin/enbmod.dll + bin/inject.exe + bin/scripts/. Enable in the launcher with UseClientMods=true; attach to a running client with 'just inject-enbmod'."
+
+# Attach the enbmod Lua runtime to an ALREADY-RUNNING client.exe, regardless of
+# how it was launched (Freya, the Net-7 launcher, or a bare wine invocation).
+# This is the RUNTIME-attach path -- inject.exe does OpenProcess + VirtualAllocEx +
+# WriteProcessMemory + CreateRemoteThread(LoadLibraryA) into the live process --
+# decoupled from the launch-time FreyaInject (which can only inject a client it
+# spawns itself, suspended). It stages the CURRENT enbmod.dll + scripts/ next to
+# the target client first, so a foreign-launched client picks up our current build
+# and mods, then remote-loads the DLL. Once loaded, enbmod's enbmod.cmd/.log
+# channel and enb.* API come alive in that client -- see the run-lua-client-command
+# skill. The Lua channel does NOT need this if the client was launched by Freya
+# with Lua mods (or an auto-login) enabled; it is for every OTHER way a client got
+# started.
+#
+# Instance selection is by WINEPREFIX: each client runs in its own prefix (its own
+# wineserver, so its own process namespace), and inject.exe's default name lookup
+# finds that prefix's single client.exe. Point it at a multibox slot by passing
+# that slot's prefix.
+#   just inject-enbmod                       # base prefix (~/.wine-enb) client
+#   WINEPREFIX=~/.wine-enb-mbox2 just inject-enbmod
+#   just inject-enbmod 42                     # a specific wine pid (rarely needed)
+inject-enbmod PID="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    prefix="${WINEPREFIX:-$HOME/.wine-enb}"
+    clientdir="$prefix/drive_c/Program Files/EA GAMES/Earth & Beyond/release"
+    if [ ! -d "$clientdir" ]; then
+        echo "ERROR: client release dir not found under prefix: $clientdir" >&2
+        echo "  set WINEPREFIX to the prefix whose client.exe you want to inject." >&2
+        exit 1
+    fi
+    # Build+stage if the injector or DLL is missing (near-instant no-op otherwise).
+    if [ ! -f bin/inject.exe ] || [ ! -f bin/enbmod.dll ]; then just build-enbmod; fi
+    # Stage the CURRENT build + mods next to the target client so a foreign-launched
+    # client loads our current enbmod. Mirrors the launcher's StageClientMods.
+    cp -f bin/enbmod.dll "$clientdir/enbmod.dll"
+    cp -f bin/inject.exe "$clientdir/inject.exe"
+    rm -rf "$clientdir/scripts"; cp -r bin/scripts "$clientdir/scripts"
+    dll_dos='C:\Program Files\EA GAMES\Earth & Beyond\release\enbmod.dll'
+    pidarg=""
+    [ -n "{{PID}}" ] && pidarg="--pid {{PID}}"
+    echo ">>> injecting enbmod into client.exe (prefix: $prefix)"
+    WINEPREFIX="$prefix" WINEDEBUG=-all DISPLAY="${DISPLAY:-:0}" \
+        wine "$clientdir/inject.exe" $pidarg "$dll_dos" 2>&1 | grep -aiE 'inject|loaded|fail|error|not found' || true
+    echo ">>> done. Probe the channel with the run-lua-client-command skill (return 1+1)."
 
 # Open the enbmod Lua HUD in an INTERACTIVE in-browser previewer, without
 # launching the game. Runs the REAL mod scripts (scripts/*.lua) inside a native
@@ -242,6 +288,7 @@ package-client-windows: build-proxy-win64 build-posfeed-dll build-enbmod
     @cp bin/FreyaPosFeed.dll dist/enb-client-windows/bin/FreyaPosFeed.dll
     @cp bin/FreyaInject.exe dist/enb-client-windows/bin/FreyaInject.exe
     @cp bin/enbmod.dll dist/enb-client-windows/bin/enbmod.dll
+    @cp bin/inject.exe dist/enb-client-windows/bin/inject.exe
     @cp -r bin/scripts dist/enb-client-windows/bin/scripts
     @cp tools/LaunchFreya/FreyaLauncher.windows-package.cfg dist/enb-client-windows/FreyaLauncher.cfg
     @echo ">>> zipping dist/enb-client-windows.zip"

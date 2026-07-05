@@ -1170,6 +1170,65 @@ namespace LaunchFreya
             return null;
         }
 
+        // Find the standalone RUNTIME injector (inject.exe) across the same dev /
+        // packaged layouts. Distinct from FreyaInject.exe: FreyaInject SPAWNS the
+        // client suspended and injects at create time (it cannot attach to a
+        // client already running); inject.exe hot-attaches an ALREADY-RUNNING
+        // client via OpenProcess + CreateRemoteThread(LoadLibraryA).
+        static string LocateRuntimeInjectorExe()
+        {
+            var candidates = new[]
+            {
+                Path.Combine(AppContext.BaseDirectory, "bin", "inject.exe"),
+                Path.Combine(AppContext.BaseDirectory, "inject.exe"),
+                Path.Combine(Directory.GetCurrentDirectory(), "bin", "inject.exe"),
+            };
+            foreach (var c in candidates)
+                if (File.Exists(c)) return c;
+            return null;
+        }
+
+        // Attach the enbmod Lua runtime to an ALREADY-RUNNING client.exe in this
+        // launcher's configured WINE prefix, independent of how that client was
+        // launched -- the Freya launcher, the Net-7 launcher, or a bare
+        // `wine client.exe`. Launch-time injection (FreyaInject.exe) can only
+        // inject a client it spawns itself; this uses the standalone inject.exe to
+        // hot-attach one that is already up. Stages enbmod.dll + the enabled mods'
+        // scripts next to the client first (identical to a mod-enabled launch), so
+        // a cold prefix that never ran with mods still gets a current runtime.
+        // Returns a human-readable status string; throws on a hard failure.
+        public string InjectEnbmodIntoRunningClient()
+        {
+            var injector = LocateRuntimeInjectorExe()
+                ?? throw new InvalidOperationException(
+                    "inject.exe not found. Build it with `just build-enbmod`.");
+
+            var dllDos = StageClientMods()
+                ?? throw new InvalidOperationException(
+                    "Could not stage enbmod.dll next to the client (see log).");
+
+            var clientDir = Path.GetDirectoryName(_setting.ClientPath);
+            var psi = WinExe(clientDir, injector, $"\"{dllDos}\"");
+            // Redirect so we can surface inject.exe's own diagnostics to the UI;
+            // WinExe defaults to UseShellExecute=true on Windows, which forbids it.
+            psi.UseShellExecute = false;
+            psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError = true;
+
+            using var p = Process.Start(psi)
+                ?? throw new InvalidOperationException("Failed to start inject.exe.");
+            var stdout = p.StandardOutput.ReadToEnd();
+            var stderr = p.StandardError.ReadToEnd();
+            p.WaitForExit(20000);
+            var code = p.HasExited ? p.ExitCode : -1;
+
+            var tail = (stdout + "\n" + stderr).Trim();
+            if (code != 0)
+                throw new InvalidOperationException(
+                    $"inject.exe exited {code}. {tail}");
+            return ("enbmod injected into the running client. " + tail).Trim();
+        }
+
         // Find the built feed DLL across dev (play-local, CWD=repo root) and
         // packaged (next to the launcher exe / its bin/) layouts.
         static string LocatePositionFeedDll()

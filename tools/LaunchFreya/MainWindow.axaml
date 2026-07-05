@@ -151,6 +151,11 @@
                 IsEnabled="{Binding #c_CheckBox_LuaMods.IsChecked}"
                 Click="OnConfigureModsClick"
                 ToolTip.Tip="Turn individual Lua mods on or off. Disabled mods are not staged or loaded." />
+        <!-- Standalone: hot-attach enbmod to a client that is ALREADY running,
+             regardless of how it was launched (Freya, Net-7, or bare wine). -->
+        <Button Name="c_Button_Inject" Content="Inject (running client)"
+                Click="OnInjectEnbmodClick"
+                ToolTip.Tip="Inject the enbmod Lua runtime into an already-running client.exe in the configured WINE prefix. Works no matter how the client was launched." />
       </StackPanel>
     </Border>
 
