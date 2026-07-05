@@ -272,6 +272,17 @@ constexpr uintptr_t CtaBuild = 0x0086f070;
 // hand that object here. Pass ONLY an object the lookup returned (never a raw address).
 constexpr uintptr_t RequestTarget = 0x00723230;
 
+// StationExit (__thiscall, ECX = M the world manager; args: char action, int, int)
+// is the client's own "leave station" method -- the same call the native "Exit
+// Starbase" button runs. Called with action = 1 (and the current StarbaseID at
+// M + world::starbase_id non-zero) it builds a STARBASE_REQUEST (wire opcode
+// 0x004E, Action = 1 "exit station") and pushes it through M's sector-server
+// Connection itself (no separate CmdSend needed); the server launches the player
+// into space (a full sector handoff, like a gate jump). action = 0 is the
+// server-driven teardown branch -- we never call that. We replicate the exit from
+// enb.undock(): confirm docked (starbase_id != 0), then call thiscall(M, 1, 0, 0).
+constexpr uintptr_t StationExit = 0x0074ba30;
+
 // ---- front-end login flow (EULA / login / character select) -----------------
 // The pre-game screens are driven by a single LoginTask object and its state
 // machine. We capture the LoginTask `this` (ECX) read-only from the per-frame
@@ -450,6 +461,18 @@ constexpr unsigned ent_modulus = 0x101; // bucket index = gid % ent_modulus
 constexpr int ent_node_next = 0x04;     // node -> next node in its bucket chain
 constexpr int ent_node_obj = 0x10;      // node -> resolved contact object
 constexpr int ent_node_gid = 0x14;      // node -> key (GameID)
+
+// In-world docked/in-space discriminator, both fields on the SClient world manager
+// M. When the player is docked the station interior view controller lives at
+// M + station_view (non-zero) and the current StarbaseID at M + starbase_id
+// (non-zero); both are cleared to 0 the moment the player launches into space. So
+// docked == (*(int*)(M + station_view) != 0), and starbase_id is a redundant
+// confirm that also yields the station's GameID. Set/cleared by the client's
+// STARBASE_SET (0x4F) handler. This is how enb.state() names "station" vs "space"
+// without a global state enum (the client has none -- it uses task polymorphism:
+// a LoginTask means front-end, an M means in-world, then station_view splits it).
+constexpr int station_view = 0x135c; // M -> station interior view ptr (non-zero == docked)
+constexpr int starbase_id = 0x1324;  // M -> current StarbaseID (0 while in space)
 } // namespace world
 
 // Target/player WORLD position, for the straight-line range shown on the frame. The
