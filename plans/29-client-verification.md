@@ -3179,6 +3179,47 @@ moot; the SOLVED block above is the truth):**
   3. No dupe / no crash across repeated takes; cargo count matches the ore actually
      mined.
 
+## [ ] CV-BB-MULTIBOX-TOKEN -- same-account multibox: bind the per-session DTLS token
+
+- **What changed (SERVER)**: `server/src/UDP_Global.cpp`. `login_ticket` is one row
+  per username (UPSERT ON CONFLICT username), so a second concurrent login of the
+  SAME account clobbers the token row. Character-select bound the player's 16-byte
+  DTLS auth token by re-querying that row (`GetLoginTokenBinary(username)`), so the
+  earlier session got the LATER session's token, its gameplay/master-handoff
+  datagrams failed the per-packet token check at the DTLS recv edge, and it hung
+  ~150s at the loading screen then dropped. Fix: stash each session's already-
+  validated ticket suffix at `ProcessTicketInfo`, keyed by its global UDP
+  `(source_addr, source_port)`, and bind THAT per-session token at
+  `HandleGlobalTicketRequest` (fall back to the DB query only on a stash miss).
+  New helper `AccountManager::TokenHexToBinary` decodes the suffix without a DB
+  read. This is the two-DIFFERENT-characters-same-account case the server already
+  documents as intended (multibox NOTE in `ProcessTicketInfo`;
+  `Player::SetCharacterID -> CheckForDuplicatePlayers` only blocks the SAME
+  character twice).
+- **Why this is a correctness change, not a weakening**: the per-packet DTLS token
+  check at the recv edge is UNCHANGED. The bound token is the exact suffix the
+  session presented and that was already validated against `login_ticket`
+  (`ValidateTicketSuffix`) before it is stashed -- strictly more correct than the
+  DB re-query, which could bind a token the session never presented. No wire format
+  changes (proxy + CLI packet parsers untouched); only WHICH internally-held token
+  the server binds to the player changes.
+- **Why the CLI/integration suite can't validate it**: the local plaintext UDP path
+  SKIPS the per-packet token check (`UDP_Global.cpp` opt-out), so the token binding
+  is a functional no-op there -- the bug only manifests on the DTLS online path,
+  which the CLI does not exercise. Hence this real-client entry.
+- **Primary source**: the incident proxy log (window 2 GameID 0x4000000c: 30x
+  `SendMasterLogin timed out` -> CRITICAL hang; window 1 0x4000000b succeeded),
+  same account `griever`, two different characters (slots 1 and 0); window 1 auth'd
+  and overwrote the shared token row before window 2's bind.
+- **What to look for (real client, TWO windows, `just play-online 2`)**:
+  1. Log BOTH windows into the SAME account but DIFFERENT characters. Both must
+     reach in-space (no loading-screen hang, no ~150s SendMasterLogin retry storm
+     in either proxy log).
+  2. The SAME character in two windows must STILL be refused (CheckForDuplicatePlayers
+     force-kick) -- the fix must not have loosened that.
+  3. Both sessions play normally (movement, chat, combat) with no dropped gameplay
+     datagrams -- i.e. each window's DTLS token matches what the server bound.
+
 ## [ ] CV-BC-GROUPINVITE-CRASH -- invitee client no longer crashes on group invite
 
 - **What changed (CLIENT, freya/ MIT)**: `freya/client-injection/enbmod/src/lua_api.cpp`,
