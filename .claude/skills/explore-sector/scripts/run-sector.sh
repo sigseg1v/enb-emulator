@@ -50,11 +50,12 @@ fi
 relogin() {
     echo "[run-sector] hard hang -> kill + relogin ..." >&2
     bash "$LOGIN_DIR/login.sh" || true
-    # login.sh occasionally stalls on the character-select Enter flake; force the
-    # last two steps until we are confirmed in-game (08 exits non-zero on timeout).
+    # login.sh's in-client auto-login owns EULA/credentials/char-enter now (the
+    # old screen-driven 07-charselect step is gone); if 08 timed out the client
+    # is most likely still loading the scene -- just re-poll it.
     for _ in 1 2 3; do
         if bash "$LOGIN_DIR/08-wait-ingame.sh"; then return 0; fi
-        bash "$LOGIN_DIR/07-charselect-enter.sh" || true
+        sleep 5
     done
     bash "$LOGIN_DIR/08-wait-ingame.sh"
 }
