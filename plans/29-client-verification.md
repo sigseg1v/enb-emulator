@@ -3255,6 +3255,9 @@ moot; the SOLVED block above is the truth):**
      actually draws in-game.
   3. WINE regression: the same two log lines + a drawing HUD on a local
      `just play-local` client (the lazy poll path is new for WINE too).
+     **DONE 2026-07-05**: full local `login.sh` run -- `overlay: hook installed --
+     IDirect3DDevice8::Present @ 7fc37240 (game device 015ad810)`, `overlay: Present
+     hook FIRED`, freya-hud image loaded; no probe/init-failed lines; login completed.
 
 ## [ ] CV-BC-GROUPINVITE-CRASH -- invitee client no longer crashes on group invite
 
