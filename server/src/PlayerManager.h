@@ -141,6 +141,7 @@ public:
 	void	RequestGroupAux(int GroupID, int PlayerID);
 	void	GroupChat(int GroupID, long GameID, char * Message);
 	bool	GroupExploreXP(Player *owner, char *message, long XP_Gain);
+	void	GroupRevealNav(Player *owner, Object *obj);
     void    GroupCombatXP(Player *owner, char *, int mob_level);
     int     GetGroupFromPlayer(long PlayerID);
     bool    CheckGrouped(Player *p1, Player *p2);

@@ -3214,3 +3214,83 @@ moot; the SOLVED block above is the truth):**
      returns a sane value on both once the group is active.
   3. Leader-only buttons appear only for the actual leader (no false leader while the
      group is still building).
+
+## [ ] CV-BD-OVERLAY-STATEBLOCK-LEAK -- HUD no longer leaks a D3D state block every frame
+
+- **What changed (CLIENT, freya/ MIT)**: `freya/client-injection/enbmod/src/overlay.cpp`,
+  `draw_frame`. The overlay snapshots the game's device state around its own 2D pass so
+  the HUD's render states never leak into the game's next frame. It did this by calling
+  `dev->CreateStateBlock(D3DSBT_ALL, &sb)` at the top of every drawn frame and
+  `DeleteStateBlock(sb)` at the bottom -- i.e. it allocated and freed a FULL-device
+  state block 30-60x per second, but only while the HUD was actually drawing (an empty
+  display list early-returns before the state block). Under wined3d that per-frame
+  create/delete churn grew committed D3D (file/shared) memory smoothly and without
+  plateau, HUD-gated. For a 32-bit `client.exe` (WOW64) that boots at ~3.45 GB VmSize
+  with only ~500 MB of address-space headroom, hours of that growth exhausts the space
+  and the next ~4 MB reservation fails -> `err:virtual:allocate_virtual_memory out of
+  memory` storm -> `Unhandled page fault on read access to 00000001`. This is the
+  leader/te crash (the group-invite fix CV-BC is a DIFFERENT, opposite crash -- invitee,
+  control-flow corruption, not address-space).
+- **The fix**: create ONE state block lazily on first draw, then `CaptureStateBlock` it
+  each frame before our SetRenderState calls and `ApplyStateBlock` after -- reusing a
+  single allocation instead of Create/Delete per frame. Released in `release_caches`
+  (device reset/unload) alongside the texture caches. No wire/protocol change; pure
+  client-side mod fix.
+- **Measurement evidence (this box, WINE, in-space, HUD on, ungrouped)**: controlled
+  on/off/on toggle with a second client as control isolated the growth to the HUD and
+  to file/shared (wined3d) mappings, not private heap. OLD dll: RSS +2790..+3022
+  kB/min, smooth and monotonic over an hour. FIXED dll (13.1 min, 40 samples): RSS
+  +214 kB/min, anon +5 kB/min, and the file/shared series was FLAT (262232 kB) except a
+  single one-time +2 MB asset step -- the smooth per-frame linear climb is gone. ~93% of
+  the HUD-gated growth eliminated; the residual is discrete/base-client asset churn.
+- **Why the CLI can't validate it**: client-side D3D8 present-hook rendering under
+  wined3d; no server/proxy/CLI packet is involved. Only the real client over a LONG
+  session proves the address space no longer fills.
+- **What to look for (real client, LONG session, HUD on)**: play for several hours with
+  the Freya HUD visible (party frame + vitals, the normal case). The client must NOT
+  accumulate VmSize toward the ~4 GB WOW64 ceiling and must NOT die with the
+  `allocate_virtual_memory out of memory` / `page fault on read at 00000001` signature.
+  Sanity check: `grep -c allocate_virtual_memory` in the WINE stderr should stay ~0.
+
+## [ ] CV-GROUPNAV -- formation exploration shares the nav MAP REVEAL, not just XP
+
+- **What changed (SERVER, CC BY-NC-SA)**: `server/src/GroupManager.cpp` (new
+  `PlayerManager::GroupRevealNav`), called from
+  `server/src/PlayerExperience.cpp` `Player::AwardNavExploreXP` right after the
+  existing `GroupExploreXP` call. Header decl in `server/src/PlayerManager.h`.
+- **The bug (internal inconsistency)**: when a grouped player explores a nav, the
+  server already fans the explore XP AND the "Discovered &lt;nav&gt;" message out
+  to every in-range formation member (`GroupExploreXP`, `GroupManager.cpp:339`),
+  but the nav OBJECT + 0x0099 NAVIGATION map entry were sent to the DISCOVERER
+  only -- `ObjectManager::CheckNavRanges` (`ObjectManager.cpp:613`) reveals
+  per-player by proximity and iterates nobody's group. So a formation member was
+  credited with discovering a nav (XP + message) they could never see on their
+  map. Observed live in multibox: the follower earned group explore XP for a gate
+  the leader reached in formation while the gate stayed off the follower's map,
+  and flying back through the area did not help.
+- **The fix**: `GroupRevealNav` mirrors `GroupExploreXP`'s member gating verbatim
+  (same sector, within 40k of the owner, active &amp; not incapacitated) and, for
+  each member that does not already have the nav, sets its
+  `ExposedNavList`/`ExploredNavList`, persists the discovery
+  (`SaveDiscoverNav`/`SaveExploreNav`), and sends the SAME `SendObject` +
+  `SendNavigation` the discoverer got. Reveal set == XP set, so they can never
+  drift. No-op for a solo (ungrouped) player.
+- **Primary source (CLAUDE.md clause A)**: (1) internal inconsistency above -- the
+  server already asserts the member discovered the nav while withholding it; (2)
+  owner first-hand retail testimony that EnB formation flight shared exploration
+  (map reveal), not merely XP. No capture of the retail follower's CREATE stream
+  was available; proceeding on (1)+(2) per owner direction.
+- **Why the CLI can't fully validate it (clause B)**: the emitted packets (0x0004
+  object create, 0x0099 NAVIGATION) are byte-format-pinned already
+  (`SectorNavigationHardeningTests`) -- this change only widens the RECIPIENT set,
+  not any byte layout. The fan-out is observable only at a second grouped avatar,
+  which is blocked by Net7Proxy single-tenancy (see
+  `TwoPlayerGroupNavExploreShareTests`, `[Fact(Skip)]`, same wall as the other
+  two-player tests). The regression is pinned in correct shape for when the proxy
+  multiplexes.
+- **What to look for (real client, TWO grouped chars)**: group two characters,
+  put them in formation, and fly the LEADER to a nav/gate the FOLLOWER has never
+  personally explored. The follower must (a) get the group explore XP + "Discovered"
+  message as before, AND (b) now see that nav/gate appear on its own map, marked
+  visited. Re-log the follower: the nav must persist (it was saved to the
+  follower's explored list). Solo (ungrouped) exploration must be unchanged.

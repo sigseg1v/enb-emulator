@@ -21,6 +21,7 @@
 #include "PlayerManager.h"
 #include "SectorManager.h"
 #include "PlayerClass.h"
+#include "ObjectClass.h"
 #include "MemoryHandler.h"
 #include <net7/Opcodes.h>
 #include <math.h>
@@ -374,6 +375,65 @@ bool PlayerManager::GroupExploreXP(Player *owner, char *msg, long XP_Gain)
 		//Player not in group.
         owner->AwardExploreXP(msg, XP_Gain);
 		return false;
+	}
+}
+
+// Formation/group exploration sharing. When a grouped player explores a nav,
+// GroupExploreXP (above) already fans the explore XP AND the "Discovered <nav>"
+// message out to every in-range formation member -- but the nav OBJECT and the
+// map entry itself were only ever sent to the ONE discovering player, because
+// ObjectManager::CheckNavRanges reveals per-player by proximity (it sets that
+// player's ExposedNavList/ExploredNavList and calls SendObject/SendNavigation on
+// that player alone). That left formation members credited with discovering a nav
+// they could not see on their map -- an internally inconsistent state ("you
+// discovered X" with no X). Reveal the nav to exactly the members that received
+// the shared XP, so the two stay in lockstep. Mirrors GroupExploreXP's member
+// gating verbatim (same sector, within 40k of the owner, active & not
+// incapacitated) so the reveal set can never drift from the XP set. No-op for a
+// solo (ungrouped) player, so non-grouped play is unchanged.
+void PlayerManager::GroupRevealNav(Player *owner, Object *obj)
+{
+	Group *g = GetGroupFromID(owner->GroupID());
+	Player *player = 0;
+
+	if (!g || !obj) return;
+
+	u32 owner_sector_num = owner->PlayerIndex()->GetSectorNum();
+
+	for (int i=0;i<6;i++)
+	{
+		if (g->Member[i].GameID == -1) continue;
+
+		player = GetPlayer(g->Member[i].GameID);
+		if (player == owner) continue;	// the discoverer already has it
+
+		if (player && player->Active() && player->AcceptedGroupInvite()
+			&& player->PlayerIndex()->GetSectorNum() == owner_sector_num
+			&& player->RangeFrom(owner->Position()) < 40000.0f && !player->ShipIndex()->GetIsIncapacitated())
+		{
+			// Only reveal what this member does not already have, so we never
+			// re-send the create or double-persist the discovery.
+			bool need_expose  = !obj->GetEIndex(player->ExposedNavList());
+			bool need_explore = !obj->GetEIndex(player->ExploredNavList());
+			if (!need_expose && !need_explore) continue;
+
+			if (need_expose)
+			{
+				obj->SetEIndex(player->ExposedNavList());
+				player->SaveDiscoverNav(obj->GetDatabaseUID());
+			}
+			if (need_explore)
+			{
+				obj->SetEIndex(player->ExploredNavList());
+				player->SaveExploreNav(obj->GetDatabaseUID());
+			}
+
+			// Same packets CheckNavRanges sends the discoverer: the static
+			// object create, then the navigation/map entry (with the explored
+			// flag now set, so it shows as visited on the member's map).
+			obj->SendObject(player);
+			obj->SendNavigation(player);
+		}
 	}
 }
 
