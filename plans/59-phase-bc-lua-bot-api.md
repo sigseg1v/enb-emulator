@@ -60,13 +60,22 @@ Legend: [x] done+built, [~] in progress, [ ] todo, [!] blocked.
       client's own StationExit method (addr 0x0074ba30, thiscall(M, action=1, 0, 0)), which
       emits wire opcode 0x004E STARBASE_REQUEST Action=1; server LaunchIntoSpace. Guarded on
       docked (M+starbase_id != 0). game.h: addr::StationExit. CV-BOT-UNDOCK.
-- [ ] `enb.warp()` / `enb.warp_stop()` -- DEFERRED (genuinely harder). Warp is NOT a
-      CmdBuild verb: it is its own packet, wire opcode 0x009B WarpPacket{GameID, short Navs,
-      int32 TargetID[20]}, a server-side TOGGLE (send again while warping -> TerminateWarp).
-      No one-arg builder; a mod must construct the WarpPacket (with a nav-id list) and push
-      it via CmdSend, OR replay the HUD warp-orb handler (which depends on the client having
-      already built its warp-path object). Needs a new game.h addr + the WarpPacket layout +
-      live validation before shipping -- do NOT fake it. Tracked as the one open API item.
+- [x] `enb.warp()` / `enb.warp_stop()` -- IMPLEMENTED (needs live validation, CV-BOT-WARP).
+      Warp is NOT a CmdBuild verb: it is its own packet OBJECT the client serializes itself
+      (wire opcode 0x009B), a server-side TOGGLE (re-send while warping -> TerminateWarp, so
+      warp and warp_stop are one code path). The mod does NOT hand-encode bytes -- it drives
+      the native warp-orb sequence on M: WarpPathBuild(radarCtrl) builds the nav path from the
+      current target, then WarpPacketCtor wraps the persistent NavigationList (M + navlist =
+      0x1138) + the built nav vector, and CmdSend (the SAME generic *(M+connection)->vt[2] send
+      as everything else) transmits 0x009B; WarpPacketDtor frees it. game.h: addr::WarpPathBuild
+      / WarpNavVec / WarpPacketCtor / WarpPacketDtor + world::navlist. The one piece with no
+      fixed offset -- the radar/targeting controller `this` -- is captured read-only at
+      WarpPathBuild's entry (hooks::warp_radar_ctrl), same pattern as the cockpit captures, so
+      it is populated once a warp path has been built this session. enb.warp() operates on the
+      CURRENT target (target a nav first with enb.request_target/enb.navs), mirroring dock/gate.
+      Returns false + a reason string when M/radar not captured or the path is not ready this
+      frame (retry next tick). NOT faked: every address is decomp-proven; only the end-to-end
+      client effect is unverified (CV-BOT-WARP).
 
 ## Station detection -- DONE (M-field discriminator, not a global enum)
 - [x] `enb.state()` now positively names "station" vs "space" from the captured world
@@ -94,11 +103,43 @@ so each native-touching call gets a real-client check here:
       carry are covered by kNavClassTokens {"nav","gate","wormhole"} so `enb.navs()` is
       non-empty. If navs are NOT in the entity hash (they may live in the NavListBuild
       0x007b7ef0 nav list instead), navs() needs a second source -- confirm which.
+- [ ] CV-BOT-WARP: with a nav targeted (enb.request_target), `enb.warp()` engages warp to it
+      the same as clicking the warp orb, and a second `enb.warp()` / `enb.warp_stop()` while
+      warping terminates it. Confirm the radar controller is captured (hooks::warp_radar_ctrl
+      non-zero) BEFORE the first bot warp -- determine whether it is seeded merely by targeting
+      a nav (NavListRender path) or only after one manual orb warp; if the latter, document the
+      one-manual-warp bootstrap. Also confirm M+0x1138 is the NavigationList on the SAME object
+      CmdSend uses (M), not a distinct player object.
 
 ## Original station-UI task (folded in -- depends on station detection above)
 - [ ] freya-hud in station: show ONLY chat + C/E/T discipline bars (xp_overlay) + top
       buttons (micromenu); hide target/party/action(hotbar)/loot/vitals-cards.
       Needs positive station detection + per-frame station gating. Verify via screenshots.
+
+## Group-formation automation (owner asked 2026-07-05: "auto gate in group formation +
+## auto redo formation after gate on leader + auto rejoin formation after gate on members")
+NOT built yet. Current state: `party_frame.lua` has only MANUAL formation buttons (leader
+sets type via CTA 4/5/6 + break 9; member form-up CTA 7 / leave 8; group_action pushes the
+CTARequest 0xBC). There is NO auto-gate loop, NO auto-reform-after-gate, NO auto-rejoin. This
+is bot behaviour to build ON TOP of the API, and it has hard dependencies:
+- [ ] Depends on `enb.gate()` (shipped, CV-BOT-GATE unverified) and `enb.warp()` (just
+      shipped, CV-BOT-WARP unverified). Building auto-gate on unverified gate/warp is building
+      on sand -- those CV checks must pass first.
+- [ ] Group state must survive a gate. Plan 48 documents the CLI LOSING group/formation state
+      after a warp/sector-change; the client-side enb.group() reader may hit the same, and an
+      auto-rejoin keys off exactly that state. Verify enb.group()/enb.is_leader() are still
+      correct immediately after a gate before trusting them as the reform trigger.
+- [ ] Leader path: after a gate lands (sector-id/state change observed), re-issue the last
+      formation-type CTA (4/5/6) so the group reforms. Member path: after the gate lands,
+      re-issue form-up CTA 7. Auto-gate: define the trigger (leader initiates -> members
+      follow) -- retail does NOT auto-gate members, so this is explicitly bot-only behaviour.
+- [ ] MUST be lightweight + opt-in: any per-tick group/target polling risks the pump-clocked
+      tick-hang that froze a live client before (see the no-debug-instrumentation memory). No
+      heavy every-tick work; event/edge-triggered on sector change, gated behind an explicit
+      enable.
+- [ ] CANNOT be truthfully marked "tested" without a live MULTI-CLIENT run (leader + members
+      grouped, formed, crossing a gate together) on LOCAL dev clients -- the proxy is
+      single-client (one per client). Never run this against the owner's live game client.
 
 ## Skill rewrite (after the API lands + is live-validated)
 - [ ] `explore-sector`: replace W/D/C key enum + warp-orb click + map OCR with
@@ -122,3 +163,14 @@ so each native-touching call gets a real-client check here:
   validation. All native-touching calls have CV-BOT-* real-client checks above. hull/shield/
   energy were already covered by enb.self()/enb.vitals(). NEXT: warp, then the station-UI
   gating task (now unblocked by state detection), then the skill rewrite.
+- 2026-07-05: WARP implemented (no longer deferred). Decomp mining proved the full native
+  warp-orb sequence: generic packet-object send (CmdSend, *(M+connection)->vt[2]), WarpPacket
+  ctor/dtor (0x008b1aa0 / 0x008b1c70), path builder (0x007bd980) + nav-vector getter
+  (0x007bd960), NavigationList at M+0x1138. Added addr::WarpPathBuild/WarpNavVec/WarpPacketCtor
+  /WarpPacketDtor + world::navlist to game.h; a read-only capture hook on WarpPathBuild grabs
+  the radar-controller ECX (hooks::warp_radar_ctrl) since it has no fixed offset. enb.warp /
+  enb.warp_stop are one toggle path. Build-clean + clang-clean. NOT faked -- addresses are
+  decomp-proven; CV-BOT-WARP tracks the live client effect. Owner also requested group-
+  formation automation (auto-gate/reform/rejoin) -- recorded above as NOT-built, with its
+  gate/warp-validation + multi-client-test dependencies spelled out. That feature never
+  existed; only the manual formation buttons do.

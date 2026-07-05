@@ -531,6 +531,31 @@ extern "C" __attribute__((naked)) void hk_CockpitCommands() {
                          "jmp *_real_CockpitCommands_tramp\n\t");
 }
 
+// ---- warp radar/targeting controller capture -------------------------------
+// game.h::addr::WarpPathBuild (0x007bd980) is __thiscall(ECX = the radar/targeting
+// controller) -- the object that builds the warp nav path from the current target.
+// It is a session singleton but is NOT reachable as a fixed M/player offset (the
+// native warp-orb handler holds it in a bare register), so we capture its `this`
+// (ECX) read-only here -- the exact pattern of the cockpit captures -- letting
+// lua_api (enb.warp) drive the native warp path build + WarpPacket send. Populated
+// once the client has built a warp path this session; forwards every argument
+// untouched via the trampoline and never alters the build.
+static volatile unsigned g_warp_radar = 0; // ECX of the warp path builder
+extern "C" {
+void* real_WarpPathBuild_tramp = nullptr;
+void notify_warp_radar(unsigned thisp) {
+    g_warp_radar = thisp;
+}
+}
+extern "C" __attribute__((naked)) void hk_WarpPathBuild() {
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl %ecx\n\t" // this (radar/targeting controller)
+                         "call _notify_warp_radar\n\t"
+                         "addl $4, %esp\n\t"
+                         "popal\n\t"
+                         "jmp *_real_WarpPathBuild_tramp\n\t");
+}
+
 // ---- chat panel capture ----------------------------------------------------
 // game.h::addr::ChatLocalLine (0x0074d990) is __thiscall(ECX = the chat PANEL).
 // Every displayed line -- system, local notice, computer, warning, and network
@@ -823,6 +848,11 @@ bool enable_event_hooks() {
         logf("hook CockpitCommands failed");
         ok = false;
     }
+    if (MH_CreateHook((void*)game::addr::WarpPathBuild, (void*)&hk_WarpPathBuild,
+                      &real_WarpPathBuild_tramp) != MH_OK) {
+        logf("hook WarpPathBuild failed");
+        ok = false;
+    }
     if (MH_CreateHook((void*)game::addr::ChatLocalLine, (void*)&hk_ChatPanel,
                       &real_ChatPanel_tramp) != MH_OK) {
         logf("hook ChatLocalLine failed");
@@ -998,6 +1028,9 @@ unsigned cockpit_throttle_ctrl() {
 }
 unsigned cockpit_cmd_ctrl() {
     return g_cockpit_cmd;
+}
+unsigned warp_radar_ctrl() {
+    return g_warp_radar;
 }
 unsigned chat_panel() {
     return g_chat_panel;

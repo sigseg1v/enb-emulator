@@ -1565,6 +1565,73 @@ static int l_undock(lua_State* L) {
     return 1;
 }
 
+// Engage (or, run again, terminate) warp to the CURRENT target -- the shared body
+// of enb.warp / enb.warp_stop. Reproduces the native warp-orb sequence on M:
+// build the nav path from the current target off the captured radar controller,
+// wrap the persistent NavigationList (M + navlist) and the built nav vector into a
+// WarpPacket, and send it through M's Connection (CmdSend). Warp is a server-side
+// TOGGLE, so the SAME call terminates an in-progress warp -- warp and warp_stop are
+// one code path. Returns false (sends nothing) when M or the radar controller is not
+// yet captured, or when the path is not ready this frame (no target / still
+// building) -- the caller should target a nav first (enb.request_target/enb.navs)
+// and may retry next tick. reason is filled for the false cases (nil on success).
+static bool do_warp(uintptr_t& out_m, const char*& reason) {
+    reason = nullptr;
+    uintptr_t m = hooks::world_mgr();
+    if (!m || !mem::readable((void*)(m + game::world::navlist), 4)) {
+        reason = "no world manager (not in space)";
+        return false;
+    }
+    uintptr_t radar = hooks::warp_radar_ctrl();
+    if (!radar || !mem::readable((void*)radar, 4)) {
+        reason = "warp controller not captured -- engage warp once via the orb to seed it";
+        return false;
+    }
+    out_m = m;
+    // Build the warp path from the current target; 0 => no target / not ready yet.
+    if (actions::call_thiscall(game::addr::WarpPathBuild, radar, nullptr, 0) == 0) {
+        reason = "warp path not ready (no nav targeted, or still building)";
+        return false;
+    }
+    uint32_t nav_list = mem::u32(m + game::world::navlist);
+    uint32_t nav_vec = actions::call_thiscall(game::addr::WarpNavVec, radar, nullptr, 0);
+    if (!nav_list || !nav_vec) {
+        reason = "warp nav list/vector empty";
+        return false;
+    }
+    uint32_t pkt[5] = {0, 0, 0, 0, 0}; // caller-owned WarpPacket object storage
+    uint32_t ctor_args[2] = {nav_list, nav_vec};
+    actions::call_thiscall(game::addr::WarpPacketCtor, (uintptr_t)pkt, ctor_args, 2);
+    uint32_t snd[1] = {(uint32_t)(uintptr_t)pkt};
+    actions::call_thiscall(game::addr::CmdSend, m, snd, 1);
+    actions::call_thiscall(game::addr::WarpPacketDtor, (uintptr_t)pkt, nullptr, 0);
+    return true;
+}
+
+// enb.warp() -> bool[, string]. Engage warp to the currently-targeted nav (target
+// one first with enb.request_target / enb.navs). Returns true on send, or false +
+// a reason string. Because warp is a server toggle, calling this while already
+// warping terminates the warp -- see enb.warp_stop, which is the same path.
+static int l_warp(lua_State* L) {
+    uintptr_t m = 0;
+    const char* reason = nullptr;
+    bool ok = do_warp(m, reason);
+    lua_pushboolean(L, ok);
+    if (ok) {
+        return 1;
+    }
+    lua_pushstring(L, reason ? reason : "warp failed");
+    return 2;
+}
+
+// enb.warp_stop() -> bool[, string]. Terminate an in-progress warp. Warp is a
+// server-side toggle with no distinct client stop opcode, so this re-runs the exact
+// warp send: the server flips warping -> TerminateWarp. Same guards/reasons as
+// enb.warp (needs a resolvable path, which still holds while warping).
+static int l_warp_stop(lua_State* L) {
+    return l_warp(L);
+}
+
 // enb.dist(...) -> number | nil. Straight-line distance, three call shapes:
 //   enb.dist()                    -- local ship -> current target
 //   enb.dist(x, y, z)             -- local ship -> a world point
@@ -2816,6 +2883,10 @@ static void push_addr_table(lua_State* L) {
     A(NavListBuild);
     A(NavListRender);
     A(WarpPath);
+    A(WarpPathBuild);
+    A(WarpNavVec);
+    A(WarpPacketCtor);
+    A(WarpPacketDtor);
     A(KeyDefinitions);
     A(BindCategories);
     A(AbilitySlots);
@@ -2863,6 +2934,8 @@ void open(lua_State* L) {
                                    {"register", l_register},
                                    {"gate", l_gate},
                                    {"undock", l_undock},
+                                   {"warp", l_warp},
+                                   {"warp_stop", l_warp_stop},
                                    {"dist", l_dist},
                                    {"objects", l_objects},
                                    {"navs", l_navs},

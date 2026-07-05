@@ -283,6 +283,33 @@ constexpr uintptr_t RequestTarget = 0x00723230;
 // enb.undock(): confirm docked (starbase_id != 0), then call thiscall(M, 1, 0, 0).
 constexpr uintptr_t StationExit = 0x0074ba30;
 
+// ---- warp (engage warp to the currently-targeted nav) ----
+// Warp is NOT an avatar-command (CmdBuild verb) and NOT a raw byte buffer: it is a
+// packet OBJECT the client serializes itself (wire opcode 0x009B), pushed through the
+// same generic Connection send as every other packet (CmdSend -- *(M + connection)
+// ->vtable[2]). The native warp-orb click reproduces as this sequence, all on M:
+//   1. RequestTarget(nav) so the current target is the nav.
+//   2. WarpPathBuild(radarCtrl) -- reads the current target off the radar/targeting
+//      controller and runs NavListBuild into that controller's nav vector; returns 1
+//      when the path is ready this frame, 0 while still building (retry next tick).
+//   3. navList = *(M + world::navlist); navVec = WarpNavVec(radarCtrl) (== ctrl+0x40).
+//   4. WarpPacketCtor(buf[5], navList, navVec) builds the WarpPacket object in buf.
+//   5. CmdSend(M, buf) serializes+sends 0x009B (framed [u16 len][u16 0x9B][payload];
+//      the client owns the byte order, so no htonl/ntohl on our side).
+//   6. WarpPacketDtor(buf) frees the object's owned nav-vector copy.
+// Warp is a server-side TOGGLE: re-running the same sequence while warping terminates
+// it (enb.warp_stop), so there is no distinct client stop opcode.
+//
+// The radar/targeting controller `this` is a session singleton but is NOT reachable
+// as a fixed M/player offset (the warp handler holds it in a bare register). We
+// capture its ECX read-only at WarpPathBuild's entry (hooks::warp_radar_ctrl), the
+// exact pattern as the cockpit/target captures; it is populated once the client has
+// built a warp path at least once this session (targeting a nav + engaging warp).
+constexpr uintptr_t WarpPathBuild = 0x007bd980;
+constexpr uintptr_t WarpNavVec = 0x007bd960;
+constexpr uintptr_t WarpPacketCtor = 0x008b1aa0;
+constexpr uintptr_t WarpPacketDtor = 0x008b1c70;
+
 // ---- front-end login flow (EULA / login / character select) -----------------
 // The pre-game screens are driven by a single LoginTask object and its state
 // machine. We capture the LoginTask `this` (ECX) read-only from the per-frame
@@ -434,6 +461,7 @@ constexpr int aux_container = 0x88; // *(dataObj + 0x88) -> aux container (threa
 namespace world {
 constexpr int player_id = 0x112c;  // M -> local player game id (command actor)
 constexpr int connection = 0x1124; // M -> sector-server Connection (command sink)
+constexpr int navlist = 0x1138;    // M -> persistent NavigationList (warp packet input)
 // The INVENTORY/LOOT command channel is NOT M's connection. The native loot/mining
 // take commits the InvMove through the SClient that OWNS the open cargo container:
 // C = *(container + cargo::view_client), and the command is pushed on C's Connection
