@@ -961,6 +961,19 @@ play-online CLIENT_PATH='' HOST='':
     # "EA.com temporarily unavailable (INV-300)" at login. Tear it down first.
     echo ">>> taking down any local docker stack (frees 3500/3801/3805)"
     docker compose down --remove-orphans >/dev/null 2>&1 || true
+    # Also clear any leftover play-multibox-local proxy CONTAINERS. Those are a
+    # DIFFERENT docker project (mbox1..mbox8, docker-compose.mbox.yml) that the
+    # `docker compose down` above does NOT touch, and each PUBLISHES the exact
+    # 127.0.0.1:235xx port block this recipe hands a native per-instance proxy
+    # (slot i -> 23500+i*10). If one is left up from an earlier session it
+    # silently steals that slot's block: the instance's native FreyaProxy.exe
+    # can't bind (EADDRINUSE), the client dials the stale local-pointing docker
+    # proxy instead, and hangs at login (client 1 on 3500 works, client 2+ stuck).
+    # Tear all eight down (no-op for projects that aren't up).
+    echo ">>> clearing any stale multibox-local proxy units (frees 23500..)"
+    for j in $(seq 1 8); do
+        docker compose -f docker-compose.mbox.yml -p "mbox$j" down --remove-orphans >/dev/null 2>&1 || true
+    done
     # Kill stale WINE proxies from prior runs that may still hold those ports.
     # Pattern excludes the .exe suffix match against this recipe's own argv.
     pkill -f 'FreyaProxy\.exe' >/dev/null 2>&1 || true
