@@ -3618,3 +3618,24 @@ moot; the SOLVED block above is the truth):**
   already open, `/` must insert a literal "/" into the line as any other character (it was already
   swallowed while editing -- confirm no regression). (3) Enter still opens the box as before.
 - **Setup**: redeploy the freya-hud mod (or DEBUG auto-refresh), log in, in space.
+
+### [ ] CV-PB66-FONT -- target-frame + discipline-card fonts are larger and legible at the owner's resolution (PB-66)
+
+- **Change**: `freya-hud/target_frame.lua` draws the target NAME at scale `NAME_SCALE=1.3` and the
+  DISTANCE at `DIST_SCALE=1.15` (were the fixed ~14px default 1.0); `freya-hud/xp_overlay.lua` draws
+  the C/E/T discipline letters at `LETTER_SCALE=1.3` and the "LV n" badges at `BADGE_SCALE=0.95`.
+  All four also grow on a bigger-than-1280x960 screen via `H.smul(1.4)` -- previously these glyphs
+  were the only fixed-px HUD text that did NOT scale up on a large backbuffer, which is why they read
+  small at the owner's resolution. Line advance and name-wrap width track the scale so nothing clips;
+  the discipline card geometry was widened to fit. Lua-only (script mods), no DLL rebuild.
+- **Why the CLI/integration suite does NOT close this**: the overlay HUD is client-only pixels; no
+  server or wire path is involved. Font legibility is a visual judgement only the real client shows.
+- **What to look for (real client)**: (1) target any object -- the bottom-right target name +
+  "Dist" line must read clearly larger than before, cleanly above the hull/shield bars, not clipped
+  or overlapping; a long name still wraps to 2 lines without overrunning the bar width. (2) The
+  bottom-left C/E/T discipline card letters + "LV n" badges must read larger, still aligned in their
+  columns. (3) Confirm the size feels right AT THE OWNER'S RESOLUTION -- if still too small/large,
+  the single knob to turn is `NAME_SCALE`/`DIST_SCALE`/`LETTER_SCALE` (base) or `TEXT_SMUL`
+  (big-screen growth) in those two files. Verified on the 1280x960 dev client; owner tunes the exact
+  multiplier at their native res.
+- **Setup**: redeploy the freya-hud mod (or DEBUG auto-refresh / `/run reload()`), log in, in space.
