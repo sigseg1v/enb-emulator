@@ -1032,6 +1032,10 @@ unsigned cockpit_cmd_ctrl() {
 unsigned warp_radar_ctrl() {
     return g_warp_radar;
 }
+void seed_warp_radar_ctrl(unsigned thisp) {
+    if (g_warp_radar == 0)
+        g_warp_radar = thisp;
+}
 unsigned chat_panel() {
     return g_chat_panel;
 }

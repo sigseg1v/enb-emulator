@@ -64,6 +64,47 @@ inline bool writable(const void* p, size_t len) {
            prot == PAGE_EXECUTE_WRITECOPY;
 }
 
+// Does `p` point at real executable code -- a committed, executable page inside a
+// mapped module image (not a heap/stack scratch page that merely happens to be
+// executable)? Used to validate a value read from an object slot is a genuine vtable
+// / function pointer before we trust the object's shape (e.g. resolving a controller
+// by offset without the capturing hook). A garbage pointer overwhelmingly fails the
+// MEM_IMAGE + executable test, so this turns "wrong object" into a clean rejection
+// instead of a call into nonsense.
+inline bool is_code(uintptr_t p) {
+    if (!p)
+        return false;
+    MEMORY_BASIC_INFORMATION mbi;
+    if (!VirtualQuery((const void*)p, &mbi, sizeof mbi))
+        return false;
+    if (mbi.State != MEM_COMMIT || mbi.Type != MEM_IMAGE)
+        return false;
+    DWORD prot = mbi.Protect & 0xFF;
+    return prot == PAGE_EXECUTE_READ || prot == PAGE_EXECUTE_READWRITE ||
+           prot == PAGE_EXECUTE_WRITECOPY || prot == PAGE_EXECUTE;
+}
+
+// Does `p` point into a mapped module image and is readable -- i.e. .text OR .rdata
+// (const data such as a C++ vtable), NOT a heap/stack scratch page? A real object's
+// vtable pointer lands here (vtables live in .rdata: MEM_IMAGE, readable, usually NOT
+// executable), while its vtable ENTRIES are is_code(). Use this for the vtable-pointer
+// check and is_code() for the function-pointer entries.
+inline bool is_image_data(uintptr_t p) {
+    if (!p)
+        return false;
+    MEMORY_BASIC_INFORMATION mbi;
+    if (!VirtualQuery((const void*)p, &mbi, sizeof mbi))
+        return false;
+    if (mbi.State != MEM_COMMIT || mbi.Type != MEM_IMAGE)
+        return false;
+    if (mbi.Protect & PAGE_GUARD)
+        return false;
+    DWORD prot = mbi.Protect & 0xFF;
+    return prot == PAGE_READONLY || prot == PAGE_READWRITE || prot == PAGE_WRITECOPY ||
+           prot == PAGE_EXECUTE_READ || prot == PAGE_EXECUTE_READWRITE ||
+           prot == PAGE_EXECUTE_WRITECOPY;
+}
+
 // Guarded typed read. Returns `def` if the address isn't committed+readable (cheap pre-check)
 // OR if the deref still faults (VEH backstop -- covers the TOCTOU race where the page is unmapped
 // between the VirtualQuery and the read).

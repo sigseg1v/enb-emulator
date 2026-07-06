@@ -300,15 +300,43 @@ constexpr uintptr_t StationExit = 0x0074ba30;
 // Warp is a server-side TOGGLE: re-running the same sequence while warping terminates
 // it (enb.warp_stop), so there is no distinct client stop opcode.
 //
-// The radar/targeting controller `this` is a session singleton but is NOT reachable
-// as a fixed M/player offset (the warp handler holds it in a bare register). We
-// capture its ECX read-only at WarpPathBuild's entry (hooks::warp_radar_ctrl), the
-// exact pattern as the cockpit/target captures; it is populated once the client has
-// built a warp path at least once this session (targeting a nav + engaging warp).
+// The radar/targeting controller `this` is a session singleton. The primary source is
+// still the read-only ECX capture at WarpPathBuild's entry (hooks::warp_radar_ctrl),
+// populated once the client has built a warp path at least once this session. But it
+// IS also reachable by a fixed deref chain off M, with NO orb click needed to seed the
+// hook: the orb handler loads SC = *(handlerThis + 0x40) (SC == M, the world/space
+// client singleton), then MainView = *(SC + 0x1354) (SC's active view slot -- a HUD
+// controller, NOT the radar), and the radar hangs off it at MainView + 0x80:
+//
+//     radar = *( *(M + warp::mainview_on_m) + warp::radar_in_mainview )
+//
+// The radar is a small (~0x50-byte) object built lazily during MainView init and
+// stored ONLY there (no global handle), so *(MainView + 0x80) can be 0 before the 3D
+// view is up. lua_api walks this chain and fully validates the radar's structure
+// (warp::* offsets below) before ever calling into it, so enb.warp engages with zero
+// screen interaction. See resolve_warp_radar.
 constexpr uintptr_t WarpPathBuild = 0x007bd980;
 constexpr uintptr_t WarpNavVec = 0x007bd960;
 constexpr uintptr_t WarpPacketCtor = 0x008b1aa0;
 constexpr uintptr_t WarpPacketDtor = 0x008b1c70;
+
+// Offsets used to resolve + validate the radar controller off M without the ECX hook.
+// All are read guarded (VEH-backed) BEFORE any native call, so a wrong candidate fails
+// validation and is rejected rather than hanging the client. The radar's first member
+// (radar + 0) is itself an SC-family object m0; subsys/subsys_flag/getdata_vtoff below
+// are read off m0, while the nav-vector blocks live directly on the radar.
+namespace warp {
+constexpr int mainview_on_m = 0x1354; // M -> MainView (SC's active-view slot; a HUD controller)
+constexpr int radar_in_mainview =
+    0x80;                      // MainView + 0x80: the radar object (0 until the view is up)
+constexpr int subsys = 0x12a4; // m0 (== *radar) + 0x12a4: targeting subsystem WarpPathBuild derefs
+constexpr int subsys_flag = 0x10;   // (m0+subsys) + 0x10: "path already built" byte flag
+constexpr int nav_vec = 0x40;       // radar + 0x40: primary nav vector control block
+constexpr int nav_vec2 = 0x3c;      // radar + 0x3c: secondary nav vector control block
+constexpr int vec_begin = 0x08;     // vector control block -> begin pointer
+constexpr int vec_end = 0x0c;       // vector control block -> end pointer
+constexpr int getdata_vtoff = 0x28; // m0->vtable[+0x28]: the getter WarpPathBuild invokes
+} // namespace warp
 
 // ---- front-end login flow (EULA / login / character select) -----------------
 // The pre-game screens are driven by a single LoginTask object and its state

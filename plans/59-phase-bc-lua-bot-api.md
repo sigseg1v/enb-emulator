@@ -60,22 +60,30 @@ Legend: [x] done+built, [~] in progress, [ ] todo, [!] blocked.
       client's own StationExit method (addr 0x0074ba30, thiscall(M, action=1, 0, 0)), which
       emits wire opcode 0x004E STARBASE_REQUEST Action=1; server LaunchIntoSpace. Guarded on
       docked (M+starbase_id != 0). game.h: addr::StationExit. CV-BOT-UNDOCK.
-- [x] `enb.warp()` / `enb.warp_stop()` -- IMPLEMENTED (needs live validation, CV-BOT-WARP).
-      Warp is NOT a CmdBuild verb: it is its own packet OBJECT the client serializes itself
-      (wire opcode 0x009B), a server-side TOGGLE (re-send while warping -> TerminateWarp, so
-      warp and warp_stop are one code path). The mod does NOT hand-encode bytes -- it drives
-      the native warp-orb sequence on M: WarpPathBuild(radarCtrl) builds the nav path from the
-      current target, then WarpPacketCtor wraps the persistent NavigationList (M + navlist =
-      0x1138) + the built nav vector, and CmdSend (the SAME generic *(M+connection)->vt[2] send
-      as everything else) transmits 0x009B; WarpPacketDtor frees it. game.h: addr::WarpPathBuild
-      / WarpNavVec / WarpPacketCtor / WarpPacketDtor + world::navlist. The one piece with no
-      fixed offset -- the radar/targeting controller `this` -- is captured read-only at
-      WarpPathBuild's entry (hooks::warp_radar_ctrl), same pattern as the cockpit captures, so
-      it is populated once a warp path has been built this session. enb.warp() operates on the
-      CURRENT target (target a nav first with enb.request_target/enb.navs), mirroring dock/gate.
-      Returns false + a reason string when M/radar not captured or the path is not ready this
-      frame (retry next tick). NOT faked: every address is decomp-proven; only the end-to-end
-      client effect is unverified (CV-BOT-WARP).
+- [x] `enb.warp()` / `enb.warp_stop()` -- SHIPPED + LIVE-VALIDATED (2026-07-05). Warp is its
+      own packet OBJECT the client serializes itself (wire opcode 0x009B), a server-side TOGGLE
+      (re-send while warping -> TerminateWarp, so warp and warp_stop are one code path). Send
+      sequence: WarpPathBuild(radar) [low-byte bool return] builds the nav path from the current
+      target, WarpNavVec(radar) yields the built nav vector, WarpPacketCtor(pkt, navId_VALUE,
+      navVec_PTR) wraps them, CmdSend(SC, &pkt) transmits 0x009B, WarpPacketDtor(&pkt) frees it.
+      Addresses: WarpPathBuild 0x007bd980 / WarpNavVec 0x007bd960 / WarpPacketCtor 0x008b1aa0 /
+      WarpPacketDtor 0x008b1c70 / CmdSend 0x00728150.
+      THE FIX (previous "wrong base object" diagnosis was a one-hop parse error): the radar is
+      resolved statically, zero screen interaction, as `radar = *( *(M + 0x1354) + 0x80 )`.
+      M+0x1354 is NOT a dead target_ctrl cross-ref -- it is the MainView HUD controller (the
+      per-view-mode controller array slot); the radar hangs one deref DEEPER at MainView+0x80.
+      It is built lazily during 3D-view init and no global holds it, so *(MainView+0x80) is 0
+      before the view is up -- looks_like_radar() guards that. Validation (all confirmed live):
+      radar+0 == SC (== M, the CmdSend base), *(SC)=vtable 0x00b03240, vtable[+0x28]=code getter,
+      SC+0x12a4=targeting subsystem non-null, nav-vector control blocks at radar+0x3c/+0x40 sane.
+      navId = *(SC+0x1138) is stored INLINE in the packet (observed 0x1f) and never dereferenced,
+      so M IS the correct base for both the packet and CmdSend -- there is no separate ship
+      object S. Live proof: targeted "Accelerator to Equatorial Earth" (d=50540), enb.warp()
+      returned true, ship warped to d=2543, game printed "COMPUTER: Warp target reached", no
+      crash; warp_radar().hooked latched == resolved (native WarpPathBuild fired through the ECX
+      hook with our statically-resolved this). game.h warp:: offsets: mainview_on_m=0x1354,
+      radar_in_mainview=0x80, subsys=0x12a4, nav_vec=0x40, nav_vec2=0x3c, getdata_vtoff=0x28.
+      CV-BOT-WARP (still needs owner real-client confirm of warp_stop toggle).
 
 ## Station detection -- DONE (M-field discriminator, not a global enum)
 - [x] `enb.state()` now positively names "station" vs "space" from the captured world
@@ -103,13 +111,15 @@ so each native-touching call gets a real-client check here:
       carry are covered by kNavClassTokens {"nav","gate","wormhole"} so `enb.navs()` is
       non-empty. If navs are NOT in the entity hash (they may live in the NavListBuild
       0x007b7ef0 nav list instead), navs() needs a second source -- confirm which.
-- [ ] CV-BOT-WARP: with a nav targeted (enb.request_target), `enb.warp()` engages warp to it
-      the same as clicking the warp orb, and a second `enb.warp()` / `enb.warp_stop()` while
-      warping terminates it. Confirm the radar controller is captured (hooks::warp_radar_ctrl
-      non-zero) BEFORE the first bot warp -- determine whether it is seeded merely by targeting
-      a nav (NavListRender path) or only after one manual orb warp; if the latter, document the
-      one-manual-warp bootstrap. Also confirm M+0x1138 is the NavigationList on the SAME object
-      CmdSend uses (M), not a distinct player object.
+- [~] CV-BOT-WARP: ENGAGE half VALIDATED LIVE (2026-07-05, agent-driven dev client): with a nav
+      targeted via enb.request_target(100000), `enb.warp()` engaged a real warp the same as the
+      orb -- ship crossed ~48k units (d 50540->2543), game printed "COMPUTER: Warp target
+      reached", no crash. The radar is resolved STATICALLY (no orb-seed needed): warp_radar()
+      showed resolved==radar non-zero with hooked==0 BEFORE the warp (proving zero-interaction
+      resolve), then hooked latched == resolved after (native fired through the ECX hook with our
+      this). navId is stored inline in the packet, so M is the correct base -- no distinct ship
+      object. REMAINING for owner: confirm the warp_stop TOGGLE (a 2nd enb.warp() while warping
+      terminates it) on the real client -- the agent test only exercised engage.
 
 ## Original station-UI task (folded in -- depends on station detection above)
 - [ ] freya-hud in station: show ONLY chat + C/E/T discipline bars (xp_overlay) + top

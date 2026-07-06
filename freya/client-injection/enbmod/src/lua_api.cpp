@@ -1565,6 +1565,63 @@ static int l_undock(lua_State* L) {
     return 1;
 }
 
+// Structural predicate: does `radar` have the exact shape WarpPathBuild + the orb
+// handler require? All reads are guarded (VEH-backed), so this never faults. The checks
+// mirror the native code's own dereferences, so passing them means the native build path
+// is safe to run on this object -- and a wrong candidate (garbage / not the controller)
+// fails one of them and is rejected rather than hanging the client.
+static bool looks_like_radar(uintptr_t radar) {
+    using namespace game::addr::warp;
+    // radar readable through both nav-vector ptr slots (+0x3c/+0x40). The radar is a small
+    // (~0x50-byte) object, so we only touch the low fields we actually validate here.
+    if (!radar || !mem::readable((void*)radar, 0x44))
+        return false;
+    // First member m0 (== *radar) is an SC-family object: *m0 is its vtable pointer (into
+    // image .rdata, NOT necessarily executable), and the getter slot WarpPathBuild invokes
+    // (m0->vtable[+0x28]) must point at real executable code.
+    uintptr_t m0 = mem::ptr(radar);
+    if (!m0)
+        return false;
+    uintptr_t vt = mem::ptr(m0);
+    if (!mem::is_image_data(vt) || !mem::is_code(mem::ptr(vt + getdata_vtoff)))
+        return false;
+    // The targeting subsystem WarpPathBuild dereferences (*(m0 + 0x12a4)) must be present
+    // (non-null, its flag byte readable) -- else the native build takes its assert branch.
+    uintptr_t ts = mem::ptr(m0 + subsys);
+    if (!ts || !mem::readable((void*)(ts + subsys_flag), 1))
+        return false;
+    // The nav-vector control blocks bound WarpPathBuild's copy loop: a garbage block yields
+    // a huge (end-begin)>>2 count -> the exact hang we must never repeat. Require each block
+    // readable and, when non-empty, a sane forward, 4-aligned span.
+    const int vecs[2] = {nav_vec, nav_vec2};
+    for (int i = 0; i < 2; ++i) {
+        uintptr_t vp = mem::ptr(radar + vecs[i]);
+        if (!vp || !mem::readable((void*)vp, 0x10))
+            return false;
+        uintptr_t b = mem::ptr(vp + vec_begin);
+        uintptr_t e = mem::ptr(vp + vec_end);
+        if (b && (e < b || (e - b) > 0x40000 || ((e - b) & 3)))
+            return false;
+    }
+    return true;
+}
+
+// Resolve the warp radar controller off M by deref chain and validate its shape, with NO
+// native call -- the safe alternative to a real warp-orb engage:
+//     radar = *( *(M + mainview_on_m) + radar_in_mainview )
+// (M -> MainView -> radar). Returns the validated radar ptr, or 0 if it cannot be trusted
+// (e.g. the 3D view is not up yet, so MainView + 0x80 is still 0).
+static uintptr_t resolve_warp_radar(uintptr_t m) {
+    using namespace game::addr::warp;
+    if (!m)
+        return 0;
+    uintptr_t mainview = mem::ptr(m + mainview_on_m);
+    if (!mainview)
+        return 0;
+    uintptr_t radar = mem::ptr(mainview + radar_in_mainview);
+    return looks_like_radar(radar) ? radar : 0;
+}
+
 // Engage (or, run again, terminate) warp to the CURRENT target -- the shared body
 // of enb.warp / enb.warp_stop. Reproduces the native warp-orb sequence on M:
 // build the nav path from the current target off the captured radar controller,
@@ -1583,24 +1640,43 @@ static bool do_warp(uintptr_t& out_m, const char*& reason) {
         return false;
     }
     uintptr_t radar = hooks::warp_radar_ctrl();
+    if (!radar) {
+        // Not seeded by a real orb engage yet -- resolve + validate it off M so warp
+        // works with zero screen interaction. seed only latches while unset, so a later
+        // genuine WarpPathBuild capture still wins.
+        radar = resolve_warp_radar(m);
+        if (radar)
+            hooks::seed_warp_radar_ctrl((unsigned)radar);
+    }
     if (!radar || !mem::readable((void*)radar, 4)) {
-        reason = "warp controller not captured -- engage warp once via the orb to seed it";
+        reason = "warp controller not resolvable off M (not in space, or ship half-built) "
+                 "-- retry after fully in space, or engage warp once via the orb to seed it";
         return false;
     }
     out_m = m;
-    // Build the warp path from the current target; 0 => no target / not ready yet.
-    if (actions::call_thiscall(game::addr::WarpPathBuild, radar, nullptr, 0) == 0) {
+    // Build the warp path from the current target. The native builder returns a bool in
+    // its LOW byte (the game tests `== '\0'`); a false return means "path not finished
+    // building" (no nav targeted, or still building) -- do NOT send in that case. Mask to
+    // the low byte so a dirty high EAX can't be misread as success.
+    if ((actions::call_thiscall(game::addr::WarpPathBuild, radar, nullptr, 0) & 0xFF) == 0) {
         reason = "warp path not ready (no nav targeted, or still building)";
         return false;
     }
-    uint32_t nav_list = mem::u32(m + game::world::navlist);
+    // Mirror the orb handler's packet build exactly: navId is an inline VALUE (stored
+    // verbatim, never dereferenced by the ctor -- so any value, incl. small ones, is
+    // safe); navVec is a POINTER to the just-built nav-node vector, which the ctor CLONES
+    // (so it must be non-null or the clone faults dereferencing it).
+    uint32_t nav_id = mem::u32(m + game::world::navlist); // *(SC + 0x1138), inline value
     uint32_t nav_vec = actions::call_thiscall(game::addr::WarpNavVec, radar, nullptr, 0);
-    if (!nav_list || !nav_vec) {
-        reason = "warp nav list/vector empty";
+    if (!nav_vec) {
+        reason = "warp nav vector not built";
         return false;
     }
-    uint32_t pkt[5] = {0, 0, 0, 0, 0}; // caller-owned WarpPacket object storage
-    uint32_t ctor_args[2] = {nav_list, nav_vec};
+    // Caller-owned WarpPacket storage. The ctor writes through +0x10 (needs >=0x14 bytes)
+    // and installs the packet vtable; CmdSend serializes it through that vtable. 0x20 for
+    // margin, zero-initialized.
+    uint32_t pkt[8] = {0};
+    uint32_t ctor_args[2] = {nav_id, nav_vec};
     actions::call_thiscall(game::addr::WarpPacketCtor, (uintptr_t)pkt, ctor_args, 2);
     uint32_t snd[1] = {(uint32_t)(uintptr_t)pkt};
     actions::call_thiscall(game::addr::CmdSend, m, snd, 1);
@@ -1630,6 +1706,45 @@ static int l_warp(lua_State* L) {
 // enb.warp (needs a resolvable path, which still holds while warping).
 static int l_warp_stop(lua_State* L) {
     return l_warp(L);
+}
+
+// enb.warp_radar() -> { hooked=<ptr>, resolved=<ptr> }. Read-only diagnostic: the
+// radar controller as captured by the WarpPathBuild hook (0 until a real orb engage)
+// and as resolved+validated off M by resolve_warp_radar (0 if the structure does not
+// check out). Makes NO native call -- purely for confirming the offset resolution is
+// sound before trusting enb.warp. A non-zero resolved value means enb.warp can engage
+// with zero screen interaction; equal hooked+resolved values once both are set proves
+// the offset resolves to the same object the game passes.
+static int l_warp_radar(lua_State* L) {
+    using namespace game::addr::warp;
+    uintptr_t m = hooks::world_mgr();
+    lua_newtable(L);
+#define WR_SET(name, val)                                                                          \
+    do {                                                                                           \
+        lua_pushinteger(L, (lua_Integer)(val));                                                    \
+        lua_setfield(L, -2, name);                                                                 \
+    } while (0)
+    WR_SET("hooked", hooks::warp_radar_ctrl());
+    WR_SET("m", m);
+    WR_SET("resolved", m ? resolve_warp_radar(m) : 0);
+    // Intermediate chain, for diagnosing a 0 resolve (all guarded reads, no native call):
+    // M -> MainView -> radar.
+    uintptr_t mainview = m ? mem::ptr(m + mainview_on_m) : 0;
+    WR_SET("mainview", mainview);
+    uintptr_t radar = mainview ? mem::ptr(mainview + radar_in_mainview) : 0;
+    WR_SET("radar", radar);
+    uintptr_t m0 = radar ? mem::ptr(radar) : 0;
+    WR_SET("m0", m0);
+    uintptr_t vt = m0 ? mem::ptr(m0) : 0;
+    WR_SET("vt", vt);
+    WR_SET("vt_code", vt ? (mem::is_code(vt) ? 1 : 0) : 0);
+    WR_SET("getter", vt ? mem::ptr(vt + getdata_vtoff) : 0);
+    WR_SET("getter_code", vt ? (mem::is_code(mem::ptr(vt + getdata_vtoff)) ? 1 : 0) : 0);
+    WR_SET("ts", m0 ? mem::ptr(m0 + subsys) : 0);
+    WR_SET("navvec", radar ? mem::ptr(radar + nav_vec) : 0);
+    WR_SET("navvec2", radar ? mem::ptr(radar + nav_vec2) : 0);
+#undef WR_SET
+    return 1;
 }
 
 // enb.dist(...) -> number | nil. Straight-line distance, three call shapes:
@@ -2936,6 +3051,7 @@ void open(lua_State* L) {
                                    {"undock", l_undock},
                                    {"warp", l_warp},
                                    {"warp_stop", l_warp_stop},
+                                   {"warp_radar", l_warp_radar},
                                    {"dist", l_dist},
                                    {"objects", l_objects},
                                    {"navs", l_navs},
