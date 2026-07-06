@@ -3664,3 +3664,31 @@ moot; the SOLVED block above is the truth):**
   controls still appear (the native hover path polls the cursor, which a message swallow cannot stop)
   -- confirm this is acceptable, or flag it for the engine-level gadget-disable follow-up.
 - **Setup**: redeploy the freya-hud mod (or DEBUG auto-refresh / `/run reload()`), log in, in space.
+
+### [ ] CV-PB62-TIMER -- timed missions arm a countdown and auto-fail+free the slot on expiry (PB-62)
+
+- **Status**: NOT YET IMPLEMENTED. This entry pre-registers the wire check that gates the fix, so the
+  encoding gets pinned BEFORE the server populates the field. The PB-62 diagnosis is complete (see
+  plans/41): the mission-progression engine is correct and Nommos Adults (mob_id 977) are reachable;
+  the one real defect is that the `time="1200"` mission timer is never armed, so no countdown shows
+  and (with `forfeitable="0"`) the slot is permanently stuck.
+- **Planned change**: parse the `time=` mission attribute into `MissionTree` (new `TimeLimit`), and on
+  accept (PlayerMissions.cpp:462) populate the EXISTING client-facing `_Mission` Aux fields
+  `IsTimed` / `StartTime` / `ExpirationTime` (AuxClasses/AuxMission.h) plus tick-expire the mission
+  (auto-fail + free slot) in the live player update. Reuses the current Aux packet layout -- no new
+  bytes on the wire, only fields the client already parses get non-zero values.
+- **Why the CLI/integration suite does NOT close this**: the CLI can pin the Aux packet BYTES, but only
+  the real Win32 client proves the countdown RENDERS correctly (right units/epoch) and that an expired
+  mission clears the PDA slot so the player can re-accept. The whole point of the fix is the client's
+  timer UI + slot recovery.
+- **Blocker to resolve first**: the client's expected encoding of `_Mission.ExpirationTime` /
+  `StartTime` (seconds-remaining? absolute Unix seconds? server tick ms?) is NOT pinned. Get a capture
+  of a real timed-mission Aux packet (retail or a known-good server) and add a CaptureReplay fixture
+  that locks the encoding. Do NOT arm the fields blind -- a wrong epoch renders a garbage countdown.
+- **What to look for (real client)**: (1) Accept a timed mission (Build Shield, mission 130) -> the PDA
+  shows a ~20:00 countdown ticking down. (2) Let it expire -> the mission auto-fails, the slot frees,
+  and the mission can be re-accepted from Orkael. (3) A non-timed mission shows NO countdown and never
+  auto-fails (regression guard). (4) `forfeitable="0"` missions still cannot be manually abandoned
+  mid-timer, but expiry now recovers the slot.
+- **Setup**: rebuild the server (`just rebuild server`), accept mission 130 at Orkael Lazarra (Trin
+  station, Akerons Gate), observe the PDA timer, then wait out or shorten `time=` for the test.
