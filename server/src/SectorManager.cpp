@@ -30,6 +30,7 @@
 #include "MemoryHandler.h"
 #include "ObjectManager.h"
 #include "UDPConnection.h"
+#include <net7/DtlsTransport.h>
 #include "PacketMethods.h"
 #include <cstring>     // std::memset for pthread_t init (Phase M)
 #include <cerrno>      // strerror in pthread_create error path
@@ -42,6 +43,7 @@ SectorManager::SectorManager(ServerManager *server_mgr)
     m_ServerMgr = server_mgr;
     m_SectorData = NULL;
     m_SectorConnection = NULL;
+    m_ParkedDtls = NULL;
     m_SectorID = -1;
     m_Port = -1;
 	m_IPAddr = -1;
@@ -149,6 +151,14 @@ void SectorManager::DropListener()
 	if (m_SectorConnection)
 	{
 		m_SectorConnection->StopReceiver();
+		// Preserve the DTLS transport across the park so the client-side proxy's
+		// established session to this port keeps working when the sector restarts
+		// on the same deterministic port. DetachDtls nulls m_Dtls on the old
+		// connection so the delete below does NOT tear down the SSL associations;
+		// StartListener re-adopts m_ParkedDtls on the rebound socket. StopReceiver
+		// has joined the recv thread and TeardownSector already stopped the event
+		// thread, so nothing is mid-Feed/SendApp while we hand the pointer off.
+		m_ParkedDtls = m_SectorConnection->DetachDtls();
 		delete m_SectorConnection;
 		m_SectorConnection = NULL;
 		m_Port = -1;
@@ -170,6 +180,11 @@ void SectorManager::ReStartListener()
 SectorManager::~SectorManager()
 {
 	delete m_SectorConnection;
+	// If the sector was parked when the manager is destroyed, the DTLS transport
+	// lives on m_ParkedDtls (not on any connection), so free it here. While online
+	// it is owned by m_SectorConnection and freed by the delete above; the two are
+	// mutually exclusive, so this never double-frees.
+	delete m_ParkedDtls;
 }
 
 long SectorManager::GetSectorNextObjID()
@@ -232,6 +247,19 @@ bool SectorManager::StartListener(short port)
 		delete m_SectorConnection;
 		m_Port = -1;
 		return false;
+	}
+
+	// If this sector was parked (see DropListener), re-install the DTLS transport
+	// preserved from the pre-park listener BEFORE StartReceiver -- so the recv path
+	// reuses the existing per-peer SSL associations instead of minting a fresh
+	// transport the client-side proxy has never handshaked with. Must precede
+	// StartReceiver, whose `if (!m_Dtls) m_Dtls = MakeServerDtlsTransport()` only
+	// mints a new one when none was adopted. (Plaintext mode: m_ParkedDtls is null,
+	// so this is a no-op and the cleartext path is unchanged.)
+	if (m_ParkedDtls)
+	{
+		m_SectorConnection->AdoptDtls(m_ParkedDtls);
+		m_ParkedDtls = NULL;
 	}
 
 	// Receiver thread is no longer auto-started in the constructor; start

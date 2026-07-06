@@ -35,6 +35,7 @@ class SectorMemoryManager;
 class Object;
 class CMob;
 struct MOBData;
+namespace net7 { class DtlsTransport; }
 
 typedef std::vector<TimeNode*> TimeNodeVec;
 typedef std::vector<Object*> ObjectList;
@@ -214,6 +215,13 @@ private:
     SectorData    * m_SectorData;           // Pointer to Sector Data for THIS sector
     ServerManager * m_ServerMgr;
     UDP_Connection* m_SectorConnection;     // UDP connection for sector
+    // Phase AI Stage 2: DTLS transport preserved across a park/restart cycle.
+    // DropListener() stashes the pre-park listener's transport here (instead of
+    // letting ~UDP_Connection destroy it) and StartListener() re-installs it on
+    // the rebound socket, so the client-side proxy's established DTLS session to
+    // this sector's port survives the park and its C->S login is not dropped.
+    // Non-null ONLY while a sector is parked; owned here until re-adopted or freed.
+    net7::DtlsTransport* m_ParkedDtls;
     short           m_Port;
 	long			m_IPAddr;
 	bool	        m_IsSectorServerReady;

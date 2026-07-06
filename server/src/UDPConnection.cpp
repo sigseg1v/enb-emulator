@@ -91,6 +91,28 @@ void UDP_Connection::StartReceiver()
 	pthread_create(&m_Thread, NULL, &LaunchUDPRecvThread, (void *) this);
 }
 
+// Phase AI Stage 2: surrender ownership of the DTLS transport so a park (which
+// deletes this UDP_Connection) does NOT tear down the per-peer SSL associations.
+// The caller (SectorManager::DropListener) stashes the returned transport and
+// re-installs it via AdoptDtls on the rebound listener. Safe only when no recv/
+// send thread is in flight (StopReceiver has joined the recv thread and the
+// sector event thread is already stopped by TeardownSector before DropListener).
+net7::DtlsTransport* UDP_Connection::DetachDtls()
+{
+	net7::DtlsTransport *d = m_Dtls;
+	m_Dtls = nullptr;
+	return d;
+}
+
+// Install a transport detached from the pre-park listener. Must be called BEFORE
+// StartReceiver(), whose `if (!m_Dtls) m_Dtls = MakeServerDtlsTransport()` then
+// sees a non-null m_Dtls and reuses the adopted associations instead of minting
+// a fresh (and, to the proxy, unknown) transport.
+void UDP_Connection::AdoptDtls(net7::DtlsTransport *dtls)
+{
+	m_Dtls = dtls;
+}
+
 UDP_Connection::~UDP_Connection()
 {
 //	LogMessage("UDP connection terminated.\n");

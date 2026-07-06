@@ -83,6 +83,19 @@ public:
 	// to quiesce a sector listener before the obj_manager it reads is purged.
 	void                StopReceiver();
 
+	// Phase AI Stage 2: hand this listener's DTLS transport off across a park/
+	// restart cycle. DetachDtls() surrenders ownership of m_Dtls (nulling it so
+	// ~UDP_Connection will NOT tear down its per-peer SSL associations); AdoptDtls()
+	// installs a previously-detached transport BEFORE StartReceiver() so the recv
+	// path reuses it instead of minting a fresh one. This preserves the client-side
+	// proxy's established DTLS session to a sector's deterministic port when that
+	// sector is parked (socket closed) and later restarted (socket rebound) -- the
+	// proxy keys its association by (server_ip, port) and reuses it, so a fresh
+	// server transport would leave the proxy sending under keys the server no
+	// longer has, silently dropping every C->S datagram (incl. the sector login).
+	net7::DtlsTransport* DetachDtls();
+	void                AdoptDtls(net7::DtlsTransport *dtls);
+
 	bool				IsRegisteredIP(long addr);
 	void				RegisterIP(long addr);
 

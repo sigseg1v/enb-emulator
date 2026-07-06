@@ -3533,3 +3533,35 @@ moot; the SOLVED block above is the truth):**
 - **STILL TO VERIFY after the fix (real clients, over real latency)**: re-run the prod repro
   (leader gates flying a formation, member auto-carried) and confirm the member survives the
   reform on the far side and snaps into the slot -- no client crash.
+
+## [ ] CV-AI-DTLS-PARK -- gating into a PARKED-then-RESTARTED sector completes on a DTLS deploy
+
+- **PROD BUG this fixes (AI-12, 2026-07-05)**: on the online (DTLS-required) server two grouped
+  multibox players wedged gating Earth -> Asteroid Belt Alpha (sector 1076, deterministic
+  port 3504). Prod logs showed cold-start works and online re-visit works, but a gate into a
+  sector that had been idle-PARKED and then restarted produced NO "Handle Sector Login" line --
+  the client's sector-login datagram silently failed to decrypt server-side.
+- **What changed (SERVER, no proxy/client redeploy)**: preserve the sector listener's
+  `net7::DtlsTransport` across the Phase-AI park/restart cycle instead of destroying it.
+  `UDP_Connection::DetachDtls/AdoptDtls` + `SectorManager::m_ParkedDtls`; `DropListener` stashes
+  the transport, `StartListener` re-adopts it on the rebound socket before StartReceiver. The
+  client-side proxy keys its DTLS association by (server_ip, port) and, once Established, never
+  re-handshakes -- so a fresh server transport on the same port left the proxy encrypting under
+  keys the server no longer had, dropping every C->S datagram incl. the sector login. Keeping the
+  server transport alive across the park makes the proxy's established session keep working.
+- **Why no CLI byte-pin**: NOT a wire-format change. No new/changed bytes on the wire -- the same
+  sector-login datagram flows; the only change is DTLS session lifetime on the proxy<->server leg.
+  The mechanism is instead pinned by two deterministic gtests in
+  `freya/tests/server/protocol/dtls_transport_test.cpp` (fresh transport drops the reused-session
+  login; preserved transport delivers it byte-for-byte).
+- **Why the CLI/integration suite can't fully validate it**: the local docker default is PLAINTEXT
+  (NET7_DTLS_ALLOW_PLAINTEXT), where the bug cannot occur and the fix is a no-op. Reproducing the
+  wedge needs DTLS enabled + certs provisioned + a real client that gates, sits until the target
+  sector idle-parks (~5 min default), then gates back. Only a real client on a DTLS deploy
+  exercises the full path.
+- **What to look for (real client on a DTLS deploy, e.g. the online server after the owner
+  redeploys)**: gate into a sector, leave it (all players out) long enough for idle teardown to
+  PARK it (server log `TeardownSector: parking idle sector_id=...`), then gate back into that same
+  sector. Expected: the far-side server logs `Handle Sector Login` + `Sector login for player` and
+  the client loads into space normally -- no loading-screen wedge. Before the fix the restarted
+  sector produced no "Handle Sector Login" and the client hung.

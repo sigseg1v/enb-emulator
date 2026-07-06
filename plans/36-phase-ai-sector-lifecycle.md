@@ -314,6 +314,44 @@ The naive AI-9 "free/reset obj_manager" is UNSAFE as originally written. Facts:
   (20:36+) log window is error-free. Boot-time TalkTree/mission errors are
   pre-existing and unrelated. RSS reclaim = the 111 freed objects per parked
   space sector (the honest spin-DOWN number).
+- [x] AI-12 (DTLS park/restart session-preservation fix, 2026-07-05):
+  **PROD BUG.** On the online (DTLS-required) server two grouped multibox
+  players wedged gating Earth -> Asteroid Belt Alpha (sector 1076, port 3504).
+  Prod logs proved three cases: cold-start of a sector works (fresh handshake),
+  online re-visit of a live sector works (both sides keep the session), but a
+  gate into a PARKED-then-RESTARTED sector produced NO "Handle Sector Login"
+  line at all -- the client's sector-login datagram never decrypted.
+  ROOT CAUSE: the client-side proxy keys its DTLS association by
+  (server_ip, port) and, once Established, `UDPClient::DtlsKickHandshake` is a
+  no-op -- it never re-handshakes, it just resends app records under the
+  existing session. AI-9's park does `delete m_SectorConnection` ->
+  `~UDP_Connection` -> `delete m_Dtls`, destroying the server's per-peer SSL
+  associations; the restart binds a FRESH transport on the same deterministic
+  port. The proxy keeps sending under the stale session -> the fresh server
+  cannot decrypt -> every C->S datagram (incl. the sector login) is silently
+  dropped -> client wedges on the loading screen.
+  FIX (server-side, no proxy redeploy -- fixes all deployed clients and does
+  NOT risk the working online-re-visit path a proxy-side always-rehandshake
+  would): preserve `m_Dtls` across the park/restart cycle instead of destroying
+  it. `UDP_Connection::DetachDtls()` surrenders ownership (nulls m_Dtls so
+  ~UDP_Connection tears down nothing); `AdoptDtls()` re-installs it BEFORE
+  StartReceiver so the recv path reuses it instead of minting a fresh one.
+  `SectorManager::DropListener()` stashes the transport in a new `m_ParkedDtls`
+  member between StopReceiver() and delete; `StartListener()` re-adopts it after
+  the bind, before StartReceiver. Mutually exclusive with m_SectorConnection so
+  ~SectorManager frees whichever is live (no double-free). Plaintext (local
+  docker default) is unaffected: m_Dtls is null there, so DetachDtls returns
+  null and the AdoptDtls path is guarded off. NOT a wire-format change -- the
+  same bytes keep flowing; the fix is DTLS session lifetime only.
+  VERIFIED locally: `docker compose build server` compiles clean; 2 new gtests
+  in `dtls_transport_test.cpp` reproduce the exact mechanism --
+  `ParkedRestartFreshServerTransportDropsReusedProxySession` proves a fresh
+  server transport drops the reused-session login (empty app_data = the wedge),
+  `ParkedRestartPreservedServerTransportKeepsReusedProxySession` proves the
+  preserved transport delivers the login byte-for-byte. Full DTLS suite (6
+  tests) green. Real-client end-to-end confirmation: plans/29 CV-AI-DTLS-PARK
+  (local default is plaintext, where the bug can't occur, so only a real client
+  on a DTLS deploy exercises the full gate/park/gate).
 
 ## Client-verification entries (plans/29)
 
