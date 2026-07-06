@@ -263,8 +263,8 @@ TEST(DtlsTransport, ParkedRestartFreshServerTransportDropsReusedProxySession) {
         << "proxy lost its association -- it would re-handshake and mask the bug";
 
     const std::string login = "sector-login-under-reused-session";
-    DtlsStep s = client.SendApp(srv_peer, reinterpret_cast<const uint8_t*>(login.data()),
-                                login.size());
+    DtlsStep s =
+        client.SendApp(srv_peer, reinterpret_cast<const uint8_t*>(login.data()), login.size());
     ASSERT_FALSE(s.fatal) << client.LastError();
     ASSERT_FALSE(s.to_send.empty());
 
@@ -272,8 +272,8 @@ TEST(DtlsTransport, ParkedRestartFreshServerTransportDropsReusedProxySession) {
     // The record was encrypted under an epoch/keys the fresh server never
     // negotiated: it CANNOT surface as application data. This is the wedge.
     EXPECT_TRUE(r.app_data.empty())
-        << "fresh server unexpectedly decrypted a reused-session record ("
-        << r.app_data.size() << " datagrams)";
+        << "fresh server unexpectedly decrypted a reused-session record (" << r.app_data.size()
+        << " datagrams)";
 
     std::remove(cf.cert.c_str());
     std::remove(cf.key.c_str());
@@ -305,8 +305,8 @@ TEST(DtlsTransport, ParkedRestartPreservedServerTransportKeepsReusedProxySession
     ASSERT_TRUE(server.Established(cli_peer));
 
     const std::string login = "sector-login-after-park";
-    DtlsStep s = client.SendApp(srv_peer, reinterpret_cast<const uint8_t*>(login.data()),
-                                login.size());
+    DtlsStep s =
+        client.SendApp(srv_peer, reinterpret_cast<const uint8_t*>(login.data()), login.size());
     ASSERT_FALSE(s.fatal) << client.LastError();
     ASSERT_FALSE(s.to_send.empty());
 
