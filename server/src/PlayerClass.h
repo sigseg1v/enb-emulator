@@ -804,6 +804,8 @@ private:
     void        ProposeMissionTree(long mission_id, long response);
 	void		ProposePushMissionTree(long mission_id, long response);
     void        RemoveMission(long mission_slot);
+    void        ExpireStaleTimedMissions();                     // PB-62: free the slot of any non-forfeitable timed mission past its <Mission time=> limit
+    bool        IsTimedMissionExpired(long mission_slot);       // testable predicate: slot holds a non-forfeitable timed mission whose limit has elapsed
     void        EndStageReward(long mission_id, long stage, long slot = -1);
 	bool		EndStageItemCheck(MissionTree *mTree, long stage);
     bool        CheckEndStageConditions(AuxMission *m);
@@ -1349,6 +1351,7 @@ private:
 	long			  m_PushMissionUID;
 	long			  m_CompletedMissions[MAX_MISSION_ID/32]; //removed some more STL
 	MissionDataNode	  m_MissionNodes[MAX_MISSIONS];
+	u32				  m_MissionStartTick[MAX_MISSIONS]; // GetNet7TickCount() when each slot's mission was accepted; 0 = untracked. Server-only (never serialized, not persisted -- resets on relogin). Drives non-forfeitable-timed-mission spoilage.
 
 	// trading
     long			  m_TradeID;			// ID of person you are trading with

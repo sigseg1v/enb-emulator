@@ -921,6 +921,17 @@ void Player::LoadMissionStatus(sql_query_c *query)
 			m->SetMissionData(mission_flags);
 			m->SetIsForfeitable(mission->forfeitable);
 
+			// PB-62: arm the spoilage clock at login for a timed, non-forfeitable
+			// mission loaded from save. The start tick is never persisted, so a
+			// loaded mission gets a fresh full window from login -- this both makes
+			// the timer survive relogin and gives an already-stuck player (from
+			// before this fix) a bounded path back: the slot frees on their next
+			// visit to the contact once the window elapses.
+			if (mission->time_limit > 0 && !mission->forfeitable)
+				m_MissionStartTick[mission_slot] = GetNet7TickCount();
+			else
+				m_MissionStartTick[mission_slot] = 0;
+
 			//load the mission descriptions
 			for (int j=1; j<=stage_num; j++)
 			{

@@ -163,6 +163,7 @@ bool TalkTreeParser::ParseMissions(MissionTree *tree, char *data)
 	tree->Nodes.clear();
 	tree->NumNodes = 0;
 	tree->Job_Category = 0;
+	tree->time_limit = 0;
 
 	TempBranch = MissionBranch.getChildNode("Mission");
 
@@ -175,6 +176,11 @@ bool TalkTreeParser::ParseMissions(MissionTree *tree, char *data)
 		tree->forfeitable = false;
 	}
 	
+	// <Mission time="N"> -- N seconds before a *non-forfeitable* timed mission
+	// spoils and its slot is freed (see Player::ExpireStaleTimedMissions). Untimed
+	// missions and forfeitable timed ones keep their existing runtime behaviour.
+	tree->time_limit = intVal(MissionBranch.getAttribute("time"));
+
 	tree->Job_Category = intVal(MissionBranch.getAttribute("jobcategory"));
 
 	if (tree->MissionID == 500)

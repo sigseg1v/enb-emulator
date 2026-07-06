@@ -202,6 +202,7 @@ void Player::ResetPlayer()
 	memset(m_BaseID, 0, sizeof(m_BaseID));
 	memset(&m_Database, 0, sizeof(m_Database));
 	memset(m_MissionNodes, 0, sizeof(m_MissionNodes));
+	memset(m_MissionStartTick, 0, sizeof(m_MissionStartTick)); // PB-62: no spoilage clocks armed until a timed mission is accepted/loaded
 
 	PlayerIndex()->Reset();
 	PlayerIndex()->ClearFlags();

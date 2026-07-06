@@ -68,6 +68,18 @@ target_include_directories(auth_wrapper_test PRIVATE
 )
 target_link_libraries(auth_wrapper_test PRIVATE GTest::gtest_main)
 
+# --- Mission: non-forfeitable timed-mission spoilage decision (PB-62) ------
+# Drives the SAME MissionTimedOut() Player::IsTimedMissionExpired calls, so the
+# spoilage arithmetic + tick-wrap + guard conditions are pinned without standing
+# up a Player / ServerManager / mission DB. Header-only.
+add_executable(mission_timer_test
+    mission/mission_timer_test.cpp
+)
+target_include_directories(mission_timer_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../server/src
+)
+target_link_libraries(mission_timer_test PRIVATE GTest::gtest_main)
+
 # --- DB: live Postgres smoke (env-gated) ---------------------------------
 # Built only if libpq is available; the test itself self-skips at runtime
 # when NET7_TEST_DB_DSN is unset, so it's safe to keep enabled by default.
@@ -270,3 +282,4 @@ include(GoogleTest)
 gtest_discover_tests(smoke_test)
 gtest_discover_tests(header_layout_test)
 gtest_discover_tests(auth_wrapper_test)
+gtest_discover_tests(mission_timer_test)

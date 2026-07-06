@@ -23,6 +23,7 @@
 #include <net7/Opcodes.h>
 #include "TalkTreeParser.h"
 #include "SectorManager.h"
+#include "MissionTimer.h"
 
 
 //'One method for all mission increments' is clearly not a good approach after all.
@@ -393,6 +394,11 @@ bool Player::MissionStageNeeded(long completionIndex, long mission_data)
 
 long Player::GetSlotForMission(long mission_id, bool job)
 {
+	// PB-62: free any non-forfeitable timed mission whose spoilage clock has run
+	// out BEFORE we look for a free slot / reject a re-acquire, so a player who
+	// walks back to the contact can re-take the mission into the freed slot.
+	ExpireStaleTimedMissions();
+
 	long mission_slot = -1;
 	int i;
 	for (i = 0; i < MAX_MISSIONS; i++)
@@ -467,6 +473,16 @@ long Player::AssignMission(long mission_id)
 		m->SetStageCount(mission->NumNodes);
 		m->SetSummary(mission->summary);
 		m->SetIsForfeitable(mission->forfeitable);
+
+		// PB-62: start the server-side spoilage clock for a timed, non-forfeitable
+		// mission (e.g. mission 130 "Learn Build Shield Skill", time="1200"). Left
+		// untracked (0) for untimed or forfeitable missions -- those keep their
+		// existing behaviour. This tick is never serialized and not persisted, so a
+		// relogin resets the clock (leniency toward the player).
+		if (mission->time_limit > 0 && !mission->forfeitable)
+			m_MissionStartTick[mission_slot] = GetNet7TickCount();
+		else
+			m_MissionStartTick[mission_slot] = 0;
 
 		m->Stages.Stage[0].SetText(mission->Nodes[1]->description); //load the first stage description
 
@@ -1608,8 +1624,60 @@ void Player::RemoveMission(long mission_slot)
 			SaveRemoveMission(m->GetDatabaseID());
 			m->Clear();
 			m->SetStageNum(0);
+			m_MissionStartTick[mission_slot] = 0; // PB-62: stop the spoilage clock for this slot
 			SendAuxPlayer();
 		}
+	}
+}
+
+// PB-62: a non-forfeitable timed mission (only mission 130 "Learn Build Shield
+// Skill" today, time="1200") otherwise pins its slot forever -- MissionDismiss
+// refuses to forfeit it and, without this, no clock ever frees it, so the player
+// "cannot abandon+reacquire". The mission text names the intended escape: the
+// samples spoil after the time limit ("you'll have to get some more fresh
+// samples and try again"). This predicate reports whether such a slot's clock
+// has run out. Untimed missions, forfeitable missions, and empty/untracked slots
+// are never expired here (they keep their existing behaviour).
+bool Player::IsTimedMissionExpired(long mission_slot)
+{
+	if (mission_slot < 0 || mission_slot >= MAX_MISSIONS)
+		return false;
+
+	AuxMission *m = &m_PlayerIndex.Missions.Mission[mission_slot];
+	if (m->GetStageNum() == 0)              // slot empty
+		return false;
+	if (m_MissionStartTick[mission_slot] == 0) // clock never armed for this slot
+		return false;
+
+	MissionTree *tree = g_ServerMgr->m_Missions.GetMissionTree(m->GetDatabaseID());
+	if (!tree)
+		return false;
+
+	return MissionTimedOut(GetNet7TickCount(), m_MissionStartTick[mission_slot],
+	                       tree->time_limit, tree->forfeitable);
+}
+
+// PB-62: called at the reacquire chokepoint (top of GetSlotForMission, which the
+// mission-start NPC talk path runs through) so the stale mission's slot is freed
+// on the player's OWN connection thread at the exact moment they walk back to the
+// contact to try again -- no periodic server-loop pulse, no cross-thread
+// RemoveMission.
+void Player::ExpireStaleTimedMissions()
+{
+	for (long slot = 0; slot < MAX_MISSIONS; slot++)
+	{
+		if (!IsTimedMissionExpired(slot))
+			continue;
+
+		AuxMission *m = &m_PlayerIndex.Missions.Mission[slot];
+		char name[256];
+		strncpy(name, m->GetName(), sizeof(name) - 1);
+		name[sizeof(name) - 1] = 0;
+
+		LogMessage("Timed mission (%d) %s spoiled for %s (slot %ld) -- freeing slot\n",
+			m->GetDatabaseID(), name, Name(), slot);
+		RemoveMission(slot); // clears the slot + its start tick and re-sends AuxPlayer
+		SendVaMessageC(17, "The time-sensitive mission '%s' has expired. Return to the contact who offered it to try again.", name);
 	}
 }
 
