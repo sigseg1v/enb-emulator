@@ -3579,3 +3579,26 @@ moot; the SOLVED block above is the truth):**
   sector. Expected: the far-side server logs `Handle Sector Login` + `Sector login for player` and
   the client loads into space normally -- no loading-screen wedge. Before the fix the restarted
   sector produced no "Handle Sector Login" and the client hung.
+
+### [ ] CV-PB68 -- Manufacture terminal refuses a no-recipe item + a real recipe still builds (PB-68/PB-69)
+
+- **Change**: `Player::AllowManufacture` (server/src/PlayerManufacturing.cpp) now rejects any item
+  whose six component slots are all `<= 0` (an item with no `item_manufacture` row loads all
+  components as `0`; a row's unused slots are `-1`). This gate fronts both manufacture setup
+  (`HandleManufactureSetItem:360`) and analyze/dismantle setup (`AnalyseDismantleSetItem:191`).
+  `HasComponents` also now returns false on an empty bill of materials (defense-in-depth on the
+  credit-charge path). The analyze/dismantle grant loops changed from `!= -1` to `> 0` so an empty
+  slot (`0`) is never granted as a phantom template-0 item. Closes the money-printing exploit
+  (PB-68) and the "analyze a null-parts item, learn an empty pattern, lose the item" behavior
+  (PB-69). NOT a wire-format change (no bytes the client parses change); a "tighten toward correct"
+  server change -- it only rejects an input that should never have succeeded.
+- **Why the CLI/integration suite does NOT close this**: the manufacture/analyze terminal flow is a
+  station-interior UI the CLI suite does not drive; only the real client opens a manu terminal.
+- **What to look for (real client)**: at a manufacturing terminal, (1) select one of the 196
+  no-recipe items (e.g. a manufacturable item with no icon) -- it must NOT be buildable and must
+  NOT charge credits or produce anything (before the fix it built for credits alone, printing
+  money); (2) analyze/dismantle such an item -- it must be refused rather than consuming the item to
+  "learn" an empty pattern; (3) a NORMAL, real recipe (an item with a proper bill of materials) must
+  still set up, consume its materials, charge credits, and build exactly as before -- confirm the
+  guard did not over-block legitimate manufacturing; (4) no crash on any of the above.
+- **Setup**: `just rebuild server && just play-local`, log in, dock, open a manufacturing terminal.
