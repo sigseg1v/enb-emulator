@@ -49,8 +49,23 @@ Legend: [x] done+built, [~] in progress, [ ] todo, [!] blocked.
       x,y,z, dist}. Position comes through world_pos (the vtable locatable getter) which
       works on ANY locatable object, so it is NOT the unvalidated flat player pos offset.
 - [x] `enb.navs()`         -- enb.objects() filtered to nav-ish class tokens, dist-sorted.
-      Nav SELECTION is enb.request_target(gid) (already shipped) -- no separate select_nav
-      wrapper (would be dead-code duplication). See client-verification CV-BOT-NAVS below.
+      See client-verification CV-BOT-NAVS below.
+- [!] `enb.select_nav(dir)` -- BLOCKED/NEEDED. The earlier claim that request_target(gid)
+      covers nav selection so select_nav "would be dead-code duplication" is WRONG for the
+      survey use case, and this was proven live (2026-07-05): enb.navs() walks the IN-RANGE
+      entity hash and request_target(gid) -> entity_by_gid(gid) only resolves an in-range
+      contact. Parked at the Earth gate in Luna, enb.navs() returns just the 2 gates; the
+      ~22 cluster navs are out of scanner range, so they have no live entity and CANNOT be
+      request_target'd -- yet crossing to them is the whole survey. A player reaches them
+      with the W/D/C nav-target keybinds, which cycle the RADAR CONTROLLER's selected nav
+      over the FULL NavigationList (all navs regardless of range); WarpPathBuild builds from
+      that radar selection. So select_nav must reproduce those radar nav-cycle handlers
+      (nearest / next-farther / next-closer), NOT wrap request_target. The radar `this` is
+      already statically resolved + structurally validated (looks_like_radar), so calling a
+      METHOD on it is far safer than the earlier guessed-ECX hang. Decomp mine for the
+      handler addresses + call convention + the radar's selected-nav offset is IN PROGRESS.
+      The NavigationList head is NOT M+0x1138 (that u32 is the scalar navId, observed 0x1f);
+      the full list hangs off the radar controller.
 
 ### New -- native (mined address/opcode; needs live validation)
 - [x] `enb.gate()`     -- COMPOSABLE after all: the gate button is avatar-command 0x12
@@ -171,8 +186,16 @@ plans/29:
       A deliberate Break Formation before gating suppresses the auto-reform.
 
 ## Skill rewrite (after the API lands + is live-validated)
-- [ ] `explore-sector`: replace W/D/C key enum + warp-orb click + map OCR with
+- [~] `explore-sector`: replace W/D/C key enum + warp-orb click + map OCR with
       enb.navs()/enb.select_nav()/enb.warp()/enb.dist(); keep the ledger/logging.
+      WIP driver written: scripts/drive_lua.py -- fully headless per-sector survey over the
+      enb.* channel (identity via enb.navs() names -> navdata.identify(); gate-cross via
+      enb.sector() id flip; arrival via nav.dist <= VISIT_K; select+warp via request_target
+      + enb.warp(); gate via request_target + enb.gate()). Reuses state.py ledger +
+      logaction.sh, so completion accounting is identical. Read-only path smoke-tested live
+      (channel/nav-parse/identify all green on Luna). NOT yet committed / wired: it can only
+      warp to IN-RANGE navs, so it needs enb.select_nav() (above) to reach the out-of-range
+      cluster and actually cross a sparse sector. Lands + gets wired once select_nav is in.
 - [ ] `login-to-client`: already mostly Lua (in-game truth via enb channel); replace the
       remaining coordinate clicks where a native exists.
 - [ ] Audit other skills (undock.sh, run-sector.sh, hangcheck.sh) for OCR/click paths that
@@ -223,3 +246,14 @@ plans/29:
   dev-mode DTLS-plaintext WARNING). Removed freya-groupbot/ and reverted the party_frame.lua
   groupbot hook (both now redundant/dead). CANNOT be marked tested: needs a live multi-client
   run (leader + members, formed, gating together) on LOCAL dev clients -- CV-BC-FORMATION-GATE.
+- 2026-07-05: enb.sector() shipped (cf6b2403) -- ground-truth current sector id at M+0x12f0,
+  the headless replacement for the explore-sector map-title OCR. Live-validated end to end:
+  warped to the Luna gate in Earth (id 1060), enb.gate(), id flipped 1060 -> 1015 (= Luna)
+  within 3s; new-sector navs repopulated. Confirms enb.sector() tracks across a gate AND
+  enb.gate() drives the full sector handoff headlessly.
+- 2026-07-05: Started the explore-sector Lua-channel driver (scripts/drive_lua.py) and hit
+  the real reachability gap: enb.navs()/request_target only see IN-RANGE navs, so a sparse
+  sector (parked at a gate) cannot be crossed without the radar nav-cycle. Corrected the
+  earlier "select_nav is dead-code duplication" claim (it was wrong), marked enb.select_nav
+  [!] as the true blocker, and launched a decomp mine for the W/D/C radar nav-cycle handlers.
+  Driver is written + read-only-smoke-tested but held uncommitted until select_nav lands.
