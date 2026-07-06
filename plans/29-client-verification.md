@@ -3602,3 +3602,19 @@ moot; the SOLVED block above is the truth):**
   still set up, consume its materials, charge credits, and build exactly as before -- confirm the
   guard did not over-block legitimate manufacturing; (4) no crash on any of the above.
 - **Setup**: `just rebuild server && just play-local`, log in, dock, open a manufacturing terminal.
+
+### [ ] CV-PB67 -- pressing `/` opens the Freya chat box, never the native chat window (PB-67)
+
+- **Change**: `freya-hud/chat.lua` -- the `not editing` input branch now catches the `/` keydown
+  (`VK_OEM_2` = 0xBF), calls `start_edit()`, and returns `true` to swallow it before the game
+  wndproc. The native slash-command chat window therefore never opens; the swallowed keydown makes
+  `hk_GetMessageA` synthesize the `WM_CHAR` for `/` and re-feed it (the same path every typed char
+  in the Freya box uses), so the box opens showing "/". Lua-only (script mod), no DLL rebuild.
+- **Why the CLI/integration suite does NOT close this**: input hooking / the Lua HUD is client-only;
+  no server or wire path is involved.
+- **What to look for (real client)**: (1) with no chat box open, press `/` -- the FREYA input box
+  must open with a single "/" already in it (not "//", and NOT the old native chat window popping
+  up); type a slash command (e.g. `/gen hi`) and confirm it routes normally. (2) With the Freya box
+  already open, `/` must insert a literal "/" into the line as any other character (it was already
+  swallowed while editing -- confirm no regression). (3) Enter still opens the box as before.
+- **Setup**: redeploy the freya-hud mod (or DEBUG auto-refresh), log in, in space.
