@@ -248,7 +248,7 @@ void Player::SectorReset()
     m_ProspectBeam = false;
     m_TractorBeam = false;
     m_WarpBroadcastTime = 0;
-    m_GateReformTick = 0;
+    m_GateReformDeadline = 0;
     RemoveProspectNodes();
     m_AttacksThisTick = 0;
     m_LogDockCoords = false;
@@ -2977,13 +2977,18 @@ void Player::CheckEventTimes(unsigned long current_tick)
 		}
 
 		// Deferred group-formation reform after a gate arrival (armed in
-		// FinishLogin). Fired here, ~3s after zone-in, so the just-arrived
-		// leader's ship-object CREATE has reached every member's client before
-		// the reform's FormationPositionalUpdate anchors the member on it.
-		if (m_GateReformTick > 0 && m_GateReformTick < current_tick)
+		// FinishLogin / by the leader). Poll GroupReformOnGate until it fires
+		// (returns true once the server has sent the leader's ship object to
+		// this member's client, so the FormationPositionalUpdate anchors on a
+		// ship the client has spawned) or the deadline passes. Firing on a
+		// blind timer raced the object CREATE and crashed the member client.
+		if (m_GateReformDeadline > 0)
 		{
-			m_GateReformTick = 0;
-			g_ServerMgr->m_PlayerMgr.GroupReformOnGate(this);
+			if (g_ServerMgr->m_PlayerMgr.GroupReformOnGate(this) ||
+			    current_tick > m_GateReformDeadline)
+			{
+				m_GateReformDeadline = 0;
+			}
 		}
 
 		//delay tractoring next ore until current tractor is complete
@@ -4016,18 +4021,19 @@ void Player::FinishLogin(bool udp)
 	// lands -- covering any arrival order. No-op unless the group has a saved
 	// formation (GroupReformOnGate guards on it).
 	//
-	// DEFERRED, not synchronous: the reform emits a FormationPositionalUpdate
-	// that anchors each member on the LEADER's ship. Running it here (right
-	// after SetInSpace) fired it before the just-arrived leader's ship-object
-	// CREATE had propagated to the member's client, so the member received a
-	// formation-follow for a ship it had not spawned -> unresolvable anchor ->
-	// client crash (confirmed in prod: member GrieverJE vanished the instant
-	// leader GrieverTW finished its sector login ~6s later). Arm a short timer
-	// instead; CheckEventTimes fires the reform once the object CREATE has had
-	// time to land on every member's client.
+	// DEFERRED + POLLED, not synchronous: the reform emits a
+	// FormationPositionalUpdate that anchors each member on the LEADER's ship.
+	// Running it here (right after SetInSpace) fired it before the just-arrived
+	// leader's ship-object CREATE had propagated to the member's client, so the
+	// member received a formation-follow for a ship it had not spawned ->
+	// unresolvable anchor -> client crash (confirmed in prod: member GrieverJE
+	// vanished the instant leader GrieverTW finished its sector login ~6s
+	// later). Arm the reform poll instead; CheckEventTimes retries every tick
+	// and only fires once the server has actually sent the leader's ship to
+	// this member (leader in the member's range list), not on a blind timer.
 	if (FromSector() > 900 && FromSector() <= 9999)
 	{
-		m_GateReformTick = GetNet7TickCount() + 3000; // 3s settle after zone-in
+		ArmGateReform();
 	}
 
 	//player->m_Effects.SendEffects(player);

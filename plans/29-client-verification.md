@@ -3503,12 +3503,22 @@ moot; the SOLVED block above is the truth):**
   is what crashed it. This is also why the earlier LOCAL multibox validation passed but prod
   crashed: local RTT is ~0 so the CREATE landed before the reform; over real internet latency
   it did not.
-- **Fix**: defer the reform. `FinishLogin` no longer calls `GroupReformOnGate` synchronously;
-  it arms `m_GateReformTick = GetNet7TickCount() + 3000`, and `Player::CheckEventTimes` fires
-  the reform ~3s after zone-in, by which point the just-arrived leader's ship CREATE has
-  reached every member's client. `server/src/PlayerClass.cpp` (FinishLogin + CheckEventTimes),
-  `server/src/PlayerClass.h` (new `m_GateReformTick`). No wire bytes changed (same
-  FormationPositionalUpdate, later); no CLI pin needed.
+- **Fix (poll-until-sent, not a blind timer)**: `FinishLogin` no longer calls
+  `GroupReformOnGate` synchronously -- it arms a reform poll (`ArmGateReform`, 15s deadline)
+  and `Player::CheckEventTimes` retries `GroupReformOnGate` every tick until it fires or the
+  deadline passes. The reform only fires for a member once `leader->PlayerInRangeList(member)`
+  is true -- i.e. the server has actually run `SendShipData(member)` for the leader, enqueuing
+  the leader's ship CREATE on THAT member's packet cache. Because the member's `FormUp`
+  enqueues the FormationPositionalUpdate on the same cache on a LATER tick (the poll only fires
+  after the range-list flag is set, and both run on the one sector thread), ordered delivery
+  guarantees the client spawns the anchor ship BEFORE it gets the formation update -- a real
+  ordering guarantee, not a latency guess. The leader-landed branch now ARMS each present
+  member's poll instead of forming them inline (removing the race at the source), and `FormUp`
+  carries the same `PlayerInRangeList` guard as an authoritative backstop for the native Form
+  Up button. `server/src/GroupManager.cpp` (GroupReformOnGate + FormUp), `server/src/PlayerClass.cpp`
+  (FinishLogin + CheckEventTimes + SectorReset), `server/src/PlayerClass.h`
+  (`m_GateReformDeadline` + `ArmGateReform`). No wire bytes changed (same
+  FormationPositionalUpdate, gated on the anchor being present); no CLI pin needed.
 - **STILL TO VERIFY after the fix (real clients, over real latency)**: re-run the prod repro
   (leader gates flying a formation, member auto-carried) and confirm the member survives the
   reform on the far side and snaps into the slot -- no client crash.

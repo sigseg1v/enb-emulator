@@ -1405,6 +1405,20 @@ bool PlayerManager::FormUp(long PID)
 			return true;
 		}
 
+		// Anti-crash guard (authoritative, covers the native Form Up button too):
+		// never anchor this member on the leader's ship until the server has
+		// actually sent that ship to the member's client. The positional update
+		// below tells the member's formation solver to fly relative to
+		// g->Member[0].GameID (the leader); if the client has not spawned that
+		// object it dereferences NULL and crashes (see CV-BC-FORMATION-GATE --
+		// the gate-reform path hit exactly this). leader->PlayerInRangeList(p)
+		// is true once the leader ran SendShipData to p. Fail silently; the
+		// gate-reform poll retries, and a manual Form Up in range already passes.
+		if (!leader->PlayerInRangeList(p))
+		{
+			return false;
+		}
+
 		int Form = g->Member[0].Formation;
 		// Lock formation
 		g->Member[i].Formation = Form;
@@ -1717,14 +1731,14 @@ bool PlayerManager::GroupReformOnGate(Player *p)
 	if (g->Member[0].GameID == p->GameID())
 	{
 		// Leader landed: re-establish the formation type + lock the leader, then
-		// form up every member ALREADY in this sector. This is what covers the
-		// common ordering -- members are handed off at the leader's gate-arm and
-		// usually land ~5s before the leader finishes the gate animation, so
-		// their own FinishLogin ran while the leader was not yet here and their
-		// FormUp no-op'd. Members that have not landed yet form up on their own
-		// arrival (leader is now present). SetFormation only locks the leader
-		// (members get Position -1), so the explicit FormUp per present member
-		// is required.
+		// (RE-)ARM the reform poll on every member ALREADY in this sector rather
+		// than forming them up directly here. Forming a member up inline raced
+		// the leader's just-broadcast ship-object CREATE to that member's client
+		// and crashed it (see FormUp / CV-BC-FORMATION-GATE). Each armed member
+		// polls its own precondition (leader's ship actually sent to it) and
+		// forms up when ready via the member branch below. Re-arming also
+		// rescues a member that had already given up waiting for a slow leader.
+		// SetFormation only locks the leader (members get Position -1).
 		long leaderSector = p->PlayerIndex()->GetSectorNum();
 		if (!SetFormation(p->GameID(), g->SavedFormation,
 		                  (char*)FormationTypeName(g->SavedFormation)))
@@ -1740,19 +1754,28 @@ bool PlayerManager::GroupReformOnGate(Player *p)
 			Player *m = GetPlayer(g->Member[x].GameID);
 			if (m && m->PlayerIndex()->GetSectorNum() == leaderSector)
 			{
-				FormUp(g->Member[x].GameID);
+				m->ArmGateReform();
 			}
 		}
 		return true;
 	}
 
-	// Member landed: rejoin the formation if the leader is already here.
-	// Otherwise the leader's own arrival (above) will form this member.
+	// Member landed (or its reform poll is retrying): rejoin the formation only
+	// once the leader is here AND the server has actually sent the leader's ship
+	// object to THIS member's client. leader->PlayerInRangeList(this member) is
+	// true exactly after the leader's UpdatePlayerVisibilityList ran
+	// SendShipData to this member -- i.e. the member's client has (been sent,
+	// and by ordered delivery will spawn before this update) the anchor ship.
+	// Returning false here keeps the poll alive until that holds; without this
+	// gate the FormationPositionalUpdate anchors on a not-yet-spawned ship and
+	// crashes the member client.
 	Player *leader = GetPlayer(g->Member[0].GameID);
 	if (leader &&
-	    leader->PlayerIndex()->GetSectorNum() == p->PlayerIndex()->GetSectorNum())
+	    leader->PlayerIndex()->GetSectorNum() == p->PlayerIndex()->GetSectorNum() &&
+	    leader->PlayerInRangeList(p))
 	{
-		return FormUp(p->GameID());
+		FormUp(p->GameID());
+		return true; // precondition met: stop polling (FormUp fired at most once)
 	}
 
 	return false;
