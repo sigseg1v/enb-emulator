@@ -3639,3 +3639,28 @@ moot; the SOLVED block above is the truth):**
   (big-screen growth) in those two files. Verified on the 1280x960 dev client; owner tunes the exact
   multiplier at their native res.
 - **Setup**: redeploy the freya-hud mod (or DEBUG auto-refresh / `/run reload()`), log in, in space.
+
+### [ ] CV-PB64-BAND -- invisible native cockpit-console buttons no longer respond to clicks; Freya widgets + world targeting still work (PB-64)
+
+- **Change**: `freya-hud/native_input_block.lua` (new), required LAST among the mouse handlers in
+  `freya-hud/init.lua`. It swallows every mouse message inside the bottom cockpit-console band (left
+  screen edge across to just right of the radar dial, up ~150px from the bottom, scaled) while
+  `freya_ui_on` and in space, so the invisible native warp orb / thrusters / action-bar slots /
+  nav-map button can no longer be CLICKED. Registered last so every Freya widget wins its click
+  first; the band is solid HUD/cockpit-frame art so no world-targeting click is lost, and the
+  far-right target frame + bottom-right world corner are outside the band. Lua-only (script mod), no
+  DLL rebuild.
+- **Why the CLI/integration suite does NOT close this**: the native cockpit gadgets + the overlay are
+  client-only pixels/input; no server or wire path is involved. Only the real client shows whether a
+  click leaks to the invisible native control.
+- **What to look for (real client)**: (1) Hover/click where the OLD invisible controls sit (bottom-
+  left nav-map button, bottom-centre warp orb / throttle / steering, action-bar row) -- a CLICK must
+  do nothing (no nav map opening, no warp engaging, no native action). Verified on the dev client for
+  the nav-map button (opened the map before, opens nothing after). (2) Freya's OWN bottom HUD must
+  still work: hotbar slots fire, page toggle flips, target-frame P/T buttons act, chat still usable.
+  (3) World targeting must still work: click asteroids/ships ABOVE the band and in the bottom-RIGHT
+  corner -- they must still target. (4) Ctrl+U OFF must restore native interactivity (the guard
+  yields when the Freya UI is off). (5) KNOWN LIMITATION: the hover HIGHLIGHT + tooltip on those dead
+  controls still appear (the native hover path polls the cursor, which a message swallow cannot stop)
+  -- confirm this is acceptable, or flag it for the engine-level gadget-disable follow-up.
+- **Setup**: redeploy the freya-hud mod (or DEBUG auto-refresh / `/run reload()`), log in, in space.
