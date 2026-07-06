@@ -352,6 +352,41 @@ The naive AI-9 "free/reset obj_manager" is UNSAFE as originally written. Facts:
   tests) green. Real-client end-to-end confirmation: plans/29 CV-AI-DTLS-PARK
   (local default is plaintext, where the bug can't occur, so only a real client
   on a DTLS deploy exercises the full gate/park/gate).
+  SECOND ROOT CAUSE, found by actually running the WINE-client gate/park/gate
+  repro (2026-07-06): the DTLS session fix above was NECESSARY but not
+  SUFFICIENT. With an aggressive idle timer the repro still wedged mid-login,
+  and it was NOT a DTLS-association problem -- it was an idle-park RACE. Two
+  code paths never stamped `m_LastActivityTick`: (1) `EnsureSectorStarted`'s
+  cold-start branch bound the port and started the thread but left the ctor
+  default `m_LastActivityTick == 0`, so the very next `IdleSectorPoll` saw
+  `now > (0 + m_SectorIdleTeardownMs)` (true for any uptime past the teardown
+  window) and PARKED the sector the caller had just cold-started for an inbound
+  gate; (2) a player mid-handshake is not yet on `m_PlayerList`, so
+  `GetOccupancy()` returns 0 for them -- a long login (slow grouped/DTLS gate is
+  the worst case) could be parked out from under the player by `IdleSectorPoll`
+  while the stage acks were still in flight, timing them out at login stage 12
+  and silently logging the player out (this is what made a wormhole/gate look
+  like it "did nothing" -- the destination sector was correct, the player had
+  just been reaped mid-login). FIX (server-side, not a wire change):
+  `EnsureSectorStarted` stamps activity right after `BeginSectorThread` on the
+  cold-start path (the fast @772 and parked-restart @810 paths already did), and
+  `Player::HandleLogin` re-arms the destination sector's idle clock at the START
+  of the sector-login handshake (mirrors the existing PB-17 login-stage clock
+  reset), so the fresh sector gets the full idle grace window to complete the
+  login. Genuinely-empty sectors are still parked correctly (occupancy 0 AND no
+  recent login activity). VALIDATED END-TO-END under the real WINE client on the
+  DTLS-on stack (2026-07-06): drove gate 1015 -> wormhole 1076 -> park empty
+  1015 -> gate back into parked 1015 -> park 1076 -> gate back into parked 1076.
+  Every leg reached `player 'devuserte' fully logged in` with NO stage-12
+  timeout, NO auth-wrapper drop, NO wedge: cold-start 1015 login, cold-start
+  1076 login, legitimate park of empty 1015 (~10s empty), PARKED-RESTART of 1015
+  (`restarting parked sector_id=1015` -> `Handle Sector Login` -> `fully logged
+  in`, ~6s), and PARKED-RESTART of 1076 (`restarting parked` 16:07:32 -> `fully
+  logged in` 16:07:36). Both fixes are complementary: 8d2e938b preserves the
+  DTLS association across a legit park; the idle-park stamps stop a sector being
+  parked while a login is in flight. Prior session's "DTLS parked-restart still
+  wedges with 8d2e938b" discriminator was real but MIS-ATTRIBUTED to a DTLS
+  problem -- the confound was this idle-park-mid-login race.
 
 ## Client-verification entries (plans/29)
 

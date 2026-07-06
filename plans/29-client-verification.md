@@ -3559,6 +3559,20 @@ moot; the SOLVED block above is the truth):**
   wedge needs DTLS enabled + certs provisioned + a real client that gates, sits until the target
   sector idle-parks (~5 min default), then gates back. Only a real client on a DTLS deploy
   exercises the full path.
+- **SECOND ROOT CAUSE + LOCAL WINE-CLIENT REPRO PASS (2026-07-06)**: the DTLS session fix was
+  necessary but not sufficient. Running the full WINE-client gate/park/gate repro on a DTLS-on
+  local stack surfaced an idle-park RACE independent of DTLS: `EnsureSectorStarted`'s cold-start
+  branch and a mid-handshake login (player not yet on `m_PlayerList`, so `GetOccupancy()==0`) both
+  left the sector eligible for an immediate idle-park, so `IdleSectorPoll` parked the sector out
+  from under a login still in flight and timed the player out at stage 12 (this is why a gate/wormhole
+  looked like it "did nothing"). Fixed server-side by stamping `m_LastActivityTick` on the cold-start
+  path and re-arming the destination sector's idle clock at the start of `Player::HandleLogin`
+  (AI-12; not a wire change). With BOTH fixes, the full gate 1015 -> park -> gate-back-into-parked
+  1015 -> park 1076 -> gate-back-into-parked 1076 cycle was driven end-to-end under the real WINE
+  client on the DTLS-on stack and every leg reached `fully logged in` with no wedge, no stage-12
+  timeout, no auth-wrapper drop. This CV entry stays OPEN only for the owner's confirmation on the
+  actual online production deploy (the local repro used the same DTLS transport + certs, but prod
+  is the authoritative check).
 - **What to look for (real client on a DTLS deploy, e.g. the online server after the owner
   redeploys)**: gate into a sector, leave it (all players out) long enough for idle teardown to
   PARK it (server log `TeardownSector: parking idle sector_id=...`), then gate back into that same

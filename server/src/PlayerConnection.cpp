@@ -748,6 +748,22 @@ void Player::HandleLogin(unsigned char *data)
 
 	LogMessage("Handle Sector Login for %s\n", Name());
 
+	// Re-arm the destination sector's idle-teardown clock at the START of the
+	// login handshake, not just when the player finally lands on m_PlayerList.
+	// A player mid-handshake is NOT counted by GetOccupancy() (they join
+	// m_PlayerList only once in-space), so without this a long login -- a slow
+	// grouped/DTLS gate is the worst case -- could be parked out from under the
+	// player by IdleSectorPoll while the acks are still in flight, timing them
+	// out at login stage 12. Stamping here (in addition to the cold-start stamp
+	// in EnsureSectorStarted) keeps the sector alive across the whole handshake.
+	// (AI-12)
+	if (g_ServerMgr)
+	{
+		SectorManager *dest = g_ServerMgr->GetSectorManager(sector_id);
+		if (dest)
+			dest->StampActivity(GetNet7TickCount());
+	}
+
 	SetLoginStage(1);
 }
 
