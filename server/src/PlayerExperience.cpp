@@ -139,6 +139,10 @@ void Player::AwardNavExploreXP(Object *obj)
 
 	SaveExploreNav(obj->GetDatabaseUID());
 	g_ServerMgr->m_PlayerMgr.GroupExploreXP(this, message, xpAward);
+	// The formation shares the explore XP + "Discovered" message above; share the
+	// nav REVEAL too, so in-range group members can actually see on their map the
+	// nav they were just credited with discovering. No-op if ungrouped.
+	g_ServerMgr->m_PlayerMgr.GroupRevealNav(this, obj);
 }
 
 void Player::AddMOBDestroyExperience(short mob_level, char *mob_name)

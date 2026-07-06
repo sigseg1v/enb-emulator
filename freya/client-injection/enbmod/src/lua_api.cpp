@@ -14,6 +14,9 @@
 #include <cstring>
 #include <cstdio>
 #include <cmath>
+#include <cctype>
+#include <algorithm>
+#include <unordered_set>
 #include <windows.h>
 
 extern "C" {
@@ -294,16 +297,17 @@ static int l_self(lua_State* L) {
 }
 
 // enb.state() -> "space" | "station" | "login" | "charsel" | "load" | "unknown".
-// Two sources, in priority order:
-//   1. The calibrated game-state code (game_state_addr) -- the full state set,
-//      but it is currently UNCALIBRATED (game_state_addr == 0), so it yields
-//      nothing yet.
-//   2. The in-space heartbeat (enable_inspace_hook) -- a zero-calibration signal
-//      that positively reports "space" when the per-frame vitals updater is
-//      firing. It cannot distinguish station/login/charsel from each other, so
-//      it only ever upgrades "unknown" -> "space", never the reverse.
-// "unknown" is the remaining pre-calibration default (HUD then shows the
-// skeleton rather than hiding forever).
+// Sources, in priority order:
+//   1. The optional calibrated game-state code (game_state_addr) -- kept as an
+//      override hook, but the client has no single global state enum, so it stays
+//      uncalibrated (game_state_addr == 0) and yields nothing.
+//   2. The in-world docked/in-space discriminator on the captured world manager M:
+//      M + world::station_view is non-zero exactly while docked (the station
+//      interior view) and 0 while in space, so a live M positively names
+//      "station" vs "space" with zero calibration. This is the reliable source.
+//   3. The in-space heartbeat (enable_inspace_hook) -- a per-frame vitals-updater
+//      signal that confirms "space"; it only ever upgrades "unknown" -> "space".
+// "unknown" is the pre-M default (front-end screens; HUD then shows the skeleton).
 static int l_state(lua_State* L) {
     Offsets& o = offs();
     const char* name = "unknown";
@@ -320,8 +324,16 @@ static int l_state(lua_State* L) {
         else if (o.state_load >= 0 && s == o.state_load)
             name = "load";
     }
-    // Heartbeat fallback: if the calibrated source could not name a state, but
-    // the in-space vitals updater is firing, we ARE in space.
+    // In-world source: a captured M means we are in-game; station_view splits
+    // docked (station) from undocked (space). Only consulted while state is still
+    // "unknown" so an explicit calibrated code (source 1) still wins if present.
+    if (!strcmp(name, "unknown")) {
+        uintptr_t m = hooks::world_mgr();
+        if (m && mem::readable((void*)(m + game::world::station_view), 4))
+            name = mem::i32(m + game::world::station_view) != 0 ? "station" : "space";
+    }
+    // Heartbeat fallback: if neither source above could name a state, but the
+    // in-space vitals updater is firing, we ARE in space.
     if (!strcmp(name, "unknown")) {
         const unsigned long kFreshMs = 400;
         unsigned long last = hooks::last_inspace_tick();
@@ -329,6 +341,21 @@ static int l_state(lua_State* L) {
             name = "space";
     }
     lua_pushstring(L, name);
+    return 1;
+}
+
+// enb.sector() -> number | nil. The current sector id the client holds at
+// M + world::sector_id (the same id as the content DB's sectors.sector_id). Ground
+// truth for "which sector am I in" -- unlike an OCR of the map title or a nav-label
+// read, it cannot be fooled by a silent tow into another sector. nil out of world
+// (no captured M) or if the field is not readable.
+static int l_sector(lua_State* L) {
+    uintptr_t m = hooks::world_mgr();
+    if (!m || !mem::readable((void*)(m + game::world::sector_id), 4)) {
+        lua_pushnil(L);
+        return 1;
+    }
+    lua_pushinteger(L, (lua_Integer)mem::u32(m + game::world::sector_id));
     return 1;
 }
 
@@ -1456,6 +1483,521 @@ static int l_target_action(lua_State* L) {
     return 1;
 }
 
+// ---------------------------------------------------------------------------
+// Bot API -- named high-level actions a Lua bot can call by name instead of by
+// raw opcode. Every one is built on the SAME validated primitives the rest of
+// this file uses: send_target_cmd (CmdBuild + CmdSend, the avatar-command path),
+// the gid->object entity hash (entity_by_gid's walk), and the locatable getter
+// (world_pos). No new server behaviour; these only invoke command paths the
+// client already drives natively. Game-thread only (native __thiscall calls).
+// ---------------------------------------------------------------------------
+
+// Resolve (M, local player GameID, current target GameID). false if the world
+// manager is not captured yet or nothing is targeted.
+static bool bot_actor_and_target(uintptr_t& m, uint32_t& player, uint32_t& target) {
+    m = hooks::world_mgr();
+    if (!m || !mem::readable((void*)(m + game::world::player_id), 4))
+        return false;
+    player = mem::u32(m + game::world::player_id);
+    uintptr_t tgt = hooks::target_obj();
+    if (!tgt || !mem::readable((void*)(tgt + game::world::tgt_gid), 4))
+        return false;
+    target = mem::u32(tgt + game::world::tgt_gid);
+    return true;
+}
+
+// enb.dock() -> bool. Dock at the currently-targeted station (avatar-command
+// 0x1c). Target a starbase first (enb.request_target / enb.navs()); returns false
+// (sends nothing) if nothing is targeted. Same path as enb.target_action(0x1c),
+// live-validated end to end.
+static int l_dock(lua_State* L) {
+    uintptr_t m;
+    uint32_t player, target;
+    if (!bot_actor_and_target(m, player, target)) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    send_target_cmd(m, player, 0x1c, target);
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+// enb.register() -> bool. Register at the currently-targeted station
+// (avatar-command 0x19) -- sets it as the recall/home point. Target a station
+// first. Same path as enb.target_action(0x19).
+static int l_register(lua_State* L) {
+    uintptr_t m;
+    uint32_t player, target;
+    if (!bot_actor_and_target(m, player, target)) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    send_target_cmd(m, player, 0x19, target);
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+// enb.gate() -> bool. Jump through the currently-targeted stargate. The native
+// gate button is a two-step avatar-command: op 0x12 arms the jump (server
+// TerminateWarp + GateActivate, which stores the gate's destination) and op 0x13
+// finishes it (the sector handoff to that destination). The real client sends
+// 0x13 once its fly-in animation completes; back-to-back arm+finish transits
+// immediately, since the finish step does not re-check position -- the same
+// shortcut the "land" verb (0x1d -> 0x08) already uses. Target a stargate first.
+// The fly-in-skip behaviour is tracked for real-client confirmation in plans/29.
+static int l_gate(lua_State* L) {
+    uintptr_t m;
+    uint32_t player, target;
+    if (!bot_actor_and_target(m, player, target)) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    send_target_cmd(m, player, 0x12, target);
+    send_target_cmd(m, player, 0x13, target);
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+// enb.undock() -> bool. Leave the current station into space. Calls the client's
+// own station-exit method (addr::StationExit, thiscall on the captured world
+// manager M) with action = 1, which builds a STARBASE_REQUEST (wire opcode
+// 0x004E, Action = 1) and sends it through M's Connection itself; the server then
+// launches the player into space. No-op (returns false, sends nothing) when M is
+// not captured or the player is not docked (M + starbase_id == 0), so calling it
+// in space is harmless. Real-client station->space transition tracked in plans/29.
+static int l_undock(lua_State* L) {
+    uintptr_t m = hooks::world_mgr();
+    if (!m || !mem::readable((void*)(m + game::world::starbase_id), 4)) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    if (mem::i32(m + game::world::starbase_id) == 0) {
+        lua_pushboolean(L, 0); // not docked -- nothing to exit
+        return 1;
+    }
+    uint32_t b[3] = {1u, 0u, 0u}; // action = 1 (exit station), then two ignored args
+    actions::call_thiscall(game::addr::StationExit, m, b, 3);
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+// Structural predicate: does `radar` have the exact shape WarpPathBuild + the orb
+// handler require? All reads are guarded (VEH-backed), so this never faults. The checks
+// mirror the native code's own dereferences, so passing them means the native build path
+// is safe to run on this object -- and a wrong candidate (garbage / not the controller)
+// fails one of them and is rejected rather than hanging the client.
+static bool looks_like_radar(uintptr_t radar) {
+    using namespace game::addr::warp;
+    // radar readable through both nav-vector ptr slots (+0x3c/+0x40). The radar is a small
+    // (~0x50-byte) object, so we only touch the low fields we actually validate here.
+    if (!radar || !mem::readable((void*)radar, 0x44))
+        return false;
+    // First member m0 (== *radar) is an SC-family object: *m0 is its vtable pointer (into
+    // image .rdata, NOT necessarily executable), and the getter slot WarpPathBuild invokes
+    // (m0->vtable[+0x28]) must point at real executable code.
+    uintptr_t m0 = mem::ptr(radar);
+    if (!m0)
+        return false;
+    uintptr_t vt = mem::ptr(m0);
+    if (!mem::is_image_data(vt) || !mem::is_code(mem::ptr(vt + getdata_vtoff)))
+        return false;
+    // The targeting subsystem WarpPathBuild dereferences (*(m0 + 0x12a4)) must be present
+    // (non-null, its flag byte readable) -- else the native build takes its assert branch.
+    uintptr_t ts = mem::ptr(m0 + subsys);
+    if (!ts || !mem::readable((void*)(ts + subsys_flag), 1))
+        return false;
+    // The nav-vector control blocks bound WarpPathBuild's copy loop: a garbage block yields
+    // a huge (end-begin)>>2 count -> the exact hang we must never repeat. Require each block
+    // readable and, when non-empty, a sane forward, 4-aligned span.
+    const int vecs[2] = {nav_vec, nav_vec2};
+    for (int i = 0; i < 2; ++i) {
+        uintptr_t vp = mem::ptr(radar + vecs[i]);
+        if (!vp || !mem::readable((void*)vp, 0x10))
+            return false;
+        uintptr_t b = mem::ptr(vp + vec_begin);
+        uintptr_t e = mem::ptr(vp + vec_end);
+        if (b && (e < b || (e - b) > 0x40000 || ((e - b) & 3)))
+            return false;
+    }
+    return true;
+}
+
+// Resolve the warp radar controller off M by deref chain and validate its shape, with NO
+// native call -- the safe alternative to a real warp-orb engage:
+//     radar = *( *(M + mainview_on_m) + radar_in_mainview )
+// (M -> MainView -> radar). Returns the validated radar ptr, or 0 if it cannot be trusted
+// (e.g. the 3D view is not up yet, so MainView + 0x80 is still 0).
+static uintptr_t resolve_warp_radar(uintptr_t m) {
+    using namespace game::addr::warp;
+    if (!m)
+        return 0;
+    uintptr_t mainview = mem::ptr(m + mainview_on_m);
+    if (!mainview)
+        return 0;
+    uintptr_t radar = mem::ptr(mainview + radar_in_mainview);
+    return looks_like_radar(radar) ? radar : 0;
+}
+
+// Engage (or, run again, terminate) warp to the CURRENT target -- the shared body
+// of enb.warp / enb.warp_stop. Reproduces the native warp-orb sequence on M:
+// build the nav path from the current target off the captured radar controller,
+// wrap the persistent NavigationList (M + navlist) and the built nav vector into a
+// WarpPacket, and send it through M's Connection (CmdSend). Warp is a server-side
+// TOGGLE, so the SAME call terminates an in-progress warp -- warp and warp_stop are
+// one code path. Returns false (sends nothing) when M or the radar controller is not
+// yet captured, or when the path is not ready this frame (no target / still
+// building) -- the caller should target a nav first (enb.request_target/enb.navs)
+// and may retry next tick. reason is filled for the false cases (nil on success).
+static bool do_warp(uintptr_t& out_m, const char*& reason) {
+    reason = nullptr;
+    uintptr_t m = hooks::world_mgr();
+    if (!m || !mem::readable((void*)(m + game::world::navlist), 4)) {
+        reason = "no world manager (not in space)";
+        return false;
+    }
+    uintptr_t radar = hooks::warp_radar_ctrl();
+    if (!radar) {
+        // Not seeded by a real orb engage yet -- resolve + validate it off M so warp
+        // works with zero screen interaction. seed only latches while unset, so a later
+        // genuine WarpPathBuild capture still wins.
+        radar = resolve_warp_radar(m);
+        if (radar)
+            hooks::seed_warp_radar_ctrl((unsigned)radar);
+    }
+    if (!radar || !mem::readable((void*)radar, 4)) {
+        reason = "warp controller not resolvable off M (not in space, or ship half-built) "
+                 "-- retry after fully in space, or engage warp once via the orb to seed it";
+        return false;
+    }
+    out_m = m;
+    // Build the warp path from the current target. The native builder returns a bool in
+    // its LOW byte (the game tests `== '\0'`); a false return means "path not finished
+    // building" (no nav targeted, or still building) -- do NOT send in that case. Mask to
+    // the low byte so a dirty high EAX can't be misread as success.
+    if ((actions::call_thiscall(game::addr::WarpPathBuild, radar, nullptr, 0) & 0xFF) == 0) {
+        reason = "warp path not ready (no nav targeted, or still building)";
+        return false;
+    }
+    // Mirror the orb handler's packet build exactly: navId is an inline VALUE (stored
+    // verbatim, never dereferenced by the ctor -- so any value, incl. small ones, is
+    // safe); navVec is a POINTER to the just-built nav-node vector, which the ctor CLONES
+    // (so it must be non-null or the clone faults dereferencing it).
+    uint32_t nav_id = mem::u32(m + game::world::navlist); // *(SC + 0x1138), inline value
+    uint32_t nav_vec = actions::call_thiscall(game::addr::WarpNavVec, radar, nullptr, 0);
+    if (!nav_vec) {
+        reason = "warp nav vector not built";
+        return false;
+    }
+    // Caller-owned WarpPacket storage. The ctor writes through +0x10 (needs >=0x14 bytes)
+    // and installs the packet vtable; CmdSend serializes it through that vtable. 0x20 for
+    // margin, zero-initialized.
+    uint32_t pkt[8] = {0};
+    uint32_t ctor_args[2] = {nav_id, nav_vec};
+    actions::call_thiscall(game::addr::WarpPacketCtor, (uintptr_t)pkt, ctor_args, 2);
+    uint32_t snd[1] = {(uint32_t)(uintptr_t)pkt};
+    actions::call_thiscall(game::addr::CmdSend, m, snd, 1);
+    actions::call_thiscall(game::addr::WarpPacketDtor, (uintptr_t)pkt, nullptr, 0);
+    return true;
+}
+
+// enb.warp() -> bool[, string]. Engage warp to the currently-targeted nav (target
+// one first with enb.request_target / enb.navs). Returns true on send, or false +
+// a reason string. Because warp is a server toggle, calling this while already
+// warping terminates the warp -- see enb.warp_stop, which is the same path.
+static int l_warp(lua_State* L) {
+    uintptr_t m = 0;
+    const char* reason = nullptr;
+    bool ok = do_warp(m, reason);
+    lua_pushboolean(L, ok);
+    if (ok) {
+        return 1;
+    }
+    lua_pushstring(L, reason ? reason : "warp failed");
+    return 2;
+}
+
+// enb.warp_stop() -> bool[, string]. Terminate an in-progress warp. Warp is a
+// server-side toggle with no distinct client stop opcode, so this re-runs the exact
+// warp send: the server flips warping -> TerminateWarp. Same guards/reasons as
+// enb.warp (needs a resolvable path, which still holds while warping).
+static int l_warp_stop(lua_State* L) {
+    return l_warp(L);
+}
+
+// enb.warp_radar() -> { hooked=<ptr>, resolved=<ptr> }. Read-only diagnostic: the
+// radar controller as captured by the WarpPathBuild hook (0 until a real orb engage)
+// and as resolved+validated off M by resolve_warp_radar (0 if the structure does not
+// check out). Makes NO native call -- purely for confirming the offset resolution is
+// sound before trusting enb.warp. A non-zero resolved value means enb.warp can engage
+// with zero screen interaction; equal hooked+resolved values once both are set proves
+// the offset resolves to the same object the game passes.
+static int l_warp_radar(lua_State* L) {
+    using namespace game::addr::warp;
+    uintptr_t m = hooks::world_mgr();
+    lua_newtable(L);
+#define WR_SET(name, val)                                                                          \
+    do {                                                                                           \
+        lua_pushinteger(L, (lua_Integer)(val));                                                    \
+        lua_setfield(L, -2, name);                                                                 \
+    } while (0)
+    WR_SET("hooked", hooks::warp_radar_ctrl());
+    WR_SET("m", m);
+    WR_SET("resolved", m ? resolve_warp_radar(m) : 0);
+    // Intermediate chain, for diagnosing a 0 resolve (all guarded reads, no native call):
+    // M -> MainView -> radar.
+    uintptr_t mainview = m ? mem::ptr(m + mainview_on_m) : 0;
+    WR_SET("mainview", mainview);
+    uintptr_t radar = mainview ? mem::ptr(mainview + radar_in_mainview) : 0;
+    WR_SET("radar", radar);
+    uintptr_t m0 = radar ? mem::ptr(radar) : 0;
+    WR_SET("m0", m0);
+    uintptr_t vt = m0 ? mem::ptr(m0) : 0;
+    WR_SET("vt", vt);
+    WR_SET("vt_code", vt ? (mem::is_code(vt) ? 1 : 0) : 0);
+    WR_SET("getter", vt ? mem::ptr(vt + getdata_vtoff) : 0);
+    WR_SET("getter_code", vt ? (mem::is_code(mem::ptr(vt + getdata_vtoff)) ? 1 : 0) : 0);
+    WR_SET("ts", m0 ? mem::ptr(m0 + subsys) : 0);
+    WR_SET("navvec", radar ? mem::ptr(radar + nav_vec) : 0);
+    WR_SET("navvec2", radar ? mem::ptr(radar + nav_vec2) : 0);
+#undef WR_SET
+    return 1;
+}
+
+// enb.dist(...) -> number | nil. Straight-line distance, three call shapes:
+//   enb.dist()                    -- local ship -> current target
+//   enb.dist(x, y, z)             -- local ship -> a world point
+//   enb.dist(x,y,z, x2,y2,z2)     -- point -> point
+// The local-ship position comes through the locatable getter (world_pos on the
+// same local ship object enb.target()/enb.self() distance uses). nil if a needed
+// position can't be read (no target, ship not resolved yet).
+static int l_dist(lua_State* L) {
+    int n = lua_gettop(L);
+    double a[3], b[3];
+    if (n >= 6) {
+        for (int i = 0; i < 3; ++i)
+            a[i] = luaL_checknumber(L, 1 + i);
+        for (int i = 0; i < 3; ++i)
+            b[i] = luaL_checknumber(L, 4 + i);
+    } else if (n >= 3) {
+        for (int i = 0; i < 3; ++i)
+            b[i] = luaL_checknumber(L, 1 + i);
+        uintptr_t ship = targeting_data_obj();
+        if (!ship || !world_pos(ship, a)) {
+            lua_pushnil(L);
+            return 1;
+        }
+    } else {
+        uintptr_t ship = targeting_data_obj();
+        uintptr_t tgt = hooks::target_obj();
+        if (!ship || !tgt || !world_pos(ship, a) || !world_pos(tgt, b)) {
+            lua_pushnil(L);
+            return 1;
+        }
+    }
+    double dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
+    lua_pushnumber(L, std::sqrt(dx * dx + dy * dy + dz * dz));
+    return 1;
+}
+
+// Case-insensitive substring test (empty needle matches everything).
+static bool ci_contains(const std::string& hay, const char* needle) {
+    if (!needle || !*needle)
+        return true;
+    std::string h = hay, n = needle;
+    for (char& c : h)
+        c = (char)std::tolower((unsigned char)c);
+    for (char& c : n)
+        c = (char)std::tolower((unsigned char)c);
+    return h.find(n) != std::string::npos;
+}
+
+struct BotSnap {
+    uint32_t gid;
+    uintptr_t obj;
+};
+struct BotRow {
+    uint32_t gid;
+    uintptr_t base;
+    std::string cls, nm;
+    double x, y, z, dist;
+    bool haspos, hasdist;
+};
+
+// Walk M's GameID entity hash (the same 0x101-bucket chained table entity_by_gid
+// resolves single ids through) and collect every live object, enriched with its
+// class name, instance name, world position and distance from the local ship.
+// class_filter (nullptr = all) keeps only objects whose class name CONTAINS it
+// (case-insensitive). The bucket walk runs under one fault guard (a corrupt chain
+// aborts the walk, keeping what was gathered); the per-object enrichment reads all
+// self-check / self-guard, so it runs outside the guard.
+static void bot_gather(std::vector<BotRow>& out, const char* class_filter) {
+    uintptr_t M = hooks::world_mgr();
+    if (!M)
+        return;
+    static const int kMax = 4096;
+    static BotSnap snap[kMax]; // static: no large stack frame / no alloc under guard
+    int count = 0;
+    if (__builtin_setjmp(mem::g_guard_jmp)) {
+        mem::g_guard_on = 0; // a read faulted mid-walk -- keep what we have
+    } else {
+        mem::g_guard_on = 1;
+        for (unsigned bucket = 0; bucket < game::world::ent_modulus && count < kMax; ++bucket) {
+            uintptr_t head = M + game::world::ent_buckets + bucket * 4;
+            if (!mem::readable((void*)head, 4))
+                continue;
+            uintptr_t node = mem::ptr(head);
+            for (int hops = 0; node && hops < 512 && count < kMax; ++hops) {
+                if (!mem::readable((void*)(node + game::world::ent_node_gid), 4))
+                    break;
+                uint32_t gid = (uint32_t)mem::i32(node + game::world::ent_node_gid);
+                uintptr_t obj = mem::ptr(node + game::world::ent_node_obj);
+                if (gid && obj) {
+                    snap[count].gid = gid;
+                    snap[count].obj = obj;
+                    ++count;
+                }
+                if (!mem::readable((void*)(node + game::world::ent_node_next), 4))
+                    break;
+                node = mem::ptr(node + game::world::ent_node_next);
+            }
+        }
+        mem::g_guard_on = 0;
+    }
+    double pp[3];
+    bool have_pp = false;
+    {
+        uintptr_t ship = targeting_data_obj();
+        if (ship)
+            have_pp = world_pos(ship, pp);
+    }
+    // The bucket walk can re-emit the same object many times (the chains overlap /
+    // thread across buckets, so one GameID shows up under several bucket heads). The
+    // entity hash is gid-keyed -- one live object per GameID -- so dedup by gid and
+    // keep the first sighting; without this enb.objects()/enb.navs() return a single
+    // nav dozens of times.
+    std::unordered_set<uint32_t> seen_gid;
+    seen_gid.reserve((size_t)count);
+    for (int i = 0; i < count; ++i) {
+        if (!seen_gid.insert(snap[i].gid).second)
+            continue;
+        uintptr_t obj = snap[i].obj;
+        if (!mem::readable((void*)obj, 4))
+            continue;
+        std::string cls, nm;
+        uintptr_t container = mem::readable((void*)(obj + game::world::tgt_container), 4)
+                                  ? mem::ptr(obj + game::world::tgt_container)
+                                  : 0;
+        if (container) {
+            uintptr_t clsp = mem::ptr(container + 0x3c);
+            if (clsp && mem::readable((void*)clsp, 1))
+                cls = mem::cstr(clsp);
+            uintptr_t namep = mem::ptr(container + 0x124);
+            if (namep && mem::readable((void*)namep, 1))
+                nm = mem::cstr(namep);
+        }
+        if (class_filter && (cls.empty() || !ci_contains(cls, class_filter)))
+            continue;
+        BotRow r{};
+        r.gid = snap[i].gid;
+        r.base = obj;
+        r.cls = cls;
+        r.nm = nm;
+        double wp[3];
+        r.haspos = world_pos(obj, wp);
+        if (r.haspos) {
+            r.x = wp[0];
+            r.y = wp[1];
+            r.z = wp[2];
+            if (have_pp) {
+                double dx = wp[0] - pp[0], dy = wp[1] - pp[1], dz = wp[2] - pp[2];
+                r.dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+                r.hasdist = true;
+            }
+        }
+        out.push_back(r);
+    }
+}
+
+// Push a vector<BotRow> as a Lua array of {gid, base, class?, name?, x?,y?,z?, dist?}.
+static void bot_push_rows(lua_State* L, const std::vector<BotRow>& rows) {
+    lua_newtable(L);
+    int idx = 0;
+    for (const BotRow& r : rows) {
+        lua_newtable(L);
+        lua_pushinteger(L, (lua_Integer)(uint32_t)r.gid);
+        lua_setfield(L, -2, "gid");
+        lua_pushinteger(L, (lua_Integer)r.base);
+        lua_setfield(L, -2, "base");
+        if (!r.cls.empty()) {
+            lua_pushlstring(L, r.cls.data(), r.cls.size());
+            lua_setfield(L, -2, "class");
+        }
+        if (!r.nm.empty()) {
+            lua_pushlstring(L, r.nm.data(), r.nm.size());
+            lua_setfield(L, -2, "name");
+        }
+        if (r.haspos) {
+            lua_pushnumber(L, r.x);
+            lua_setfield(L, -2, "x");
+            lua_pushnumber(L, r.y);
+            lua_setfield(L, -2, "y");
+            lua_pushnumber(L, r.z);
+            lua_setfield(L, -2, "z");
+        }
+        if (r.hasdist) {
+            lua_pushnumber(L, r.dist);
+            lua_setfield(L, -2, "dist");
+        }
+        lua_rawseti(L, -2, ++idx);
+    }
+}
+
+// enb.objects([class_filter]) -> array of every live in-scene object, each a table
+// {gid, base, class, name, x, y, z, dist}. Optional class_filter keeps only
+// objects whose class name contains that substring (case-insensitive), e.g.
+// enb.objects("Ship") / enb.objects("Asteroid"). This is the raw scene snapshot a
+// bot introspects; enb.navs() is a filtered view of it.
+static int l_objects(lua_State* L) {
+    const char* filter = luaL_optstring(L, 1, nullptr);
+    std::vector<BotRow> rows;
+    bot_gather(rows, filter);
+    bot_push_rows(L, rows);
+    return 1;
+}
+
+// enb.navs() -> array of navigation objects + stargates in scene, nearest-first,
+// each {gid, base, class, name, x, y, z, dist}. A distance-sorted view of
+// enb.objects() filtered to nav-ish class names. Feed a row's gid to
+// enb.request_target(gid) to select it, then enb.warp()/enb.gate().
+//
+// COVERAGE CAVEAT: this returns navs that are present in the client's live entity
+// hash (in scan range / already revealed). The game's full nav catalogue for a
+// sector may live in a separate nav list, and the exact class strings navs carry
+// are not yet live-confirmed -- run enb.objects() in a real sector to verify the
+// class tokens below cover them. Do not assume enb.navs() is the complete nav set
+// for a sector until that live check is done.
+static const char* const kNavClassTokens[] = {"nav", "gate", "wormhole"};
+static int l_navs(lua_State* L) {
+    std::vector<BotRow> all;
+    bot_gather(all, nullptr);
+    std::vector<BotRow> rows;
+    for (const BotRow& r : all) {
+        for (const char* tok : kNavClassTokens) {
+            if (ci_contains(r.cls, tok)) {
+                rows.push_back(r);
+                break;
+            }
+        }
+    }
+    std::stable_sort(rows.begin(), rows.end(), [](const BotRow& a, const BotRow& b) {
+        if (a.hasdist != b.hasdist)
+            return a.hasdist; // known-distance rows first
+        return a.dist < b.dist;
+    });
+    bot_push_rows(L, rows);
+    return 1;
+}
+
 // enb.loot() -> array of occupied hulk/loot cargo rows (empty table if none). Each
 // row is { slot=<0-based int>, name=<string>, stack=<qty int>, tid=<ItemTemplateID>,
 // tmpl=<template ptr>, asset=<template+icon-asset ptr> }; the array also carries a
@@ -1634,8 +2176,13 @@ static int l_request_target(lua_State* L) {
         lua_pushboolean(L, 0); // no live entity for this GameID -- not targetable, skip
         return 1;
     }
-    uint32_t args[1] = {(uint32_t)obj};
-    actions::call_thiscall(game::addr::RequestTarget, m, args, 1);
+    // RequestTarget is __cdecl(M, obj): it reads M+0x112c (our source GameID) and
+    // obj+0x90 (the target's GameID), builds REQUEST_TARGET, and sends. BOTH operands
+    // come off the stack -- it does NOT take M in ECX. Calling it thiscall-with-one-arg
+    // left param_2 (obj) pointing at an uninitialized stack slot, so obj+0x90 faulted
+    // the moment a party-member row was clicked. Pass both on the stack, in order.
+    uint32_t args[2] = {(uint32_t)m, (uint32_t)obj};
+    actions::call_cdecl(game::addr::RequestTarget, args, 2);
     lua_pushboolean(L, 1);
     return 1;
 }
@@ -2476,6 +3023,10 @@ static void push_addr_table(lua_State* L) {
     A(NavListBuild);
     A(NavListRender);
     A(WarpPath);
+    A(WarpPathBuild);
+    A(WarpNavVec);
+    A(WarpPacketCtor);
+    A(WarpPacketDtor);
     A(KeyDefinitions);
     A(BindCategories);
     A(AbilitySlots);
@@ -2519,6 +3070,16 @@ void open(lua_State* L) {
                                    {"worldmgr", l_worldmgr},
                                    {"target_action", l_target_action},
                                    {"request_target", l_request_target},
+                                   {"dock", l_dock},
+                                   {"register", l_register},
+                                   {"gate", l_gate},
+                                   {"undock", l_undock},
+                                   {"warp", l_warp},
+                                   {"warp_stop", l_warp_stop},
+                                   {"warp_radar", l_warp_radar},
+                                   {"dist", l_dist},
+                                   {"objects", l_objects},
+                                   {"navs", l_navs},
                                    {"loot", l_loot},
                                    {"loot_age", l_loot_age},
                                    {"loot_take", l_loot_take},
@@ -2526,6 +3087,7 @@ void open(lua_State* L) {
                                    {"is_leader", l_is_leader},
                                    {"aux_entry", l_aux_entry},
                                    {"state", l_state},
+                                   {"sector", l_sector},
                                    {"cursor", l_cursor},
                                    {"patch_ret", l_patch_ret},
                                    {"unpatch", l_unpatch},

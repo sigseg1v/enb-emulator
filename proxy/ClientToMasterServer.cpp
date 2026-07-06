@@ -135,8 +135,10 @@ void Connection::HandleMasterJoin() {
     if (sector_port == -1) {
         LogMessage(">> CRITICAL: SendMasterLogin failed after %d attempts; "
                    "client will hang at loading screen. Check that the server's "
-                   "master UDP listener has started (look for 'Registering "
-                   "sector server' in server logs).\n",
+                   "master UDP listener has started (look for 'Registering sector "
+                   "server' in server logs). Over DTLS this can also mean the "
+                   "server bound a mismatched per-session auth token so this "
+                   "session's handoff was dropped at the recv edge.\n",
                    kHandoffAttempts);
         SendServerRedirect(sector_id);
         return;

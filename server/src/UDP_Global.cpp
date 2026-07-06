@@ -26,6 +26,88 @@
 #include "PlayerClass.h"
 #include "MemoryHandler.h"
 #include "SaveManager.h"   // Phase AM: EmitExternalStatusEvent
+#include <net7/DtlsTransport.h>   // net7::DtlsPeerKey -- per-session (addr,port) key
+
+#include <map>
+#include <mutex>
+#include <time.h>
+
+// ---------------------------------------------------------------------------
+// Multibox fix: per-session login-token stash.
+//
+// login_ticket is ONE ROW PER USERNAME (UPSERT ON CONFLICT username). A second
+// concurrent login of the SAME account overwrites that row, so binding the
+// player's DTLS auth token by re-querying login_ticket at character-select
+// (GetLoginTokenBinary(username)) can bind a DIFFERENT session's token. The
+// mis-bound session's gameplay datagrams then fail the per-packet token check
+// at the recv edge, its 0x2008 master handoff is dropped, and it hangs at the
+// loading screen -- exactly the two-different-characters-same-account case the
+// server otherwise explicitly supports (see the multibox NOTE in
+// ProcessTicketInfo below, and Player::SetCharacterID -> CheckForDuplicatePlayers
+// which only blocks the SAME character twice).
+//
+// The authoritative per-session token is the ticket SUFFIX the session itself
+// presented at ProcessTicketInfo (the same 32-hex token its proxy learned from
+// the ticket and wraps every datagram with). Both the ticket-info and the later
+// avatar-login for one proxy session arrive on the same global UDP socket, i.e.
+// the same (source_addr, source_port). Stash the validated suffix keyed by that
+// session key at ticket time, then bind THAT token at character-select instead
+// of the clobber-prone DB re-query.
+//
+// This does not weaken the DTLS posture: the suffix was already validated
+// against login_ticket in ProcessTicketInfo (ValidateTicketSuffix) before it is
+// stashed, and the per-packet token check at the recv edge is unchanged. It is
+// strictly MORE correct than the DB re-query, which could bind a token the
+// session never presented.
+namespace {
+
+struct SessionToken {
+    unsigned char token[16];
+    long          expires_ms;   // prune entries older than this
+};
+
+std::mutex                       g_SessionTokenMtx;
+std::map<uint64_t, SessionToken> g_SessionTokens;
+
+// Login tickets expire ~5 min after issue; bound the stash to that window so a
+// session that presents a ticket but never selects a character cannot leak an
+// entry indefinitely.
+const long kSessionTokenTtlMs = 5 * 60 * 1000L;
+
+void StashSessionToken(long source_addr, short source_port, const unsigned char token[16])
+{
+    uint64_t key = net7::DtlsPeerKey((uint32_t)source_addr, (uint16_t)source_port);
+    long now_ms = (long)time(NULL) * 1000L;
+
+    std::lock_guard<std::mutex> lk(g_SessionTokenMtx);
+    // Opportunistically prune expired entries so the map stays bounded to the
+    // set of sessions within the ticket-expiry window.
+    for (auto it = g_SessionTokens.begin(); it != g_SessionTokens.end(); )
+        it = (it->second.expires_ms < now_ms) ? g_SessionTokens.erase(it) : std::next(it);
+
+    SessionToken &e = g_SessionTokens[key];
+    memcpy(e.token, token, 16);
+    e.expires_ms = now_ms + kSessionTokenTtlMs;
+}
+
+// Consume-on-bind: a session selects one character per ticket presentation, and
+// every avatar-login is preceded by a fresh ProcessTicketInfo, so erasing on
+// bind both frees the entry and prevents a stale token from surviving.
+bool TakeSessionToken(long source_addr, short source_port, unsigned char out[16])
+{
+    uint64_t key = net7::DtlsPeerKey((uint32_t)source_addr, (uint16_t)source_port);
+    long now_ms = (long)time(NULL) * 1000L;
+
+    std::lock_guard<std::mutex> lk(g_SessionTokenMtx);
+    auto it = g_SessionTokens.find(key);
+    if (it == g_SessionTokens.end()) return false;
+    bool fresh = (it->second.expires_ms >= now_ms);
+    if (fresh) memcpy(out, it->second.token, 16);
+    g_SessionTokens.erase(it);
+    return fresh;
+}
+
+} // namespace
 
 #define G_ERROR_BANNED_ACCOUNT		0
 #define G_ERROR_NICKNAME_USED		1
@@ -158,6 +240,17 @@ bool UDP_Connection::ProcessTicketInfo(char *msg, EnbUdpHeader *hdr, const long 
         return false;
     }
 
+    // Multibox fix: remember THIS session's validated token, keyed by its global
+    // UDP (addr,port), so character-select can bind the token the session itself
+    // presented rather than re-querying the username-keyed login_ticket row (which
+    // a second same-account login clobbers). See the stash block at the top of
+    // this file. The suffix is 32 hex chars -> 16 binary bytes.
+    {
+        unsigned char sess_tok[16];
+        if (suffix && g_AccountMgr->TokenHexToBinary(suffix, sess_tok))
+            StashSessionToken(source_addr, source_port, sess_tok);
+    }
+
     long account_id = g_AccountMgr->GetAccountID(account_name);
 	long account_status = g_AccountMgr->GetAccountStatus(account_name);
 
@@ -275,8 +368,17 @@ void UDP_Connection::HandleGlobalTicketRequest(char *msg, EnbUdpHeader *hdr, con
         // Functionally a no-op when DTLS is opted out -- the plaintext path
         // never checks the token. Fail-closed: if the token cannot be bound,
         // DTLS gameplay for this player is dropped rather than trusted.
+        // Multibox fix: bind the token THIS session presented at ProcessTicketInfo
+        // (stashed by its global (addr,port)), NOT a re-query of the username-keyed
+        // login_ticket row -- that row is clobbered by a second concurrent
+        // same-account login, which would bind the wrong session's token and drop
+        // this session's gameplay/handoff at the DTLS recv edge. Fall back to the
+        // DB query only if the stash missed (e.g. a legacy/plaintext path that did
+        // not route through ProcessTicketInfo).
         unsigned char auth_tok[16];
-        if (g_AccountMgr->GetLoginTokenBinary(username, auth_tok))
+        if (TakeSessionToken(source_addr, source_port, auth_tok))
+            player->SetAuthToken(auth_tok);
+        else if (g_AccountMgr->GetLoginTokenBinary(username, auth_tok))
             player->SetAuthToken(auth_tok);
         else
             LogMessage("HandleGlobalTicketRequest: no login token to bind for '%s' "

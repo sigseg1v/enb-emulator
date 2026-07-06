@@ -21,6 +21,7 @@
 #include "PlayerManager.h"
 #include "SectorManager.h"
 #include "PlayerClass.h"
+#include "ObjectClass.h"
 #include "MemoryHandler.h"
 #include <net7/Opcodes.h>
 #include <math.h>
@@ -374,6 +375,65 @@ bool PlayerManager::GroupExploreXP(Player *owner, char *msg, long XP_Gain)
 		//Player not in group.
         owner->AwardExploreXP(msg, XP_Gain);
 		return false;
+	}
+}
+
+// Formation/group exploration sharing. When a grouped player explores a nav,
+// GroupExploreXP (above) already fans the explore XP AND the "Discovered <nav>"
+// message out to every in-range formation member -- but the nav OBJECT and the
+// map entry itself were only ever sent to the ONE discovering player, because
+// ObjectManager::CheckNavRanges reveals per-player by proximity (it sets that
+// player's ExposedNavList/ExploredNavList and calls SendObject/SendNavigation on
+// that player alone). That left formation members credited with discovering a nav
+// they could not see on their map -- an internally inconsistent state ("you
+// discovered X" with no X). Reveal the nav to exactly the members that received
+// the shared XP, so the two stay in lockstep. Mirrors GroupExploreXP's member
+// gating verbatim (same sector, within 40k of the owner, active & not
+// incapacitated) so the reveal set can never drift from the XP set. No-op for a
+// solo (ungrouped) player, so non-grouped play is unchanged.
+void PlayerManager::GroupRevealNav(Player *owner, Object *obj)
+{
+	Group *g = GetGroupFromID(owner->GroupID());
+	Player *player = 0;
+
+	if (!g || !obj) return;
+
+	u32 owner_sector_num = owner->PlayerIndex()->GetSectorNum();
+
+	for (int i=0;i<6;i++)
+	{
+		if (g->Member[i].GameID == -1) continue;
+
+		player = GetPlayer(g->Member[i].GameID);
+		if (player == owner) continue;	// the discoverer already has it
+
+		if (player && player->Active() && player->AcceptedGroupInvite()
+			&& player->PlayerIndex()->GetSectorNum() == owner_sector_num
+			&& player->RangeFrom(owner->Position()) < 40000.0f && !player->ShipIndex()->GetIsIncapacitated())
+		{
+			// Only reveal what this member does not already have, so we never
+			// re-send the create or double-persist the discovery.
+			bool need_expose  = !obj->GetEIndex(player->ExposedNavList());
+			bool need_explore = !obj->GetEIndex(player->ExploredNavList());
+			if (!need_expose && !need_explore) continue;
+
+			if (need_expose)
+			{
+				obj->SetEIndex(player->ExposedNavList());
+				player->SaveDiscoverNav(obj->GetDatabaseUID());
+			}
+			if (need_explore)
+			{
+				obj->SetEIndex(player->ExploredNavList());
+				player->SaveExploreNav(obj->GetDatabaseUID());
+			}
+
+			// Same packets CheckNavRanges sends the discoverer: the static
+			// object create, then the navigation/map entry (with the explored
+			// flag now set, so it shows as visited on the member's map).
+			obj->SendObject(player);
+			obj->SendNavigation(player);
+		}
 	}
 }
 
@@ -1332,6 +1392,33 @@ bool PlayerManager::FormUp(long PID)
 			return false;
 		}
 
+		// The leader is the formation ANCHOR (slot 0, relative offset {0,0,0}):
+		// SetFormation already locked them there. Sending the leader a
+		// FormationPositionalUpdate anchored on THEMSELVES tells the client to fly
+		// formation relative to its own ship -- the client's formation solver then
+		// feeds its own position back into itself and overflows its stack, crashing
+		// the real client (observed: WINE virtual_setup_exception stack overflow the
+		// instant a leader issues Form Up). The anchor has nothing to fly to, so
+		// forming up slot 0 is a no-op.
+		if (i == 0)
+		{
+			return true;
+		}
+
+		// Anti-crash guard (authoritative, covers the native Form Up button too):
+		// never anchor this member on the leader's ship until the server has
+		// actually sent that ship to the member's client. The positional update
+		// below tells the member's formation solver to fly relative to
+		// g->Member[0].GameID (the leader); if the client has not spawned that
+		// object it dereferences NULL and crashes (see CV-BC-FORMATION-GATE --
+		// the gate-reform path hit exactly this). leader->PlayerInRangeList(p)
+		// is true once the leader ran SendShipData to p. Fail silently; the
+		// gate-reform poll retries, and a manual Form Up in range already passes.
+		if (!leader->PlayerInRangeList(p))
+		{
+			return false;
+		}
+
 		int Form = g->Member[0].Formation;
 		// Lock formation
 		g->Member[i].Formation = Form;
@@ -1472,6 +1559,10 @@ bool PlayerManager::SetFormation(long leaderID, long formation, char* formation_
 		}
 	}
 
+	// Remember the group's active formation so it auto-re-establishes after a
+	// gate (see GroupLeaderGate / GroupReformOnGate).
+	g->SavedFormation = formation;
+
 	return true;
 }
 
@@ -1508,6 +1599,9 @@ bool PlayerManager::BreakFormation(long leaderID)
 	strcpy_s(g->FormationName, sizeof(g->FormationName), "");
 	g->FormationName[sizeof(g->FormationName)-1] = '\0';
 
+	// A deliberate break stops the after-gate auto-reform (GroupReformOnGate).
+	g->SavedFormation = 0;
+
 	for (int i = 0; i < 6; ++i)
 	{
 		memberID = GetMemberID(groupid, i);
@@ -1532,6 +1626,159 @@ bool PlayerManager::BreakFormation(long leaderID)
 	}
 
 	return true;
+}
+
+// Map a formation type id to the name SetFormation stamps on the group.
+static const char* FormationTypeName(long f)
+{
+	switch (f)
+	{
+		case 4:  return "Slot Back";
+		case 5:  return "Block";
+		case 6:  return "Pipe";
+		default: return "";
+	}
+}
+
+bool PlayerManager::GroupLeaderGate(Player *leader, long dest)
+{
+	// Only the leader carries the group, and only for a valid destination. A
+	// non-leader / ungrouped / failed gate returns false so the caller drops
+	// just this ship out of the formation (the pre-existing lone-gater path).
+	if (!leader || dest <= 0)
+	{
+		return false;
+	}
+
+	Group *g = GetGroupFromID(leader->GroupID());
+	if (!g || g->Member[0].GameID != leader->GameID())
+	{
+		return false;
+	}
+
+	// Remember the active formation so the far side re-establishes it. If the
+	// group was not actually flying a formation there is nothing to carry or
+	// restore, but we still return true (we are the leader) so the caller does
+	// not run the lone-member LeaveFormation on us.
+	long formation = g->Member[0].Formation;
+	if (formation >= 4)
+	{
+		g->SavedFormation = formation;
+	}
+
+	long leaderSector = leader->PlayerIndex()->GetSectorNum();
+
+	for (int x = 0; x < 6; ++x)
+	{
+		if (g->Member[x].GameID == 0)
+		{
+			continue;
+		}
+
+		bool formed = (g->Member[x].Position != -1);
+		Player *m = GetPlayer(g->Member[x].GameID);
+
+		// Clear the formation flags across the gate. The client tears the
+		// formation down through the loading screen; GroupReformOnGate rebuilds
+		// it on the far side. (Mirrors BreakFormation, but leaves SavedFormation
+		// intact so the restore knows what to rebuild.)
+		g->Member[x].Formation = 0;
+		g->Member[x].Position  = -1;
+		if (m)
+		{
+			m->PlayerIndex()->GroupInfo.SetFormation(0);
+			m->PlayerIndex()->GroupInfo.SetPosition(-1);
+			if (x == 0)
+			{
+				m->PlayerIndex()->GroupInfo.SetFormationName("");
+			}
+			m->SendAuxPlayer();
+		}
+
+		// Carry a formed, same-sector, non-leader member through the same gate.
+		// SectorServerHandoff alone is a complete sector transfer (this is how
+		// TowToBase moves a player); the far-side FromSector is the leader's
+		// sector, so the member lands on the gate-arrival branch and rejoins.
+		if (x != 0 && formed && m &&
+		    m->PlayerIndex()->GetSectorNum() == leaderSector)
+		{
+			SectorManager *msm = m->GetSectorManager();
+			if (msm)
+			{
+				m->TerminateWarp();
+				m->SetStargateDestination(dest);
+				msm->SectorServerHandoff(m, dest);
+			}
+		}
+	}
+
+	return true;
+}
+
+bool PlayerManager::GroupReformOnGate(Player *p)
+{
+	if (!p)
+	{
+		return false;
+	}
+
+	Group *g = GetGroupFromID(p->GroupID());
+	if (!g || g->SavedFormation < 4)
+	{
+		return false;
+	}
+
+	if (g->Member[0].GameID == p->GameID())
+	{
+		// Leader landed: re-establish the formation type + lock the leader, then
+		// (RE-)ARM the reform poll on every member ALREADY in this sector rather
+		// than forming them up directly here. Forming a member up inline raced
+		// the leader's just-broadcast ship-object CREATE to that member's client
+		// and crashed it (see FormUp / CV-BC-FORMATION-GATE). Each armed member
+		// polls its own precondition (leader's ship actually sent to it) and
+		// forms up when ready via the member branch below. Re-arming also
+		// rescues a member that had already given up waiting for a slow leader.
+		// SetFormation only locks the leader (members get Position -1).
+		long leaderSector = p->PlayerIndex()->GetSectorNum();
+		if (!SetFormation(p->GameID(), g->SavedFormation,
+		                  (char*)FormationTypeName(g->SavedFormation)))
+		{
+			return false;
+		}
+		for (int x = 1; x < 6; ++x)
+		{
+			if (g->Member[x].GameID == 0)
+			{
+				continue;
+			}
+			Player *m = GetPlayer(g->Member[x].GameID);
+			if (m && m->PlayerIndex()->GetSectorNum() == leaderSector)
+			{
+				m->ArmGateReform();
+			}
+		}
+		return true;
+	}
+
+	// Member landed (or its reform poll is retrying): rejoin the formation only
+	// once the leader is here AND the server has actually sent the leader's ship
+	// object to THIS member's client. leader->PlayerInRangeList(this member) is
+	// true exactly after the leader's UpdatePlayerVisibilityList ran
+	// SendShipData to this member -- i.e. the member's client has (been sent,
+	// and by ordered delivery will spawn before this update) the anchor ship.
+	// Returning false here keeps the poll alive until that holds; without this
+	// gate the FormationPositionalUpdate anchors on a not-yet-spawned ship and
+	// crashes the member client.
+	Player *leader = GetPlayer(g->Member[0].GameID);
+	if (leader &&
+	    leader->PlayerIndex()->GetSectorNum() == p->PlayerIndex()->GetSectorNum() &&
+	    leader->PlayerInRangeList(p))
+	{
+		FormUp(p->GameID());
+		return true; // precondition met: stop polling (FormUp fired at most once)
+	}
+
+	return false;
 }
 
 bool PlayerManager::RequestTargetMyTarget(long sourceID, long targetID)

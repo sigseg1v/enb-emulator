@@ -973,16 +973,19 @@ namespace LaunchFreya
             // Copy the scripts/ tree beside the staged DLL, but stage only the
             // ENABLED mods: disabled mod folders are skipped on copy AND pruned from
             // a previous launch's staging, so a disabled mod is never present for
-            // init.lua to discover -- i.e. it is neither loaded nor injected. Missing
-            // scripts is not fatal -- enbmod just logs an init.lua error and keeps
-            // ticking -- but warn so the user knows why their mods aren't running.
+            // init.lua to discover -- i.e. it is neither loaded nor injected. A null
+            // scriptsSrc (no on-disk bundle) is NOT fatal: the bootstrap falls back
+            // to the copy embedded in this executable, and the store mods stage
+            // regardless. Missing scripts entirely is also not fatal -- enbmod just
+            // logs an init.lua error and keeps ticking -- but warn so the user knows
+            // why their mods aren't running.
             try
             {
                 var clientDir = Path.GetDirectoryName(_setting.ClientPath);
-                if (scriptsSrc != null && !string.IsNullOrEmpty(clientDir))
+                if (!string.IsNullOrEmpty(clientDir))
                     StageScriptsWithEnabledMods(scriptsSrc, Path.Combine(clientDir, "scripts"));
                 else
-                    _warn("Client mods: enbmod scripts/ folder not found; injecting the DLL with no scripts.");
+                    _warn("Client mods: client folder unknown; injecting the DLL with no scripts.");
             }
             catch (Exception ex)
             {
@@ -992,29 +995,33 @@ namespace LaunchFreya
         }
 
         // Stage scripts/ next to the client, honouring the per-mod enable state in
-        // _setting.ModStates. The shared bootstrap (init.lua, lib/, and the
-        // runtime-generated calib_data.lua) is copied from the bundled scripts
-        // tree as-is. The MODS, however, come from the persistent mod store
-        // (<launcher-dir>/mods, ours + the user's), NOT the bundle: only enabled
-        // mod folders are copied (minus the 'modhash' bookkeeping file), and any
-        // disabled or removed folder lingering from a previous launch is deleted
-        // at the destination.
+        // _setting.ModStates. The shared bootstrap (init.lua + lib/) has two
+        // sources: the on-disk scripts tree (dev repo checkout, or the zip's
+        // one-time bin/scripts seed) and the copy EMBEDDED in this executable at
+        // build time. The launcher self-updates while bin/scripts never does, so
+        // on a packaged install the embedded copy is the one guaranteed current
+        // (and guaranteed present: installs from a pre-bundle zip have no
+        // bin/scripts at all, which used to skip ALL staging and leave enbmod
+        // with no init.lua). Release therefore prefers embedded; DEBUG prefers
+        // the on-disk repo tree so live Lua edits keep winning. The MODS come
+        // from the persistent mod store (<launcher-dir>/mods, ours + the
+        // user's), NOT the bundle: only enabled mod folders are copied (minus
+        // the 'modhash' bookkeeping file), and any disabled or removed folder
+        // lingering from a previous launch is deleted at the destination.
         void StageScriptsWithEnabledMods(string scriptsSrc, string scriptsDst)
         {
             Directory.CreateDirectory(scriptsDst);
 
-            // Top-level files (init.lua, ...). Note: we never delete files at the
-            // destination root, so a runtime-written calib_data.lua survives re-staging.
-            foreach (var file in Directory.GetFiles(scriptsSrc))
-                File.Copy(file, Path.Combine(scriptsDst, Path.GetFileName(file)), overwrite: true);
-
-            // Non-mods subdirs (lib/, ...) copy wholesale.
-            foreach (var sub in Directory.GetDirectories(scriptsSrc))
-            {
-                var name = Path.GetFileName(sub);
-                if (string.Equals(name, "mods", StringComparison.OrdinalIgnoreCase)) continue;
-                CopyDirectory(sub, Path.Combine(scriptsDst, name));
-            }
+#if DEBUG
+            bool bootstrapStaged = scriptsSrc != null && StageBootstrapFromDisk(scriptsSrc, scriptsDst);
+            if (!bootstrapStaged) bootstrapStaged = StageEmbeddedBootstrap(scriptsDst);
+#else
+            bool bootstrapStaged = StageEmbeddedBootstrap(scriptsDst);
+            if (!bootstrapStaged && scriptsSrc != null)
+                bootstrapStaged = StageBootstrapFromDisk(scriptsSrc, scriptsDst);
+#endif
+            if (!bootstrapStaged)
+                _warn("Client mods: no scripts/ bootstrap found (on disk or embedded); mods cannot load.");
 
             var modsSrc = ModStore.Dir();
             var modsDst = Path.Combine(scriptsDst, "mods");
@@ -1058,6 +1065,56 @@ namespace LaunchFreya
             }
 
             _warn($"Client mods: staged {staged} mod(s), skipped {skipped} disabled.");
+        }
+
+        // Stage the bootstrap (top-level files + non-mods subdirs) from an on-disk
+        // scripts tree. Never deletes files at the destination root, so a
+        // runtime-written calib_data.lua survives re-staging.
+        bool StageBootstrapFromDisk(string scriptsSrc, string scriptsDst)
+        {
+            // Top-level files (init.lua, ...).
+            foreach (var file in Directory.GetFiles(scriptsSrc))
+                File.Copy(file, Path.Combine(scriptsDst, Path.GetFileName(file)), overwrite: true);
+
+            // Non-mods subdirs (lib/, ...) copy wholesale.
+            foreach (var sub in Directory.GetDirectories(scriptsSrc))
+            {
+                var name = Path.GetFileName(sub);
+                if (string.Equals(name, "mods", StringComparison.OrdinalIgnoreCase)) continue;
+                CopyDirectory(sub, Path.Combine(scriptsDst, name));
+            }
+            return true;
+        }
+
+        // Stage the bootstrap from the resources embedded in this executable (see
+        // the EmbeddedResource glob in LaunchFreya.csproj: enbmodscripts/<relpath>,
+        // init.lua + lib/*.lua, mods excluded). Returns false if the build carried
+        // no embedded scripts. Writes only -- never deletes -- so calib_data.lua
+        // and any extra destination files survive, same as the disk path.
+        bool StageEmbeddedBootstrap(string scriptsDst)
+        {
+            const string prefix = "enbmodscripts/";
+            var asm = typeof(Launcher).Assembly;
+            int staged = 0;
+            foreach (var resName in asm.GetManifestResourceNames())
+            {
+                // %(RecursiveDir) in the LogicalName yields '\' separators when the
+                // launcher is built on Windows and '/' on Linux -- normalize both.
+                var norm = resName.Replace('\\', '/');
+                if (!norm.StartsWith(prefix, StringComparison.Ordinal)) continue;
+                var rel = norm.Substring(prefix.Length);
+                var dest = Path.Combine(scriptsDst, rel.Replace('/', Path.DirectorySeparatorChar));
+                var destDir = Path.GetDirectoryName(dest);
+                if (!string.IsNullOrEmpty(destDir)) Directory.CreateDirectory(destDir);
+                using var src = asm.GetManifestResourceStream(resName);
+                if (src == null) continue;
+                using var dst = File.Create(dest);
+                src.CopyTo(dst);
+                staged++;
+            }
+            if (staged > 0)
+                _warn($"Client mods: staged the embedded scripts bootstrap ({staged} file(s)).");
+            return staged > 0;
         }
 
         // Copy a DLL into the client release folder and return its DOS path, or null
@@ -1111,6 +1168,65 @@ namespace LaunchFreya
             foreach (var c in candidates)
                 if (File.Exists(c)) return c;
             return null;
+        }
+
+        // Find the standalone RUNTIME injector (inject.exe) across the same dev /
+        // packaged layouts. Distinct from FreyaInject.exe: FreyaInject SPAWNS the
+        // client suspended and injects at create time (it cannot attach to a
+        // client already running); inject.exe hot-attaches an ALREADY-RUNNING
+        // client via OpenProcess + CreateRemoteThread(LoadLibraryA).
+        static string LocateRuntimeInjectorExe()
+        {
+            var candidates = new[]
+            {
+                Path.Combine(AppContext.BaseDirectory, "bin", "inject.exe"),
+                Path.Combine(AppContext.BaseDirectory, "inject.exe"),
+                Path.Combine(Directory.GetCurrentDirectory(), "bin", "inject.exe"),
+            };
+            foreach (var c in candidates)
+                if (File.Exists(c)) return c;
+            return null;
+        }
+
+        // Attach the enbmod Lua runtime to an ALREADY-RUNNING client.exe in this
+        // launcher's configured WINE prefix, independent of how that client was
+        // launched -- the Freya launcher, the Net-7 launcher, or a bare
+        // `wine client.exe`. Launch-time injection (FreyaInject.exe) can only
+        // inject a client it spawns itself; this uses the standalone inject.exe to
+        // hot-attach one that is already up. Stages enbmod.dll + the enabled mods'
+        // scripts next to the client first (identical to a mod-enabled launch), so
+        // a cold prefix that never ran with mods still gets a current runtime.
+        // Returns a human-readable status string; throws on a hard failure.
+        public string InjectEnbmodIntoRunningClient()
+        {
+            var injector = LocateRuntimeInjectorExe()
+                ?? throw new InvalidOperationException(
+                    "inject.exe not found. Build it with `just build-enbmod`.");
+
+            var dllDos = StageClientMods()
+                ?? throw new InvalidOperationException(
+                    "Could not stage enbmod.dll next to the client (see log).");
+
+            var clientDir = Path.GetDirectoryName(_setting.ClientPath);
+            var psi = WinExe(clientDir, injector, $"\"{dllDos}\"");
+            // Redirect so we can surface inject.exe's own diagnostics to the UI;
+            // WinExe defaults to UseShellExecute=true on Windows, which forbids it.
+            psi.UseShellExecute = false;
+            psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError = true;
+
+            using var p = Process.Start(psi)
+                ?? throw new InvalidOperationException("Failed to start inject.exe.");
+            var stdout = p.StandardOutput.ReadToEnd();
+            var stderr = p.StandardError.ReadToEnd();
+            p.WaitForExit(20000);
+            var code = p.HasExited ? p.ExitCode : -1;
+
+            var tail = (stdout + "\n" + stderr).Trim();
+            if (code != 0)
+                throw new InvalidOperationException(
+                    $"inject.exe exited {code}. {tail}");
+            return ("enbmod injected into the running client. " + tail).Trim();
         }
 
         // Find the built feed DLL across dev (play-local, CWD=repo root) and

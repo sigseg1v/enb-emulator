@@ -421,6 +421,11 @@ public:
     //rangelist handling
     void        UpdatePlayerVisibilityList();
     bool        PlayerInRangeList(Player *p_check);
+    // Arm (or re-arm) the deferred group-formation reform poll after a gate
+    // arrival. The poll (CheckEventTimes) keeps re-attempting the reform until
+    // it fires or this deadline passes, so an arbitrarily slow arrival still
+    // reforms once the leader's ship object has reached this member's client.
+    void        ArmGateReform() { m_GateReformDeadline = GetNet7TickCount() + 15000; } // 15s cap
     void        AddPlayerToRangeList(Player *p, bool is_group_member = false);
     void        RemovePlayerFromRangeList(Player *p);
     void        RemoveFromAllSectorRangeLists(); //this removes the presence of the player from all the lists in the current sector
@@ -1269,6 +1274,16 @@ private:
     unsigned long     m_WarpTime;
     unsigned long     m_WarpBroadcastTime;
 	float			  m_WarpDrain;
+
+	// Deferred group-formation reform after a gate arrival. Non-zero = the
+	// reform is pending and CheckEventTimes polls GroupReformOnGate every tick
+	// until it succeeds or this DEADLINE tick passes. The reform is only fired
+	// once the server has actually SENT the leader's ship object to the
+	// member's client (leader is in the member's range list) -- firing it
+	// before that (as the original synchronous FinishLogin call did) anchored
+	// the member's formation solver on a ship it had not spawned yet and
+	// crashed the real client (see GroupReformOnGate / FormUp / ArmGateReform).
+	unsigned long     m_GateReformDeadline;
 
     //energy
     unsigned long     m_EnergyRecharge;

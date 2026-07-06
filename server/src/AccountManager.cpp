@@ -220,6 +220,20 @@ void AccountManager::SetupTickets()
         return true;
     }
 
+    bool AccountManager::TokenHexToBinary(const char *hex, unsigned char out[16])
+    {
+        if (!hex || !*hex) return false;
+        if (!EnsureAccountSodiumReady()) return false;
+
+        size_t bin_len = 0;
+        if (sodium_hex2bin(out, 16, hex, strlen(hex),
+                           NULL, &bin_len, NULL) != 0 || bin_len != 16)
+        {
+            return false;
+        }
+        return true;
+    }
+
     void AccountManager::UpdateLoginTime(long account_id)
     {
 	    sql_query_c TimeUpdate(&m_SQL_Conn);

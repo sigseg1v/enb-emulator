@@ -134,6 +134,20 @@ unsigned actionbar();
 unsigned cockpit_throttle_ctrl();
 unsigned cockpit_cmd_ctrl();
 
+// ECX (this) captured from WarpPathBuild (game::addr::WarpPathBuild): the
+// radar/targeting controller that builds the warp nav path from the current target.
+// It is a session singleton with no fixed M/player offset, so we capture it here. 0
+// until the client has built a warp path this session (targeted a nav + engaged
+// warp at least once). lua_api (enb.warp) needs it to drive the native path build.
+unsigned warp_radar_ctrl();
+
+// Seed the warp radar controller WITHOUT a real orb engage: lua_api resolves it by
+// offset off M and validates its full structure (see resolve_warp_radar) before
+// calling this, so enb.warp works with zero screen interaction. Only takes effect
+// while unset (a genuine WarpPathBuild capture always wins if it has already fired),
+// so a resolved value can never clobber the ground-truth ECX the hook latched.
+void seed_warp_radar_ctrl(unsigned thisp);
+
 // ECX (this) captured from ChatLocalLine (game::addr::ChatLocalLine): the session-stable
 // chat PANEL object. The line RING hangs off it at +chat::panel_ring, and it is the
 // `this` ChatSend requires. 0 until the first line is printed this session. lua_api

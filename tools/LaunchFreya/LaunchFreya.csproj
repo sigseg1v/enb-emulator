@@ -51,6 +51,17 @@
     <AvaloniaResource Include="..\..\vendor\fonts\*.ttf"
                       Link="Assets\Fonts\%(Filename)%(Extension)" />
     <None Include="FreyaLauncher.cfg" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The enbmod BOOTSTRAP (init.lua + lib/, NOT the mods) embedded into the
+         launcher executable. The launcher stages these next to client.exe at
+         launch; carrying them inside the self-updated exe keeps the bootstrap
+         in lockstep with the enbmod.dll the updater ships, and fixes installs
+         whose one-time bin/scripts zip seed is missing or stale (the updater
+         never re-delivers bin/scripts). Mods are excluded: they come from the
+         mod store / manifest channel (MOD-STRUCTURE.md). Publish the launcher
+         and enbmod.dll together whenever the bootstrap changes. -->
+    <EmbeddedResource Include="..\..\freya\client-injection\enbmod\scripts\**\*.lua"
+                      Exclude="..\..\freya\client-injection\enbmod\scripts\mods\**"
+                      LogicalName="enbmodscripts/%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.2.3" />

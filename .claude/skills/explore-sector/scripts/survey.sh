@@ -87,28 +87,23 @@ detect_sector() {
         done
     fi
     s="$(_read_sector)"; [ -n "$s" ] && { echo "$s"; return 0; }
-    echo "[survey] sector OCR failed -- recovering (re-enter if at char-select, re-open map)" >&2
-    # 1) re-enter from character-select if that is where we are. 07 exits 0 as a
-    #    no-op when already in-game; a NON-ZERO exit means it WAS at char-select and
-    #    could not enter (OCR could not confirm the character name or the ENTER
-    #    button). In that case we must NOT fall through to read-sector.sh -- its
-    #    open-map step would click blindly on the char-select screen (the "clicking
-    #    random shit all over the place" bug). HALT for the operator instead.
-    local rc
-    bash "$LOGIN_DIR/07-charselect-enter.sh" >&2; rc=$?
-    if [ "$rc" -ne 0 ]; then
-        echo "[survey] 07-charselect-enter bailed (rc=$rc) -- still at character-select, NOT map-clicking. HALT." >&2
-        return 1
-    fi
-    # 08-wait-ingame confirms in-game via the enbmod Lua channel -- which does NOT
-    # exist in screen-only manual-client mode (no mods injected). Running it there
-    # just burns its whole timeout printing a STUCK we ignore, so skip it in manual
-    # mode. The read-sector poll below IS our screen-only in-space signal: read-sector
-    # refuses char-select/login and only prints SECTOR once the map title actually
-    # reads, so a successful read == loaded into space. We just have to poll it long
-    # enough to outlast the load screen (a fresh scene load can take ~30-60s).
+    echo "[survey] sector OCR failed -- recovering (confirm in-game, re-open map)" >&2
+    # 1) confirm we are IN-GAME before touching the screen. The old screen-driven
+    #    07-charselect-enter step is gone (login is OCR-free; the in-client
+    #    auto-login owns char-enter), so the enbmod Lua channel is the guard now:
+    #    08 exiting non-zero means the character is NOT loaded into the world
+    #    (load hang, or parked at character-select where read-sector's map-open
+    #    click would land on random UI -- the "clicking random shit all over the
+    #    place" bug). HALT for the operator instead of clicking blindly.
+    #    Screen-only manual-client mode has no Lua channel to consult (no mods
+    #    injected); there the read-sector poll below is the (weaker) in-space
+    #    signal -- read-sector refuses char-select/login and only prints SECTOR
+    #    once the map title actually reads.
     if [ "${ENB_EXPLORE_MANUAL_CLIENT:-0}" != 1 ]; then
-        bash "$LOGIN_DIR/08-wait-ingame.sh" >&2 || true
+        if ! bash "$LOGIN_DIR/08-wait-ingame.sh" >&2; then
+            echo "[survey] 08-wait-ingame failed -- not in-game (char-select or load hang), NOT map-clicking. HALT." >&2
+            return 1
+        fi
     fi
     # 2) poll read-sector.sh until the load screen clears and the map title reads.
     #    read-sector.sh re-opens the map each call; during the load screen it returns

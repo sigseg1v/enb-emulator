@@ -1,4 +1,5 @@
 #include "overlay.h"
+#include "game.h"
 #include "log.h"
 #include "mem.h"
 #include <windows.h>
@@ -701,80 +702,54 @@ static HRESULT WINAPI hk_Present(IDirect3DDevice8* dev, const RECT* src, const R
     return real_Present(dev, src, dst, wnd, dirty);
 }
 
-bool init() {
-    // Resolve the IDirect3DDevice8 vtable from a throwaway device. d3d8.dll is
-    // already loaded by the game (client.exe imports it); LoadLibrary is only a
-    // fallback for a pre-render injection race.
-    HMODULE d3dmod = GetModuleHandleA("d3d8.dll");
-    if (!d3dmod)
-        d3dmod = LoadLibraryA("d3d8.dll");
-    if (!d3dmod) {
-        logf("overlay: d3d8.dll not found");
-        return false;
+// Present-hook installation. We take the Present pointer from the vtable of the
+// GAME'S OWN IDirect3DDevice8 (game::render::device) rather than creating a
+// throwaway probe device. The old probe broke on native Windows: with the game
+// holding the adapter (fullscreen-exclusive), a second windowed HAL device can
+// fail, and the D3DDEVTYPE_REF fallback does not exist outside SDK installs --
+// CreateDevice returned D3DERR_NOTAVAILABLE (0x8876086c) and the overlay never
+// drew. (Both probe paths happened to work under WINE, which is why this never
+// showed locally.) Every D3D8 device shares one implementation vtable, so the
+// game device's Present slot is the same code address the probe used to find --
+// minus the second device.
+//
+// The device global is null until the renderer starts, which is AFTER our
+// launch-time injection -- so poll(), called every tick on the game thread,
+// installs the hook as soon as the global goes non-null. Hot-injection into a
+// running client hooks on the first poll. Installing from the game thread is
+// also safer than the old worker-thread install: the game cannot be inside
+// Present while its own thread is executing our tick.
+static bool g_present_hooked = false; // poll() runs on the game thread only
+static bool g_present_hook_failed = false;
+
+void poll() {
+    if (g_present_hooked || g_present_hook_failed)
+        return;
+    uintptr_t dev = mem::ptr(game::render::device);
+    if (!dev)
+        return;                   // renderer not up yet -- retry next tick
+    uintptr_t vt = mem::ptr(dev); // IDirect3DDevice8 vtable
+    if (!vt)
+        return;
+    void* present_addr = (void*)mem::ptr(vt + 15 * sizeof(void*)); // vtable[15] = Present
+    if (!present_addr) {
+        logf("overlay: device %p has null Present slot -- no drawing", (void*)dev);
+        g_present_hook_failed = true;
+        return;
     }
-
-    typedef IDirect3D8*(WINAPI * Create8_t)(UINT);
-    // via void*: FARPROC -> target-type direct cast trips -Wcast-function-type
-    Create8_t create = (Create8_t)(void*)GetProcAddress(d3dmod, "Direct3DCreate8");
-    if (!create) {
-        logf("overlay: Direct3DCreate8 not exported");
-        return false;
-    }
-    IDirect3D8* d3d = create(D3D_SDK_VERSION);
-    if (!d3d) {
-        logf("overlay: Direct3DCreate8 failed");
-        return false;
-    }
-
-    WNDCLASSA wc = {};
-    wc.lpfnWndProc = DefWindowProcA;
-    wc.hInstance = GetModuleHandleA(nullptr);
-    wc.lpszClassName = "enbmod_d3d8probe";
-    RegisterClassA(&wc);
-    HWND wnd = CreateWindowA(wc.lpszClassName, "", WS_OVERLAPPEDWINDOW, 0, 0, 16, 16, nullptr,
-                             nullptr, wc.hInstance, nullptr);
-
-    D3DPRESENT_PARAMETERS pp = {};
-    pp.Windowed = TRUE;
-    pp.SwapEffect = D3DSWAPEFFECT_DISCARD;
-    pp.BackBufferFormat = D3DFMT_UNKNOWN; // windowed: current display format
-    pp.BackBufferWidth = 16;
-    pp.BackBufferHeight = 16;
-    pp.hDeviceWindow = wnd;
-
-    IDirect3DDevice8* dev = nullptr;
-    HRESULT hr =
-        d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, wnd,
-                          D3DCREATE_SOFTWARE_VERTEXPROCESSING | D3DCREATE_FPU_PRESERVE, &pp, &dev);
-    if (FAILED(hr))
-        hr = d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_REF, wnd,
-                               D3DCREATE_SOFTWARE_VERTEXPROCESSING | D3DCREATE_FPU_PRESERVE, &pp,
-                               &dev);
-    if (FAILED(hr) || !dev) {
-        logf("overlay: probe CreateDevice failed (0x%08lx)", (unsigned long)hr);
-        d3d->Release();
-        DestroyWindow(wnd);
-        UnregisterClassA(wc.lpszClassName, wc.hInstance);
-        return false;
-    }
-
-    void** vtable = *(void***)dev;   // IDirect3DDevice8 vtable
-    void* present_addr = vtable[15]; // index 15 = Present
-    dev->Release();
-    d3d->Release();
-    DestroyWindow(wnd);
-    UnregisterClassA(wc.lpszClassName, wc.hInstance);
-
     if (MH_CreateHook(present_addr, (void*)&hk_Present, (void**)&real_Present) != MH_OK) {
-        logf("overlay: hook Present failed");
-        return false;
+        logf("overlay: hook Present failed -- no drawing");
+        g_present_hook_failed = true;
+        return;
     }
     if (MH_EnableHook(present_addr) != MH_OK) {
-        logf("overlay: enable Present hook failed");
-        return false;
+        logf("overlay: enable Present hook failed -- no drawing");
+        g_present_hook_failed = true;
+        return;
     }
-    logf("overlay: hook installed -- IDirect3DDevice8::Present @ %p", present_addr);
-    return true;
+    logf("overlay: hook installed -- IDirect3DDevice8::Present @ %p (game device %p)", present_addr,
+         (void*)dev);
+    g_present_hooked = true;
 }
 
 void shutdown() {

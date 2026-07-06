@@ -248,6 +248,7 @@ void Player::SectorReset()
     m_ProspectBeam = false;
     m_TractorBeam = false;
     m_WarpBroadcastTime = 0;
+    m_GateReformDeadline = 0;
     RemoveProspectNodes();
     m_AttacksThisTick = 0;
     m_LogDockCoords = false;
@@ -2975,6 +2976,21 @@ void Player::CheckEventTimes(unsigned long current_tick)
 			RechargeReactor(0.0f);
 		}
 
+		// Deferred group-formation reform after a gate arrival (armed in
+		// FinishLogin / by the leader). Poll GroupReformOnGate until it fires
+		// (returns true once the server has sent the leader's ship object to
+		// this member's client, so the FormationPositionalUpdate anchors on a
+		// ship the client has spawned) or the deadline passes. Firing on a
+		// blind timer raced the object CREATE and crashed the member client.
+		if (m_GateReformDeadline > 0)
+		{
+			if (g_ServerMgr->m_PlayerMgr.GroupReformOnGate(this) ||
+			    current_tick > m_GateReformDeadline)
+			{
+				m_GateReformDeadline = 0;
+			}
+		}
+
 		//delay tractoring next ore until current tractor is complete
 		if (m_ProspectBeamNode.player_id !=0 && m_ProspectBeamNode.event_time < current_tick && m_ProspectTractorNode.player_id == 0)
 		{
@@ -3156,6 +3172,35 @@ void Player::SendToVisibilityList(bool include_player)
 		return; //don't update position
 	}
 
+	// Replicate the flying player's FACING (nose direction) to observers.
+	// Under the MVAS position feed the server refreshes m_Position_info.Position
+	// every frame but never m_Position_info.Orientation (CalcNewHeading is
+	// skipped while IS_PLAYER(m_MVAS_index)), so the 0x003E broadcast carries a
+	// stale/spawn orientation: remote players see the ship slide through space
+	// without ever turning. The feed does carry the ship's nose vector (stored
+	// in m_ClientHeading; the live 0x1004 capture is position xyz + heading xyz
+	// and NOTHING MORE -- there is no roll component on the retail wire, so nose
+	// direction with roll leveled is the most any observer could ever have seen),
+	// so convert that nose vector to the wire quaternion the SAME way the engine
+	// look-rotation does (Object::CalcOrientation, yaw+pitch, roll=0) and send
+	// THAT. Restored below before returning so the local warp / velocity /
+	// dead-reckoning path never sees the transient orientation (routing facing
+	// into the motion path is what pinned the historical phantom-velocity bug --
+	// this stays strictly on the outbound broadcast copy).
+	float saved_orient[4];
+	bool overrode_orient = false;
+	if (m_HaveClientHeading && m_ReceivedMovement)
+	{
+		memcpy(saved_orient, m_Position_info.Orientation, sizeof(saved_orient));
+		float facing_target[3] = {
+			m_Position_info.Position[0] + m_ClientHeading[0],
+			m_Position_info.Position[1] + m_ClientHeading[1],
+			m_Position_info.Position[2] + m_ClientHeading[2]
+		};
+		CalcOrientation(facing_target, m_Position_info.Position, false);
+		overrode_orient = true;
+	}
+
 	//sort out 'this' player first if we need to
 	if (include_player)
 	{
@@ -3196,6 +3241,11 @@ void Player::SendToVisibilityList(bool include_player)
 
 	m_Position_info.RotZ *= 10.0f;
     m_Position_info.UpdatePeriod = update;
+
+	// Restore the stored orientation: the facing override above is broadcast-only
+	// and must not persist into the local motion/warp state.
+	if (overrode_orient)
+		memcpy(m_Position_info.Orientation, saved_orient, sizeof(saved_orient));
 
     m_ReceivedMovement = false;
 }
@@ -3963,6 +4013,28 @@ void Player::FinishLogin(bool udp)
 	SetInSpace(true);
 
 	SetWormholed(false);
+
+	// Group-formation gate automation: re-establish the formation carried
+	// through a gate. Gate arrivals only (FromSector is the origin gate's
+	// sector, 900 < id <= 9999; a station undock is > 9999, a fresh login 0).
+	// The leader re-forms every member already here; each member rejoins as it
+	// lands -- covering any arrival order. No-op unless the group has a saved
+	// formation (GroupReformOnGate guards on it).
+	//
+	// DEFERRED + POLLED, not synchronous: the reform emits a
+	// FormationPositionalUpdate that anchors each member on the LEADER's ship.
+	// Running it here (right after SetInSpace) fired it before the just-arrived
+	// leader's ship-object CREATE had propagated to the member's client, so the
+	// member received a formation-follow for a ship it had not spawned ->
+	// unresolvable anchor -> client crash (confirmed in prod: member GrieverJE
+	// vanished the instant leader GrieverTW finished its sector login ~6s
+	// later). Arm the reform poll instead; CheckEventTimes retries every tick
+	// and only fires once the server has actually sent the leader's ship to
+	// this member (leader in the member's range list), not on a blind timer.
+	if (FromSector() > 900 && FromSector() <= 9999)
+	{
+		ArmGateReform();
+	}
 
 	//player->m_Effects.SendEffects(player);
 

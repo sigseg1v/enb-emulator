@@ -261,16 +261,82 @@ constexpr uintptr_t AutoFollowBuild = 0x0089d070;
 constexpr uintptr_t CmdSend = 0x00728150;
 constexpr uintptr_t CtaBuild = 0x0086f070;
 
-// RequestTarget (__thiscall, ECX = M; arg: a live contact-object pointer) is the
+// RequestTarget (__cdecl(M, obj) -- BOTH args on the stack, NOT thiscall) is the
 // client's own "make this object my target" call -- the same path a click on an
-// object in space takes. It reads the object's GameID (obj + world::tgt_gid) into a
-// REQUEST_TARGET (wire opcode 0x17) packet and pushes it through M's sector-server
-// Connection (M + world::connection). The server validates the target is real / in
+// object in space takes. It reads M's source GameID (M + 0x112c) and the object's
+// GameID (obj + 0x90) into a REQUEST_TARGET (wire opcode 0x17) packet and pushes it
+// through M's sector-server Connection. The server validates the target is real / in
 // range and replies SET_TARGET (0x19), which the client applies natively (target
 // frame, threat text, highlight). We replicate it from enb.request_target: resolve a
 // GameID to its contact object with the same gid->object lookup enb.group uses, then
-// hand that object here. Pass ONLY an object the lookup returned (never a raw address).
+// call cdecl(M, obj). Pass ONLY an object the lookup returned (never a raw address).
 constexpr uintptr_t RequestTarget = 0x00723230;
+
+// StationExit (__thiscall, ECX = M the world manager; args: char action, int, int)
+// is the client's own "leave station" method -- the same call the native "Exit
+// Starbase" button runs. Called with action = 1 (and the current StarbaseID at
+// M + world::starbase_id non-zero) it builds a STARBASE_REQUEST (wire opcode
+// 0x004E, Action = 1 "exit station") and pushes it through M's sector-server
+// Connection itself (no separate CmdSend needed); the server launches the player
+// into space (a full sector handoff, like a gate jump). action = 0 is the
+// server-driven teardown branch -- we never call that. We replicate the exit from
+// enb.undock(): confirm docked (starbase_id != 0), then call thiscall(M, 1, 0, 0).
+constexpr uintptr_t StationExit = 0x0074ba30;
+
+// ---- warp (engage warp to the currently-targeted nav) ----
+// Warp is NOT an avatar-command (CmdBuild verb) and NOT a raw byte buffer: it is a
+// packet OBJECT the client serializes itself (wire opcode 0x009B), pushed through the
+// same generic Connection send as every other packet (CmdSend -- *(M + connection)
+// ->vtable[2]). The native warp-orb click reproduces as this sequence, all on M:
+//   1. RequestTarget(nav) so the current target is the nav.
+//   2. WarpPathBuild(radarCtrl) -- reads the current target off the radar/targeting
+//      controller and runs NavListBuild into that controller's nav vector; returns 1
+//      when the path is ready this frame, 0 while still building (retry next tick).
+//   3. navList = *(M + world::navlist); navVec = WarpNavVec(radarCtrl) (== ctrl+0x40).
+//   4. WarpPacketCtor(buf[5], navList, navVec) builds the WarpPacket object in buf.
+//   5. CmdSend(M, buf) serializes+sends 0x009B (framed [u16 len][u16 0x9B][payload];
+//      the client owns the byte order, so no htonl/ntohl on our side).
+//   6. WarpPacketDtor(buf) frees the object's owned nav-vector copy.
+// Warp is a server-side TOGGLE: re-running the same sequence while warping terminates
+// it (enb.warp_stop), so there is no distinct client stop opcode.
+//
+// The radar/targeting controller `this` is a session singleton. The primary source is
+// still the read-only ECX capture at WarpPathBuild's entry (hooks::warp_radar_ctrl),
+// populated once the client has built a warp path at least once this session. But it
+// IS also reachable by a fixed deref chain off M, with NO orb click needed to seed the
+// hook: the orb handler loads SC = *(handlerThis + 0x40) (SC == M, the world/space
+// client singleton), then MainView = *(SC + 0x1354) (SC's active view slot -- a HUD
+// controller, NOT the radar), and the radar hangs off it at MainView + 0x80:
+//
+//     radar = *( *(M + warp::mainview_on_m) + warp::radar_in_mainview )
+//
+// The radar is a small (~0x50-byte) object built lazily during MainView init and
+// stored ONLY there (no global handle), so *(MainView + 0x80) can be 0 before the 3D
+// view is up. lua_api walks this chain and fully validates the radar's structure
+// (warp::* offsets below) before ever calling into it, so enb.warp engages with zero
+// screen interaction. See resolve_warp_radar.
+constexpr uintptr_t WarpPathBuild = 0x007bd980;
+constexpr uintptr_t WarpNavVec = 0x007bd960;
+constexpr uintptr_t WarpPacketCtor = 0x008b1aa0;
+constexpr uintptr_t WarpPacketDtor = 0x008b1c70;
+
+// Offsets used to resolve + validate the radar controller off M without the ECX hook.
+// All are read guarded (VEH-backed) BEFORE any native call, so a wrong candidate fails
+// validation and is rejected rather than hanging the client. The radar's first member
+// (radar + 0) is itself an SC-family object m0; subsys/subsys_flag/getdata_vtoff below
+// are read off m0, while the nav-vector blocks live directly on the radar.
+namespace warp {
+constexpr int mainview_on_m = 0x1354; // M -> MainView (SC's active-view slot; a HUD controller)
+constexpr int radar_in_mainview =
+    0x80;                      // MainView + 0x80: the radar object (0 until the view is up)
+constexpr int subsys = 0x12a4; // m0 (== *radar) + 0x12a4: targeting subsystem WarpPathBuild derefs
+constexpr int subsys_flag = 0x10;   // (m0+subsys) + 0x10: "path already built" byte flag
+constexpr int nav_vec = 0x40;       // radar + 0x40: primary nav vector control block
+constexpr int nav_vec2 = 0x3c;      // radar + 0x3c: secondary nav vector control block
+constexpr int vec_begin = 0x08;     // vector control block -> begin pointer
+constexpr int vec_end = 0x0c;       // vector control block -> end pointer
+constexpr int getdata_vtoff = 0x28; // m0->vtable[+0x28]: the getter WarpPathBuild invokes
+} // namespace warp
 
 // ---- front-end login flow (EULA / login / character select) -----------------
 // The pre-game screens are driven by a single LoginTask object and its state
@@ -366,6 +432,15 @@ constexpr int char_max = 8;                          // character slots to scan
 constexpr unsigned sel_index = 0x1080;               // selected character index (int)
 } // namespace login
 
+// Renderer globals. The engine creates one IDirect3DDevice8 at startup and
+// stores it in a static global (build-constant address, no ASLR). It is null
+// until the renderer initializes -- a few frames after process start -- so
+// readers must treat 0 as "not yet" and retry. The overlay takes the Present
+// vtable slot straight off this device (see overlay.cpp poll()).
+namespace render {
+constexpr uintptr_t device = 0x00c00660; // IDirect3DDevice8* (null until renderer up)
+} // namespace render
+
 // Vitals-bar fill chain. Unlike the Offsets struct below (runtime hypotheses),
 // these are CONFIRMED build-constant field offsets, observed at runtime: the
 // vitals controller `this` is captured live every frame by the in-space
@@ -423,6 +498,8 @@ constexpr int aux_container = 0x88; // *(dataObj + 0x88) -> aux container (threa
 namespace world {
 constexpr int player_id = 0x112c;  // M -> local player game id (command actor)
 constexpr int connection = 0x1124; // M -> sector-server Connection (command sink)
+constexpr int navlist = 0x1138;    // M -> persistent NavigationList (warp packet input)
+constexpr int sector_id = 0x12f0;  // M -> current sector id (matches the sectors table id)
 // The INVENTORY/LOOT command channel is NOT M's connection. The native loot/mining
 // take commits the InvMove through the SClient that OWNS the open cargo container:
 // C = *(container + cargo::view_client), and the command is pushed on C's Connection
@@ -450,6 +527,18 @@ constexpr unsigned ent_modulus = 0x101; // bucket index = gid % ent_modulus
 constexpr int ent_node_next = 0x04;     // node -> next node in its bucket chain
 constexpr int ent_node_obj = 0x10;      // node -> resolved contact object
 constexpr int ent_node_gid = 0x14;      // node -> key (GameID)
+
+// In-world docked/in-space discriminator, both fields on the SClient world manager
+// M. When the player is docked the station interior view controller lives at
+// M + station_view (non-zero) and the current StarbaseID at M + starbase_id
+// (non-zero); both are cleared to 0 the moment the player launches into space. So
+// docked == (*(int*)(M + station_view) != 0), and starbase_id is a redundant
+// confirm that also yields the station's GameID. Set/cleared by the client's
+// STARBASE_SET (0x4F) handler. This is how enb.state() names "station" vs "space"
+// without a global state enum (the client has none -- it uses task polymorphism:
+// a LoginTask means front-end, an M means in-world, then station_view splits it).
+constexpr int station_view = 0x135c; // M -> station interior view ptr (non-zero == docked)
+constexpr int starbase_id = 0x1324;  // M -> current StarbaseID (0 while in space)
 } // namespace world
 
 // Target/player WORLD position, for the straight-line range shown on the frame. The
@@ -496,7 +585,19 @@ constexpr int keybuf_sz = 0x40; // zeroed scratch key-object buffer
 // the local player and any in-range remote (so a group member's current shield
 // is readable client-side).
 constexpr uintptr_t get_shared = 0x005bf2b0;
-constexpr int shared_val_off = 0x248; // entry + 0x248 -> float (0..1) live value
+// A shared entry is DELTA-INTERPOLATED, so it carries two floats: the settled
+// snapshot value at +0x23c (the last value the server replicated -- what the
+// interpolator eases TOWARD and clamps against) and a volatile per-frame
+// animation scratch at +0x248. +0x248 is written by the client's interpolator
+// each frame and, once an interpolation window elapses, is EXTRAPOLATED to the
+// draining/filling extreme (0.0 while a shield is dropping, 1.0 while rising) --
+// so a raw read of +0x248 catches a shield mid-drain reading 0 the instant the
+// target is fired on, even though its true shield is nonzero. We want the
+// authoritative snapshot, not the animation, so we read +0x23c. Reading it is a
+// pure side-effect-free read; running the interpolator ourselves would MUTATE
+// the entry (+0x240/+0x244/+0x248/+0x24c) and fight the client's own per-frame
+// pass. The settled read yields +0x23c directly, confirming it is the value.
+constexpr int shared_val_off = 0x23c; // entry + 0x23c -> float (0..1) settled snapshot value
 } // namespace aux
 
 // Discipline levels (RPGInfo Combat/Trade/Explore) -- a property bag like aux,

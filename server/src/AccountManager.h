@@ -72,6 +72,14 @@ public:
     // there is no unexpired row or the stored token is not 32 valid hex chars.
     bool    GetLoginTokenBinary(const char *username, unsigned char out[16]);
 
+    // Multibox fix: decode a login-ticket suffix (32 lowercase hex chars, as
+    // presented in the ticket the proxy learned and validated) directly into 16
+    // binary bytes, WITHOUT re-querying login_ticket. The DB row is keyed by
+    // username and is clobbered by a second concurrent same-account login, so
+    // GetLoginTokenBinary(username) can return a DIFFERENT session's token; the
+    // session's own presented suffix is the authoritative per-session token.
+    bool    TokenHexToBinary(const char *hex, unsigned char out[16]);
+
     bool	GetEmailAddress(char *username, char *buffer, int buflen);
 	long	GetAccountID(char *username);
 	long	GetAvatarID(char *username, int slot);

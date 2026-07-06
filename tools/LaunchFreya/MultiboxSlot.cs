@@ -97,41 +97,47 @@ namespace LaunchFreya
             return new MultiboxSlot(DefaultBase);
         }
 
-        // A block is free when all 3 TCP ports AND the posfeed UDP port bind on
-        // 127.0.0.1. We probe by binding (and immediately releasing); a busy slot
-        // means another instance already owns that block.
+        // A block is free when NOTHING is already serving its sector port
+        // (base+0) on 127.0.0.1. We detect a live instance by trying to CONNECT
+        // to that port -- a refused connection means no proxy owns the block.
+        //
+        // This is deliberately a CONNECT probe, not a BIND probe. A bind probe is
+        // unreliable on Windows: the running proxy holds the port with a plain
+        // (non-exclusive) bind, and a second socket with SO_REUSEADDR -- which is
+        // what a default .NET TcpListener uses (ExclusiveAddressUse == false) --
+        // is allowed to bind the SAME 127.0.0.1:port on Windows. So the bind
+        // probe wrongly reports the busy stock port 3500 as "free", the launcher
+        // decides this is the first instance, never arms the single-instance
+        // mutex bypass, and the second client dies on "Earth & Beyond is already
+        // running". (Linux/WINE forbid the shared active bind, which is why the
+        // bug never showed under WINE.) A connect probe is unambiguous on both.
+        //
+        // base+0 is the sector port (3500 stock / base for a remapped slot) -- it
+        // is the block's discriminator and the proxy listens on it from startup,
+        // before any client connects, so it is a reliable liveness signal.
         static bool IsBlockFree(int b)
         {
-            for (int k = 0; k < 3; k++)
-                if (!TcpFree(b + k))
+            return !TcpListening(b);
+        }
+
+        // True if something accepts a TCP connection on 127.0.0.1:port right now.
+        static bool TcpListening(int port)
+        {
+            try
+            {
+                using var probe = new TcpClient();
+                var ar = probe.BeginConnect(IPAddress.Loopback, port, null, null);
+                // A loopback connect completes near-instantly; bound the wait so a
+                // busy machine never stalls the Play click. No answer in time is
+                // treated as "not listening" (free) -- the same lenient direction
+                // the old bind probe took on error.
+                if (!ar.AsyncWaitHandle.WaitOne(TimeSpan.FromMilliseconds(400)))
                     return false;
-            return UdpFree(b + 3);
-        }
-
-        static bool TcpFree(int port)
-        {
-            TcpListener probe = null;
-            try
-            {
-                probe = new TcpListener(IPAddress.Loopback, port);
-                probe.Start();
+                probe.EndConnect(ar); // throws if the connect was refused -> free
                 return true;
             }
             catch (SocketException) { return false; }
-            finally { try { probe?.Stop(); } catch { } }
-        }
-
-        static bool UdpFree(int port)
-        {
-            Socket probe = null;
-            try
-            {
-                probe = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-                probe.Bind(new IPEndPoint(IPAddress.Loopback, port));
-                return true;
-            }
-            catch (SocketException) { return false; }
-            finally { try { probe?.Dispose(); } catch { } }
+            catch (ObjectDisposedException) { return false; }
         }
     }
 }

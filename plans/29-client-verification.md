@@ -3179,6 +3179,86 @@ moot; the SOLVED block above is the truth):**
   3. No dupe / no crash across repeated takes; cargo count matches the ore actually
      mined.
 
+## [ ] CV-BB-MULTIBOX-TOKEN -- same-account multibox: bind the per-session DTLS token
+
+- **What changed (SERVER)**: `server/src/UDP_Global.cpp`. `login_ticket` is one row
+  per username (UPSERT ON CONFLICT username), so a second concurrent login of the
+  SAME account clobbers the token row. Character-select bound the player's 16-byte
+  DTLS auth token by re-querying that row (`GetLoginTokenBinary(username)`), so the
+  earlier session got the LATER session's token, its gameplay/master-handoff
+  datagrams failed the per-packet token check at the DTLS recv edge, and it hung
+  ~150s at the loading screen then dropped. Fix: stash each session's already-
+  validated ticket suffix at `ProcessTicketInfo`, keyed by its global UDP
+  `(source_addr, source_port)`, and bind THAT per-session token at
+  `HandleGlobalTicketRequest` (fall back to the DB query only on a stash miss).
+  New helper `AccountManager::TokenHexToBinary` decodes the suffix without a DB
+  read. This is the two-DIFFERENT-characters-same-account case the server already
+  documents as intended (multibox NOTE in `ProcessTicketInfo`;
+  `Player::SetCharacterID -> CheckForDuplicatePlayers` only blocks the SAME
+  character twice).
+- **Why this is a correctness change, not a weakening**: the per-packet DTLS token
+  check at the recv edge is UNCHANGED. The bound token is the exact suffix the
+  session presented and that was already validated against `login_ticket`
+  (`ValidateTicketSuffix`) before it is stashed -- strictly more correct than the
+  DB re-query, which could bind a token the session never presented. No wire format
+  changes (proxy + CLI packet parsers untouched); only WHICH internally-held token
+  the server binds to the player changes.
+- **Why the CLI/integration suite can't validate it**: the local plaintext UDP path
+  SKIPS the per-packet token check (`UDP_Global.cpp` opt-out), so the token binding
+  is a functional no-op there -- the bug only manifests on the DTLS online path,
+  which the CLI does not exercise. Hence this real-client entry.
+- **Primary source**: the incident proxy log (window 2 GameID 0x4000000c: 30x
+  `SendMasterLogin timed out` -> CRITICAL hang; window 1 0x4000000b succeeded),
+  same account `griever`, two different characters (slots 1 and 0); window 1 auth'd
+  and overwrote the shared token row before window 2's bind.
+- **What to look for (real client, TWO windows, `just play-online 2`)**:
+  1. Log BOTH windows into the SAME account but DIFFERENT characters. Both must
+     reach in-space (no loading-screen hang, no ~150s SendMasterLogin retry storm
+     in either proxy log).
+  2. The SAME character in two windows must STILL be refused (CheckForDuplicatePlayers
+     force-kick) -- the fix must not have loosened that.
+  3. Both sessions play normally (movement, chat, combat) with no dropped gameplay
+     datagrams -- i.e. each window's DTLS token matches what the server bound.
+
+## [ ] CV-BB-WINDOWS-CLIENTMODS -- Lua mods work on a native-Windows install (custom client path)
+
+- **What changed (CLIENT, freya/ MIT + launcher)**: two independent defects made the
+  Windows tester's Lua mods dead even though the Configure Mods UI listed them:
+  1. `tools/LaunchFreya/Launcher.cs` + `LaunchFreya.csproj`: staging skipped ENTIRELY
+     when the on-disk `bin/scripts` bundle was absent (installs from a zip predating
+     the bundle never get it -- the self-updater deliberately never re-delivers
+     scripts), so `enbmod.dll` was injected with no `scripts/init.lua` next to it
+     (`init.lua error: cannot open ...\scripts\init.lua`). Fix: the bootstrap
+     (init.lua + lib/*.lua, mods excluded) is now EMBEDDED in FreyaLauncher.exe and
+     staged from there; Release prefers the embedded copy (it self-updates in
+     lockstep with enbmod.dll, bin/scripts never does), DEBUG prefers the repo tree.
+     Store-mod staging now runs regardless of the bootstrap source.
+  2. `freya/client-injection/enbmod/src/overlay.cpp` (+ `game.h`, `dllmain.cpp`):
+     `overlay::init` probed for a Present pointer by creating its OWN throwaway
+     D3D8 device -- HAL windowed, then REF. On native Windows the game holds the
+     adapter fullscreen-exclusive (HAL probe can fail) and the REF rasterizer does
+     not exist outside SDK installs, so the probe died with 0x8876086c
+     D3DERR_NOTAVAILABLE and the HUD never drew. Fix: no probe device at all --
+     `overlay::poll()` (called from the tick, on the game thread) reads the game's
+     OWN `IDirect3DDevice8*` from its static global (`game::render::device`,
+     0x00c00660) and hooks vtable[15] (Present) once it is non-null.
+- **Why the CLI can't validate it**: both are in-client rendering/staging behaviour;
+  no wire format is involved.
+- **What to look for (native Windows install, custom exe path, e.g. the tester's
+  `D:\...\release\client.exe`)**:
+  1. Launch via FreyaLauncher.exe with Lua Mods on. `scripts/init.lua` + `lib/` +
+     enabled mods appear next to client.exe; `enbmod.log` shows `loaded ...init.lua`
+     (no "cannot open" error) and the launcher log shows the embedded-bootstrap or
+     disk staging line.
+  2. `enbmod.log` shows `overlay: hook installed -- IDirect3DDevice8::Present @ ...`
+     (no `probe CreateDevice failed` / `overlay::init failed` lines) and the HUD
+     actually draws in-game.
+  3. WINE regression: the same two log lines + a drawing HUD on a local
+     `just play-local` client (the lazy poll path is new for WINE too).
+     **DONE 2026-07-05**: full local `login.sh` run -- `overlay: hook installed --
+     IDirect3DDevice8::Present @ 7fc37240 (game device 015ad810)`, `overlay: Present
+     hook FIRED`, freya-hud image loaded; no probe/init-failed lines; login completed.
+
 ## [ ] CV-BC-GROUPINVITE-CRASH -- invitee client no longer crashes on group invite
 
 - **What changed (CLIENT, freya/ MIT)**: `freya/client-injection/enbmod/src/lua_api.cpp`,
@@ -3214,3 +3294,231 @@ moot; the SOLVED block above is the truth):**
      returns a sane value on both once the group is active.
   3. Leader-only buttons appear only for the actual leader (no false leader while the
      group is still building).
+
+## [ ] CV-BD-OVERLAY-STATEBLOCK-LEAK -- HUD no longer leaks a D3D state block every frame
+
+- **What changed (CLIENT, freya/ MIT)**: `freya/client-injection/enbmod/src/overlay.cpp`,
+  `draw_frame`. The overlay snapshots the game's device state around its own 2D pass so
+  the HUD's render states never leak into the game's next frame. It did this by calling
+  `dev->CreateStateBlock(D3DSBT_ALL, &sb)` at the top of every drawn frame and
+  `DeleteStateBlock(sb)` at the bottom -- i.e. it allocated and freed a FULL-device
+  state block 30-60x per second, but only while the HUD was actually drawing (an empty
+  display list early-returns before the state block). Under wined3d that per-frame
+  create/delete churn grew committed D3D (file/shared) memory smoothly and without
+  plateau, HUD-gated. For a 32-bit `client.exe` (WOW64) that boots at ~3.45 GB VmSize
+  with only ~500 MB of address-space headroom, hours of that growth exhausts the space
+  and the next ~4 MB reservation fails -> `err:virtual:allocate_virtual_memory out of
+  memory` storm -> `Unhandled page fault on read access to 00000001`. This is the
+  leader/te crash (the group-invite fix CV-BC is a DIFFERENT, opposite crash -- invitee,
+  control-flow corruption, not address-space).
+- **The fix**: create ONE state block lazily on first draw, then `CaptureStateBlock` it
+  each frame before our SetRenderState calls and `ApplyStateBlock` after -- reusing a
+  single allocation instead of Create/Delete per frame. Released in `release_caches`
+  (device reset/unload) alongside the texture caches. No wire/protocol change; pure
+  client-side mod fix.
+- **Measurement evidence (this box, WINE, in-space, HUD on, ungrouped)**: controlled
+  on/off/on toggle with a second client as control isolated the growth to the HUD and
+  to file/shared (wined3d) mappings, not private heap. OLD dll: RSS +2790..+3022
+  kB/min, smooth and monotonic over an hour. FIXED dll (13.1 min, 40 samples): RSS
+  +214 kB/min, anon +5 kB/min, and the file/shared series was FLAT (262232 kB) except a
+  single one-time +2 MB asset step -- the smooth per-frame linear climb is gone. ~93% of
+  the HUD-gated growth eliminated; the residual is discrete/base-client asset churn.
+- **Why the CLI can't validate it**: client-side D3D8 present-hook rendering under
+  wined3d; no server/proxy/CLI packet is involved. Only the real client over a LONG
+  session proves the address space no longer fills.
+- **What to look for (real client, LONG session, HUD on)**: play for several hours with
+  the Freya HUD visible (party frame + vitals, the normal case). The client must NOT
+  accumulate VmSize toward the ~4 GB WOW64 ceiling and must NOT die with the
+  `allocate_virtual_memory out of memory` / `page fault on read at 00000001` signature.
+  Sanity check: `grep -c allocate_virtual_memory` in the WINE stderr should stay ~0.
+
+## [ ] CV-GROUPNAV -- formation exploration shares the nav MAP REVEAL, not just XP
+
+- **What changed (SERVER, CC BY-NC-SA)**: `server/src/GroupManager.cpp` (new
+  `PlayerManager::GroupRevealNav`), called from
+  `server/src/PlayerExperience.cpp` `Player::AwardNavExploreXP` right after the
+  existing `GroupExploreXP` call. Header decl in `server/src/PlayerManager.h`.
+- **The bug (internal inconsistency)**: when a grouped player explores a nav, the
+  server already fans the explore XP AND the "Discovered &lt;nav&gt;" message out
+  to every in-range formation member (`GroupExploreXP`, `GroupManager.cpp:339`),
+  but the nav OBJECT + 0x0099 NAVIGATION map entry were sent to the DISCOVERER
+  only -- `ObjectManager::CheckNavRanges` (`ObjectManager.cpp:613`) reveals
+  per-player by proximity and iterates nobody's group. So a formation member was
+  credited with discovering a nav (XP + message) they could never see on their
+  map. Observed live in multibox: the follower earned group explore XP for a gate
+  the leader reached in formation while the gate stayed off the follower's map,
+  and flying back through the area did not help.
+- **The fix**: `GroupRevealNav` mirrors `GroupExploreXP`'s member gating verbatim
+  (same sector, within 40k of the owner, active &amp; not incapacitated) and, for
+  each member that does not already have the nav, sets its
+  `ExposedNavList`/`ExploredNavList`, persists the discovery
+  (`SaveDiscoverNav`/`SaveExploreNav`), and sends the SAME `SendObject` +
+  `SendNavigation` the discoverer got. Reveal set == XP set, so they can never
+  drift. No-op for a solo (ungrouped) player.
+- **Primary source (CLAUDE.md clause A)**: (1) internal inconsistency above -- the
+  server already asserts the member discovered the nav while withholding it; (2)
+  owner first-hand retail testimony that EnB formation flight shared exploration
+  (map reveal), not merely XP. No capture of the retail follower's CREATE stream
+  was available; proceeding on (1)+(2) per owner direction.
+- **Why the CLI can't fully validate it (clause B)**: the emitted packets (0x0004
+  object create, 0x0099 NAVIGATION) are byte-format-pinned already
+  (`SectorNavigationHardeningTests`) -- this change only widens the RECIPIENT set,
+  not any byte layout. The fan-out is observable only at a second grouped avatar,
+  which is blocked by Net7Proxy single-tenancy (see
+  `TwoPlayerGroupNavExploreShareTests`, `[Fact(Skip)]`, same wall as the other
+  two-player tests). The regression is pinned in correct shape for when the proxy
+  multiplexes.
+- **What to look for (real client, TWO grouped chars)**: group two characters,
+  put them in formation, and fly the LEADER to a nav/gate the FOLLOWER has never
+  personally explored. The follower must (a) get the group explore XP + "Discovered"
+  message as before, AND (b) now see that nav/gate appear on its own map, marked
+  visited. Re-log the follower: the nav must persist (it was saved to the
+  follower's explored list). Solo (ungrouped) exploration must be unchanged.
+
+### [ ] CV-MVAS-ORIENT-BCAST -- Other players' ships visibly TURN (nose facing) while flying, not just slide
+
+- **Bug (owner-observed, live multibox)**: when you watch another player fly past
+  in your sector, their ship's POSITION updates smoothly but its ORIENTATION never
+  changes -- the hull slides through space frozen at whatever facing it had when it
+  came into range. Their rotation is not replicated.
+- **Root cause**: under the MVAS position feed the server refreshes
+  `m_Position_info.Position` every frame (`UpdatePositionFromMVAS` -> `SetPosition`)
+  but NEVER refreshes `m_Position_info.Orientation`: `CalcNewHeading` is skipped
+  while `IS_PLAYER(m_MVAS_index)` (`CalcNewPosition`, `PlayerClass.cpp`), and the
+  MVAS feed deliberately stores the client nose vector only in the decoupled
+  `m_ClientHeading` (firing-arc use, see CV-MVAS-ORIENT). So the 0x003E
+  ADVANCED_POSITIONAL_UPDATE the server fans out to every in-range observer
+  (`Player::SendToVisibilityList` -> `SendAdvancedPositionalUpdate`) carries a
+  stale/spawn quaternion. Observers get correct position, frozen facing.
+- **Change (`server/src/PlayerClass.cpp` `SendToVisibilityList`)**: on the OUTBOUND
+  broadcast only, convert the already-fed nose vector (`m_ClientHeading`) to the wire
+  quaternion using the engine's own look-rotation (`Object::CalcOrientation(target,
+  self, set_heading=false)`, yaw+pitch, roll leveled) and send THAT, then restore
+  the stored orientation before returning -- exactly mirroring the existing transient
+  `RotZ`/`UpdatePeriod` mutate-restore in the same function. The override is strictly
+  on the broadcast copy: it never enters `Orientation()` persistently, never touches
+  `m_Velocity`/`m_Position_info.Velocity`, and cannot reintroduce the CV-MVAS-POS
+  phantom-velocity warp regression (the whole reason facing was decoupled).
+- **ROLL IS NOT AND CANNOT BE REPLICATED -- primary source**: the retail MVAS
+  `0x1004` position feed carries position xyz + nose-heading xyz and NOTHING ELSE
+  (live Net7Proxy capture, `proxy/local-debug` Combat-*.pcapng; the server reads
+  only the 6 floats -- `UDP_MVAS.cpp` / `proxy/UDPClient_linux.cpp` comment). There
+  is no roll component anywhere on the retail flying-client -> server wire, so no
+  observer in retail ever saw another ship's true roll either. Replicating nose
+  direction with roll leveled is the MOST any observer could faithfully have seen;
+  fabricating a roll channel would be a divergence from retail, not a fix, and is
+  therefore deliberately NOT done.
+- **Primary source (CLAUDE.md clause A)**: (1) internal inconsistency -- the server
+  advances a player's broadcast position every frame while broadcasting a frozen
+  orientation for the same player, which is self-contradictory; (2) the nose vector
+  is already present server-side (the same `m_ClientHeading` proven by the `0x1004`
+  heading capture, CV-MVAS-ORIENT) -- this change only routes existing data onto the
+  existing 0x003E Orientation slot for observers; (3) owner first-hand retail
+  testimony that other players' ships visibly turned. No new wire field, no widened
+  input acceptance, no loosened gate.
+- **Why the CLI can't fully validate it (clause B)**: the 0x003E byte layout is
+  already pinned (`SectorAdvancedPositionalUpdateHardeningTests`); this changes only
+  the VALUE of the Orientation quaternion for a moving player, observable solely at a
+  SECOND avatar within range while the first flies under the MVAS feed. Blocked by
+  Net7Proxy single-tenancy + the absence of an in-test movement driver -- identical
+  wall to `TwoPlayerGroupNavExploreShareTests`. Pinned in correct shape by
+  `TwoPlayerRemoteFacingReplicationTests` (`[Fact(Skip)]`) for when the proxy
+  multiplexes.
+- **What to look for (real client, TWO chars)**: put two characters in the same
+  sector within visual range. Fly char A in circles / bank turns while char B
+  watches. B must now see A's ship NOSE swing to match A's flight direction
+  (yaw+pitch), not merely translate. Roll will look leveled -- that is expected and
+  correct (see the roll note above). CRUCIAL regressions to confirm ABSENT on the
+  moving client A itself: warp still engages, target locks stay stable, no phantom
+  drift -- i.e. the broadcast-only override did not leak into A's motion path.
+
+## [~] CV-BC-FORMATION-GATE -- group formation auto-carries + auto-reforms through a gate
+
+- **VALIDATED (2026-07-05, two LOCAL dev clients, `just play-multibox-local 2`)**: leader
+  `devuserjd` [40000021] + member `devuser2jd` [40000035], grouped, Block formation, both in
+  Europa (sector 10551). Leader targeted "Gate to Sirius System" and gated. Server log proof:
+  both `Master handoff player devuserjd ... to sector 4120` AND `Master handoff player
+  devuser2jd ... to sector 4120` -- the member was carried through the SAME gate with NO
+  member-side gate command (behaviour 1, auto-carry, CONFIRMED). On the far side both did
+  `Sector login`, group stayed intact (leader still leads), and the member snapped to
+  `dist=200.0004` from the leader -- exactly the Block member offset `{0,-200,0}` -- so the
+  formation auto-re-established (behaviours 2+3, leader re-forms + member rejoins, CONFIRMED).
+- **STILL TO VERIFY (not covered by the 2-formed-char run above)**:
+  - A grouped-but-UNFORMED third char is left behind (needs a 3rd client).
+  - A member gating on its own just leaves the formation (old behaviour intact).
+  - Break Formation, then gate -- confirm it does NOT auto-reform on arrival (sub-check 4).
+- **Bug found + fixed during this test**: `PlayerManager::FormUp` sent the LEADER (formation
+  anchor, slot 0, relative offset {0,0,0}) a `SendFormationPositionalUpdate` anchored on
+  itself when the leader issued Form Up -- the client's formation solver fed its own position
+  back into itself and overflowed its stack (WINE `virtual_setup_exception stack overflow`,
+  instant leader-client crash). Guarded `FormUp` to no-op for slot 0 (the anchor has nothing
+  to fly to). NOT on the feature's reform path (`GroupReformOnGate` FormUps members only,
+  `for x=1`), but reachable by the native leader clicking Form Up. Fix verified: leader Form
+  Up now returns true with no crash. `server/src/GroupManager.cpp` FormUp.
+
+- **What changed (SERVER)**: `server/src/GroupManager.cpp` (`PlayerManager::GroupLeaderGate`,
+  `GroupReformOnGate`, + `SavedFormation` maintenance in `SetFormation`/`BreakFormation`),
+  `server/src/PlayerConnection.cpp` (gate-arm case 18), `server/src/PlayerClass.cpp`
+  (`FinishLogin`), `server/src/PlayerManager.h` (new `Group::SavedFormation` + decls). New
+  behaviour the retail server did not have (owner-authorised 2026-07-05): when a group LEADER
+  gates while flying a formation, the server carries every FORMED member in the leader's sector
+  through the same stargate (`SectorServerHandoff` to the leader's destination), and on the far
+  side re-establishes the formation -- the leader re-forms every member present, each member
+  rejoins (FormUp) when it lands. Unformed group members are NOT carried. A member gating solo
+  still just drops out of the formation. A deliberate Break Formation clears the saved formation
+  so it does not auto-restore.
+- **Why no CLI byte-pin**: no new wire format. It reuses packets the client already parses
+  (SectorServerHandoff / SendAuxPlayer / the formation positional updates SetFormation+FormUp
+  already emit) to drive new server logic. Per the updated server rules (CLAUDE.md, owner
+  2026-07-05) that needs no capture citation -- there are no new bytes to pin.
+- **Why the CLI/integration suite can't validate it**: it needs a live MULTI-CLIENT group
+  (leader + members, formed, crossing a gate together). The proxy is single-client (one per
+  client) and the suite has no in-space movement/formation driver -- same wall as the two-player
+  group nav tests. Hence this real-client entry.
+- **What to look for (real client, >=2 chars, LOCAL dev clients only -- `just play-cli` per
+  client; NEVER the owner's live game)**:
+  1. Group two chars, leader initiates a Slot Back / Block / Pipe formation, member forms up.
+  2. Leader gates. The formed member is pulled through the SAME gate (no manual gate on the
+     member). Both land in the destination sector.
+  3. On the far side the formation visibly re-establishes (member snaps back into the slot),
+     once, with no CTA spam. Confirm a grouped-but-UNFORMED third char is left behind, and that
+     a member gating on its own just leaves the formation (old behaviour intact).
+  4. Break Formation, then gate -- confirm it does NOT auto-reform on arrival.
+
+- **PROD CRASH found + fixed (2026-07-05, ONLINE deploy, real clients)**: the auto-reform
+  crashed the carried member's client on gate arrival. Repro: leader `GrieverTW` [4000000b]
+  gated from Asteroid Belt Alpha (1076) to sector 1060; member `GrieverJE` [4000000c] was
+  auto-carried. **Server-log timeline (online, primary source for this fix)**: `01:34:43
+  player 0x4000000c 'GrieverJE' fully logged in` (member arrives, ~6s AHEAD of leader; its own
+  FinishLogin reform found the leader not-yet-in-sector -> no-op, member sits fine) ->
+  `01:34:49 player 0x4000000b 'GrieverTW' fully logged in` (leader arrives; its FinishLogin
+  synchronously ran `GroupReformOnGate` -> `FormUp(GrieverJE)` -> `SendFormationPositionalUpdate`
+  anchoring JE on TW's ship) -> **GrieverJE vanishes from the log with no clean removal, no
+  re-login, no socket error** = the client died on the spot. Mechanism: the reform fired at
+  the instant the leader's ship-object CREATE was still propagating to the member's client, so
+  the member got a formation-follow packet for a ship it had not spawned -> unresolvable anchor
+  -> same crash family the slot-0 self-anchor guard already documents (`FormUp`), but a SECOND
+  unguarded case. Note the byte format was correct -- "no new wire format" was NOT sufficient
+  for client-safety; the NEW timing/context (server-initiated mid-sector-load, anchor absent)
+  is what crashed it. This is also why the earlier LOCAL multibox validation passed but prod
+  crashed: local RTT is ~0 so the CREATE landed before the reform; over real internet latency
+  it did not.
+- **Fix (poll-until-sent, not a blind timer)**: `FinishLogin` no longer calls
+  `GroupReformOnGate` synchronously -- it arms a reform poll (`ArmGateReform`, 15s deadline)
+  and `Player::CheckEventTimes` retries `GroupReformOnGate` every tick until it fires or the
+  deadline passes. The reform only fires for a member once `leader->PlayerInRangeList(member)`
+  is true -- i.e. the server has actually run `SendShipData(member)` for the leader, enqueuing
+  the leader's ship CREATE on THAT member's packet cache. Because the member's `FormUp`
+  enqueues the FormationPositionalUpdate on the same cache on a LATER tick (the poll only fires
+  after the range-list flag is set, and both run on the one sector thread), ordered delivery
+  guarantees the client spawns the anchor ship BEFORE it gets the formation update -- a real
+  ordering guarantee, not a latency guess. The leader-landed branch now ARMS each present
+  member's poll instead of forming them inline (removing the race at the source), and `FormUp`
+  carries the same `PlayerInRangeList` guard as an authoritative backstop for the native Form
+  Up button. `server/src/GroupManager.cpp` (GroupReformOnGate + FormUp), `server/src/PlayerClass.cpp`
+  (FinishLogin + CheckEventTimes + SectorReset), `server/src/PlayerClass.h`
+  (`m_GateReformDeadline` + `ArmGateReform`). No wire bytes changed (same
+  FormationPositionalUpdate, gated on the anchor being present); no CLI pin needed.
+- **STILL TO VERIFY after the fix (real clients, over real latency)**: re-run the prod repro
+  (leader gates flying a formation, member auto-carried) and confirm the member survives the
+  reform on the far side and snaps into the slot -- no client crash.

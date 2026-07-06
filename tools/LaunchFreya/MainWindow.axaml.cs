@@ -1265,6 +1265,39 @@ namespace LaunchFreya
             await dlg.ShowDialog(this);
         }
 
+        // "Inject (running client)" -- hot-attach the enbmod Lua runtime to a
+        // client.exe that is ALREADY running in the configured WINE prefix, no
+        // matter how it was launched (Freya, the Net-7 launcher, or a bare
+        // `wine client.exe`). This is the runtime-attach counterpart to launch-time
+        // injection: it stages the current enbmod.dll + enabled scripts next to the
+        // client and runs inject.exe (CreateRemoteThread(LoadLibraryA)) against the
+        // live process. Independent of the Lua Mods checkbox, which only governs
+        // whether the NEXT launch injects at spawn time.
+        async void OnInjectEnbmodClick(object sender, RoutedEventArgs e)
+        {
+            var btn = sender as Button;
+            if (btn != null) btn.IsEnabled = false;
+            c_Status.Text = "Injecting enbmod into the running client...";
+            try
+            {
+                var launcher = new Launcher(_setting, AppendLog);
+                // inject.exe blocks briefly on the remote thread; keep the UI live.
+                var status = await Task.Run(() => launcher.InjectEnbmodIntoRunningClient());
+                AppendLog(status);
+                c_Status.Text = status;
+            }
+            catch (Exception ex)
+            {
+                AppendLog("Inject failed: " + ex);
+                await Err("Could not inject enbmod: " + ex.Message);
+                c_Status.Text = "Injection failed -- see the Advanced log.";
+            }
+            finally
+            {
+                if (btn != null) btn.IsEnabled = true;
+            }
+        }
+
         // "Configure Mods..." -- a scrollable popup listing every enbmod mod found
         // under the source scripts/mods/ tree. Each row is an enable/disable
         // checkbox + the mod name + its author, with the mod description as a hover
