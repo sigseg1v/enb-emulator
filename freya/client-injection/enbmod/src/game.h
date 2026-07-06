@@ -499,6 +499,7 @@ namespace world {
 constexpr int player_id = 0x112c;  // M -> local player game id (command actor)
 constexpr int connection = 0x1124; // M -> sector-server Connection (command sink)
 constexpr int navlist = 0x1138;    // M -> persistent NavigationList (warp packet input)
+constexpr int sector_id = 0x12f0;  // M -> current sector id (matches the sectors table id)
 // The INVENTORY/LOOT command channel is NOT M's connection. The native loot/mining
 // take commits the InvMove through the SClient that OWNS the open cargo container:
 // C = *(container + cargo::view_client), and the command is pushed on C's Connection

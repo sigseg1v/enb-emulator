@@ -344,6 +344,21 @@ static int l_state(lua_State* L) {
     return 1;
 }
 
+// enb.sector() -> number | nil. The current sector id the client holds at
+// M + world::sector_id (the same id as the content DB's sectors.sector_id). Ground
+// truth for "which sector am I in" -- unlike an OCR of the map title or a nav-label
+// read, it cannot be fooled by a silent tow into another sector. nil out of world
+// (no captured M) or if the field is not readable.
+static int l_sector(lua_State* L) {
+    uintptr_t m = hooks::world_mgr();
+    if (!m || !mem::readable((void*)(m + game::world::sector_id), 4)) {
+        lua_pushnil(L);
+        return 1;
+    }
+    lua_pushinteger(L, (lua_Integer)mem::u32(m + game::world::sector_id));
+    return 1;
+}
+
 // enb.cursor(on) -- draw our own pointer ON TOP of the overlay (the native
 // cursor renders under the HUD). on=false stops drawing it.
 static int l_cursor(lua_State* L) {
@@ -3072,6 +3087,7 @@ void open(lua_State* L) {
                                    {"is_leader", l_is_leader},
                                    {"aux_entry", l_aux_entry},
                                    {"state", l_state},
+                                   {"sector", l_sector},
                                    {"cursor", l_cursor},
                                    {"patch_ret", l_patch_ret},
                                    {"unpatch", l_unpatch},
