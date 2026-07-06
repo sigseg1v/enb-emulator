@@ -25,8 +25,8 @@
 namespace {
 
 // mission 130's real limit: time="1200" seconds == 20 minutes.
-constexpr int    kMission130LimitS = 1200;
-constexpr uint32_t kBase           = 1'000'000u; // an arbitrary "accept" tick (ms)
+constexpr int kMission130LimitS = 1200;
+constexpr uint32_t kBase = 1'000'000u; // an arbitrary "accept" tick (ms)
 
 // --- guard conditions: these must NEVER force-expire ---------------------
 
@@ -39,8 +39,8 @@ TEST(MissionTimer, UntimedMissionNeverExpires) {
 TEST(MissionTimer, ForfeitableTimedMissionNeverForceExpires) {
     // A forfeitable mission already has an escape (the forfeit button); we do not
     // yank it out from under the player, no matter how long it has run.
-    EXPECT_FALSE(MissionTimedOut(kBase + kMission130LimitS * 1000u + 1, kBase,
-                                 kMission130LimitS, /*forfeitable=*/true));
+    EXPECT_FALSE(MissionTimedOut(kBase + kMission130LimitS * 1000u + 1, kBase, kMission130LimitS,
+                                 /*forfeitable=*/true));
 }
 
 TEST(MissionTimer, UnarmedClockNeverExpires) {
@@ -71,7 +71,7 @@ TEST(MissionTimer, PastLimitExpires) {
 TEST(MissionTimer, Mission130Boundary) {
     // 19:59 -> not spoiled; 20:00 -> spoiled.
     EXPECT_FALSE(MissionTimedOut(kBase + 1'199'000u, kBase, kMission130LimitS, false));
-    EXPECT_TRUE (MissionTimedOut(kBase + 1'200'000u, kBase, kMission130LimitS, false));
+    EXPECT_TRUE(MissionTimedOut(kBase + 1'200'000u, kBase, kMission130LimitS, false));
 }
 
 // --- GetNet7TickCount() wrap: unsigned subtraction must stay correct ------
@@ -79,15 +79,15 @@ TEST(MissionTimer, Mission130Boundary) {
 TEST(MissionTimer, TickWrapNotYetElapsed) {
     // armed just before the 32-bit tick counter wraps; "now" has wrapped past 0
     // but only 10s of real time has passed -> not expired.
-    uint32_t start = 0xFFFFFFFFu - 5000u;      // 5s before wrap
-    uint32_t now   = 5000u;                     // 5s after wrap  => 10s elapsed
+    uint32_t start = 0xFFFFFFFFu - 5000u; // 5s before wrap
+    uint32_t now = 5000u;                 // 5s after wrap  => 10s elapsed
     EXPECT_FALSE(MissionTimedOut(now, start, kMission130LimitS, false));
 }
 
 TEST(MissionTimer, TickWrapElapsed) {
     // same wrap, but a full 20 minutes of real time has elapsed across it.
-    uint32_t start = 0xFFFFFFFFu - 5000u;                 // 5s before wrap
-    uint32_t now   = (kMission130LimitS * 1000u) - 5000u; // 20min after the start
+    uint32_t start = 0xFFFFFFFFu - 5000u;               // 5s before wrap
+    uint32_t now = (kMission130LimitS * 1000u) - 5000u; // 20min after the start
     EXPECT_TRUE(MissionTimedOut(now, start, kMission130LimitS, false));
 }
 
