@@ -248,6 +248,7 @@ void Player::SectorReset()
     m_ProspectBeam = false;
     m_TractorBeam = false;
     m_WarpBroadcastTime = 0;
+    m_GateReformTick = 0;
     RemoveProspectNodes();
     m_AttacksThisTick = 0;
     m_LogDockCoords = false;
@@ -2975,6 +2976,16 @@ void Player::CheckEventTimes(unsigned long current_tick)
 			RechargeReactor(0.0f);
 		}
 
+		// Deferred group-formation reform after a gate arrival (armed in
+		// FinishLogin). Fired here, ~3s after zone-in, so the just-arrived
+		// leader's ship-object CREATE has reached every member's client before
+		// the reform's FormationPositionalUpdate anchors the member on it.
+		if (m_GateReformTick > 0 && m_GateReformTick < current_tick)
+		{
+			m_GateReformTick = 0;
+			g_ServerMgr->m_PlayerMgr.GroupReformOnGate(this);
+		}
+
 		//delay tractoring next ore until current tractor is complete
 		if (m_ProspectBeamNode.player_id !=0 && m_ProspectBeamNode.event_time < current_tick && m_ProspectTractorNode.player_id == 0)
 		{
@@ -4004,9 +4015,19 @@ void Player::FinishLogin(bool udp)
 	// The leader re-forms every member already here; each member rejoins as it
 	// lands -- covering any arrival order. No-op unless the group has a saved
 	// formation (GroupReformOnGate guards on it).
+	//
+	// DEFERRED, not synchronous: the reform emits a FormationPositionalUpdate
+	// that anchors each member on the LEADER's ship. Running it here (right
+	// after SetInSpace) fired it before the just-arrived leader's ship-object
+	// CREATE had propagated to the member's client, so the member received a
+	// formation-follow for a ship it had not spawned -> unresolvable anchor ->
+	// client crash (confirmed in prod: member GrieverJE vanished the instant
+	// leader GrieverTW finished its sector login ~6s later). Arm a short timer
+	// instead; CheckEventTimes fires the reform once the object CREATE has had
+	// time to land on every member's client.
 	if (FromSector() > 900 && FromSector() <= 9999)
 	{
-		g_ServerMgr->m_PlayerMgr.GroupReformOnGate(this);
+		m_GateReformTick = GetNet7TickCount() + 3000; // 3s settle after zone-in
 	}
 
 	//player->m_Effects.SendEffects(player);

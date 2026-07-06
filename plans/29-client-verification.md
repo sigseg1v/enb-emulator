@@ -3484,3 +3484,31 @@ moot; the SOLVED block above is the truth):**
      once, with no CTA spam. Confirm a grouped-but-UNFORMED third char is left behind, and that
      a member gating on its own just leaves the formation (old behaviour intact).
   4. Break Formation, then gate -- confirm it does NOT auto-reform on arrival.
+
+- **PROD CRASH found + fixed (2026-07-05, ONLINE deploy, real clients)**: the auto-reform
+  crashed the carried member's client on gate arrival. Repro: leader `GrieverTW` [4000000b]
+  gated from Asteroid Belt Alpha (1076) to sector 1060; member `GrieverJE` [4000000c] was
+  auto-carried. **Server-log timeline (online, primary source for this fix)**: `01:34:43
+  player 0x4000000c 'GrieverJE' fully logged in` (member arrives, ~6s AHEAD of leader; its own
+  FinishLogin reform found the leader not-yet-in-sector -> no-op, member sits fine) ->
+  `01:34:49 player 0x4000000b 'GrieverTW' fully logged in` (leader arrives; its FinishLogin
+  synchronously ran `GroupReformOnGate` -> `FormUp(GrieverJE)` -> `SendFormationPositionalUpdate`
+  anchoring JE on TW's ship) -> **GrieverJE vanishes from the log with no clean removal, no
+  re-login, no socket error** = the client died on the spot. Mechanism: the reform fired at
+  the instant the leader's ship-object CREATE was still propagating to the member's client, so
+  the member got a formation-follow packet for a ship it had not spawned -> unresolvable anchor
+  -> same crash family the slot-0 self-anchor guard already documents (`FormUp`), but a SECOND
+  unguarded case. Note the byte format was correct -- "no new wire format" was NOT sufficient
+  for client-safety; the NEW timing/context (server-initiated mid-sector-load, anchor absent)
+  is what crashed it. This is also why the earlier LOCAL multibox validation passed but prod
+  crashed: local RTT is ~0 so the CREATE landed before the reform; over real internet latency
+  it did not.
+- **Fix**: defer the reform. `FinishLogin` no longer calls `GroupReformOnGate` synchronously;
+  it arms `m_GateReformTick = GetNet7TickCount() + 3000`, and `Player::CheckEventTimes` fires
+  the reform ~3s after zone-in, by which point the just-arrived leader's ship CREATE has
+  reached every member's client. `server/src/PlayerClass.cpp` (FinishLogin + CheckEventTimes),
+  `server/src/PlayerClass.h` (new `m_GateReformTick`). No wire bytes changed (same
+  FormationPositionalUpdate, later); no CLI pin needed.
+- **STILL TO VERIFY after the fix (real clients, over real latency)**: re-run the prod repro
+  (leader gates flying a formation, member auto-carried) and confirm the member survives the
+  reform on the far side and snaps into the slot -- no client crash.

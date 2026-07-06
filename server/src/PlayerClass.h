@@ -1270,6 +1270,15 @@ private:
     unsigned long     m_WarpBroadcastTime;
 	float			  m_WarpDrain;
 
+	// Deferred group-formation reform after a gate arrival. Set to a future
+	// tick in FinishLogin; CheckEventTimes fires GroupReformOnGate when it
+	// elapses. The delay lets the just-arrived leader's ship-object CREATE
+	// propagate to each member's client BEFORE the reform's
+	// FormationPositionalUpdate anchors the member on it -- firing the reform
+	// synchronously at FinishLogin raced that CREATE and crashed the member's
+	// client on an unresolvable formation anchor (see GroupReformOnGate).
+	unsigned long     m_GateReformTick;
+
     //energy
     unsigned long     m_EnergyRecharge;
 
