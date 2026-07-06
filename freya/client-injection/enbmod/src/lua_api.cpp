@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cctype>
 #include <algorithm>
+#include <unordered_set>
 #include <windows.h>
 
 extern "C" {
@@ -1854,7 +1855,16 @@ static void bot_gather(std::vector<BotRow>& out, const char* class_filter) {
         if (ship)
             have_pp = world_pos(ship, pp);
     }
+    // The bucket walk can re-emit the same object many times (the chains overlap /
+    // thread across buckets, so one GameID shows up under several bucket heads). The
+    // entity hash is gid-keyed -- one live object per GameID -- so dedup by gid and
+    // keep the first sighting; without this enb.objects()/enb.navs() return a single
+    // nav dozens of times.
+    std::unordered_set<uint32_t> seen_gid;
+    seen_gid.reserve((size_t)count);
     for (int i = 0; i < count; ++i) {
+        if (!seen_gid.insert(snap[i].gid).second)
+            continue;
         uintptr_t obj = snap[i].obj;
         if (!mem::readable((void*)obj, 4))
             continue;
