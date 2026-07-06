@@ -3431,6 +3431,17 @@ moot; the SOLVED block above is the truth):**
   correct (see the roll note above). CRUCIAL regressions to confirm ABSENT on the
   moving client A itself: warp still engages, target locks stay stable, no phantom
   drift -- i.e. the broadcast-only override did not leak into A's motion path.
+- **Follow-up (owner-observed, live, 2026-07-05): SUPPRESS the override WHILE
+  WARPING.** With the nose-heading override active, a warping ship visibly TWISTS
+  SIDEWAYS to observers -- the warp still arrives at the right place, it just looks
+  wrong. Root cause: during warp the client nose vector is the camera/aim direction,
+  which is NOT the warp travel vector, so broadcasting it yaws the hull off the warp
+  line. Fix (`SendToVisibilityList`): gate the override on `&& !WarpDrive()`, so
+  mid-warp the broadcast falls back to the ship's pre-warp orientation (the original
+  slide-without-twisting look). No wire-format change; only the conditional VALUE of
+  the Orientation quaternion while `m_WarpDrive` is set. Real-client check: warp char
+  A across a sector while char B watches -- A's hull must track the warp line, not
+  crab/twist sideways; on exit from warp the nose-facing replication resumes.
 
 ## [~] CV-BC-FORMATION-GATE -- group formation auto-carries + auto-reforms through a gate
 
