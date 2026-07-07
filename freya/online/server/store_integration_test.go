@@ -295,14 +295,63 @@ func TestIT_MailLoot_Credits(t *testing.T) {
 	}
 	id := mustListingID(t, mailID)
 
-	if err := st.LootAttachment(ctx, acct.id, id, 0); err != nil {
+	if err := st.LootAttachment(ctx, acct.id, id, 0, ""); err != nil {
 		t.Fatalf("LootAttachment: %v", err)
 	}
 	if got := creditsOf(t, st, ctx, av.id); got != before+777 {
 		t.Errorf("wallet = %d after loot, want %d", got, before+777)
 	}
-	if err := st.LootAttachment(ctx, acct.id, id, 0); err != errAlreadyLooted {
+	if err := st.LootAttachment(ctx, acct.id, id, 0, ""); err != errAlreadyLooted {
 		t.Errorf("re-loot = %v, want errAlreadyLooted", err)
+	}
+}
+
+// PB-70: an account-level item mail (a settled auction win / return, delivered
+// with recipient 0) must loot into the ACTING topbar character's vault, not the
+// account's lowest-slot character. The bug: with the low-slot character's vault
+// full, the loot failed "bank is full" even though the acting character had 96
+// empty slots. Mirrors the PB-31 acting-character threading for placeBid/buyout.
+func TestIT_MailLoot_RoutesToActingCharacter_NotFullPrimarySlot(t *testing.T) {
+	st, ctx := testStore(t)
+	acct := seedAccount(t, st, ctx, 17, 2, 1000)
+	primary := acct.avatars[0] // slot 0 -- the old, wrong target
+	acting := acct.avatars[1]  // slot 1 -- the character the player is on
+	itemID, _ := pickTradableItem(t, st, ctx, true)
+
+	// Fill the primary character's vault completely so the old slot-0 routing
+	// would fail with errNoVaultSpace.
+	for slot := 0; slot < vaultSlotCount; slot++ {
+		seedVaultItem(t, st, ctx, primary.id, slot, itemID, 1, nil)
+	}
+
+	deliverItemForTest(t, st, ctx, acct.id, 0, itemID) // account-level (recipient 0)
+
+	mail := st.accountMail(ctx, acct.id)
+	var mailID string
+	for _, m := range mail {
+		if hasItemAttachment([]MailView{m}, itemID) {
+			mailID = m.ID
+		}
+	}
+	if mailID == "" {
+		t.Fatalf("seeded item mail not found; got %+v", mail)
+	}
+	id := mustListingID(t, mailID)
+
+	// Old behaviour (no acting character): routes to the full primary and fails.
+	if err := st.LootAttachment(ctx, acct.id, id, 0, ""); err != errNoVaultSpace {
+		t.Fatalf("loot with no acting char = %v, want errNoVaultSpace (primary vault is full)", err)
+	}
+
+	// Fix: name the acting character -> the item lands in its (empty) vault.
+	if err := st.LootAttachment(ctx, acct.id, id, 0, acting.name); err != nil {
+		t.Fatalf("loot with acting char = %v, want nil", err)
+	}
+	if got := vaultCount(t, st, ctx, acting.id, itemID); got != 1 {
+		t.Errorf("acting vault has %d of item %d, want 1", got, itemID)
+	}
+	if got := vaultCount(t, st, ctx, primary.id, itemID); got != vaultSlotCount {
+		t.Errorf("primary vault has %d of item %d, want %d (untouched)", got, itemID, vaultSlotCount)
 	}
 }
 

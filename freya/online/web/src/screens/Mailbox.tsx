@@ -305,7 +305,7 @@ export function Mailbox({
         if (busy) return;
         setBusy(true);
         try {
-            await api.lootAttachment(mailId, att.index ?? arrIdx);
+            await api.lootAttachment(mailId, att.index ?? arrIdx, character);
             toast(`Looted ${lootLabel(att)}`);
             await reload();
         } catch (err) {
@@ -325,7 +325,7 @@ export function Mailbox({
             const pending = m.attachments
                 .map((att, i) => ({ att, idx: att.index ?? i }))
                 .filter(({ att }) => att.looted !== true);
-            for (const { idx } of pending) await api.lootAttachment(m.id, idx);
+            for (const { idx } of pending) await api.lootAttachment(m.id, idx, character);
             const n = pending.length;
             toast(`Looted ${n} attachment${n === 1 ? '' : 's'}`);
             await reload();
