@@ -3619,26 +3619,38 @@ moot; the SOLVED block above is the truth):**
   swallowed while editing -- confirm no regression). (3) Enter still opens the box as before.
 - **Setup**: redeploy the freya-hud mod (or DEBUG auto-refresh), log in, in space.
 
-### [ ] CV-PB66-FONT -- target-frame + discipline-card fonts are larger and legible at the owner's resolution (PB-66)
+### [ ] CV-PB66-FONT -- target-frame + discipline-card fonts are larger AND CRISP at the owner's resolution (PB-66)
 
-- **Change**: `freya-hud/target_frame.lua` draws the target NAME at scale `NAME_SCALE=1.3` and the
-  DISTANCE at `DIST_SCALE=1.15` (were the fixed ~14px default 1.0); `freya-hud/xp_overlay.lua` draws
-  the C/E/T discipline letters at `LETTER_SCALE=1.3` and the "LV n" badges at `BADGE_SCALE=0.95`.
-  All four also grow on a bigger-than-1280x960 screen via `H.smul(1.4)` -- previously these glyphs
-  were the only fixed-px HUD text that did NOT scale up on a large backbuffer, which is why they read
-  small at the owner's resolution. Line advance and name-wrap width track the scale so nothing clips;
-  the discipline card geometry was widened to fit. Lua-only (script mods), no DLL rebuild.
+- **Change (DLL rebuild required)**: the enlarged HUD text is now a genuinely LARGER FONT, not a
+  magnified 14px bitmap. The overlay (`enbmod/src/overlay.cpp`) bakes a LADDER of real-pixel font
+  atlases (one GDI `CreateFontA(-px,...)` per size, 8..28px, 1px apart) instead of a single 14px
+  sheet. `draw_text` snaps the requested pixel height to the nearest baked atlas and blits each glyph
+  1:1 (POINT-sampled) -- no scale multiply reaches the vertices, so text is pixel-exact/crisp at every
+  size. The mods request text in real pixels: `freya_hud.lua` adds `H.otext_px(x,y,s,rgb,px,alpha)` /
+  `H.measure_px(s,px)` (px -> scale = px/14, the C++ snaps back to that exact atlas). `target_frame.lua`
+  draws the target NAME at `NAME_PX=18`, DISTANCE at `DIST_PX=16`, verb-button letters at `14*smul(1.5)`;
+  `xp_overlay.lua` draws the C/E/T letters at `LETTER_PX=18` and the "LV n" badges at `BADGE_PX=13`. All
+  grow on a bigger-than-1280x960 screen via `H.smul(1.4/1.5)` (0 growth at the reference res) -- these
+  glyphs were previously the only fixed-px HUD text that did NOT scale up on a large backbuffer, which
+  is why they read small at the owner's res. Line advance and name-wrap width track the px so nothing
+  clips; the discipline-card geometry was widened to fit. **This supersedes the earlier scale-multiply
+  approach the owner rejected as blurry ("Scaling blurs it, just keep 100% scale but increase
+  fontsize").** Requires `just build-enbmod` + client relaunch (the DLL does not hot-reload; the Lua
+  does).
 - **Why the CLI/integration suite does NOT close this**: the overlay HUD is client-only pixels; no
-  server or wire path is involved. Font legibility is a visual judgement only the real client shows.
-- **What to look for (real client)**: (1) target any object -- the bottom-right target name +
-  "Dist" line must read clearly larger than before, cleanly above the hull/shield bars, not clipped
-  or overlapping; a long name still wraps to 2 lines without overrunning the bar width. (2) The
-  bottom-left C/E/T discipline card letters + "LV n" badges must read larger, still aligned in their
-  columns. (3) Confirm the size feels right AT THE OWNER'S RESOLUTION -- if still too small/large,
-  the single knob to turn is `NAME_SCALE`/`DIST_SCALE`/`LETTER_SCALE` (base) or `TEXT_SMUL`
-  (big-screen growth) in those two files. Verified on the 1280x960 dev client; owner tunes the exact
-  multiplier at their native res.
-- **Setup**: redeploy the freya-hud mod (or DEBUG auto-refresh / `/run reload()`), log in, in space.
+  server or wire path is involved. Font legibility/crispness is a visual judgement only the real client
+  shows.
+- **What to look for (real client)**: (1) target any object -- the bottom-right target name + "Dist"
+  line reads clearly larger AND SHARP (no fuzzy/upscaled edges), cleanly above the hull/shield bars,
+  not clipped; a long name still wraps to 2 lines without overrunning the bar width. (2) The bottom-left
+  C/E/T discipline card letters + "LV n" badges read larger and crisp, still aligned in their columns.
+  (3) Confirm the size feels right AT THE OWNER'S RESOLUTION -- to retune, change the real px
+  (`NAME_PX`/`DIST_PX`/`LETTER_PX`/`BADGE_PX`) or the big-screen growth (`TEXT_SMUL`) in those two mod
+  files; the atlas ladder covers 8..28px so any value in range stays crisp. Live-verified on the
+  1280x960 dev client 2026-07-06: 4x nearest-neighbour zoom of the live target frame ("Asteroid" /
+  "Dist 8.39k" / P,T verb letters) and the C/E/T card ("LV 25" badges) shows clean antialiased edges,
+  no blur. Owner confirms the multiplier at native res.
+- **Setup**: `just build-enbmod`, relaunch the client, log in, in space, target an object.
 
 ### [ ] CV-PB64-BAND -- invisible native cockpit-console buttons no longer respond to clicks; Freya widgets + world targeting still work (PB-64)
 

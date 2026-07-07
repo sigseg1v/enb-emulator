@@ -75,15 +75,15 @@ local CFG = {
     LINE_H   = 14,    -- name / distance line height at scale 1.0 (grows with the text scale)
     DIST_GAP = 2,     -- gap between the distance line and the name above it
     DIST_ALPHA = 204, -- distance text opacity (~80% of 255)
-    -- text scale for the name / distance readouts. The overlay font is a single
-    -- fixed ~14px glyph, which reads too small in the bottom-right frame; the owner
-    -- wants both lines larger. NAME is the target's name (biggest), DIST the range
-    -- line below it (a touch smaller). Both also grow on a bigger-than-1280x960
-    -- screen via H.smul (the base font is fixed-px, so like the bars/buttons it
-    -- otherwise reads small there) -- 0 growth at the reference res.
-    NAME_SCALE = 1.3,
-    DIST_SCALE = 1.15,
-    TEXT_SMUL  = 1.4, -- big-screen growth factor applied to NAME/DIST (1.0 at ref res)
+    -- font sizes (px) for the name / distance readouts. The base overlay font
+    -- (14px) reads too small in the bottom-right frame; the owner wants both lines
+    -- larger. These are real FONT SIZES -- the overlay bakes a real atlas per size
+    -- and blits 1:1 (crisp, no scaling/magnification). NAME is the target's name
+    -- (biggest), DIST the range line below it (a touch smaller). Both grow on a
+    -- bigger-than-1280x960 screen via H.smul -- 0 growth at the reference res.
+    NAME_PX = 18,
+    DIST_PX = 16,
+    TEXT_SMUL = 1.4, -- big-screen growth factor applied to NAME/DIST (1.0 at ref res)
 }
 
 -- ---- verb table (the target-action letter buttons) --------------------------
@@ -315,15 +315,15 @@ local function draw_buttons_up(verbs, x, bottom_y, maxw)
         enb.draw.rrect(r.x, r.y, r.w, r.h, H.RADIUS,
                        glow and H.LINE_HOT or H.LINE,
                        glow and 255 or (r.enabled and 150 or 80), false)
-        -- the single letter, centred and scaled up to fill a big-screen button.
-        local scale = H.smul(1.5)
-        local lw, lh = H.measure(r.letter)
-        lw, lh = lw * scale, lh * scale
+        -- the single letter, centred; a real 14px font at the base res, grown to
+        -- fill a big-screen button via H.smul (crisp, no scaling).
+        local letter_px = math.floor(H.FONT_PX * H.smul(1.5) + 0.5)
+        local lw, lh = H.measure_px(r.letter, letter_px)
         local ink = H.INK
         if denied then ink = 0x1a1206
         elseif hot then ink = 0x06121f
         elseif not r.enabled then ink = H.darker(H.INK) end
-        H.otext(r.x + (r.w - lw) / 2, r.y + (r.h - lh) / 2, r.letter, ink, scale)
+        H.otext_px(r.x + (r.w - lw) / 2, r.y + (r.h - lh) / 2, r.letter, ink, letter_px)
     end
 
     -- decay both glows one tick so the feedback fades.
@@ -368,27 +368,30 @@ local function draw_target()
     -- its top edge then moves the cursor above it.
     local cursor = hull_y - CFG.NAME_GAP
 
-    local name_scale = CFG.NAME_SCALE * H.smul(CFG.TEXT_SMUL)
-    local dist_scale = CFG.DIST_SCALE * H.smul(CFG.TEXT_SMUL)
+    local name_px = math.floor(CFG.NAME_PX * H.smul(CFG.TEXT_SMUL) + 0.5)
+    local dist_px = math.floor(CFG.DIST_PX * H.smul(CFG.TEXT_SMUL) + 0.5)
+    -- size ratio vs the base font, used for line-advance and wrap math below.
+    local name_k = name_px / H.FONT_PX
+    local dist_k = dist_px / H.FONT_PX
 
-    -- ---- distance: one line above the bars. Line advance tracks the text scale so a
+    -- ---- distance: one line above the bars. Line advance tracks the font size so a
     -- bigger glyph does not overlap the bar below it.
     if t.dist then
-        cursor = cursor - math.floor(CFG.LINE_H * dist_scale)
-        H.otext(bx, cursor, string.format("Dist %.2fk", t.dist / 1000),
-                H.darker(H.INK), dist_scale, CFG.DIST_ALPHA)
+        cursor = cursor - math.floor(CFG.LINE_H * dist_k)
+        H.otext_px(bx, cursor, string.format("Dist %.2fk", t.dist / 1000),
+                   H.darker(H.INK), dist_px, CFG.DIST_ALPHA)
         cursor = cursor - CFG.DIST_GAP
     end
 
     -- ---- name + " (L<level>)" above the distance, <= 2 lines (drawn bottom-up).
-    -- Wrap width is the bar width divided by the scale, since the glyphs are drawn
-    -- name_scale times wider than H.measure reports.
+    -- Wrap width is the bar width divided by the size ratio, since the glyphs are
+    -- drawn name_k times wider than H.measure (base font) reports.
     local label = t.name or "Target"
     if t.level then label = label .. string.format(" (L%d)", t.level) end
-    local lines = wrap_two(label, bw / name_scale)
+    local lines = wrap_two(label, bw / name_k)
     for i = #lines, 1, -1 do
-        cursor = cursor - math.floor(CFG.LINE_H * name_scale)
-        H.otext(bx, cursor, lines[i], H.INK, name_scale)
+        cursor = cursor - math.floor(CFG.LINE_H * name_k)
+        H.otext_px(bx, cursor, lines[i], H.INK, name_px)
     end
 
     -- ---- buttons on top, their row bottom a gap above the name.

@@ -210,6 +210,21 @@ function H.otext(x, y, s, rgb, scale, alpha)
     enb.draw.text(x,     y,     s, rgb, scale, alpha)
 end
 
+-- The overlay bakes a LADDER of real-pixel font atlases and blits each glyph
+-- 1:1, so text drawn at N px is a genuinely N-px font -- crisp, never an
+-- up-scaled bitmap. `otext_px` / `measure_px` are the size-in-pixels front end
+-- (base font = H.FONT_PX): prefer them over passing a scale multiplier when you
+-- want a specific, crisp font size.
+H.FONT_PX = 14
+function H.otext_px(x, y, s, rgb, px, alpha)
+    return H.otext(x, y, s, rgb, (px or H.FONT_PX) / H.FONT_PX, alpha)
+end
+function H.measure_px(s, px)
+    local w, h = H.measure(s)
+    local k = (px or H.FONT_PX) / H.FONT_PX
+    return math.floor(w * k + 0.5), math.floor(h * k + 0.5)
+end
+
 -- darker shade of an 0xRRGGBB color, for the bottom of a vertical-gradient fill
 function H.darker(rgb)
     return (rgb >> 1) & 0x7f7f7f

@@ -87,12 +87,35 @@ struct Glyph {
     float u0, v0, u1, v1;
     int w, h;
 };
-static IDirect3DTexture8* g_fontTex = nullptr;
-static Glyph g_glyphs[95];
-static int g_lineHeight = 0;
-static const int FONT_TEX = 256;
-// Set (release order) after build_font filled g_glyphs/g_lineHeight, cleared on
-// cache release. Gates measure_text reads from the tick thread.
+// The overlay bakes the printable ASCII set into a LADDER of real-pixel font
+// atlases (one GDI CreateFontA per size), NOT a single 14px atlas magnified at
+// draw time. draw_text snaps a requested pixel height to the nearest baked size
+// and blits each glyph 1:1 (POINT-sampled) -- so enlarged HUD text is a
+// genuinely larger font, pixel-exact and crisp, never an up-scaled 14px bitmap
+// (which blurred). Sizes span FONT_MIN_PX..FONT_MAX_PX inclusive, 1px apart.
+struct FontAtlas {
+    IDirect3DTexture8* tex = nullptr;
+    Glyph glyphs[95];
+    int lineHeight = 0;
+    int px = 0;  // baked pixel height
+    int dim = 0; // atlas texture edge (256 or 512)
+};
+static const int FONT_MIN_PX = 8;
+static const int FONT_MAX_PX = 28;
+static const int FONT_BASE_PX = 14; // "scale 1.0" reference size
+static const int FONT_NSIZE = FONT_MAX_PX - FONT_MIN_PX + 1;
+static const int FONT_BASE_IDX = FONT_BASE_PX - FONT_MIN_PX;
+static FontAtlas g_fonts[FONT_NSIZE];
+// pick the atlas index whose baked px is nearest a requested pixel height.
+static inline int font_index_for_px(int px) {
+    if (px < FONT_MIN_PX)
+        px = FONT_MIN_PX;
+    if (px > FONT_MAX_PX)
+        px = FONT_MAX_PX;
+    return px - FONT_MIN_PX;
+}
+// Set (release order) after every atlas is built, cleared on cache release.
+// Gates measure_text reads from the tick thread.
 static std::atomic<bool> g_fontReady{false};
 
 // ---- cached images (path -> managed texture) ---------------------------------
@@ -135,9 +158,11 @@ static void release_cmd_textures(std::vector<Cmd>& v) {
 
 static void release_caches() {
     g_fontReady.store(false, std::memory_order_release);
-    if (g_fontTex) {
-        g_fontTex->Release();
-        g_fontTex = nullptr;
+    for (auto& fa : g_fonts) {
+        if (fa.tex) {
+            fa.tex->Release();
+            fa.tex = nullptr;
+        }
     }
     if (g_white) {
         g_white->Release();
@@ -177,17 +202,21 @@ static bool build_white(IDirect3DDevice8* dev) {
     return true;
 }
 
-// GDI-render the printable ASCII set white-on-black into a DIB, then upload it
-// as A8R8G8B8 with alpha = rendered luminance (antialiased edges keep partial
-// coverage). One texture, built once per device.
-static bool build_font(IDirect3DDevice8* dev) {
+// GDI-render the printable ASCII set white-on-black at `px` into a DIB, then
+// upload it as A8R8G8B8 with alpha = rendered luminance (antialiased edges keep
+// partial coverage). One managed texture per size, built once per device.
+static bool build_font_atlas(IDirect3DDevice8* dev, int px, FontAtlas& fa) {
+    const int dim = (px <= 20) ? 256 : 512; // large sizes need a bigger sheet
+    fa.px = px;
+    fa.dim = dim;
+
     HDC screen = GetDC(nullptr);
     HDC mdc = CreateCompatibleDC(screen);
 
     BITMAPINFO bi = {};
     bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bi.bmiHeader.biWidth = FONT_TEX;
-    bi.bmiHeader.biHeight = -FONT_TEX; // top-down
+    bi.bmiHeader.biWidth = dim;
+    bi.bmiHeader.biHeight = -dim; // top-down
     bi.bmiHeader.biPlanes = 1;
     bi.bmiHeader.biBitCount = 32;
     bi.bmiHeader.biCompression = BI_RGB;
@@ -198,12 +227,12 @@ static bool build_font(IDirect3DDevice8* dev) {
         if (bmp)
             DeleteObject(bmp);
         DeleteDC(mdc);
-        logf("overlay: font DIB failed");
+        logf("overlay: font DIB failed (%dpx)", px);
         return false;
     }
     HBITMAP oldbmp = (HBITMAP)SelectObject(mdc, bmp);
 
-    HFONT font = CreateFontA(-14, 0, 0, 0, FW_NORMAL, 0, 0, 0, ANSI_CHARSET, OUT_DEFAULT_PRECIS,
+    HFONT font = CreateFontA(-px, 0, 0, 0, FW_NORMAL, 0, 0, 0, ANSI_CHARSET, OUT_DEFAULT_PRECIS,
                              CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, FF_DONTCARE | DEFAULT_PITCH,
                              "Tahoma");
     HFONT oldfont = (HFONT)SelectObject(mdc, font);
@@ -213,59 +242,57 @@ static bool build_font(IDirect3DDevice8* dev) {
 
     TEXTMETRICA tm = {};
     GetTextMetricsA(mdc, &tm);
-    g_lineHeight = tm.tmHeight;
+    fa.lineHeight = tm.tmHeight;
 
-    memset(bits, 0, FONT_TEX * FONT_TEX * 4);
-    int x = 0, y = 0;
+    memset(bits, 0, (size_t)dim * dim * 4);
+    int gx = 0, gy = 0;
     bool fit = true;
     for (int c = 32; c <= 126; ++c) {
         char ch = (char)c;
         SIZE sz = {};
         GetTextExtentPoint32A(mdc, &ch, 1, &sz);
-        if (x + sz.cx + 1 > FONT_TEX) {
-            x = 0;
-            y += g_lineHeight + 1;
+        if (gx + sz.cx + 1 > dim) {
+            gx = 0;
+            gy += fa.lineHeight + 1;
         }
-        if (y + g_lineHeight > FONT_TEX) {
+        if (gy + fa.lineHeight > dim) {
             fit = false;
             break;
         }
-        TextOutA(mdc, x, y, &ch, 1);
-        Glyph& g = g_glyphs[c - 32];
+        TextOutA(mdc, gx, gy, &ch, 1);
+        Glyph& g = fa.glyphs[c - 32];
         g.w = sz.cx;
-        g.h = g_lineHeight;
-        g.u0 = (float)x / FONT_TEX;
-        g.v0 = (float)y / FONT_TEX;
-        g.u1 = (float)(x + sz.cx) / FONT_TEX;
-        g.v1 = (float)(y + g_lineHeight) / FONT_TEX;
-        x += sz.cx + 1;
+        g.h = fa.lineHeight;
+        g.u0 = (float)gx / dim;
+        g.v0 = (float)gy / dim;
+        g.u1 = (float)(gx + sz.cx) / dim;
+        g.v1 = (float)(gy + fa.lineHeight) / dim;
+        gx += sz.cx + 1;
     }
     GdiFlush();
 
     bool ok = false;
-    if (fit && SUCCEEDED(dev->CreateTexture(FONT_TEX, FONT_TEX, 1, 0, D3DFMT_A8R8G8B8,
-                                            D3DPOOL_MANAGED, &g_fontTex))) {
+    if (fit && SUCCEEDED(dev->CreateTexture(dim, dim, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED,
+                                            &fa.tex))) {
         D3DLOCKED_RECT lr;
-        if (SUCCEEDED(g_fontTex->LockRect(0, &lr, nullptr, 0))) {
+        if (SUCCEEDED(fa.tex->LockRect(0, &lr, nullptr, 0))) {
             const uint8_t* src = (const uint8_t*)bits;
-            for (int row = 0; row < FONT_TEX; ++row) {
+            for (int row = 0; row < dim; ++row) {
                 uint32_t* dst = (uint32_t*)((uint8_t*)lr.pBits + row * lr.Pitch);
-                for (int col = 0; col < FONT_TEX; ++col) {
-                    uint8_t lum = src[(row * FONT_TEX + col) * 4 + 1]; // green ch
+                for (int col = 0; col < dim; ++col) {
+                    uint8_t lum = src[((size_t)row * dim + col) * 4 + 1]; // green ch
                     dst[col] = ((uint32_t)lum << 24) | 0x00FFFFFFu;
                 }
             }
-            g_fontTex->UnlockRect(0);
+            fa.tex->UnlockRect(0);
             ok = true;
         } else {
-            g_fontTex->Release();
-            g_fontTex = nullptr;
+            fa.tex->Release();
+            fa.tex = nullptr;
         }
     }
     if (!ok)
-        logf("overlay: font atlas build failed%s", fit ? "" : " (charset overflow)");
-    else
-        g_fontReady.store(true, std::memory_order_release);
+        logf("overlay: font atlas build failed (%dpx)%s", px, fit ? "" : " (charset overflow)");
 
     SelectObject(mdc, oldfont);
     DeleteObject(font);
@@ -275,14 +302,25 @@ static bool build_font(IDirect3DDevice8* dev) {
     return ok;
 }
 
+// Build the whole size ladder. All-or-nothing: any failure leaves g_fontReady
+// clear and the caller releases the caches.
+static bool build_fonts(IDirect3DDevice8* dev) {
+    for (int i = 0; i < FONT_NSIZE; ++i) {
+        if (!build_font_atlas(dev, FONT_MIN_PX + i, g_fonts[i]))
+            return false;
+    }
+    g_fontReady.store(true, std::memory_order_release);
+    return true;
+}
+
 static bool ensure_caches(IDirect3DDevice8* dev) {
-    if (dev == g_cacheDev && g_white && g_fontTex)
+    if (dev == g_cacheDev && g_white && g_fonts[FONT_BASE_IDX].tex)
         return true;
     if (g_cacheDev && dev != g_cacheDev)
         logf("overlay: device changed -- rebuilding GPU caches");
     release_caches();
     g_cacheDev = dev;
-    if (!build_white(dev) || !build_font(dev)) {
+    if (!build_white(dev) || !build_fonts(dev)) {
         release_caches();
         return false;
     }
@@ -487,14 +525,21 @@ static void draw_text(IDirect3DDevice8* dev, int x, int y, const std::string& s,
                       float scale) {
     if (scale <= 0.0f)
         scale = 1.0f;
+    // Snap the requested pixel height to the nearest baked atlas and blit each
+    // glyph 1:1 -- a real larger font, not a magnified 14px bitmap. No scale
+    // multiply reaches the vertices, so POINT sampling stays pixel-exact/crisp.
+    int px = (int)lroundf((float)FONT_BASE_PX * scale);
+    const FontAtlas& fa = g_fonts[font_index_for_px(px)];
+    if (!fa.tex)
+        return;
     float cx = (float)x;
-    dev->SetTexture(0, g_fontTex);
+    dev->SetTexture(0, fa.tex);
     for (char chs : s) {
         unsigned char ch = (unsigned char)chs;
         if (ch < 32 || ch > 126)
             ch = '?';
-        const Glyph& g = g_glyphs[ch - 32];
-        float gw = g.w * scale, gh = g.h * scale;
+        const Glyph& g = fa.glyphs[ch - 32];
+        float gw = (float)g.w, gh = (float)g.h;
         Vtx v[4] = {
             {cx - 0.5f, (float)y - 0.5f, 0, 1, c, g.u0, g.v0},
             {cx + gw - 0.5f, (float)y - 0.5f, 0, 1, c, g.u1, g.v0},
@@ -771,17 +816,20 @@ bool measure_text(const std::string& s, int* w, int* h) {
         *h = 0;
     if (!g_fontReady.load(std::memory_order_acquire))
         return false;
+    // Base-size metrics: the mods request larger text as a multiple of this and
+    // scale the measured width themselves, so measure stays at the 14px base.
+    const FontAtlas& fa = g_fonts[FONT_BASE_IDX];
     int width = 0;
     for (char chs : s) {
         unsigned char ch = (unsigned char)chs;
         if (ch < 32 || ch > 126)
             ch = '?';
-        width += g_glyphs[ch - 32].w;
+        width += fa.glyphs[ch - 32].w;
     }
     if (w)
         *w = width;
     if (h)
-        *h = g_lineHeight;
+        *h = fa.lineHeight;
     return true;
 }
 
