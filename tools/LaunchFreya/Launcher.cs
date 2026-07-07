@@ -362,6 +362,17 @@ namespace LaunchFreya
                 info = WinExe(dir, _setting.ClientPath, clientArgs);
             }
 
+            // Multibox: free the single-instance guard BEFORE launching. The
+            // client's "already running" check is a named mutex held by the client
+            // that started first; the injected IAT-hook bypass does not fire
+            // reliably on native Windows, so close that mutex from out here -- reach
+            // into every already-running client and drop its handle, destroying the
+            // object -- so the client we are about to start gets past the guard.
+            // No-op off Windows (WINE uses the injected bypass) and untouched for a
+            // genuine first-instance launch, which keeps its normal guard.
+            if (_slot != null && _slot.Multibox)
+                SingleInstanceMutexReaper.ReapOtherClients(_setting.ClientPath, _warn);
+
             // Snapshot the client windows already open BEFORE we launch, so the
             // optional placer can tell ours apart from any other client (multibox).
             bool place = _setting.WindowX.HasValue && _setting.WindowY.HasValue;
