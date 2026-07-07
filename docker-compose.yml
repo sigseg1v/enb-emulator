@@ -659,6 +659,14 @@ services:
         # db/postgres/fix_orphan_mob_spawns.sql + server/src/MOBClass.cpp guards.
         echo "schema-init: removing orphan mob_spawn_group rows -> net7"
         psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/fix_orphan_mob_spawns.sql
+        # Mission text-coherence fixes (ALWAYS, idempotent). Targeted replace()s
+        # of misleading player-facing mission text (e.g. mission 130's Stage-1
+        # objective that asked for "5 blubber" while the engine tracks kill-3).
+        # The replace is a no-op once applied, so this is safe to re-run and also
+        # repairs pre-existing volumes. Text only -- no completion node, gate,
+        # reward, or wire format changes. See db/postgres/seed_mission_fixes.sql.
+        echo "schema-init: applying /db/seed_mission_fixes.sql -> net7"
+        psql -h postgres -U net7 -d net7 -v ON_ERROR_STOP=1 -f /db/seed_mission_fixes.sql
         # Sequence sync (ALWAYS, idempotent). schema.sql and the Phase Y
         # seeds bulk-load identity columns with explicit ids without
         # advancing their backing sequences, so every IDENTITY sequence is

@@ -3704,6 +3704,29 @@ moot; the SOLVED block above is the truth):**
   To test expiry without waiting 20 min, temporarily lower `time=` in `missions."mission_XML"` for id
   130, `just rebuild server`, re-accept, then attempt to re-accept after the shortened window.
 
+### [ ] CV-PB62-TEXT -- mission 130's corrected journal text renders and the quest completes end-to-end (PB-62)
+
+- **Status**: SHIPPED (content-text only, no wire change). This is the primary "won't progress" half of
+  PB-62. Root cause was misleading MISSION TEXT, not code: mission 130's Stage-1 `<Description>` told the
+  player to *"retreive 5 Nommos Blubber samples"* while the Stage-1 completion node is FIGHT_MOB kill-3 of
+  mob 977 (blubber is Stage-2 turn-in loot, `Count=1`). Fix = `db/postgres/seed_mission_fixes.sql`, an
+  idempotent schema-init overlay that `replace()`s the Stage-1 description to describe hunting Nommos for
+  a blubber sample, drops the phantom "5" from Orkael's accept dialogue, and removes a leaked dev note.
+- **Why this is CLIENT-only verification (no byte-pin)**: only the STRING content inside the existing,
+  already-understood `missions.mission_XML` blob changed -- the packet layout the client parses is
+  identical, so there is no new wire format to pin in the CLI. What a test cannot prove is that the real
+  client's PDA renders the new objective text correctly (ASCII with `--`, no XML-special chars) and that a
+  player following the corrected instructions actually completes the quest.
+- **What to look for (real client)**: (1) Accept mission 130 at Orkael Lazarra -> the PDA Stage-1 objective
+  now reads the corrected "hunt the Nommos Adults ... recover a fresh blubber sample" text (no "5 blubber",
+  no dev note in Stage 2). (2) Kill 3 Nommos Adults (mob 977) at Nommos Point -> Stage-1 kill-count
+  advances 1/3..3/3 and the stage completes (NOT gated on holding blubber). (3) Return to Orkael with a
+  looted Nommos Blubber (5401) -> Stage-2 turn-in fires, rewards granted (skill 9 Build Shields + 3
+  schematics + 2500 TradeXP). (4) Confirm the text renders without truncation/garbling on the client's
+  journal panel.
+- **Setup**: re-seed the net7 DB (`docker compose down -v && docker compose up -d`, or apply
+  `db/postgres/seed_mission_fixes.sql` to a running `net7`), then log in and accept mission 130.
+
 ### [ ] CV-PB62-TIMER -- timed missions show a live countdown in the PDA (PB-62, DEFERRED)
 
 - **Status**: NOT IMPLEMENTED / DEFERRED. This is the COSMETIC half of PB-62 (the owner's "20-min limit
