@@ -1698,7 +1698,34 @@ test:
 # with FREYA_TEST_DB set so the DB-gated tests actually execute. Each test
 # seeds + wipes its own reserved id band, so it is safe against a running stack.
 test-online-it:
+    #!/usr/bin/env bash
+    set -euo pipefail
     docker compose up -d postgres schema-init
+    # schema-init is a ONE-SHOT seeder, and `up -d` returns the instant it is
+    # STARTED, not when it FINISHES. On a fresh volume (CI) the seed takes
+    # minutes (~110k content rows + Phase Y + freya_online.sql creates the
+    # auction_bids / mailbox tables + galaxy topology). Running the Go suite
+    # before it completes raced past the schema -> `relation "auction_bids"
+    # does not exist` + `empty topology: 0 systems`. Block on the seeder's exit
+    # and assert it succeeded BEFORE the tests touch the DB. (Locally this is a
+    # near-instant no-op: an already-seeded volume trips every idempotency gate
+    # and schema-init exits in under a second.)
+    echo ">>> waiting for schema-init to finish seeding..."
+    cid=$(docker compose ps -aq schema-init)
+    if [ -z "$cid" ]; then
+        echo ">>> schema-init container not found after 'up'" >&2
+        docker compose ps -a >&2
+        exit 1
+    fi
+    # `docker wait` blocks until the one-shot exits and prints its exit code
+    # (portable; unlike `docker compose wait` it keys off the container id, not
+    # the compose project, so an already-exited seeder is handled cleanly).
+    code=$(docker wait "$cid")
+    if [ "$code" != "0" ]; then
+        echo ">>> schema-init failed (exit $code); dumping its log:" >&2
+        docker compose logs schema-init >&2
+        exit 1
+    fi
     cd freya/online/server && FREYA_TEST_DB=1 FREYA_TEST_DB_HOST=localhost:{{ENB_DB_PORT}} go test ./...
 
 # Freya Online web SPA unit tests (rarity/format math, real-vs-mock API dispatch).

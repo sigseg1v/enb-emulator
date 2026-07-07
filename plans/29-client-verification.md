@@ -3431,6 +3431,17 @@ moot; the SOLVED block above is the truth):**
   correct (see the roll note above). CRUCIAL regressions to confirm ABSENT on the
   moving client A itself: warp still engages, target locks stay stable, no phantom
   drift -- i.e. the broadcast-only override did not leak into A's motion path.
+- **Follow-up (owner-observed, live, 2026-07-05): SUPPRESS the override WHILE
+  WARPING.** With the nose-heading override active, a warping ship visibly TWISTS
+  SIDEWAYS to observers -- the warp still arrives at the right place, it just looks
+  wrong. Root cause: during warp the client nose vector is the camera/aim direction,
+  which is NOT the warp travel vector, so broadcasting it yaws the hull off the warp
+  line. Fix (`SendToVisibilityList`): gate the override on `&& !WarpDrive()`, so
+  mid-warp the broadcast falls back to the ship's pre-warp orientation (the original
+  slide-without-twisting look). No wire-format change; only the conditional VALUE of
+  the Orientation quaternion while `m_WarpDrive` is set. Real-client check: warp char
+  A across a sector while char B watches -- A's hull must track the warp line, not
+  crab/twist sideways; on exit from warp the nose-facing replication resumes.
 
 ## [~] CV-BC-FORMATION-GATE -- group formation auto-carries + auto-reforms through a gate
 
@@ -3522,3 +3533,194 @@ moot; the SOLVED block above is the truth):**
 - **STILL TO VERIFY after the fix (real clients, over real latency)**: re-run the prod repro
   (leader gates flying a formation, member auto-carried) and confirm the member survives the
   reform on the far side and snaps into the slot -- no client crash.
+
+## [ ] CV-AI-DTLS-PARK -- gating into a PARKED-then-RESTARTED sector completes on a DTLS deploy
+
+- **PROD BUG this fixes (AI-12, 2026-07-05)**: on the online (DTLS-required) server two grouped
+  multibox players wedged gating Earth -> Asteroid Belt Alpha (sector 1076, deterministic
+  port 3504). Prod logs showed cold-start works and online re-visit works, but a gate into a
+  sector that had been idle-PARKED and then restarted produced NO "Handle Sector Login" line --
+  the client's sector-login datagram silently failed to decrypt server-side.
+- **What changed (SERVER, no proxy/client redeploy)**: preserve the sector listener's
+  `net7::DtlsTransport` across the Phase-AI park/restart cycle instead of destroying it.
+  `UDP_Connection::DetachDtls/AdoptDtls` + `SectorManager::m_ParkedDtls`; `DropListener` stashes
+  the transport, `StartListener` re-adopts it on the rebound socket before StartReceiver. The
+  client-side proxy keys its DTLS association by (server_ip, port) and, once Established, never
+  re-handshakes -- so a fresh server transport on the same port left the proxy encrypting under
+  keys the server no longer had, dropping every C->S datagram incl. the sector login. Keeping the
+  server transport alive across the park makes the proxy's established session keep working.
+- **Why no CLI byte-pin**: NOT a wire-format change. No new/changed bytes on the wire -- the same
+  sector-login datagram flows; the only change is DTLS session lifetime on the proxy<->server leg.
+  The mechanism is instead pinned by two deterministic gtests in
+  `freya/tests/server/protocol/dtls_transport_test.cpp` (fresh transport drops the reused-session
+  login; preserved transport delivers it byte-for-byte).
+- **Why the CLI/integration suite can't fully validate it**: the local docker default is PLAINTEXT
+  (NET7_DTLS_ALLOW_PLAINTEXT), where the bug cannot occur and the fix is a no-op. Reproducing the
+  wedge needs DTLS enabled + certs provisioned + a real client that gates, sits until the target
+  sector idle-parks (~5 min default), then gates back. Only a real client on a DTLS deploy
+  exercises the full path.
+- **SECOND ROOT CAUSE + LOCAL WINE-CLIENT REPRO PASS (2026-07-06)**: the DTLS session fix was
+  necessary but not sufficient. Running the full WINE-client gate/park/gate repro on a DTLS-on
+  local stack surfaced an idle-park RACE independent of DTLS: `EnsureSectorStarted`'s cold-start
+  branch and a mid-handshake login (player not yet on `m_PlayerList`, so `GetOccupancy()==0`) both
+  left the sector eligible for an immediate idle-park, so `IdleSectorPoll` parked the sector out
+  from under a login still in flight and timed the player out at stage 12 (this is why a gate/wormhole
+  looked like it "did nothing"). Fixed server-side by stamping `m_LastActivityTick` on the cold-start
+  path and re-arming the destination sector's idle clock at the start of `Player::HandleLogin`
+  (AI-12; not a wire change). With BOTH fixes, the full gate 1015 -> park -> gate-back-into-parked
+  1015 -> park 1076 -> gate-back-into-parked 1076 cycle was driven end-to-end under the real WINE
+  client on the DTLS-on stack and every leg reached `fully logged in` with no wedge, no stage-12
+  timeout, no auth-wrapper drop. This CV entry stays OPEN only for the owner's confirmation on the
+  actual online production deploy (the local repro used the same DTLS transport + certs, but prod
+  is the authoritative check).
+- **What to look for (real client on a DTLS deploy, e.g. the online server after the owner
+  redeploys)**: gate into a sector, leave it (all players out) long enough for idle teardown to
+  PARK it (server log `TeardownSector: parking idle sector_id=...`), then gate back into that same
+  sector. Expected: the far-side server logs `Handle Sector Login` + `Sector login for player` and
+  the client loads into space normally -- no loading-screen wedge. Before the fix the restarted
+  sector produced no "Handle Sector Login" and the client hung.
+
+### [ ] CV-PB68 -- Manufacture terminal refuses a no-recipe item + a real recipe still builds (PB-68/PB-69)
+
+- **Change**: `Player::AllowManufacture` (server/src/PlayerManufacturing.cpp) now rejects any item
+  whose six component slots are all `<= 0` (an item with no `item_manufacture` row loads all
+  components as `0`; a row's unused slots are `-1`). This gate fronts both manufacture setup
+  (`HandleManufactureSetItem:360`) and analyze/dismantle setup (`AnalyseDismantleSetItem:191`).
+  `HasComponents` also now returns false on an empty bill of materials (defense-in-depth on the
+  credit-charge path). The analyze/dismantle grant loops changed from `!= -1` to `> 0` so an empty
+  slot (`0`) is never granted as a phantom template-0 item. Closes the money-printing exploit
+  (PB-68) and the "analyze a null-parts item, learn an empty pattern, lose the item" behavior
+  (PB-69). NOT a wire-format change (no bytes the client parses change); a "tighten toward correct"
+  server change -- it only rejects an input that should never have succeeded.
+- **Why the CLI/integration suite does NOT close this**: the manufacture/analyze terminal flow is a
+  station-interior UI the CLI suite does not drive; only the real client opens a manu terminal.
+- **What to look for (real client)**: at a manufacturing terminal, (1) select one of the 196
+  no-recipe items (e.g. a manufacturable item with no icon) -- it must NOT be buildable and must
+  NOT charge credits or produce anything (before the fix it built for credits alone, printing
+  money); (2) analyze/dismantle such an item -- it must be refused rather than consuming the item to
+  "learn" an empty pattern; (3) a NORMAL, real recipe (an item with a proper bill of materials) must
+  still set up, consume its materials, charge credits, and build exactly as before -- confirm the
+  guard did not over-block legitimate manufacturing; (4) no crash on any of the above.
+- **Setup**: `just rebuild server && just play-local`, log in, dock, open a manufacturing terminal.
+
+### [ ] CV-PB67 -- pressing `/` opens the Freya chat box, never the native chat window (PB-67)
+
+- **Change**: `freya-hud/chat.lua` -- the `not editing` input branch now catches the `/` keydown
+  (`VK_OEM_2` = 0xBF), calls `start_edit()`, and returns `true` to swallow it before the game
+  wndproc. The native slash-command chat window therefore never opens; the swallowed keydown makes
+  `hk_GetMessageA` synthesize the `WM_CHAR` for `/` and re-feed it (the same path every typed char
+  in the Freya box uses), so the box opens showing "/". Lua-only (script mod), no DLL rebuild.
+- **Why the CLI/integration suite does NOT close this**: input hooking / the Lua HUD is client-only;
+  no server or wire path is involved.
+- **What to look for (real client)**: (1) with no chat box open, press `/` -- the FREYA input box
+  must open with a single "/" already in it (not "//", and NOT the old native chat window popping
+  up); type a slash command (e.g. `/gen hi`) and confirm it routes normally. (2) With the Freya box
+  already open, `/` must insert a literal "/" into the line as any other character (it was already
+  swallowed while editing -- confirm no regression). (3) Enter still opens the box as before.
+- **Setup**: redeploy the freya-hud mod (or DEBUG auto-refresh), log in, in space.
+
+### [ ] CV-PB66-FONT -- target-frame + discipline-card fonts are larger AND CRISP at the owner's resolution (PB-66)
+
+- **Change (DLL rebuild required)**: the enlarged HUD text is now a genuinely LARGER FONT, not a
+  magnified 14px bitmap. The overlay (`enbmod/src/overlay.cpp`) bakes a LADDER of real-pixel font
+  atlases (one GDI `CreateFontA(-px,...)` per size, 8..28px, 1px apart) instead of a single 14px
+  sheet. `draw_text` snaps the requested pixel height to the nearest baked atlas and blits each glyph
+  1:1 (POINT-sampled) -- no scale multiply reaches the vertices, so text is pixel-exact/crisp at every
+  size. The mods request text in real pixels: `freya_hud.lua` adds `H.otext_px(x,y,s,rgb,px,alpha)` /
+  `H.measure_px(s,px)` (px -> scale = px/14, the C++ snaps back to that exact atlas). `target_frame.lua`
+  draws the target NAME at `NAME_PX=18`, DISTANCE at `DIST_PX=16`, verb-button letters at `14*smul(1.5)`;
+  `xp_overlay.lua` draws the C/E/T letters at `LETTER_PX=18` and the "LV n" badges at `BADGE_PX=13`. All
+  grow on a bigger-than-1280x960 screen via `H.smul(1.4/1.5)` (0 growth at the reference res) -- these
+  glyphs were previously the only fixed-px HUD text that did NOT scale up on a large backbuffer, which
+  is why they read small at the owner's res. Line advance and name-wrap width track the px so nothing
+  clips; the discipline-card geometry was widened to fit. **This supersedes the earlier scale-multiply
+  approach the owner rejected as blurry ("Scaling blurs it, just keep 100% scale but increase
+  fontsize").** Requires `just build-enbmod` + client relaunch (the DLL does not hot-reload; the Lua
+  does).
+- **Why the CLI/integration suite does NOT close this**: the overlay HUD is client-only pixels; no
+  server or wire path is involved. Font legibility/crispness is a visual judgement only the real client
+  shows.
+- **What to look for (real client)**: (1) target any object -- the bottom-right target name + "Dist"
+  line reads clearly larger AND SHARP (no fuzzy/upscaled edges), cleanly above the hull/shield bars,
+  not clipped; a long name still wraps to 2 lines without overrunning the bar width. (2) The bottom-left
+  C/E/T discipline card letters + "LV n" badges read larger and crisp, still aligned in their columns.
+  (3) Confirm the size feels right AT THE OWNER'S RESOLUTION -- to retune, change the real px
+  (`NAME_PX`/`DIST_PX`/`LETTER_PX`/`BADGE_PX`) or the big-screen growth (`TEXT_SMUL`) in those two mod
+  files; the atlas ladder covers 8..28px so any value in range stays crisp. Live-verified on the
+  1280x960 dev client 2026-07-06: 4x nearest-neighbour zoom of the live target frame ("Asteroid" /
+  "Dist 8.39k" / P,T verb letters) and the C/E/T card ("LV 25" badges) shows clean antialiased edges,
+  no blur. Owner confirms the multiplier at native res.
+- **Setup**: `just build-enbmod`, relaunch the client, log in, in space, target an object.
+
+### [ ] CV-PB64-BAND -- invisible native cockpit-console buttons no longer respond to clicks; Freya widgets + world targeting still work (PB-64)
+
+- **Change**: `freya-hud/native_input_block.lua` (new), required LAST among the mouse handlers in
+  `freya-hud/init.lua`. It swallows every mouse message inside the bottom cockpit-console band (left
+  screen edge across to just right of the radar dial, up ~150px from the bottom, scaled) while
+  `freya_ui_on` and in space, so the invisible native warp orb / thrusters / action-bar slots /
+  nav-map button can no longer be CLICKED. Registered last so every Freya widget wins its click
+  first; the band is solid HUD/cockpit-frame art so no world-targeting click is lost, and the
+  far-right target frame + bottom-right world corner are outside the band. Lua-only (script mod), no
+  DLL rebuild.
+- **Why the CLI/integration suite does NOT close this**: the native cockpit gadgets + the overlay are
+  client-only pixels/input; no server or wire path is involved. Only the real client shows whether a
+  click leaks to the invisible native control.
+- **What to look for (real client)**: (1) Hover/click where the OLD invisible controls sit (bottom-
+  left nav-map button, bottom-centre warp orb / throttle / steering, action-bar row) -- a CLICK must
+  do nothing (no nav map opening, no warp engaging, no native action). Verified on the dev client for
+  the nav-map button (opened the map before, opens nothing after). (2) Freya's OWN bottom HUD must
+  still work: hotbar slots fire, page toggle flips, target-frame P/T buttons act, chat still usable.
+  (3) World targeting must still work: click asteroids/ships ABOVE the band and in the bottom-RIGHT
+  corner -- they must still target. (4) Ctrl+U OFF must restore native interactivity (the guard
+  yields when the Freya UI is off). (5) KNOWN LIMITATION: the hover HIGHLIGHT + tooltip on those dead
+  controls still appear (the native hover path polls the cursor, which a message swallow cannot stop)
+  -- confirm this is acceptable, or flag it for the engine-level gadget-disable follow-up.
+- **Setup**: redeploy the freya-hud mod (or DEBUG auto-refresh / `/run reload()`), log in, in space.
+
+### [ ] CV-PB62-SLOT -- a non-forfeitable timed mission's slot auto-frees after its limit so it can be re-accepted (PB-62)
+
+- **Status**: SHIPPED (server-only, no wire change). This is the escape-hatch half of PB-62: mission 130
+  "Learn Build Shield Skill" is `forfeitable="0" time="1200"`, so before the fix its PDA slot was stuck
+  forever (MissionDismiss refuses to forfeit it and nothing ever armed the 20-min timer). The fix arms a
+  server-only spoilage clock (`Player::m_MissionStartTick[]`, never serialized, resets on relogin) at
+  accept AND at login-load, and lazily frees the slot on the reacquire path (`GetSlotForMission` ->
+  `ExpireStaleTimedMissions` -> `RemoveMission`) once `MissionTimedOut()` says the 1200s window elapsed.
+  A one-line system message tells the player the mission expired and to return to the contact.
+- **Why this is a CLIENT-only verification (no byte-pin)**: the server emits NO new bytes -- it does not
+  set any `_Mission` Aux dirty bit, so nothing new crosses the wire; `RemoveMission` reuses the
+  already-understood mission-removal path the client already handles. The decision arithmetic is unit-
+  tested (`freya/tests/server/mission/mission_timer_test.cpp`, 9 cases pinning `MissionTimedOut`). What
+  a test CANNOT prove is that the real client's PDA actually clears the freed slot and lets the player
+  re-accept from the NPC -- that is what this entry gates.
+- **What to look for (real client)**: (1) Accept mission 130 at Orkael Lazarra; note the slot is filled.
+  (2) Try to abandon it -> still refused ("This mission is non forfeitable"): the `forfeitable="0"`
+  content is unchanged, on purpose. (3) After the 20-min window (or with `time=` shortened for the
+  test), talk to Orkael / reopen the offer -> the stale mission is gone from the PDA, the system message
+  fired, and the mission can be re-accepted into a fresh slot. (4) A non-timed mission is NEVER
+  force-freed (regression guard). (5) NOTE: there is deliberately NO visible countdown yet -- see
+  CV-PB62-TIMER; expiry is silent until the reacquire attempt. (6) Relogin resets the clock (leniency),
+  so a player who relogs gets the full 20 min again -- confirm that is acceptable.
+- **Setup**: `just rebuild server`, accept mission 130 at Orkael Lazarra (Trin station, Akerons Gate).
+  To test expiry without waiting 20 min, temporarily lower `time=` in `missions."mission_XML"` for id
+  130, `just rebuild server`, re-accept, then attempt to re-accept after the shortened window.
+
+### [ ] CV-PB62-TIMER -- timed missions show a live countdown in the PDA (PB-62, DEFERRED)
+
+- **Status**: NOT IMPLEMENTED / DEFERRED. This is the COSMETIC half of PB-62 (the owner's "20-min limit
+  not shown on the item/quest"). The slot-recovery defect is fixed separately and with no wire change
+  (CV-PB62-SLOT); this entry pre-registers the wire check for the *visible* countdown so the encoding
+  gets pinned BEFORE the server ever populates a client-facing timer field.
+- **Why it is a WIRE change (and thus gated)**: showing a countdown means populating the client-facing
+  `_Mission` Aux fields `IsTimed` / `StartTime` / `ExpirationTime` (AuxClasses/AuxMission.h). Because the
+  AuxMission serializer is dirty-bit driven (a `Set*` sets a per-field Flags bit and `BuildPacket` only
+  serializes fields whose bit is set), setting those fields WOULD emit new bytes the client parses --
+  a real wire-format change, unlike the slot-recovery fix which touches none of them.
+- **Blocker to resolve first**: the client's expected encoding of `_Mission.ExpirationTime` / `StartTime`
+  (seconds-remaining? absolute Unix seconds? server tick ms?) is NOT pinned. Get a capture of a real
+  timed-mission Aux packet (or client-behaviour analysis) and add a CaptureReplay fixture that locks the
+  encoding. Do NOT arm the fields blind -- a wrong epoch renders a garbage countdown.
+- **What to look for (real client)**: (1) Accept mission 130 -> the PDA shows a ~20:00 countdown ticking
+  down in the right units. (2) The countdown agrees with the server-side spoilage clock (the slot frees
+  right about when the countdown hits 0). (3) A non-timed mission shows NO countdown (regression guard).
+- **Setup**: pin the encoding first (fixture), then populate the Aux fields at accept + on the periodic
+  update, `just rebuild server`, accept mission 130, observe the PDA countdown.

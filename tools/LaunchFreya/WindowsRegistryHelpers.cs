@@ -26,9 +26,9 @@ namespace LaunchFreya
         // path in Launcher.PatchRegistry) so the value lands where the client
         // reads it regardless of either side's bitness. HKLM\Software subkey path
         // only (no hive prefix).
-        const string RenderSubKey       = "Software\\Westwood Studios\\Earth and Beyond\\Render";
+        const string RenderSubKey = "Software\\Westwood Studios\\Earth and Beyond\\Render";
         const string RegistrationSubKey = "Software\\Westwood Studios\\Earth and Beyond\\Registration";
-        const string AuthAuthSubKey     = "Software\\EACom\\AuthAuth";
+        const string AuthAuthSubKey = "Software\\EACom\\AuthAuth";
 
         [SupportedOSPlatform("windows")]
         public static void EnsureRegistered()

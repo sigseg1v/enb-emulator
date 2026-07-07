@@ -201,7 +201,10 @@ func TestIT_API_PostThenBuyout(t *testing.T) {
 	// A fresh client logs in as the buyer (separate cookie jar) and buys it out.
 	bc, _ := newTestAPI(t, st)
 	loginAPI(t, bc, base, buyer)
-	bresp := apiPost(t, bc, base+"/api/auction/"+listing.ID+"/buyout", map[string]any{})
+	// Buyout charges the acting topbar character (PB-31), so the body names it --
+	// exactly as the SPA's api.buyout(listingId, avatar) does.
+	bresp := apiPost(t, bc, base+"/api/auction/"+listing.ID+"/buyout",
+		map[string]any{"avatar": buyer.avatars[0].name})
 	bresp.Body.Close()
 	if bresp.StatusCode != http.StatusOK {
 		t.Fatalf("buyout = %d, want 200", bresp.StatusCode)

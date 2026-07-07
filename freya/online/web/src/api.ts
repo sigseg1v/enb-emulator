@@ -200,8 +200,16 @@ export async function markRead(mailId: string): Promise<{ ok: boolean }> {
     return postJSON<{ ok: boolean }>(`/api/mail/${mailId}/read`, {});
 }
 
-export async function lootAttachment(mailId: string, index: number): Promise<{ ok: boolean }> {
-    return postJSON<{ ok: boolean }>(`/api/mail/${mailId}/loot`, { index });
+// avatar is the selected topbar character: the vault the looted item lands in.
+// Account-level mail (auction wins, returns) would otherwise always loot into
+// the account's lowest-slot character, failing if that vault is full even when
+// the acting character has room (PB-70).
+export async function lootAttachment(
+    mailId: string,
+    index: number,
+    avatar: string,
+): Promise<{ ok: boolean }> {
+    return postJSON<{ ok: boolean }>(`/api/mail/${mailId}/loot`, { index, avatar });
 }
 
 /** Delete a mail message (and its attachments). Unlooted attachments are forfeited. */

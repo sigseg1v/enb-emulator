@@ -2510,7 +2510,15 @@ static int l_chat_send(lua_State* L) {
         return 1;
     }
     const char* line = g_chat_send_buf.c_str();
-    if (line[0] == '/') {
+    // A SINGLE leading '/' is a client-side console command: offer it to the
+    // client's slash dispatcher first. A DOUBLE leading '//' is a SERVER slash
+    // command (GM/admin channel, parsed by Player::HandleSlashCommands, which
+    // itself gates on Msg[0]=='/' && Msg[1]=='/'). The client dispatcher does
+    // NOT own '//' lines -- handing it one makes it strip a single '/' and
+    // reject the remainder ("Illegal slash command: /wormhole ..."), claiming
+    // the line so it never reaches the server. So '//' must bypass the client
+    // dispatcher and go straight out as a plain chat line.
+    if (line[0] == '/' && line[1] != '/') {
         uint32_t a[1] = {(uint32_t)(uintptr_t)line};
         unsigned r = actions::call_thiscall(addr::ChatCmdDispatch, mgr, a, 1);
         if (r & 0xff) { // command claimed the line

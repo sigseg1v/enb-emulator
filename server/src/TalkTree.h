@@ -188,6 +188,7 @@ struct MissionTree
 	mapMissionNodes	Nodes;
 	long MissionID;
 	bool forfeitable;
+	int  time_limit;   // <Mission time="..."> in seconds; 0 = untimed. Server-side spoilage timer.
 	u8   Job_Category;
 	long MinSecurityLevel;
 } ATTRIB_PACKED;

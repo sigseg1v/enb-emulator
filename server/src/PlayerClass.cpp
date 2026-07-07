@@ -202,6 +202,7 @@ void Player::ResetPlayer()
 	memset(m_BaseID, 0, sizeof(m_BaseID));
 	memset(&m_Database, 0, sizeof(m_Database));
 	memset(m_MissionNodes, 0, sizeof(m_MissionNodes));
+	memset(m_MissionStartTick, 0, sizeof(m_MissionStartTick)); // PB-62: no spoilage clocks armed until a timed mission is accepted/loaded
 
 	PlayerIndex()->Reset();
 	PlayerIndex()->ClearFlags();
@@ -3187,9 +3188,15 @@ void Player::SendToVisibilityList(bool include_player)
 	// dead-reckoning path never sees the transient orientation (routing facing
 	// into the motion path is what pinned the historical phantom-velocity bug --
 	// this stays strictly on the outbound broadcast copy).
+	// Suppress the nose-heading override WHILE WARPING. During warp the client
+	// nose vector is the camera/aim direction, which is NOT the warp travel
+	// vector -- broadcasting it yaws the ship model sideways relative to the
+	// warp line, so observers see the warping ship visibly twist. Skipping the
+	// override mid-warp lets the broadcast carry the ship's pre-warp orientation
+	// (the original slide-without-turning behaviour), which reads correctly.
 	float saved_orient[4];
 	bool overrode_orient = false;
-	if (m_HaveClientHeading && m_ReceivedMovement)
+	if (m_HaveClientHeading && m_ReceivedMovement && !WarpDrive())
 	{
 		memcpy(saved_orient, m_Position_info.Orientation, sizeof(saved_orient));
 		float facing_target[3] = {

@@ -149,6 +149,18 @@ struct CertFiles {
     }
 };
 
+// Load the server cert on `server`, trust it on `client`, and run a verified
+// handshake to mutual establishment. Mirrors production setup (verify ON).
+bool EstablishSession(DtlsTransport& client, DtlsTransport& server, const CertFiles& cf,
+                      uint64_t srv_peer, uint64_t cli_peer) {
+    if (!server.LoadServerCert(cf.cert.c_str(), cf.key.c_str()))
+        return false;
+    if (!client.SetVerifyCaFile(cf.cert))
+        return false;
+    client.SetVerifyHostname(kHost);
+    return RunHandshake(client, server, srv_peer, cli_peer);
+}
+
 } // namespace
 
 TEST(DtlsTransport, HandshakeAndBidirectionalRoundTrip) {
@@ -197,6 +209,113 @@ TEST(DtlsTransport, HandshakeAndBidirectionalRoundTrip) {
         std::string got(r.app_data[0].begin(), r.app_data[0].end());
         EXPECT_EQ(got, s2c);
     }
+
+    std::remove(cf.cert.c_str());
+    std::remove(cf.key.c_str());
+}
+
+// ---------------------------------------------------------------------------
+// Parked-sector restart / proxy-session reuse (Phase AI Stage 2).
+//
+// Repro of the production gate-wedge: a sector is parked (its UDP listener +
+// DTLS transport torn down) and later restarted on the SAME deterministic port.
+// The client-side proxy keys its DTLS association by (server_ip, port) and, once
+// established, does NOT re-handshake (UDPClient::DtlsKickHandshake is a no-op
+// while the peer is Established) -- it just resends application datagrams (the
+// sector-login among them) under the existing association. So whether the
+// returning login is delivered depends ENTIRELY on whether the server kept that
+// association across the park.
+//
+// These two tests pin both sides of the fix: destroying+recreating the server
+// transport (the old DropListener/StartListener behaviour) silently drops the
+// reused-session login (the wedge), while preserving the transport across the
+// park (DetachDtls/AdoptDtls) keeps decrypting it.
+// ---------------------------------------------------------------------------
+
+// The BUG: a fresh server transport after the park cannot decrypt the proxy's
+// reused-session record, so the sector-login is silently dropped and no
+// "Handle Sector Login" ever fires -> the client wedges on the gate transition.
+TEST(DtlsTransport, ParkedRestartFreshServerTransportDropsReusedProxySession) {
+    CertFiles cf;
+    ASSERT_TRUE(GenSelfSigned(cf.cert, cf.key));
+
+    // Same port (3504) before and after the park -- the deterministic sector port.
+    const uint64_t srv_peer = DtlsPeerKey(0x0A000001u, 3504);
+    const uint64_t cli_peer = DtlsPeerKey(0x0A0000FEu, 50000);
+
+    DtlsTransport client(DtlsRole::Client); // the proxy: persists across the park
+    {
+        DtlsTransport server1(DtlsRole::Server);
+        ASSERT_TRUE(EstablishSession(client, server1, cf, srv_peer, cli_peer))
+            << "initial handshake failed: client=" << client.LastError()
+            << " server=" << server1.LastError();
+        // server1 goes out of scope here == the park's `delete m_Dtls` (all
+        // per-peer SSL associations torn down).
+    }
+
+    // Restart the parked sector the OLD way: a brand-new server transport bound
+    // to the same port. It has no per-peer association for the proxy.
+    DtlsTransport server2(DtlsRole::Server);
+    ASSERT_TRUE(server2.LoadServerCert(cf.cert.c_str(), cf.key.c_str()));
+
+    // The proxy still considers its session established and will NOT re-handshake.
+    ASSERT_TRUE(client.Established(srv_peer))
+        << "proxy lost its association -- it would re-handshake and mask the bug";
+
+    const std::string login = "sector-login-under-reused-session";
+    DtlsStep s =
+        client.SendApp(srv_peer, reinterpret_cast<const uint8_t*>(login.data()), login.size());
+    ASSERT_FALSE(s.fatal) << client.LastError();
+    ASSERT_FALSE(s.to_send.empty());
+
+    DtlsStep r = server2.Feed(cli_peer, s.to_send.data(), s.to_send.size());
+    // The record was encrypted under an epoch/keys the fresh server never
+    // negotiated: it CANNOT surface as application data. This is the wedge.
+    EXPECT_TRUE(r.app_data.empty())
+        << "fresh server unexpectedly decrypted a reused-session record (" << r.app_data.size()
+        << " datagrams)";
+
+    std::remove(cf.cert.c_str());
+    std::remove(cf.key.c_str());
+}
+
+// The FIX: preserving the SAME server transport across the park (DetachDtls on
+// DropListener, AdoptDtls on StartListener) keeps the proxy's reused-session
+// login decrypting byte-for-byte -> the sector-login lands and the gate completes.
+TEST(DtlsTransport, ParkedRestartPreservedServerTransportKeepsReusedProxySession) {
+    CertFiles cf;
+    ASSERT_TRUE(GenSelfSigned(cf.cert, cf.key));
+
+    const uint64_t srv_peer = DtlsPeerKey(0x0A000001u, 3504);
+    const uint64_t cli_peer = DtlsPeerKey(0x0A0000FEu, 50000);
+
+    DtlsTransport client(DtlsRole::Client);
+    // The server transport is PRESERVED across the park: DropListener detaches it
+    // from the torn-down listener and StartListener re-adopts it on the rebound
+    // socket, so this one object outlives the park exactly as in the fix.
+    DtlsTransport server(DtlsRole::Server);
+    ASSERT_TRUE(EstablishSession(client, server, cf, srv_peer, cli_peer))
+        << "initial handshake failed: client=" << client.LastError()
+        << " server=" << server.LastError();
+
+    // Park + restart happen here with the association intact on both ends: the
+    // socket was closed and rebound (irrelevant to DTLS, which keys by peer addr),
+    // but the transport -- and thus the per-peer SSL state -- survived.
+    ASSERT_TRUE(client.Established(srv_peer));
+    ASSERT_TRUE(server.Established(cli_peer));
+
+    const std::string login = "sector-login-after-park";
+    DtlsStep s =
+        client.SendApp(srv_peer, reinterpret_cast<const uint8_t*>(login.data()), login.size());
+    ASSERT_FALSE(s.fatal) << client.LastError();
+    ASSERT_FALSE(s.to_send.empty());
+
+    DtlsStep r = server.Feed(cli_peer, s.to_send.data(), s.to_send.size());
+    ASSERT_FALSE(r.fatal) << server.LastError();
+    ASSERT_EQ(r.app_data.size(), 1u)
+        << "preserved association failed to decrypt the post-park login";
+    std::string got(r.app_data[0].begin(), r.app_data[0].end());
+    EXPECT_EQ(got, login);
 
     std::remove(cf.cert.c_str());
     std::remove(cf.key.c_str());

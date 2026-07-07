@@ -14,6 +14,10 @@
 --   loot_frame  -- the LEFT-side hulk salvage/loot readout (slot/name/stack/icon)
 --   micromenu   -- the four top-left micro-menu buttons (Inventory / Character /
 --                  Map / Options), restoring the hidden bottom-left chrome band
+--   native_input_block -- PB-64: LAST mouse handler; swallows the dead native
+--                  cockpit-console band (warp orb / thrusters / action slots /
+--                  nav-map button) so every Freya widget above wins its click
+--                  first and only the invisible-native leftover gets eaten
 --   ui_toggle   -- Ctrl+U master switch: flips the whole Freya overlay off (and
 --                  the native HUD back on) and on again
 --
@@ -28,4 +32,5 @@ require("target_frame")
 require("party_frame")
 require("loot_frame")
 require("micromenu")
+require("native_input_block")
 require("ui_toggle")

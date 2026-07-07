@@ -163,6 +163,7 @@ bool TalkTreeParser::ParseMissions(MissionTree *tree, char *data)
 	tree->Nodes.clear();
 	tree->NumNodes = 0;
 	tree->Job_Category = 0;
+	tree->time_limit = 0;
 
 	TempBranch = MissionBranch.getChildNode("Mission");
 
@@ -175,6 +176,11 @@ bool TalkTreeParser::ParseMissions(MissionTree *tree, char *data)
 		tree->forfeitable = false;
 	}
 	
+	// <Mission time="N"> -- N seconds before a *non-forfeitable* timed mission
+	// spoils and its slot is freed (see Player::ExpireStaleTimedMissions). Untimed
+	// missions and forfeitable timed ones keep their existing runtime behaviour.
+	tree->time_limit = intVal(MissionBranch.getAttribute("time"));
+
 	tree->Job_Category = intVal(MissionBranch.getAttribute("jobcategory"));
 
 	if (tree->MissionID == 500)
@@ -245,7 +251,7 @@ bool TalkTreeParser::ParseMissions(MissionTree *tree, char *data)
 		for (int y=0;y<NumCompletionNodes;y++)
 		{
 			CompletionNode *cNode = new CompletionNode;
-			memset(cNode, 0, sizeof(cNode));
+			memset(cNode, 0, sizeof(*cNode)); // sizeof(*cNode), NOT sizeof(cNode) (== pointer size 8): the latter left char_data (last member) uninitialized, so a completion node with no Text attr carried a garbage char_data pointer -- deref'd unguarded in PlayerMissions PLAY_SOUND path.
 			this_node->completion_list.push_back(cNode);
 			TempBranch = TalkBranch.getChildNode("Completion",y);
 
@@ -329,7 +335,7 @@ bool TalkTreeParser::ParseMissions(MissionTree *tree, char *data)
 		for (int z=0;z<NumRewardNodes;z++)
 		{
 			RewardNode *rNode = new RewardNode;
-			memset(rNode, 0, sizeof(rNode));
+			memset(rNode, 0, sizeof(*rNode)); // sizeof(*rNode), NOT sizeof(rNode) (== pointer size 8): same latent-uninitialized-field bug as the CompletionNode memset above.
 			this_node->rewards.push_back(rNode);
 			TempBranch = TalkBranch.getChildNode("Reward",z);
 

@@ -478,6 +478,10 @@ func (s *apiServer) handleLoot(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		Index int `json:"index"`
+		// Avatar is the selected topbar character: the vault the looted item is
+		// routed to (PB-70). Empty falls back to the mail's addressee, then the
+		// account's primary character.
+		Avatar string `json:"avatar"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
@@ -486,7 +490,7 @@ func (s *apiServer) handleLoot(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
 
-	if err := s.store.LootAttachment(ctx, acctID, id, body.Index); err != nil {
+	if err := s.store.LootAttachment(ctx, acctID, id, body.Index, body.Avatar); err != nil {
 		mutationError(w, err)
 		return
 	}

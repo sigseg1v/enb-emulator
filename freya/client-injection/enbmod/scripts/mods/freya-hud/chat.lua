@@ -61,6 +61,7 @@ local CFG = {
 local VK_BACK = 0x08
 local VK_RETURN = 0x0D
 local VK_ESCAPE = 0x1B
+local VK_OEM_2 = 0xBF  -- the '/' key on a US layout
 
 -- ---- input state -----------------------------------------------------------
 local editing = false
@@ -262,6 +263,15 @@ enb.on_input(function(msg, wparam, lparam)
     if not editing then
         -- Enter opens the input box (and swallows, so native chat never opens).
         if (msg == M.KEYDOWN or msg == M.SYSKEYDOWN) and wparam == VK_RETURN then
+            start_edit()
+            return true
+        end
+        -- '/' must open OUR box, never the native chat window (PB-67). Swallow the
+        -- keydown here so the game wndproc never sees it; hk_GetMessageA then
+        -- synthesizes the WM_CHAR for '/' and re-feeds it, and since we are now
+        -- editing the CHAR branch below appends it -- so the box opens showing "/".
+        -- (Do NOT pre-seed buf with "/" or that synthesized char would double it.)
+        if (msg == M.KEYDOWN or msg == M.SYSKEYDOWN) and wparam == VK_OEM_2 then
             start_edit()
             return true
         end

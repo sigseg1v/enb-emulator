@@ -833,7 +833,20 @@ SectorManager *ServerManager::EnsureSectorStarted(long sector_id)
 	// 3) Bind the deterministic UDP port and start the event thread.
 	mgr = GetSectorManager(sector_id);
 	if (mgr)
+	{
 		mgr->BeginSectorThread();
+		// Stamp activity on cold-start exactly as the fast (772) and parked-restart
+		// (810) paths do. Without this the manager keeps its ctor default
+		// m_LastActivityTick == 0, so the very next IdleSectorPoll evaluates
+		// now > (0 + m_SectorIdleTeardownMs) -- true for any server uptime past the
+		// teardown window -- and PARKS the sector the caller just cold-started for
+		// an inbound gate. The gating player is still in the login handshake
+		// (login stage 12, not yet on m_PlayerList, so GetOccupancy() == 0), the
+		// park stops the listener, its stage acks can no longer be delivered, and
+		// the player times out mid-login. Stamping here gives the fresh sector the
+		// full idle-teardown grace window to complete the login. (AI-12)
+		mgr->StampActivity(GetNet7TickCount());
+	}
 
 	return mgr;
 }

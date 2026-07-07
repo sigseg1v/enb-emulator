@@ -132,14 +132,17 @@ func (s *Store) DeleteMessage(ctx context.Context, accountID int64, messageID in
 // credits add to the character's wallet; items drop into a free vault slot.
 // lootAvatar is the account's primary live character when the message is not
 // addressed to a specific (still-live) character.
-func (s *Store) LootAttachment(ctx context.Context, accountID int64, messageID int64, index int) error {
+// actingAvatar is the caller's selected topbar character (its display name), or
+// "" if none was supplied. When set and owned by the account, the looted item is
+// routed to THAT character's vault -- see lootAttachmentTx.
+func (s *Store) LootAttachment(ctx context.Context, accountID int64, messageID int64, index int, actingAvatar string) error {
 	return s.serialTx(ctx, func(tx pgx.Tx) error {
-		return s.lootAttachmentTx(ctx, tx, accountID, messageID, index)
+		return s.lootAttachmentTx(ctx, tx, accountID, messageID, index, actingAvatar)
 	})
 }
 
 // lootAttachmentTx is the body of LootAttachment, run inside a serializable tx.
-func (s *Store) lootAttachmentTx(ctx context.Context, tx pgx.Tx, accountID int64, messageID int64, index int) error {
+func (s *Store) lootAttachmentTx(ctx context.Context, tx pgx.Tx, accountID int64, messageID int64, index int, actingAvatar string) error {
 	// Confirm ownership and find the loot-target character.
 	var recipientAvatar *int64
 	err := tx.QueryRow(ctx,
@@ -193,10 +196,37 @@ func (s *Store) lootAttachmentTx(ctx context.Context, tx pgx.Tx, accountID int64
 		return errAlreadyLooted
 	}
 
-	// Resolve the loot-target avatar: addressed recipient if still live, else
-	// the account's primary character.
+	// Resolve the loot-target avatar, in preference order:
+	//   1. the acting character the caller selected in the topbar, if owned;
+	//   2. the mail's addressed recipient, if still live;
+	//   3. the account's primary (lowest-slot) character.
+	//
+	// (1) is the PB-70 fix. Account-level mail (bid wins, seller returns, faucet
+	// sales -- delivered with recipient 0, see store_ah_write.go) previously
+	// always fell straight to (3), so the loot landed in the lowest-slot
+	// character's vault regardless of which character the player was on. A full
+	// slot-0 vault then failed the loot with "vault is full" even when the
+	// character the player was actually looking at had dozens of free slots.
+	// Routing to the acting character puts the item in the vault the player is
+	// viewing. It can only ever target a character on the SAME account (the mail
+	// row is account-scoped above and ownedAvatarByName requires ownership), so
+	// it cannot redirect loot off-account. When the acting character is chosen we
+	// do NOT fall back to another character's vault if it is full/online: the
+	// player picked this destination, so a clear "vault is full" / offline error
+	// is correct -- silently dumping into a different vault is the very confusion
+	// this fixes. The Mailbox view only shows a character account-level mail plus
+	// mail addressed to that same character, so for addressed mail the acting
+	// character already equals the addressee and (1) is a no-op.
 	var lootAvatar int64
-	if recipientAvatar != nil {
+	if actingAvatar != "" {
+		id, aerr := ownedAvatarByName(ctx, tx, accountID, actingAvatar)
+		if aerr == nil {
+			lootAvatar = id
+		} else if !errors.Is(aerr, errCharacterNotFound) {
+			return aerr
+		}
+	}
+	if lootAvatar == 0 && recipientAvatar != nil {
 		var live bool
 		err = tx.QueryRow(ctx,
 			`SELECT deleted_at IS NULL FROM avatar_info WHERE avatar_id = $1`, *recipientAvatar).Scan(&live)

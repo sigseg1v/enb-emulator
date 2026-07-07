@@ -319,6 +319,36 @@ jobs:
         if: always()
         run: docker rm -f net7proxy-ci || true
 
+  # The freya/online (Go) backend has its own DB-gated integration suite
+  # (freya/online/server/*_integration_test.go) that drives the auction house,
+  # mailbox, and vault against the real seeded two-DB Postgres. It was NOT wired
+  # into CI, so a server-side contract change (PB-31 requiring the acting avatar
+  # on buyout) silently broke TestIT_API_PostThenBuyout and the PB-70 loot fix
+  # had no CI guard. This job runs it via the same `just test-online-it` recipe
+  # used locally: bring up postgres + schema-init (full content + user seeds),
+  # then run the Go suite with FREYA_TEST_DB set so the gated tests execute.
+  online-integration-test:
+    name: online-integration-test (freya/online Go suite)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          # Track the module's go directive (currently 1.25.0) so the toolchain
+          # gate is satisfied without a hardcoded version drifting from go.mod.
+          go-version-file: freya/online/server/go.mod
+      - name: Install just
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends just
+      - name: Bring up seeded postgres + run the Go integration suite
+        run: just test-online-it
+      - name: Compose logs (always)
+        if: always()
+        run: docker compose logs postgres schema-init || true
+
   # The integration suite cannot parallelise in-process: it shares one
   # ServerCollection / one docker-compose stack, and the proxy is
   # single-client. So we shard it across PARALLEL jobs instead -- each

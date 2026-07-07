@@ -169,7 +169,9 @@ bool Player::AnalyseDismantleSetItem(_Item *Source)
 		bool fail = false;
 		for(int item=0;item<6;item++)
 		{
-			if (ManuIndex()->Components.Item[item].GetItemTemplateID() != -1)
+			// > 0 (not != -1): an empty component slot resolves to 0, and
+			// granting template 0 would hand the player a phantom item.
+			if (ManuIndex()->Components.Item[item].GetItemTemplateID() > 0)
 			{
 				if (CargoAddItem(ManuIndex()->Components.Item[item].GetItemTemplateID(), 1) == 0)
 					ManuIndex()->Components.Item[item].SetItemTemplateID(-1);
@@ -572,7 +574,10 @@ void Player::HandleManufactureAction(unsigned char *data)
 							// Send the items to your inventory
 							for(int item=0;item<6;item++)
 							{
-								if (ManuIndex()->Components.Item[item].GetItemTemplateID() != -1)
+								// > 0 (not != -1): an empty component slot resolves
+								// to 0, and granting template 0 would hand the player
+								// a phantom item on a no-recipe crit/dismantle.
+								if (ManuIndex()->Components.Item[item].GetItemTemplateID() > 0)
 								{
 									CargoAddItem(ManuIndex()->Components.Item[item].GetItemTemplateID(), 1);
 									ManuIndex()->Components.Item[item].SetItemTemplateID(-1);
@@ -1256,6 +1261,24 @@ void Player::RemoveComponentsFromInventory(long Multiplier)
 bool Player::HasComponents(long Multiplier)
 {
     int i, j, ItemCount;
+
+    // Defense in depth for the money-printing exploit guarded at setup in
+    // AllowManufacture: a manufacture/refine with an empty bill of materials
+    // (no component slot > 0) consumes nothing, so it must never reach the
+    // credit-charge path. Refuse it here even if a crafted packet skipped
+    // setup -- with no components you do not "have" them.
+    bool haveReal = false;
+    for (i=0;i<6;i++)
+    {
+        if (ManuIndex()->Components.Item[i].GetItemTemplateID() > 0)
+        {
+            haveReal = true;
+            break;
+        }
+    }
+    if (!haveReal)
+        return false;
+
     for (i=0;i<6;i++)
     {
         if (ManuIndex()->Components.Item[i].GetItemTemplateID() > 0)
@@ -1298,6 +1321,30 @@ bool Player::AllowManufacture(ItemBase * iBase)
 	{
 		ManuIndex()->SetValidity(VALIDITY_NOT_MANUFACTURABLE);
 		ManuIndex()->SetFailureMessage("This item is non-manufacturable");
+		return false;
+	}
+
+	// An item with no bill of materials has no real recipe: an item with no
+	// item_manufacture row loads all six component template ids as 0 (memset
+	// default in ItemBaseSQL), and a row's unused slots are -1. If none of the
+	// six is a real component (> 0), refuse it here. This gate fronts BOTH the
+	// manufacture setup (HandleManufactureSetItem) and the analyze/dismantle
+	// setup (AnalyseDismantleSetItem), so it blocks both: otherwise such an
+	// item could be "built" consuming zero materials for credits alone (a
+	// money-printing exploit) and analyzed to learn an unusable empty pattern.
+	bool haveRecipe = false;
+	for (int c = 0; c < 6; c++)
+	{
+		if (iBase->Component(c) > 0)
+		{
+			haveRecipe = true;
+			break;
+		}
+	}
+	if (!haveRecipe)
+	{
+		ManuIndex()->SetValidity(VALIDITY_NOT_MANUFACTURABLE);
+		ManuIndex()->SetFailureMessage("This item has no manufacturing recipe");
 		return false;
 	}
 

@@ -267,6 +267,26 @@ func deliverCreditsForTest(t *testing.T, st *Store, ctx context.Context, account
 	}
 }
 
+// deliverItemForTest posts a single-item attachment to an account's mailbox via
+// the same deliverItem helper the AH settlement uses. recipientAvatar 0 =
+// account-level (as a settled auction win is delivered, store_ah_write.go), in
+// its own committed transaction.
+func deliverItemForTest(t *testing.T, st *Store, ctx context.Context, accountID, recipientAvatar int64, itemID int) {
+	t.Helper()
+	tx, err := st.user.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer tx.Rollback(ctx)
+	if err := deliverItem(ctx, tx, accountID, recipientAvatar, "Auction House", "Test win", "test",
+		itemID, 1, nil, nil, nil, nil); err != nil {
+		t.Fatalf("deliverItem: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+}
+
 func mustExec(t *testing.T, pool *pgxpool.Pool, ctx context.Context, sql string, args ...any) {
 	t.Helper()
 	if _, err := pool.Exec(ctx, sql, args...); err != nil {

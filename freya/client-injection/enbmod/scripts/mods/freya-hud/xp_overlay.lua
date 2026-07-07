@@ -26,15 +26,24 @@ local H = require("freya_hud")
 local CFG = {
     X         = 22,    -- left edge (in 8px from the edge; matches the chat box). Up
                        -- follows H.chat_top(), which the raised chat BOTTOM moves.
-    W         = 196,   -- card width (design)
+    W         = 210,   -- card width (widened for the larger letter + badge fonts)
     BOTTOM    = 14,    -- gap from screen bottom (design bottom:14)
     PAD_X     = 8,
     PAD_Y     = 6,
-    ROW_H     = 18,
+    ROW_H     = 20,    -- row height (raised to fit the enlarged discipline letter)
     ROW_GAP   = 4,
-    LETTER_W  = 14,    -- colored C/E/T column
-    BADGE_W   = 40,    -- "LV n" column on the right
-    BADGE_SCALE = 0.8, -- "LV n" badge text 20% smaller than body text
+    LETTER_W  = 16,    -- colored C/E/T column (widened for the larger letter)
+    BADGE_W   = 46,    -- "LV n" column on the right (widened for the larger badge)
+    -- the base overlay font (14px) reads too small on the discipline card; the
+    -- owner wants the letters + LV badges larger. These are real FONT SIZES in
+    -- pixels -- the overlay bakes a real atlas per size and blits 1:1 (crisp, no
+    -- scaling/magnification). LETTER is the C/E/T glyph, BADGE the "LV n" text (a
+    -- touch smaller). Both grow on a bigger-than-1280x960 screen via H.smul (0
+    -- growth at the reference res), matching target_frame's name / distance text.
+    LETTER_PX = 18,
+    BADGE_PX  = 13,  -- "LV n" badge font size
+    TEXT_SMUL = 1.4, -- big-screen growth factor (1.0 at ref res)
+    TEXT_DY   = 3,   -- raise both the C/E/T letter AND the "LV n" badge this many px
     BAR_H     = 8,     -- xp bar height (design disc__bar)
 }
 
@@ -77,10 +86,14 @@ enb.on_tick(function()
         -- shown as a percent. Falls back to a flat-struct pct if ever calibrated.
         local frac = enb.xp_frac and enb.xp_frac(row.key)
         local pct = frac and frac * 100 or me[row.key .. "_pct"]
-        local text_y = ry + math.floor((CFG.ROW_H - 14) / 2)
+        local letter_px = math.floor(CFG.LETTER_PX * H.smul(CFG.TEXT_SMUL) + 0.5)
+        local badge_px  = math.floor(CFG.BADGE_PX * H.smul(CFG.TEXT_SMUL) + 0.5)
+        -- vertically center each glyph on the row at its own rendered height,
+        -- then raise the whole row's text a few px to the owner's taste.
+        local text_y = ry + math.floor((CFG.ROW_H - letter_px) / 2) - CFG.TEXT_DY
 
         -- colored discipline letter
-        H.otext(x + CFG.PAD_X, text_y, row.letter, cal and row.rgb or H.UNCAL)
+        H.otext_px(x + CFG.PAD_X, text_y, row.letter, cal and row.rgb or H.UNCAL, letter_px)
 
         -- xp bar, vertically centered in the row
         local by = ry + math.floor((CFG.ROW_H - CFG.BAR_H) / 2)
@@ -94,11 +107,11 @@ enb.on_tick(function()
         end
         enb.draw.rrect(bar_x, by, bar_w, CFG.BAR_H, H.RADIUS, H.LINE, 70, false)
 
-        -- "LV n" badge, right-aligned, 20% smaller than body text
+        -- "LV n" badge, right-aligned, a touch smaller than the discipline letter
         local badge = "LV " .. (cal and lvl and tostring(lvl) or "--")
-        local bw = H.measure(badge) * CFG.BADGE_SCALE
-        H.otext(x + CFG.W - CFG.PAD_X - bw - 8, text_y + 3, badge,
-                cal and H.INK_DIM or H.UNCAL, CFG.BADGE_SCALE)
+        local bw = H.measure_px(badge, badge_px)
+        H.otext_px(x + CFG.W - CFG.PAD_X - bw - 8, text_y + 3, badge,
+                   cal and H.INK_DIM or H.UNCAL, badge_px)
 
         ry = ry + CFG.ROW_H + CFG.ROW_GAP
     end
