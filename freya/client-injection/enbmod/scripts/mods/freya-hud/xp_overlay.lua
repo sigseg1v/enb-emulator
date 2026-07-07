@@ -43,6 +43,7 @@ local CFG = {
     LETTER_PX = 18,
     BADGE_PX  = 13,  -- "LV n" badge font size
     TEXT_SMUL = 1.4, -- big-screen growth factor (1.0 at ref res)
+    TEXT_DY   = 3,   -- raise both the C/E/T letter AND the "LV n" badge this many px
     BAR_H     = 8,     -- xp bar height (design disc__bar)
 }
 
@@ -87,8 +88,9 @@ enb.on_tick(function()
         local pct = frac and frac * 100 or me[row.key .. "_pct"]
         local letter_px = math.floor(CFG.LETTER_PX * H.smul(CFG.TEXT_SMUL) + 0.5)
         local badge_px  = math.floor(CFG.BADGE_PX * H.smul(CFG.TEXT_SMUL) + 0.5)
-        -- vertically center each glyph on the row at its own rendered height.
-        local text_y = ry + math.floor((CFG.ROW_H - letter_px) / 2)
+        -- vertically center each glyph on the row at its own rendered height,
+        -- then raise the whole row's text a few px to the owner's taste.
+        local text_y = ry + math.floor((CFG.ROW_H - letter_px) / 2) - CFG.TEXT_DY
 
         -- colored discipline letter
         H.otext_px(x + CFG.PAD_X, text_y, row.letter, cal and row.rgb or H.UNCAL, letter_px)
