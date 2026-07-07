@@ -883,13 +883,22 @@ namespace LaunchFreya
                 || Environment.GetEnvironmentVariable("ENB_EULA") == "ACCEPT"
                 || Environment.GetEnvironmentVariable("FREYA_EULA") == "ACCEPT";
 
-            // The single-instance mutex bypass (FreyaMultiboxHook, armed by the
-            // FREYA_MULTIBOX env) lives in FreyaPosFeed.dll, so a multi-box slot
-            // (instance 2+, _slot.Multibox) needs that DLL injected to get past the
-            // "Earth & Beyond is already running" guard -- even if the user has the
-            // position-feed toggle OFF. Without this, double-launching the launcher
-            // on Windows with the feed off would stall the second client on the
-            // mutex. Same decoupling as auto-login above.
+            // A multi-box slot (instance 2+, _slot.Multibox) needs BOTH injected
+            // DLLs, regardless of the position-feed / Lua-mods toggles:
+            //   - FreyaPosFeed.dll carries the single-instance mutex bypass
+            //     (FreyaMultiboxHook, armed by FREYA_MULTIBOX) -- the WINE path to
+            //     get past the "Earth & Beyond is already running" guard. (On native
+            //     Windows the launcher-side SingleInstanceMutexReaper also handles
+            //     the guard, but injecting this DLL is harmless and keeps WINE working.)
+            //   - enbmod.dll carries the connect()-hook PORT REMAP (netredirect,
+            //     armed by FREYA_GAME_PORT_BASE) that redirects the client's fixed
+            //     3500/3801/3805 dials onto this instance's proxy block
+            //     (base+0/+1/+2). WITHOUT it the second client dials the STOCK ports
+            //     and lands on the FIRST instance's single-client proxy: account
+            //     auth (shared 127.0.0.1:4180 relay, un-remapped) still succeeds, but
+            //     the follow-on master-server connect collides and the second client
+            //     hangs greyed-out on the name/password screen. So multibox must
+            //     force enbmod injection too -- see the enbmod gate below.
             bool multibox = _slot != null && _slot.Multibox;
 
             // Unchecking "Lock Mouse To Window" needs enbmod's ClipCursor hook
@@ -925,7 +934,7 @@ namespace LaunchFreya
             // mods toggle off -- the native publisher runs regardless of whether
             // any Lua mod is active. Without this the feed would have no resolver
             // and send nothing.
-            if (_setting.EnableClientMods || autoLogin || _setting.EnablePositionFeed || mouseUnlock)
+            if (_setting.EnableClientMods || autoLogin || _setting.EnablePositionFeed || mouseUnlock || multibox)
             {
                 var dos = StageClientMods();
                 if (dos != null) _injectDlls.Add(dos);
