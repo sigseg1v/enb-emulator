@@ -530,4 +530,11 @@ complete -- do not move on, do not report success, do not wait to be told.
 - Modernization roadmap: `docs/10-modernization-roadmap.md`
 - CLI client (Phase S): `docs/15-cli-client.md`
 - Integration tests (Phase T): `docs/16-integration-tests.md`
+- GM / admin slash commands (source-verified): `docs/11-gm-commands.md` -- the
+  full command catalog. Use it as a TESTING tool: these let you set up game
+  state fast against the dev stack. The one you will reach for most is
+  **`/wormhole <sectorID|sectorName>`** to jump a test character between sectors
+  without flying (e.g. `/wormhole Aganju`); also `/createitem`, `/createcredits`,
+  `/level`, `/createmob`, `/goto`. Requires an account access level `>= 50` (GM)
+  for the gated commands. `/move` is a dead no-op -- use `/wormhole` or `/goto`.
 - Open work: `plans/00-master.md`
