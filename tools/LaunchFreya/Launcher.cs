@@ -1306,7 +1306,11 @@ namespace LaunchFreya
         }
 
         // Find the built enbmod runtime across dev (play-local, CWD=repo root) and
-        // packaged (next to the launcher exe / its bin/) layouts.
+        // packaged (next to the launcher exe / its bin/) layouts. NEWEST candidate
+        // wins, not first-found: in dev the launcher's own output dir can hold a
+        // stale copy that would otherwise shadow a freshly built repo bin/enbmod.dll
+        // (a `just build-enbmod` then silently launched the old runtime). Packaged
+        // installs have a single candidate, so newest-wins changes nothing there.
         static string LocateEnbmodDll()
         {
             var candidates = new[]
@@ -1315,9 +1319,15 @@ namespace LaunchFreya
                 Path.Combine(AppContext.BaseDirectory, "enbmod.dll"),
                 Path.Combine(Directory.GetCurrentDirectory(), "bin", "enbmod.dll"),
             };
+            string best = null;
+            var bestTime = DateTime.MinValue;
             foreach (var c in candidates)
-                if (File.Exists(c)) return c;
-            return null;
+            {
+                if (!File.Exists(c)) continue;
+                var t = File.GetLastWriteTimeUtc(c);
+                if (t > bestTime) { best = c; bestTime = t; }
+            }
+            return best;
         }
 
         // Find the enbmod scripts/ folder (staged beside enbmod.dll by `just
