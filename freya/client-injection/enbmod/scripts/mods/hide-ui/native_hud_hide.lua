@@ -242,6 +242,108 @@ local function chat_text_leaves()
     return leaves
 end
 
+-- Set or clear a leaf's enable bit, no-op if already in the wanted state. Clearing
+-- ENABLE_BIT (0x200) hides AND removes the panel from hover/hit-testing, and the
+-- game never re-asserts it (so the hide survives rollover -- see header).
+local function set_draw(leaf, on)
+    if not (leaf and mem.readable(leaf + LEAF_FLAGS)) then return end
+    local fl = mem.u32(leaf + LEAF_FLAGS)
+    if on then
+        if (fl & ENABLE_BIT) == 0 then mem.write_u32(leaf + LEAF_FLAGS, fl | ENABLE_BIT) end
+    else
+        if (fl & ENABLE_BIT) ~= 0 then mem.write_u32(leaf + LEAF_FLAGS, fl & ~ENABLE_BIT) end
+    end
+end
+
+------------------------------------------------------------------------------
+-- Docked station chat cleanup.
+--
+-- When docked there is no cockpit controller, so hud_scene() above resolves to 0
+-- and the whole in-space path no-ops. The docked station has its OWN 2D widget
+-- scene (same HUD_SCENE_VT class) holding a native chat window drawn along the TOP
+-- of the screen -- a redundant duplicate of the Freya bottom-left chat (chat.lua),
+-- which already shows the same messages docked. We walk that scene and hide only
+-- the native chat: the chat TEXT leaves (CHAT_TEXT_VT) and the chat/combat-log
+-- scroll bar + arrow buttons (CHROME_VT leaves named "SLIDER_*"). The scroll widgets
+-- carry a stable UI-name C-string (leaf addresses are not stable across re-docks, the
+-- names are), so we key off the name, not position.
+--
+-- Everything else in this scene is left ALONE: the station-interface panels
+-- (CHROME_VT named "TSInnX") stay so the station UI keeps working, and the two
+-- 0x00afecb4 leaves are untouched. Verified live (docked at Earth Station): the top
+-- menu bar (Inventory/Character/Map/Options/Chat/Help) and the bottom-left chat +
+-- message box render in DIFFERENT scenes, so hiding every leaf here never affected
+-- them; hiding the TSInnX panels changed nothing on screen (they are invisible while
+-- idle) while hiding CHAT_TEXT + SLIDER_* removed exactly the top chat frame + its
+-- scroll chevrons the owner asked to kill.
+local WORLD_STATION_CTRL = 0x135c -- world mgr -> station controller (docked only)
+local STATION_SCENE_ROOT = 0x34   -- station controller -> scene root
+local STATION_SCENE_OFF  = 0x44   -- scene root -> 2D widget scene (HUD_SCENE_VT)
+local NAME_PTR           = 0x8c   -- CHROME_VT leaf -> char* UI name
+
+-- Resolve the docked station's 2D widget scene, validated by vtable. Returns 0 when
+-- not docked, the chain fails a readable/range check, or the class does not match --
+-- so a stale/foreign pointer can never make us write a wrong object.
+local function station_scene()
+    if enb.state() ~= "station" then return 0 end
+    local M = enb.worldmgr and enb.worldmgr() or 0
+    if not (M > 0x10000 and mem.readable(M + WORLD_STATION_CTRL)) then return 0 end
+    local ctrl = mem.u32(M + WORLD_STATION_CTRL)
+    if not (ctrl > 0x10000 and mem.readable(ctrl + STATION_SCENE_ROOT)) then return 0 end
+    local root = mem.u32(ctrl + STATION_SCENE_ROOT)
+    if not (root > 0x10000 and mem.readable(root + STATION_SCENE_OFF)) then return 0 end
+    local sc = mem.u32(root + STATION_SCENE_OFF)
+    if sc > 0x10000 and mem.readable(sc) and mem.u32(sc) == HUD_SCENE_VT then
+        return sc
+    end
+    return 0
+end
+
+-- Read a CHROME_VT leaf's UI name (char* at NAME_PTR); "" if unreadable.
+local function leaf_name(leaf)
+    if not mem.readable(leaf + NAME_PTR) then return "" end
+    local p = mem.u32(leaf + NAME_PTR)
+    if p > 0x10000 and mem.readable(p) then return mem.str(p) or "" end
+    return ""
+end
+
+-- Collect the docked-chat leaves to hide from a station scene: every CHAT_TEXT_VT
+-- leaf, plus every CHROME_VT leaf whose UI name starts with "SLIDER".
+local function station_chat_leaves(scene)
+    local sentinel = scene + LIST_END
+    local node = mem.u32(scene + LIST_BEGIN)
+    local leaves = {}
+    for _ = 1, MAX_NODES do
+        if node == sentinel or node == 0 or not mem.readable(node) then break end
+        local cp = mem.u32(node + NODE_CHILD)
+        if cp ~= 0 and mem.readable(cp) then
+            local leaf = cp - CHILD_ADJ
+            if mem.readable(leaf) then
+                local vt = mem.u32(leaf)
+                if vt == CHAT_TEXT_VT then
+                    leaves[#leaves + 1] = leaf
+                elseif vt == CHROME_VT and leaf_name(leaf):sub(1, 6) == "SLIDER" then
+                    leaves[#leaves + 1] = leaf
+                end
+            end
+        end
+        node = mem.u32(node + NODE_NEXT)
+    end
+    return leaves
+end
+
+-- Hide the redundant docked native chat every tick (re-clear ENABLE_BIT so it never
+-- draws or hit-tests), or re-show it when the master Freya-UI toggle is off. No-op in
+-- space (station_scene() == 0).
+local function apply_station()
+    local scene = station_scene()
+    if scene == 0 then return end
+    local show = (enb.freya_ui_on == false) -- master toggle off -> restore native chat
+    for _, leaf in ipairs(station_chat_leaves(scene)) do
+        set_draw(leaf, show)
+    end
+end
+
 -- Map name -> leaf for THIS frame by tail anchoring: the persistent panels are the
 -- last #ELEMENTS chrome leaves of the list (transients always insert ahead of them).
 -- Returns map, the live ordered leaf list, and the transient front-block size, or nil
@@ -259,20 +361,8 @@ local function map_panels()
     return map, leaves, base
 end
 
--- Set or clear a leaf's enable bit, no-op if already in the wanted state. Clearing
--- ENABLE_BIT (0x200) hides AND removes the panel from hover/hit-testing, and the
--- game never re-asserts it (so the hide survives rollover -- see header).
-local function set_draw(leaf, on)
-    if not (leaf and mem.readable(leaf + LEAF_FLAGS)) then return end
-    local fl = mem.u32(leaf + LEAF_FLAGS)
-    if on then
-        if (fl & ENABLE_BIT) == 0 then mem.write_u32(leaf + LEAF_FLAGS, fl | ENABLE_BIT) end
-    else
-        if (fl & ENABLE_BIT) ~= 0 then mem.write_u32(leaf + LEAF_FLAGS, fl & ~ENABLE_BIT) end
-    end
-end
-
 local function apply()
+    apply_station() -- docked station chat cleanup (no-op in space)
     local map = map_panels()
     if not map then return end
     -- Master Freya-UI toggle (Ctrl+U, owned by freya-hud): when the owner turns
