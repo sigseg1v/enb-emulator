@@ -1891,6 +1891,10 @@ struct BotRow {
     std::string cls, nm;
     double x, y, z, dist;
     bool haspos, hasdist;
+    // Filled by l_navs from the hooks nav registry (0x0099 mirror); nav_reg is
+    // false for plain enb.objects() rows and for token-fallback nav rows.
+    bool nav_reg = false;
+    hooks::NavInfo nav{};
 };
 
 // Walk M's GameID entity hash (the same 0x101-bucket chained table entity_by_gid
@@ -2018,6 +2022,16 @@ static void bot_push_rows(lua_State* L, const std::vector<BotRow>& rows) {
             lua_pushnumber(L, r.dist);
             lua_setfield(L, -2, "dist");
         }
+        if (r.nav_reg) {
+            lua_pushboolean(L, r.nav.visited);
+            lua_setfield(L, -2, "visited");
+            lua_pushinteger(L, r.nav.navtype);
+            lua_setfield(L, -2, "navtype");
+            lua_pushnumber(L, r.nav.sig);
+            lua_setfield(L, -2, "sig");
+            lua_pushboolean(L, r.nav.huge);
+            lua_setfield(L, -2, "huge");
+        }
         lua_rawseti(L, -2, ++idx);
     }
 }
@@ -2035,24 +2049,36 @@ static int l_objects(lua_State* L) {
     return 1;
 }
 
-// enb.navs() -> array of navigation objects + stargates in scene, nearest-first,
-// each {gid, base, class, name, x, y, z, dist}. A distance-sorted view of
-// enb.objects() filtered to nav-ish class names. Feed a row's gid to
-// enb.request_target(gid) to select it, then enb.warp()/enb.gate().
+// enb.navs() -> array of the sector's revealed navs, nearest-first, each
+// {gid, base, class, name, x, y, z, dist, visited, navtype, sig, huge}. Feed a
+// row's gid to enb.request_target(gid) to select it, then enb.warp()/enb.gate().
 //
-// COVERAGE CAVEAT: this returns navs that are present in the client's live entity
-// hash (in scan range / already revealed). The game's full nav catalogue for a
-// sector may live in a separate nav list, and the exact class strings navs carry
-// are not yet live-confirmed -- run enb.objects() in a real sector to verify the
-// class tokens below cover them. Do not assume enb.navs() is the complete nav set
-// for a sector until that live check is done.
-static const char* const kNavClassTokens[] = {"nav", "gate", "wormhole"};
+// The discriminator is the hooks NAV REGISTRY (the 0x0099 NAVIGATION packet
+// mirror -- see hooks.h::nav_lookup), joined against the live entity snapshot:
+// a row is a nav iff the client was TOLD it is one. Class-string matching is
+// NOT viable: real navs are class "Decoration" (a token filter here silently
+// dropped every one of them), and including "Decoration" wholesale would drag
+// in non-nav field-centre/pure decos. Only registered gids qualify -- exactly
+// the set the native nav HUD lists. Fallback: a registry MISS on a
+// gate/wormhole-class row still includes it (without visited/navtype), so a
+// late-injected session (hooks installed after the sector's 0x0099s were
+// consumed) can at least still gate onward.
+//
+// COVERAGE CAVEAT: rows are navs revealed to the client AND currently in the
+// entity hash. Hidden navs the ship has not flown near enough to reveal are
+// absent until the server sends them -- completion still needs flying.
+static const char* const kNavClassFallbackTokens[] = {"gate", "wormhole"};
 static int l_navs(lua_State* L) {
     std::vector<BotRow> all;
     bot_gather(all, nullptr);
     std::vector<BotRow> rows;
-    for (const BotRow& r : all) {
-        for (const char* tok : kNavClassTokens) {
+    for (BotRow& r : all) {
+        if (hooks::nav_lookup(r.gid, &r.nav)) {
+            r.nav_reg = true;
+            rows.push_back(r);
+            continue;
+        }
+        for (const char* tok : kNavClassFallbackTokens) {
             if (ci_contains(r.cls, tok)) {
                 rows.push_back(r);
                 break;
@@ -2065,6 +2091,15 @@ static int l_navs(lua_State* L) {
         return a.dist < b.dist;
     });
     bot_push_rows(L, rows);
+    return 1;
+}
+
+// enb.nav_count() -> number of gids in the hooks nav registry (the 0x0099
+// mirror). Diagnostic: enb.navs() row count vs this separates "nav not sent by
+// the server" (absent here) from "nav sent but entity not in the scene hash"
+// (present here, missing from enb.navs()).
+static int l_nav_count(lua_State* L) {
+    lua_pushinteger(L, hooks::nav_registry_count());
     return 1;
 }
 
@@ -3158,6 +3193,7 @@ void open(lua_State* L) {
                                    {"dist", l_dist},
                                    {"objects", l_objects},
                                    {"navs", l_navs},
+                                   {"nav_count", l_nav_count},
                                    {"loot", l_loot},
                                    {"loot_age", l_loot_age},
                                    {"loot_take", l_loot_take},
