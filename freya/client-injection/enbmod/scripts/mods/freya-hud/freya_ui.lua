@@ -531,7 +531,13 @@ enb.on_tick(function()
     if enb.cursor then enb.cursor(show) end
     if not show then return end
     local L = layout()
-    draw_player_card(L)
+    -- The player card's three bars are ship hull/shield/energy; as a docked
+    -- avatar there is no ship, so every bar reads 0% and the card is meaningless
+    -- (owner: "wont display properly"). Hide just this card in station -- the
+    -- discipline card and chat are separate mods and stay.
+    if H.state() ~= "station" then
+        draw_player_card(L)
+    end
     if show_hotbar and not RECORD_MODE then
         hide_native_glyphs()   -- kill the native slot icons before painting ours
         draw_hotbar(L)
