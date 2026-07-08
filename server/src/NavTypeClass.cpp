@@ -152,28 +152,42 @@ void StaticMap::OutOfRangeTrigger(Player *p, float range)
 
 }
 
+//exploration index methods
+//
+// One bit per m_DatabaseUID packed into an array of `long`. The word stride
+// and the in-word bit position MUST use the same bits-per-word (see the
+// matching comment on Object::SetIndex in ObjectClass.cpp): the original
+// Win32 code hardcoded `%32`, which agreed with the sizeof(long)*8 stride
+// only because sizeof(long)==4 there. On LP64 Linux the stride divides by
+// 64 while `%32` shifts within a 32-bit sub-range, so uids that differ by
+// 32 alias to the same bit (false "already exposed/explored"). Derive the
+// bit width from the word type so the two always agree. Persistence is
+// per-object rows in avatar_exploration (LoadExploredNavs rebuilds these
+// bitmaps at login), so no saved data depends on the old layout.
+static const unsigned int EIDX_BITS_PER_WORD = sizeof(long) * 8;
+
 void StaticMap::SetEIndex(long *index_array)
 {
-	long *entry = (long*) (index_array + (m_DatabaseUID/(sizeof(long)*8)));
+	long *entry = index_array + (m_DatabaseUID / EIDX_BITS_PER_WORD);
 
 	//now set the specific bit
-	*entry |= (1 << m_DatabaseUID%32);
+	*entry |= (1L << (m_DatabaseUID % EIDX_BITS_PER_WORD));
 }
 
 void StaticMap::UnSetEIndex(long *index_array)
 {
-	long *entry = (long*) (index_array + (m_DatabaseUID/(sizeof(long)*8)));
+	long *entry = index_array + (m_DatabaseUID / EIDX_BITS_PER_WORD);
 
 	//now unset the specific bit
-	*entry &= (0xFFFFFFFF ^ (1 << m_DatabaseUID%32));
+	*entry &= ~(1L << (m_DatabaseUID % EIDX_BITS_PER_WORD));
 }
 
 bool StaticMap::GetEIndex(long *index_array)
 {
-	long *entry = (long*) (index_array + (m_DatabaseUID/(sizeof(long)*8)));
+	long *entry = index_array + (m_DatabaseUID / EIDX_BITS_PER_WORD);
 
 	//now get the specific bit
-	if (*entry & (1 << m_DatabaseUID%32))
+	if (*entry & (1L << (m_DatabaseUID % EIDX_BITS_PER_WORD)))
 	{
 		return true;
 	}
