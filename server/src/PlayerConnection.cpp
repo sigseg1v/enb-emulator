@@ -7677,6 +7677,13 @@ void Player::HandleSlashCommands(char *Msg)
 							SendVaMessage("Server radius: %.1f", s->Radius());
 							SendVaMessage("Scale: %.3f", s->Scale());
 							SendVaMessage("Nav Type: %d", s->NavType());
+							SendVaMessage("ObjType: %d Active: %d Radar: %d ObjIdx: %d",
+								s->ObjectType(), s->Active() ? 1 : 0,
+								s->AppearsInRadar() ? 1 : 0, (int)s->ObjectIndex());
+							SendVaMessage("Exposed: %d Explored: %d InRange: %d",
+								s->GetEIndex(ExposedNavList()) ? 1 : 0,
+								s->GetEIndex(ExploredNavList()) ? 1 : 0,
+								s->GetIndex(ObjectRangeList()) ? 1 : 0);
 							if (obj->GetFactionID() > 0)
 							{
 								char *name = g_ServerMgr->m_FactionData.GetFactionName(obj->GetFactionID());
