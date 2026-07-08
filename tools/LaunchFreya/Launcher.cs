@@ -362,6 +362,17 @@ namespace LaunchFreya
                 info = WinExe(dir, _setting.ClientPath, clientArgs);
             }
 
+            // Multibox: free the single-instance guard BEFORE launching. The
+            // client's "already running" check is a named mutex held by the client
+            // that started first; the injected IAT-hook bypass does not fire
+            // reliably on native Windows, so close that mutex from out here -- reach
+            // into every already-running client and drop its handle, destroying the
+            // object -- so the client we are about to start gets past the guard.
+            // No-op off Windows (WINE uses the injected bypass) and untouched for a
+            // genuine first-instance launch, which keeps its normal guard.
+            if (_slot != null && _slot.Multibox)
+                SingleInstanceMutexReaper.ReapOtherClients(_setting.ClientPath, _warn);
+
             // Snapshot the client windows already open BEFORE we launch, so the
             // optional placer can tell ours apart from any other client (multibox).
             bool place = _setting.WindowX.HasValue && _setting.WindowY.HasValue;
@@ -872,13 +883,22 @@ namespace LaunchFreya
                 || Environment.GetEnvironmentVariable("ENB_EULA") == "ACCEPT"
                 || Environment.GetEnvironmentVariable("FREYA_EULA") == "ACCEPT";
 
-            // The single-instance mutex bypass (FreyaMultiboxHook, armed by the
-            // FREYA_MULTIBOX env) lives in FreyaPosFeed.dll, so a multi-box slot
-            // (instance 2+, _slot.Multibox) needs that DLL injected to get past the
-            // "Earth & Beyond is already running" guard -- even if the user has the
-            // position-feed toggle OFF. Without this, double-launching the launcher
-            // on Windows with the feed off would stall the second client on the
-            // mutex. Same decoupling as auto-login above.
+            // A multi-box slot (instance 2+, _slot.Multibox) needs BOTH injected
+            // DLLs, regardless of the position-feed / Lua-mods toggles:
+            //   - FreyaPosFeed.dll carries the single-instance mutex bypass
+            //     (FreyaMultiboxHook, armed by FREYA_MULTIBOX) -- the WINE path to
+            //     get past the "Earth & Beyond is already running" guard. (On native
+            //     Windows the launcher-side SingleInstanceMutexReaper also handles
+            //     the guard, but injecting this DLL is harmless and keeps WINE working.)
+            //   - enbmod.dll carries the connect()-hook PORT REMAP (netredirect,
+            //     armed by FREYA_GAME_PORT_BASE) that redirects the client's fixed
+            //     3500/3801/3805 dials onto this instance's proxy block
+            //     (base+0/+1/+2). WITHOUT it the second client dials the STOCK ports
+            //     and lands on the FIRST instance's single-client proxy: account
+            //     auth (shared 127.0.0.1:4180 relay, un-remapped) still succeeds, but
+            //     the follow-on master-server connect collides and the second client
+            //     hangs greyed-out on the name/password screen. So multibox must
+            //     force enbmod injection too -- see the enbmod gate below.
             bool multibox = _slot != null && _slot.Multibox;
 
             // Unchecking "Lock Mouse To Window" needs enbmod's ClipCursor hook
@@ -914,7 +934,7 @@ namespace LaunchFreya
             // mods toggle off -- the native publisher runs regardless of whether
             // any Lua mod is active. Without this the feed would have no resolver
             // and send nothing.
-            if (_setting.EnableClientMods || autoLogin || _setting.EnablePositionFeed || mouseUnlock)
+            if (_setting.EnableClientMods || autoLogin || _setting.EnablePositionFeed || mouseUnlock || multibox)
             {
                 var dos = StageClientMods();
                 if (dos != null) _injectDlls.Add(dos);
@@ -1010,6 +1030,26 @@ namespace LaunchFreya
         // lingering from a previous launch is deleted at the destination.
         void StageScriptsWithEnabledMods(string scriptsSrc, string scriptsDst)
         {
+            // MULTIBOX: a client that is ALREADY running is live-reading this
+            // SHARED scripts tree -- enbmod polls scripts/init.lua's mtime every
+            // ~120 ticks and re-runs it (dllmain.cpp on_tick / run_init_script).
+            // A second launcher that re-stages here rewrites init.lua (bumping its
+            // mtime) and deletes/rewrites mods/ mid-flight, so the running client
+            // fires a hot-reload against a half-written tree. Because the reload
+            // CLEARS all Lua callbacks before re-running init.lua, a load against
+            // the transient tree leaves the first client with NO draw callbacks --
+            // its custom UI vanishes (MVAS survives; it is native, not Lua). The
+            // first launcher already staged the identical tree (same launcher
+            // build + mod store), and a shared scripts dir can only hold ONE mod
+            // set anyway, so the secondary must NOT touch it: inject against the
+            // existing staged scripts as-is.
+            if (_slot != null && _slot.Multibox &&
+                File.Exists(Path.Combine(scriptsDst, "init.lua")))
+            {
+                _warn("Client mods: another client is already running; reusing its staged scripts/ as-is (no re-stage).");
+                return;
+            }
+
             Directory.CreateDirectory(scriptsDst);
 
 #if DEBUG
@@ -1121,19 +1161,40 @@ namespace LaunchFreya
         // (with a warning tagged `label`) on any failure.
         string StageDllNextToClient(string dllSrc, string stagedName, string label)
         {
-            string dllStaged;
+            var clientDir = Path.GetDirectoryName(_setting.ClientPath);
+            if (string.IsNullOrEmpty(clientDir) || !Directory.Exists(clientDir))
+            {
+                _warn($"{label}: client folder not found ('{clientDir}'). Continuing without it.");
+                return null;
+            }
+            var dllStaged = Path.Combine(clientDir, stagedName);
             try
             {
-                var clientDir = Path.GetDirectoryName(_setting.ClientPath);
-                if (string.IsNullOrEmpty(clientDir) || !Directory.Exists(clientDir))
-                    throw new IOException($"client folder not found ('{clientDir}')");
-                dllStaged = Path.Combine(clientDir, stagedName);
                 File.Copy(dllSrc, dllStaged, overwrite: true);
             }
             catch (Exception ex)
             {
-                _warn($"{label}: could not stage {stagedName}: {ex.Message}. Continuing without it.");
-                return null;
+                // MULTIBOX: a client that is ALREADY running holds this DLL loaded,
+                // which locks the on-disk file against overwrite on Windows, so the
+                // copy throws for the SECOND launcher. That is NOT a failure -- the
+                // staged file the first launch put there is the SAME build this
+                // launch wants (same launcher exe), so the second client can inject
+                // the existing copy as-is. Dropping enbmod.dll here was the whole
+                // multibox bug: without it the 2nd client loses the connect()-hook
+                // port remap, dials the STOCK ports, and lands on the 1st instance's
+                // single-client proxy -- hijacking its session (cross-logout, shared
+                // chat/group, no auto-login). Only fail if nothing is staged to
+                // inject.
+                if (File.Exists(dllStaged))
+                {
+                    _warn($"{label}: {stagedName} is in use by a running client (multibox); " +
+                          "injecting the already-staged copy.");
+                }
+                else
+                {
+                    _warn($"{label}: could not stage {stagedName}: {ex.Message}. Continuing without it.");
+                    return null;
+                }
             }
 
             var dosPath = WinePathToDos(dllStaged);

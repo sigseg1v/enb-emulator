@@ -2907,6 +2907,27 @@ moot; the SOLVED block above is the truth):**
   mismatch.
 - **Setup**: owner's Windows environment; press Play twice (the launcher autodetects
   the next free 127.0.0.1 port block per instance).
+- **Bug found + fixed (owner-observed 2026-07-07, native Windows two-client)**: the
+  second client SHARED the first's proxy -- logging out one logged out the other,
+  grouping/chat only worked on one, "the 2nd client to log in took everything" --
+  AND the second client did NOT auto-enter EULA/password. Root cause was NOT window
+  detection (the launcher does not read client windows for auto-login; autologin.cpp
+  runs inside injected enbmod.dll). It was `Launcher.StageDllNextToClient`:
+  `File.Copy(enbmod.dll, overwrite:true)` into the shared client dir THROWS for the
+  second launcher because the first client has that exact file loaded+locked on
+  Windows; the catch returned null, so enbmod was dropped from the 2nd client's
+  injection. No enbmod -> no netredirect port remap -> the 2nd client dialed the
+  STOCK ports (3500/3801/3805) and connected to the FIRST instance's single-client
+  proxy (session hijack), AND autologin.cpp never ran. Fix: on a locked-file copy
+  failure, if the staged DLL already exists (same build, staged by the first
+  launch), reuse it and inject the existing copy instead of returning null. Also
+  hardened `MultiboxSlot` with a session-scoped named-mutex per port block so a fast
+  double-click cannot race two launchers onto the same block before either proxy
+  binds. Both fixes are launcher-only (no wire change).
+- **Re-verify (real client)**: launch FreyaLauncher twice, Play both; (1) BOTH
+  auto-enter EULA+password (the 2nd is no longer skipped); (2) each client is on its
+  OWN proxy -- logging out one leaves the other in-world; (3) grouping shows status
+  on BOTH and group chat reaches BOTH; (4) both remain in-world simultaneously.
 
 ## [ ] CV-BA-2c -- grouped/co-located MVAS position no longer flickers between players
 
@@ -3703,6 +3724,29 @@ moot; the SOLVED block above is the truth):**
 - **Setup**: `just rebuild server`, accept mission 130 at Orkael Lazarra (Trin station, Akerons Gate).
   To test expiry without waiting 20 min, temporarily lower `time=` in `missions."mission_XML"` for id
   130, `just rebuild server`, re-accept, then attempt to re-accept after the shortened window.
+
+### [ ] CV-PB62-TEXT -- mission 130's corrected journal text renders and the quest completes end-to-end (PB-62)
+
+- **Status**: SHIPPED (content-text only, no wire change). This is the primary "won't progress" half of
+  PB-62. Root cause was misleading MISSION TEXT, not code: mission 130's Stage-1 `<Description>` told the
+  player to *"retreive 5 Nommos Blubber samples"* while the Stage-1 completion node is FIGHT_MOB kill-3 of
+  mob 977 (blubber is Stage-2 turn-in loot, `Count=1`). Fix = `db/postgres/seed_mission_fixes.sql`, an
+  idempotent schema-init overlay that `replace()`s the Stage-1 description to describe hunting Nommos for
+  a blubber sample, drops the phantom "5" from Orkael's accept dialogue, and removes a leaked dev note.
+- **Why this is CLIENT-only verification (no byte-pin)**: only the STRING content inside the existing,
+  already-understood `missions.mission_XML` blob changed -- the packet layout the client parses is
+  identical, so there is no new wire format to pin in the CLI. What a test cannot prove is that the real
+  client's PDA renders the new objective text correctly (ASCII with `--`, no XML-special chars) and that a
+  player following the corrected instructions actually completes the quest.
+- **What to look for (real client)**: (1) Accept mission 130 at Orkael Lazarra -> the PDA Stage-1 objective
+  now reads the corrected "hunt the Nommos Adults ... recover a fresh blubber sample" text (no "5 blubber",
+  no dev note in Stage 2). (2) Kill 3 Nommos Adults (mob 977) at Nommos Point -> Stage-1 kill-count
+  advances 1/3..3/3 and the stage completes (NOT gated on holding blubber). (3) Return to Orkael with a
+  looted Nommos Blubber (5401) -> Stage-2 turn-in fires, rewards granted (skill 9 Build Shields + 3
+  schematics + 2500 TradeXP). (4) Confirm the text renders without truncation/garbling on the client's
+  journal panel.
+- **Setup**: re-seed the net7 DB (`docker compose down -v && docker compose up -d`, or apply
+  `db/postgres/seed_mission_fixes.sql` to a running `net7`), then log in and accept mission 130.
 
 ### [ ] CV-PB62-TIMER -- timed missions show a live countdown in the PDA (PB-62, DEFERRED)
 

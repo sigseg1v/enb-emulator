@@ -97,15 +97,15 @@ LONG WINAPI crash_filter(EXCEPTION_POINTERS* ep) {
 void run_init_script() {
     if (!g_L)
         return;
-    // Clear callbacks registered by the previous run first, so re-running init.lua on a hot-reload
-    // replaces handlers instead of accumulating duplicates of every on_tick.
-    enb::lua::reset_callbacks(g_L);
-    if (luaL_dofile(g_L, g_init_path.c_str()) != LUA_OK) {
-        enb::logf("init.lua error: %s", lua_tostring(g_L, -1));
-        lua_pop(g_L, 1);
-    } else {
+    // Atomic (re)load: compiles + runs init.lua into a fresh callback set and
+    // commits only on success, rolling back to the previous set on any error, so
+    // a failed reload never blanks the custom UI (the old reset-then-dofile
+    // cleared every callback BEFORE loading -- one bad load left it empty).
+    if (enb::lua::run_init_atomic(g_L, g_init_path.c_str()))
         enb::logf("loaded %s", g_init_path.c_str());
-    }
+    // Stamp the mtime either way: on a failed load this stops us re-running the
+    // same broken file every 120 ticks; fixing it bumps the mtime again and a
+    // fresh reload is attempted.
     file_mtime(g_init_path, g_init_mtime);
 }
 

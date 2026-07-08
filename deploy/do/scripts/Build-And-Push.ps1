@@ -19,9 +19,13 @@
 #                                                 but only AFTER every versioned
 #                                                 push succeeds
 #
-# Retention: the newest 3 versions PER SERVICE are kept; older version tags are
-# deleted AFTER the new push succeeds, then a registry garbage-collection runs
-# to reclaim the now-untagged blobs (what actually frees space under the cap).
+# Retention: the newest 2 versions PER SERVICE are kept (current + one rollback);
+# older version tags are deleted AFTER the new push succeeds, then a registry
+# garbage-collection runs -- on EVERY push -- to reclaim the now-untagged
+# manifests + blobs (what actually frees space under the 500 MiB cap). The GC
+# MUST run in untagged-manifests mode (see Start-DocrGarbageCollection); the
+# default unreferenced-blobs-only mode frees nothing here and let storage creep
+# past the cap until a push failed with "quota exceeded".
 #
 # -Tag overrides the version label (e.g. -Tag v9). Default auto-increments to
 # one past the highest existing vN. (An override that isn't 'vN' still pushes
@@ -91,11 +95,11 @@ foreach ($s in $services) {
     Invoke-Native docker buildx imagetools create -t $latRef $verRef
 }
 
-# ---- prune: keep the newest 3 versions per service, delete older ----
+# ---- prune: keep the newest 2 versions per service, delete older ----
+$keepVersions = 2
 Write-Host ""
-Write-Host "Pruning old version tags (keep newest 3 per service)..."
-$afterTags  = Get-DocrTags $repo
-$deletedAny = $false
+Write-Host "Pruning old version tags (keep newest $keepVersions per service)..."
+$afterTags = Get-DocrTags $repo
 foreach ($s in $services) {
     $svcVers = @()
     foreach ($t in $afterTags) {
@@ -104,19 +108,21 @@ foreach ($s in $services) {
         }
     }
     $ordered = $svcVers | Sort-Object N -Descending
-    $keep = $ordered | Select-Object -First 3
-    $drop = $ordered | Select-Object -Skip 3
+    $keep = $ordered | Select-Object -First $keepVersions
+    $drop = $ordered | Select-Object -Skip $keepVersions
     foreach ($d in $drop) {
         Write-Host "  deleting $($d.Tag)"
         Remove-DocrTag $repo $d.Tag
-        $deletedAny = $true
     }
     $kept = (($keep | ForEach-Object { $_.Tag }) -join ', ')
     Write-Host "  $($s.Svc): kept [$kept]"
 }
 
-# ---- reclaim space from the now-untagged manifests ----
-if ($deletedAny) { Start-DocrGarbageCollection }
+# ---- reclaim space -- run GC on EVERY push, not only when a tag was pruned ----
+# Untagged child manifests accumulate from the buildx attestation pushes even in
+# a push that pruned nothing, and only this reclaims them. Fired async (the push
+# is done); the reclaim lands before the next push.
+Start-DocrGarbageCollection
 
 Write-Host ""
 Write-Host "Pushed enb:{server,net7go,freya-online,status-notifier,db-backup}-$version (+ -latest)."

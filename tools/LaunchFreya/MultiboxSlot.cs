@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
+using System.Threading;
 
 namespace LaunchFreya
 {
@@ -72,7 +74,7 @@ namespace LaunchFreya
                 return s;
             }
 
-            if (IsBlockFree(DefaultBase))
+            if (TryReserveBlock(DefaultBase))
             {
                 log($"multi-box: stock ports {DefaultBase} free -- single-client launch");
                 return new MultiboxSlot(DefaultBase);
@@ -83,7 +85,7 @@ namespace LaunchFreya
                 int b = SearchStart + i * PortSpan;
                 if (b > 65535 - (PortSpan - 1))
                     break;
-                if (IsBlockFree(b))
+                if (TryReserveBlock(b))
                 {
                     log($"multi-box: stock ports busy; using port block {b}..{b + PortSpan - 1}");
                     return new MultiboxSlot(b);
@@ -97,27 +99,61 @@ namespace LaunchFreya
             return new MultiboxSlot(DefaultBase);
         }
 
-        // A block is free when NOTHING is already serving its sector port
-        // (base+0) on 127.0.0.1. We detect a live instance by trying to CONNECT
-        // to that port -- a refused connection means no proxy owns the block.
+        // Named mutexes we successfully claimed, held for the launcher's lifetime
+        // so a racing launcher sees the block as taken. Kept referenced so the GC
+        // never finalizes them (which would release the OS handle early).
+        static readonly List<Mutex> s_heldSlotLocks = new();
+
+        // Try to CLAIM block b for this launcher. A block is available only when
+        // it is BOTH (1) not already served -- nothing accepts on its sector port
+        // (base+0) -- AND (2) not already claimed by a racing launcher.
         //
-        // This is deliberately a CONNECT probe, not a BIND probe. A bind probe is
-        // unreliable on Windows: the running proxy holds the port with a plain
-        // (non-exclusive) bind, and a second socket with SO_REUSEADDR -- which is
-        // what a default .NET TcpListener uses (ExclusiveAddressUse == false) --
-        // is allowed to bind the SAME 127.0.0.1:port on Windows. So the bind
-        // probe wrongly reports the busy stock port 3500 as "free", the launcher
-        // decides this is the first instance, never arms the single-instance
-        // mutex bypass, and the second client dies on "Earth & Beyond is already
-        // running". (Linux/WINE forbid the shared active bind, which is why the
-        // bug never showed under WINE.) A connect probe is unambiguous on both.
-        //
-        // base+0 is the sector port (3500 stock / base for a remapped slot) -- it
-        // is the block's discriminator and the proxy listens on it from startup,
+        // (1) is a CONNECT probe, not a BIND probe. A bind probe is unreliable on
+        // Windows: the running proxy holds the port with a plain (non-exclusive)
+        // bind, and a second socket with SO_REUSEADDR -- which is what a default
+        // .NET TcpListener uses (ExclusiveAddressUse == false) -- is allowed to
+        // bind the SAME 127.0.0.1:port on Windows. So the bind probe wrongly
+        // reports the busy stock port 3500 as "free", the launcher decides this
+        // is the first instance, never arms the single-instance mutex bypass, and
+        // the second client dies on "Earth & Beyond is already running".
+        // (Linux/WINE forbid the shared active bind, which is why that bug never
+        // showed under WINE.) A connect probe is unambiguous on both. base+0 is
+        // the block's discriminator and the proxy listens on it from startup,
         // before any client connects, so it is a reliable liveness signal.
-        static bool IsBlockFree(int b)
+        //
+        // (2) closes the fast-double-click RACE the connect probe alone cannot:
+        // the probe only sees proxies that have ALREADY bound, so two launchers
+        // started within the same sub-second window both see stock 3500 free
+        // before either proxy binds, both pick it, and the second client lands on
+        // the first's single-client proxy -- session hijack (cross-logout, shared
+        // chat/group). A session-scoped named mutex per block serializes the
+        // claim: the first launcher to take it holds it for its whole lifetime,
+        // so the racer skips the block. Session-scoped (bare name, no Global\)
+        // because co-located clients run in one interactive user session and it
+        // needs no extra privilege. This path only runs on the native-Windows
+        // manual-multibox launch; the docker/dev path pins FREYA_GAME_PORT_BASE
+        // and returns before ever reaching here.
+        static bool TryReserveBlock(int b)
         {
-            return !TcpListening(b);
+            if (TcpListening(b))
+                return false;
+
+            Mutex m;
+            try { m = new Mutex(false, $"FreyaSlot_{b}"); }
+            catch { return true; } // can't create a named mutex here -- probe-only
+
+            bool owned;
+            try { owned = m.WaitOne(0); }
+            catch (AbandonedMutexException) { owned = true; } // prior owner died -> ours now
+            catch { m.Dispose(); return true; }
+
+            if (owned)
+            {
+                s_heldSlotLocks.Add(m);
+                return true;
+            }
+            m.Dispose();
+            return false;
         }
 
         // True if something accepts a TCP connection on 127.0.0.1:port right now.

@@ -272,8 +272,8 @@ static bool build_font_atlas(IDirect3DDevice8* dev, int px, FontAtlas& fa) {
     GdiFlush();
 
     bool ok = false;
-    if (fit && SUCCEEDED(dev->CreateTexture(dim, dim, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED,
-                                            &fa.tex))) {
+    if (fit &&
+        SUCCEEDED(dev->CreateTexture(dim, dim, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &fa.tex))) {
         D3DLOCKED_RECT lr;
         if (SUCCEEDED(fa.tex->LockRect(0, &lr, nullptr, 0))) {
             const uint8_t* src = (const uint8_t*)bits;

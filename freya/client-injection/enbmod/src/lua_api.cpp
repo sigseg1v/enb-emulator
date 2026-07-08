@@ -657,6 +657,76 @@ void reset_callbacks(lua_State* L) {
     }
 }
 
+// Atomically (re)run init.lua. See the header for the contract. The old path
+// (reset_callbacks() THEN dofile) cleared every callback BEFORE loading, so any
+// failed reload -- a transient half-written scripts tree during a multibox
+// launch, or a saved Lua syntax error mid-edit -- left the client with no draw
+// callbacks and a blank custom UI until the next good reload. This makes the
+// swap transactional instead.
+bool run_init_atomic(lua_State* L, const char* path) {
+    if (!L)
+        return false;
+
+    // Compile first. A syntax error or an unreadable/half-written file fails
+    // here WITHOUT having touched the live callbacks, so the current mods keep
+    // running untouched.
+    if (luaL_loadfile(L, path) != LUA_OK) {
+        enb::logf("init.lua load error: %s", lua_tostring(L, -1));
+        lua_pop(L, 1);
+        return false;
+    }
+
+    // Detach the live callback set into locals -- the registry refs stay VALID
+    // (not unref'd), we just move ownership aside so the new chunk registers into
+    // an empty set. Mirror reset_callbacks' side effects (disarm input, drop the
+    // transient event queues) so the reload starts clean.
+    std::vector<int> old_tick;
+    old_tick.swap(g_tick_refs);
+    int old_skill = g_skill_ref;
+    g_skill_ref = LUA_NOREF;
+    int old_chat = g_chat_ref;
+    g_chat_ref = LUA_NOREF;
+    std::vector<InputCb> old_input;
+    old_input.swap(g_input_cbs);
+    hooks::set_input_mask(0);
+    {
+        std::lock_guard<std::mutex> lk(g_evq_mx);
+        g_evq.clear();
+    }
+    {
+        std::lock_guard<std::mutex> lk(g_runq_mx);
+        g_runq.clear();
+    }
+
+    if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
+        enb::logf("init.lua run error: %s -- keeping previous mods", lua_tostring(L, -1));
+        lua_pop(L, 1);
+        // ROLL BACK: drop whatever the failed run half-registered, then move the
+        // saved set back to live and re-arm the input mask from it.
+        reset_callbacks(L);
+        g_tick_refs.swap(old_tick);
+        g_skill_ref = old_skill;
+        g_chat_ref = old_chat;
+        g_input_cbs.swap(old_input);
+        unsigned uni = 0;
+        for (const InputCb& cb : g_input_cbs)
+            uni |= cb.mask;
+        hooks::set_input_mask(uni);
+        return false;
+    }
+
+    // COMMIT: the new set is live; release the old refs for good.
+    for (int ref : old_tick)
+        luaL_unref(L, LUA_REGISTRYINDEX, ref);
+    if (old_skill != LUA_NOREF)
+        luaL_unref(L, LUA_REGISTRYINDEX, old_skill);
+    if (old_chat != LUA_NOREF)
+        luaL_unref(L, LUA_REGISTRYINDEX, old_chat);
+    for (const InputCb& cb : old_input)
+        luaL_unref(L, LUA_REGISTRYINDEX, cb.ref);
+    return true;
+}
+
 static int l_on_tick(lua_State* L) {
     luaL_checktype(L, 1, LUA_TFUNCTION);
     lua_pushvalue(L, 1);
