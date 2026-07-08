@@ -424,8 +424,15 @@ bool Player::WaitForLoginAck(long stage)
 	else if (m_UDPQueue->Count() == 0) //only start bumping the login counter when the queue is low
 	{
 		m_LoginAckCounter++;
-		//still haven't had word from the client
-		if (m_LoginAckCounter > 100) //timeout
+		//still haven't had word from the client. The login thread bumps this
+		//counter roughly once per ~100ms pass, so the passes-to-timeout is the
+		//configured timeout in ms / 100 (env NET7_LOGIN_ACK_TIMEOUT_MS; default
+		//90s). Raised from the old fixed 100 (~10s) because a backgrounded
+		//multibox client whose message pump the OS has throttled routinely missed
+		//that window during a login/gate/dock/undock handshake and was forced to
+		//relog; the stage is re-sent every ~2s below, so a slow-but-live client
+		//catches up once it gets a scheduling slice.
+		if (m_LoginAckCounter > (long)(LoginAckTimeoutMs() / 100)) //timeout
 		{
 			char buffer[100];
 			//assume player is dead, log them out

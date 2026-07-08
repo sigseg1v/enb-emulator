@@ -3768,3 +3768,43 @@ moot; the SOLVED block above is the truth):**
   right about when the countdown hits 0). (3) A non-timed mission shows NO countdown (regression guard).
 - **Setup**: pin the encoding first (fixture), then populate the Aux fields at accept + on the periodic
   update, `just rebuild server`, accept mission 130, observe the PDA countdown.
+
+## [ ] CV-AZ-AFK -- multibox idle/handshake timeouts relaxed for backgrounded alts
+
+- **What changed (server, 2026-07-08)**: two server-side inactivity timers that
+  dropped a backgrounded multibox alt too aggressively are relaxed and made
+  env-configurable. NO wire-format change -- only timeout thresholds (loop
+  counters), so no byte layout the client parses is altered.
+  1. **Login-stage ack timeout** (`server/src/PlayerConnection.cpp`
+     `Player::WaitForLoginAck`): the drop-after-no-ack threshold went from a fixed
+     100 login-thread passes (~10s) to `LoginAckTimeoutMs()/100` (default 90s, env
+     `NET7_LOGIN_ACK_TIMEOUT_MS`). This is the primary fix: a gate/dock/undock/login
+     handshake resets the char below `LAST_LOGIN_STAGE`, and an OS-backgrounded
+     client whose message pump is throttled routinely missed the old ~10s window to
+     ack the stage and was force-dropped ("have to relog"). The stage is still
+     re-sent every ~2s, so a client that regains a scheduling slice catches up.
+  2. **Idle reaper** (`server/src/PlayerManager.cpp`, three sites): the
+     `LastAccessTime + 2*60000` (2 min) idle-drop is now `+ PlayerIdleReapMs()`
+     (default 5 min, env `NET7_PLAYER_IDLE_REAP_MS`). Defensive: the proxy's 30s
+     0x3005 keepalive is client-independent and normally beats this, so a parked
+     alt should never trip it; the bump only adds slack for marginal keepalive
+     delivery under heavy multibox. Not the demonstrated culprit -- the handshake
+     timeout above is.
+- **Why CLIENT-only verification (no byte-pin)**: nothing on the wire changed; the
+  CLI/integration suite cannot reproduce the OS message-pump throttling of a
+  backgrounded WINE/Windows client, which is the exact condition that triggered the
+  fast drop. Only the real multibox client under load can confirm it.
+- **What to look for (real client)**:
+  1. Launch 3+ clients on the same account (different characters), get each
+     in-space, then leave one BACKGROUNDED/unfocused for several minutes while
+     actively playing the others: the backgrounded alt stays connected and does NOT
+     drop to a relog.
+  2. Gate/dock/undock a backgrounded alt (or launch a 3rd client and immediately
+     tab away so it logs in while unfocused): it completes the handshake without the
+     "timed out during login" drop.
+  3. Server log shows no "timed out during login stage" lines for the backgrounded
+     alts, and no idle-reaper drops within the new windows. A genuinely dead client
+     (proxy also gone) is still reaped, just at 5 min instead of 2.
+- **Setup**: `just rebuild server` (no wire change, no DB reseed). Optionally tune
+  `NET7_LOGIN_ACK_TIMEOUT_MS` / `NET7_PLAYER_IDLE_REAP_MS` in the server service env
+  if the defaults need adjusting for a given machine's throttling behaviour.
