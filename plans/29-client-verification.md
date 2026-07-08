@@ -2907,6 +2907,27 @@ moot; the SOLVED block above is the truth):**
   mismatch.
 - **Setup**: owner's Windows environment; press Play twice (the launcher autodetects
   the next free 127.0.0.1 port block per instance).
+- **Bug found + fixed (owner-observed 2026-07-07, native Windows two-client)**: the
+  second client SHARED the first's proxy -- logging out one logged out the other,
+  grouping/chat only worked on one, "the 2nd client to log in took everything" --
+  AND the second client did NOT auto-enter EULA/password. Root cause was NOT window
+  detection (the launcher does not read client windows for auto-login; autologin.cpp
+  runs inside injected enbmod.dll). It was `Launcher.StageDllNextToClient`:
+  `File.Copy(enbmod.dll, overwrite:true)` into the shared client dir THROWS for the
+  second launcher because the first client has that exact file loaded+locked on
+  Windows; the catch returned null, so enbmod was dropped from the 2nd client's
+  injection. No enbmod -> no netredirect port remap -> the 2nd client dialed the
+  STOCK ports (3500/3801/3805) and connected to the FIRST instance's single-client
+  proxy (session hijack), AND autologin.cpp never ran. Fix: on a locked-file copy
+  failure, if the staged DLL already exists (same build, staged by the first
+  launch), reuse it and inject the existing copy instead of returning null. Also
+  hardened `MultiboxSlot` with a session-scoped named-mutex per port block so a fast
+  double-click cannot race two launchers onto the same block before either proxy
+  binds. Both fixes are launcher-only (no wire change).
+- **Re-verify (real client)**: launch FreyaLauncher twice, Play both; (1) BOTH
+  auto-enter EULA+password (the 2nd is no longer skipped); (2) each client is on its
+  OWN proxy -- logging out one leaves the other in-world; (3) grouping shows status
+  on BOTH and group chat reaches BOTH; (4) both remain in-world simultaneously.
 
 ## [ ] CV-BA-2c -- grouped/co-located MVAS position no longer flickers between players
 

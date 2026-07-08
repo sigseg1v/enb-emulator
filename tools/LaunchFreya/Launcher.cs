@@ -1141,19 +1141,40 @@ namespace LaunchFreya
         // (with a warning tagged `label`) on any failure.
         string StageDllNextToClient(string dllSrc, string stagedName, string label)
         {
-            string dllStaged;
+            var clientDir = Path.GetDirectoryName(_setting.ClientPath);
+            if (string.IsNullOrEmpty(clientDir) || !Directory.Exists(clientDir))
+            {
+                _warn($"{label}: client folder not found ('{clientDir}'). Continuing without it.");
+                return null;
+            }
+            var dllStaged = Path.Combine(clientDir, stagedName);
             try
             {
-                var clientDir = Path.GetDirectoryName(_setting.ClientPath);
-                if (string.IsNullOrEmpty(clientDir) || !Directory.Exists(clientDir))
-                    throw new IOException($"client folder not found ('{clientDir}')");
-                dllStaged = Path.Combine(clientDir, stagedName);
                 File.Copy(dllSrc, dllStaged, overwrite: true);
             }
             catch (Exception ex)
             {
-                _warn($"{label}: could not stage {stagedName}: {ex.Message}. Continuing without it.");
-                return null;
+                // MULTIBOX: a client that is ALREADY running holds this DLL loaded,
+                // which locks the on-disk file against overwrite on Windows, so the
+                // copy throws for the SECOND launcher. That is NOT a failure -- the
+                // staged file the first launch put there is the SAME build this
+                // launch wants (same launcher exe), so the second client can inject
+                // the existing copy as-is. Dropping enbmod.dll here was the whole
+                // multibox bug: without it the 2nd client loses the connect()-hook
+                // port remap, dials the STOCK ports, and lands on the 1st instance's
+                // single-client proxy -- hijacking its session (cross-logout, shared
+                // chat/group, no auto-login). Only fail if nothing is staged to
+                // inject.
+                if (File.Exists(dllStaged))
+                {
+                    _warn($"{label}: {stagedName} is in use by a running client (multibox); " +
+                          "injecting the already-staged copy.");
+                }
+                else
+                {
+                    _warn($"{label}: could not stage {stagedName}: {ex.Message}. Continuing without it.");
+                    return null;
+                }
             }
 
             var dosPath = WinePathToDos(dllStaged);
