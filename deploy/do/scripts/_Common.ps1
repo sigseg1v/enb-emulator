@@ -169,18 +169,55 @@ function Remove-DocrTag([string]$Repository, [string]$Tag) {
     $url = "$(Get-DocrApiBase)/repositories/$Repository/tags/$Tag"
     $null = Invoke-RestMethod -Method Delete -Uri $url -Headers (Get-DocrHeaders) `
         -SkipHttpErrorCheck -StatusCodeVariable sc
+    # 404: already gone. 412: a garbage-collection is running and DO blocks tag
+    # deletes until it finishes -- not fatal, the tag just gets pruned on the next
+    # push. Only a genuine error should fail the deploy.
+    if ($sc -eq 412) { Write-Host "  (skip $Tag -- GC in progress, will prune next push)"; return }
     if ($sc -ge 400 -and $sc -ne 404) { throw "DOCR delete-tag '$Tag' returned HTTP $sc." }
 }
 
 function Start-DocrGarbageCollection {
-    # Reclaims storage from now-untagged manifests. DO allows one active GC at a
-    # time and briefly makes the registry read-only, so tolerate "already
-    # running" / "nothing to collect" instead of failing the whole push.
-    $url = "$(Get-DocrApiBase)/garbage-collection"
+    # Reclaims storage. DO allows one active GC at a time and briefly makes the
+    # registry read-only, so tolerate "already running" / "nothing to collect"
+    # instead of failing the whole push.
+    #
+    # CRITICAL: the request body MUST select the untagged-manifests mode. The
+    # default (empty body / "unreferenced blobs only") deletes ONLY blobs that no
+    # manifest references -- of which a DOCR repo has essentially none, because
+    # every blob belongs to some manifest. Our storage is held by UNTAGGED child
+    # manifests: buildx multi-arch/attestation pushes a tagged manifest LIST whose
+    # per-arch child manifests carry no tag of their own, and once we drop the old
+    # version's parent tag those children are untagged-but-real. Only
+    # "untagged manifests and unreferenced blobs" reaps them. Posting the empty
+    # body is why every historical GC freed 0 bytes and storage crept past the cap.
+    param([switch]$Wait)
+    $url  = "$(Get-DocrApiBase)/garbage-collection"
+    $body = '{"type":"untagged manifests and unreferenced blobs"}'
     $null = Invoke-RestMethod -Method Post -Uri $url -Headers (Get-DocrHeaders) `
-        -SkipHttpErrorCheck -StatusCodeVariable sc
-    if ($sc -lt 400) { Write-Host "  garbage-collection: started (HTTP $sc)." }
-    else { Write-Host "  garbage-collection: skipped (HTTP $sc -- already running or nothing to collect)." }
+        -Body $body -SkipHttpErrorCheck -StatusCodeVariable sc
+    if ($sc -ge 400) {
+        Write-Host "  garbage-collection: skipped (HTTP $sc -- already running or nothing to collect)."
+        return
+    }
+    Write-Host "  garbage-collection: started (untagged manifests + unreferenced blobs)."
+    if (-not $Wait) { return }
+
+    # Poll the active-GC endpoint until it clears (404 = no active GC = done). DO
+    # GC runs ~15-20 min and passes through "waiting for write JWTs to expire".
+    Write-Host "  garbage-collection: waiting for completion..."
+    for ($i = 0; $i -lt 180; $i++) {
+        Start-Sleep -Seconds 15
+        $active = Invoke-RestMethod -Method Get -Uri $url -Headers (Get-DocrHeaders) `
+            -SkipHttpErrorCheck -StatusCodeVariable gsc
+        if ($gsc -eq 404) { Write-Host "  garbage-collection: done."; return }
+        if ($gsc -ge 400) { Write-Host "  garbage-collection: status HTTP $gsc; stopping wait."; return }
+        $gc = if ($active.PSObject.Properties['garbage_collection']) { $active.garbage_collection } else { $active }
+        $status = if ($gc.PSObject.Properties['status']) { $gc.status } else { '?' }
+        $freed  = if ($gc.PSObject.Properties['freed_bytes']) { $gc.freed_bytes } else { 0 }
+        Write-Host "    ...$status (freed $([math]::Round($freed/1MB,1)) MB)"
+        if ($status -in @('succeeded','failed','cancelled','canceled')) { return }
+    }
+    Write-Host "  garbage-collection: still running after wait budget; leaving it to finish in the background."
 }
 
 function Get-SshArgs {
