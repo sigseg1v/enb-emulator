@@ -1030,6 +1030,26 @@ namespace LaunchFreya
         // lingering from a previous launch is deleted at the destination.
         void StageScriptsWithEnabledMods(string scriptsSrc, string scriptsDst)
         {
+            // MULTIBOX: a client that is ALREADY running is live-reading this
+            // SHARED scripts tree -- enbmod polls scripts/init.lua's mtime every
+            // ~120 ticks and re-runs it (dllmain.cpp on_tick / run_init_script).
+            // A second launcher that re-stages here rewrites init.lua (bumping its
+            // mtime) and deletes/rewrites mods/ mid-flight, so the running client
+            // fires a hot-reload against a half-written tree. Because the reload
+            // CLEARS all Lua callbacks before re-running init.lua, a load against
+            // the transient tree leaves the first client with NO draw callbacks --
+            // its custom UI vanishes (MVAS survives; it is native, not Lua). The
+            // first launcher already staged the identical tree (same launcher
+            // build + mod store), and a shared scripts dir can only hold ONE mod
+            // set anyway, so the secondary must NOT touch it: inject against the
+            // existing staged scripts as-is.
+            if (_slot != null && _slot.Multibox &&
+                File.Exists(Path.Combine(scriptsDst, "init.lua")))
+            {
+                _warn("Client mods: another client is already running; reusing its staged scripts/ as-is (no re-stage).");
+                return;
+            }
+
             Directory.CreateDirectory(scriptsDst);
 
 #if DEBUG
