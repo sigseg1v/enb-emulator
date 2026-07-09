@@ -1,5 +1,29 @@
 # Phase AW -- Sector exploration skill (agent-driven nav survey)
 
+- **2026-07-09 NAV-DUMP PAGING + non-transit-gate exclusion + well-gate settle
+  (commit `e07797eb`).** Three linked fixes surfaced by the ship getting stuck in
+  the Asteroid Belt Beta (ABB, sid 1077) gravity-well sector, unable to route out.
+  (1) **`get_navs` now PAGES the `enb.navs()` dump.** The enbmod cmd/log channel
+  truncates each reply line at **2048 bytes**; a busy belt sector dumps ~3KB / 77
+  records in one string, so everything past record ~53 was silently lost -- and the
+  lost tail is the DISTANT navs, i.e. exactly the onward/exit gates `choose_gate`
+  needs. Page 0 snapshots `enb.navs()` into a Lua global (globals persist across
+  channel commands, verified) and each page reads a <2KB slice of that consistent
+  view. ABB went from 53 navs seen (2 accelerator spheres only) to the full 77 (all
+  4 real sector gates). This silently starved EVERY normal survey sector with >~53
+  navs of its farthest nodes too. (2) **`routable_gate()`** restricts routing to
+  names that actually cross a sector (`Gate to X` / `Sector Gate to X` / a
+  `Wormhole`): `is_gate()` matches an Accelerator Sphere because its object class is
+  `Stargate`, but warping to one never flips the sector -- it just wastes a warp
+  and, in a well sector, sends the ship toward the well. `choose_gate` filters
+  candidates through it. (3) **`settle_well_gates()`** lets a well sector's distant
+  exit gates finish rendering (belt sectors render in bursts, past `settle_navs`'s
+  2-stable-read cutoff) before `choose_gate` runs; clears the prior sector's
+  `GATES_SEEN` first, early-exits once a routable non-well gate is in range.
+  VERIFIED LIVE: ABB now well-skips and gates out via `Sector Gate to Venus`
+  (nearest tier-0 fresh sector) -> hop 1 Venus [survey], instead of thrashing the
+  two accelerator spheres then false-conceding "no gate out". Survey tooling only.
+
 - **2026-07-09 GRAPH TRAVERSAL: survey now reaches sectors BEHIND completed ones
   (commit `64786eb9`).** `drive_lua.py` was a linear gate-walker: `choose_gate`
   picked only gates to a FRESH destination and `main()` hard-stopped the entire
