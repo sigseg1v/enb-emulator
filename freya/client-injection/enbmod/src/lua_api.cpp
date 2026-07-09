@@ -1607,14 +1607,19 @@ static int l_register(lua_State* L) {
     return 1;
 }
 
-// enb.gate() -> bool. Jump through the currently-targeted stargate. The native
-// gate button is a two-step avatar-command: op 0x12 arms the jump (server
-// TerminateWarp + GateActivate, which stores the gate's destination) and op 0x13
-// finishes it (the sector handoff to that destination). The real client sends
-// 0x13 once its fly-in animation completes; back-to-back arm+finish transits
-// immediately, since the finish step does not re-check position -- the same
-// shortcut the "land" verb (0x1d -> 0x08) already uses. Target a stargate first.
-// The fly-in-skip behaviour is tracked for real-client confirmation in plans/29.
+// enb.gate() -> bool. Jump through the currently-targeted stargate. Sends ONLY
+// avatar-command op 0x12 (gate activate); the rest of the transit is the native
+// client flow: the server opens the gate and ~6s later sends the gate camera
+// control (opcode 0x0092, message 4), which arms the client's pending gate
+// finish and plays the fly-in, and the CLIENT sends op 0x13 (finish -> sector
+// handoff) when the fly-in completes. Do NOT send 0x13 here: firing arm+finish
+// back-to-back outruns that camera packet, so it lands after the handoff and
+// the new sector's START, and the fly-in's completion then re-shows the loading
+// screen in blank mode with nothing left to dismiss it -- a permanent stuck
+// "Loading." on any server without a stale-camera guard (the upstream Net-7
+// server has none). Target a stargate first; the transit completes natively in
+// roughly 6-10s, so callers must poll the sector id rather than assume an
+// instant flip.
 static int l_gate(lua_State* L) {
     uintptr_t m;
     uint32_t player, target;
@@ -1623,7 +1628,6 @@ static int l_gate(lua_State* L) {
         return 1;
     }
     send_target_cmd(m, player, 0x12, target);
-    send_target_cmd(m, player, 0x13, target);
     lua_pushboolean(L, 1);
     return 1;
 }
