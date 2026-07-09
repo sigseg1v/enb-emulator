@@ -8513,3 +8513,35 @@ pre-fix behaviour, no regression. Live end-to-end re-verification (heading nonze
 the wire, server `m_ClientHeading` matches, weapon fires while orbiting) is tracked
 under plans/29 CV-MVAS-ORIENT; the client exited during the diagnostic (auto-follow
 into a target) and needs relaunching to complete that check.
+
+## 2026-07-08 -- enb.select_nav() dead-scoped; explore-sector survey drives via the nav registry (Phase BC)
+
+Decision: the planned `enb.select_nav(dir)` radar nav-cycle reproduction is dropped.
+The blocker it existed for (request_target only resolves in-scanner-range contacts)
+was closed by joining the 0x0099 nav-registry mirror into enb.navs() (c9a8362a): the
+registry lists EVERY nav in the sector with gid + live range, and live runs verify
+request_target(gid) + enb.warp() engages legs to registry navs 98k-358k out.
+
+Live-validated survey-driver behaviours baked into drive_lua.py (each one cost a
+wedged run to learn):
+
+1. Client warp is BUOY-GRAPH pathfinding, not point-to-point. A nav with no graph
+   neighbour in link range (Earth's planet, 115.8k from the nearest nav) can never
+   be warp-engaged: request_target succeeds, warp() answers true, zero motion.
+   Driver: 2 verified engage-failure rounds -> BLACKLIST + persisted ledger skip.
+2. Multi-hop legs legitimately fly AWAY from the final target early (65k->149k
+   observed), and enb.warp() is a TOGGLE that cancels an active leg. Driver: the
+   not-closing stall re-engage is speed-gated (only re-fire below warp speed).
+3. Stations have a no-warp standoff ring (~9.5k) OUTSIDE the 8k visit radius; from
+   inside it every engage refuses. Driver: engage-refusal with the target inside
+   ARRIVE_SLOP (12k) IS arrival and records the ledger visit.
+4. The live DB spells some navs differently from the sector dataset (live "Infiniti
+   Campus"/"Systems Express 1" vs ledger "Infinity Campus"/"System Express 1").
+   The exact-norm name join left those navs unpickable (Earth false-dried at 20/38
+   with 5 reachable navs unvisited). Driver: one-to-one best-first difflib join
+   (ratio >= 0.84) between live-only and ledger-only names.
+5. Corridor-scored relocation ping-pongs (farthest anchor from A is B, from B is A):
+   anchors are used once per dry spell.
+6. Ledger nodes absent from the live registry (dataset-only hidden asteroids) can
+   never be visited; they are skipped as "not in live nav registry" -- distinct from
+   blacklisted (engage-dead) and never-in-range skips.

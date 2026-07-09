@@ -130,20 +130,25 @@ void Planet::OutOfRangeTrigger(Player *p, float range)
 
 }
 
+//exploration index methods: same bits-per-word fix as StaticMap::SetEIndex
+//(NavTypeClass.cpp) and Object::SetIndex (ObjectClass.cpp) -- the hardcoded
+//%32 aliased uids 32 apart on LP64, where sizeof(long)*8 == 64.
+static const unsigned int EIDX_BITS_PER_WORD = sizeof(long) * 8;
+
 void Planet::SetEIndex(long *index_array)
 {
-	long *entry = (long*) (index_array + (m_DatabaseUID/(sizeof(long)*8)));
+	long *entry = index_array + (m_DatabaseUID / EIDX_BITS_PER_WORD);
 
 	//now set the specific bit
-	*entry |= (1 << m_DatabaseUID%32);
+	*entry |= (1L << (m_DatabaseUID % EIDX_BITS_PER_WORD));
 }
 
 bool Planet::GetEIndex(long *index_array)
 {
-	long *entry = (long*) (index_array + (m_DatabaseUID/(sizeof(long)*8)));
+	long *entry = index_array + (m_DatabaseUID / EIDX_BITS_PER_WORD);
 
 	//now get the specific bit
-	if (*entry & (1 << m_DatabaseUID%32))
+	if (*entry & (1L << (m_DatabaseUID % EIDX_BITS_PER_WORD)))
 	{
 		return true;
 	}

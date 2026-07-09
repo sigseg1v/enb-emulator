@@ -105,10 +105,22 @@ func TestIT_GalaxyOccupancy(t *testing.T) {
 		t.Skip("no starbases in content DB; cannot test docked remap")
 	}
 	// Pick a real starbase interior->parent pair to exercise the docked remap.
+	// Deterministic (lowest interior id) and never a pair parented to Earth:
+	// map iteration order is random, and Earth has a starbase of its own
+	// (10601 -> 1060), so a random pick occasionally attributed the docked
+	// player to Earth and broke the count=1 assertion below.
+	const earth int64 = 1060
 	var interior, parent int64
 	for k, v := range sb {
-		interior, parent = k, v
-		break
+		if v == earth {
+			continue
+		}
+		if interior == 0 || k < interior {
+			interior, parent = k, v
+		}
+	}
+	if interior == 0 {
+		t.Skip("every starbase parents to Earth; cannot isolate the docked remap")
 	}
 
 	// Two accounts: one in space (sector 1060 Earth), one docked at `interior`.
@@ -118,7 +130,6 @@ func TestIT_GalaxyOccupancy(t *testing.T) {
 	off := seedAccount(t, st, ctx, 42, 1, 0)
 	_ = off
 
-	const earth int64 = 1060
 	mustExec(t, st.user, ctx, `UPDATE avatar_info SET sector = $1 WHERE avatar_id = $2`, earth, inSpace.avatars[0].id)
 	mustExec(t, st.user, ctx, `UPDATE avatar_info SET sector = $1 WHERE avatar_id = $2`, interior, docked.avatars[0].id)
 
@@ -142,8 +153,7 @@ func TestIT_GalaxyOccupancy(t *testing.T) {
 	if got := occ.Counts[itoa(interior)]; parent != interior && got != 0 {
 		t.Errorf("interior id %d should not appear as its own sector: count = %d", interior, got)
 	}
-	// Total counts both online players (not the offline one). If Earth is also
-	// the parent of the docked starbase (unlikely), total could be 2 anyway.
+	// Total counts both online players (not the offline one).
 	if occ.Total < 2 {
 		t.Errorf("total online = %d, want >= 2 (the offline account must be excluded, the two online counted)", occ.Total)
 	}

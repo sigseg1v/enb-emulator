@@ -803,18 +803,23 @@ void Player::LoadExploredNavs(sql_query_c *query)
 		account_result.fetch_row(&account_row);
 		long object_uid = account_row["object_id"];
 		long flags = account_row["explore_flags"];
-		long offset = (object_uid/(sizeof(long)*8));
+		//same bits-per-word fix as StaticMap::SetEIndex (NavTypeClass.cpp):
+		//the word stride and the bit position must both use sizeof(long)*8,
+		//or uids 32 apart alias on LP64. This rebuild MUST match the
+		//Set/GetEIndex layout exactly or loaded bits land in the wrong slot.
+		const unsigned int bits_per_word = sizeof(long) * 8;
+		long offset = (object_uid / bits_per_word);
 		long *explored;
 		long *exposed = (long*) (m_NavsExposed + offset);
-		
+
 		switch (flags)
 		{
 		case EXPLORE_NAV:
 			explored = (long*) (m_NavsExplored + offset);
-			*explored |= (1 << object_uid%32);
+			*explored |= (1L << (object_uid % bits_per_word));
 			//deliberate drop-through - an explored nav must have been exposed
 		case DISCOVER_NAV:
-			*exposed |= (1 << object_uid%32);
+			*exposed |= (1L << (object_uid % bits_per_word));
 			break;
 		}
 	}

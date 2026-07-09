@@ -101,6 +101,22 @@ unsigned xp_ctrl();
 unsigned target_obj();
 unsigned target_ctrl();
 
+// Nav registry: gid-keyed mirror of the client's nav map, fed by read-only hooks
+// on the 0x0099 NAVIGATION / 0x009A NavDelete packet handlers (installed by
+// enable_event_hooks; see game.h::addr::NavPacketProcess). nav_lookup() answers
+// "is this GameID a nav?" plus its signature/visited/navtype/huge -- the ONLY
+// reliable nav discriminator (an entity's class string is just "Decoration").
+// Cleared at world entry (GameIDs are per-sector). Game thread only.
+struct NavInfo {
+    float sig;
+    int navtype;
+    bool visited;
+    bool huge;
+};
+bool nav_lookup(unsigned gid, NavInfo* out);
+int nav_registry_count();
+void nav_registry_clear();
+
 // world_mgr() is the world/player manager M, captured (ECX) from the world-manager
 // initializer (game::addr::WorldMgrInit), which runs once at world entry. M is a
 // session-stable singleton; lua_api uses it for target-action dispatch -- the local

@@ -402,6 +402,97 @@ extern "C" __attribute__((naked)) void hk_TargetFrameRefresh() {
                          "jmp *_real_TargetFrameRefresh_tramp\n\t");
 }
 
+// ---- nav registry capture (0x0099 NAVIGATION / 0x009A NavDelete) ------------
+// See game.h::addr::NavPacketProcess for the full rationale: nav-ness lives in a
+// global gid-keyed map the 0x0099 packet populates, NOT on the entity, so
+// enb.navs() cannot identify a nav by its class string ("Decoration"). We mirror
+// the packets into this fixed registry; lua_api joins it against the live entity
+// snapshot (a row is a nav iff its gid is registered). Both hooks capture ECX
+// (the parsed packet object) read-only and forward untouched -- the exact
+// pattern of hk_TargetFrameRefresh. Reads are raw (no fault guard): the native
+// Process we forward to dereferences the same fields immediately after us, so a
+// bad packet pointer would fault either way. Single-writer, game thread only
+// (packets and the Lua tick both run on the pump thread).
+struct NavRegEntry {
+    unsigned gid;
+    float sig;
+    int navtype;
+    unsigned char visited;
+    unsigned char huge;
+};
+static const int kNavRegMax = 512; // sectors carry ~25-50 navs; headroom is cheap
+static NavRegEntry g_nav_reg[kNavRegMax];
+static int g_nav_reg_n = 0;
+extern "C" {
+void* real_NavPacket_tramp = nullptr;
+void* real_NavDelete_tramp = nullptr;
+void notify_nav_packet(unsigned pkt) {
+    NavRegEntry e;
+    e.gid = *(unsigned*)(pkt + 0xc);
+    e.sig = *(float*)(pkt + 0x10);
+    e.visited = *(unsigned char*)(pkt + 0x14);
+    e.navtype = *(int*)(pkt + 0x18);
+    e.huge = *(unsigned char*)(pkt + 0x1c);
+    for (int i = 0; i < g_nav_reg_n; ++i) {
+        if (g_nav_reg[i].gid == e.gid) {
+            g_nav_reg[i] = e; // re-send updates in place (e.g. visited flips to 1)
+            return;
+        }
+    }
+    if (g_nav_reg_n < kNavRegMax)
+        g_nav_reg[g_nav_reg_n++] = e;
+    else
+        logf("nav registry FULL (%d) -- dropped gid %u", kNavRegMax, e.gid);
+}
+void notify_nav_delete(unsigned pkt) {
+    unsigned gid = *(unsigned*)(pkt + 0xc);
+    for (int i = 0; i < g_nav_reg_n; ++i) {
+        if (g_nav_reg[i].gid == gid) {
+            g_nav_reg[i] = g_nav_reg[--g_nav_reg_n]; // swap-remove (order is irrelevant)
+            return;
+        }
+    }
+}
+}
+extern "C" __attribute__((naked)) void hk_NavPacket() {
+    // __thiscall, no stack args: ECX = the parsed 0x0099 packet. Capture read-only.
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl %ecx\n\t"
+                         "call _notify_nav_packet\n\t"
+                         "addl $4, %esp\n\t"
+                         "popal\n\t"
+                         "jmp *_real_NavPacket_tramp\n\t");
+}
+extern "C" __attribute__((naked)) void hk_NavDelete() {
+    // __thiscall, no stack args: ECX = the parsed 0x009A packet. Capture read-only.
+    __asm__ __volatile__("pushal\n\t"
+                         "pushl %ecx\n\t"
+                         "call _notify_nav_delete\n\t"
+                         "addl $4, %esp\n\t"
+                         "popal\n\t"
+                         "jmp *_real_NavDelete_tramp\n\t");
+}
+bool nav_lookup(unsigned gid, NavInfo* out) {
+    for (int i = 0; i < g_nav_reg_n; ++i) {
+        if (g_nav_reg[i].gid == gid) {
+            if (out) {
+                out->sig = g_nav_reg[i].sig;
+                out->navtype = g_nav_reg[i].navtype;
+                out->visited = g_nav_reg[i].visited != 0;
+                out->huge = g_nav_reg[i].huge != 0;
+            }
+            return true;
+        }
+    }
+    return false;
+}
+int nav_registry_count() {
+    return g_nav_reg_n;
+}
+void nav_registry_clear() {
+    g_nav_reg_n = 0;
+}
+
 // ---- world/player manager capture (world-manager initializer) ---------------
 // game.h::addr::WorldMgrInit (0x00741180) is the WORLD/PLAYER manager M's init
 // routine, __fastcall(ECX = M). It runs once at world entry (zone-in). M carries the
@@ -416,6 +507,13 @@ static volatile unsigned g_world_mgr = 0; // ECX (M) of the world-manager initia
 extern "C" {
 void* real_WorldMgrInit_tramp = nullptr;
 void notify_world_mgr(unsigned m) {
+    // World entry == sector entry: reset the nav registry here. GameIDs are
+    // per-sector, so a stale entry could tag an unrelated object in the new
+    // sector as a nav. The new sector's 0x0099s only flow once the world
+    // manager is up, so this clear cannot race them.
+    if (g_nav_reg_n)
+        logf("nav registry cleared at world entry (%d entries)", g_nav_reg_n);
+    g_nav_reg_n = 0;
     g_world_mgr = m;
 }
 }
@@ -878,6 +976,16 @@ bool enable_event_hooks() {
         logf("hook ShellApply failed");
         ok = false;
     }
+    if (MH_CreateHook((void*)game::addr::NavPacketProcess, (void*)&hk_NavPacket,
+                      &real_NavPacket_tramp) != MH_OK) {
+        logf("hook NavPacketProcess failed");
+        ok = false;
+    }
+    if (MH_CreateHook((void*)game::addr::NavDeletePacketProcess, (void*)&hk_NavDelete,
+                      &real_NavDelete_tramp) != MH_OK) {
+        logf("hook NavDeletePacketProcess failed");
+        ok = false;
+    }
     MH_EnableHook((void*)game::addr::SkillLifecycle);
     MH_EnableHook((void*)game::addr::ChatChannel);
     MH_EnableHook((void*)game::addr::ChatSend);
@@ -896,6 +1004,8 @@ bool enable_event_hooks() {
     MH_EnableHook((void*)game::addr::PdaCtor);
     MH_EnableHook((void*)game::addr::PdaSwitch);
     MH_EnableHook((void*)game::addr::ShellApply);
+    MH_EnableHook((void*)game::addr::NavPacketProcess);
+    MH_EnableHook((void*)game::addr::NavDeletePacketProcess);
     g_event_hooks_on = ok;
     logf("event hooks %s", ok ? "enabled" : "partially enabled");
     return ok;
@@ -920,6 +1030,8 @@ void disable_event_hooks() {
     MH_DisableHook((void*)game::addr::PdaCtor);
     MH_DisableHook((void*)game::addr::PdaSwitch);
     MH_DisableHook((void*)game::addr::ShellApply);
+    MH_DisableHook((void*)game::addr::NavPacketProcess);
+    MH_DisableHook((void*)game::addr::NavDeletePacketProcess);
     g_event_hooks_on = false;
 }
 

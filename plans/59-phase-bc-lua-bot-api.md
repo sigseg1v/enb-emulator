@@ -50,22 +50,12 @@ Legend: [x] done+built, [~] in progress, [ ] todo, [!] blocked.
       works on ANY locatable object, so it is NOT the unvalidated flat player pos offset.
 - [x] `enb.navs()`         -- enb.objects() filtered to nav-ish class tokens, dist-sorted.
       See client-verification CV-BOT-NAVS below.
-- [!] `enb.select_nav(dir)` -- BLOCKED/NEEDED. The earlier claim that request_target(gid)
-      covers nav selection so select_nav "would be dead-code duplication" is WRONG for the
-      survey use case, and this was proven live (2026-07-05): enb.navs() walks the IN-RANGE
-      entity hash and request_target(gid) -> entity_by_gid(gid) only resolves an in-range
-      contact. Parked at the Earth gate in Luna, enb.navs() returns just the 2 gates; the
-      ~22 cluster navs are out of scanner range, so they have no live entity and CANNOT be
-      request_target'd -- yet crossing to them is the whole survey. A player reaches them
-      with the W/D/C nav-target keybinds, which cycle the RADAR CONTROLLER's selected nav
-      over the FULL NavigationList (all navs regardless of range); WarpPathBuild builds from
-      that radar selection. So select_nav must reproduce those radar nav-cycle handlers
-      (nearest / next-farther / next-closer), NOT wrap request_target. The radar `this` is
-      already statically resolved + structurally validated (looks_like_radar), so calling a
-      METHOD on it is far safer than the earlier guessed-ECX hang. Decomp mine for the
-      handler addresses + call convention + the radar's selected-nav offset is IN PROGRESS.
-      The NavigationList head is NOT M+0x1138 (that u32 is the scalar navId, observed 0x1f);
-      the full list hangs off the radar controller.
+- [x] `enb.select_nav(dir)` -- SUPERSEDED, not needed. The out-of-range gap that made it
+      look required is closed by the 0x0099 nav-registry mirror join in enb.navs()
+      (commit c9a8362a): the registry lists EVERY nav in the sector with gid + live range
+      regardless of scanner range, and request_target(gid) + enb.warp() verifiably engages
+      legs to far registry navs (live 2026-07-08: repeated 98k-358k legs, ~4500 u/s,
+      byte-identical survey path). The radar nav-cycle reproduction is dead scope.
 
 ### New -- native (mined address/opcode; needs live validation)
 - [x] `enb.gate()`     -- COMPOSABLE after all: the gate button is avatar-command 0x12
@@ -187,15 +177,32 @@ plans/29:
 
 ## Skill rewrite (after the API lands + is live-validated)
 - [~] `explore-sector`: replace W/D/C key enum + warp-orb click + map OCR with
-      enb.navs()/enb.select_nav()/enb.warp()/enb.dist(); keep the ledger/logging.
-      WIP driver written: scripts/drive_lua.py -- fully headless per-sector survey over the
-      enb.* channel (identity via enb.navs() names -> navdata.identify(); gate-cross via
-      enb.sector() id flip; arrival via nav.dist <= VISIT_K; select+warp via request_target
-      + enb.warp(); gate via request_target + enb.gate()). Reuses state.py ledger +
-      logaction.sh, so completion accounting is identical. Read-only path smoke-tested live
-      (channel/nav-parse/identify all green on Luna). NOT yet committed / wired: it can only
-      warp to IN-RANGE navs, so it needs enb.select_nav() (above) to reach the out-of-range
-      cluster and actually cross a sparse sector. Lands + gets wired once select_nav is in.
+      enb.navs()/enb.warp()/enb.dist(); keep the ledger/logging.
+      Driver WORKS END-TO-END: scripts/drive_lua.py -- fully headless per-sector survey over
+      the enb.* channel (identity via enb.sector() id -> docs/sectors/sector_ids.json, nav
+      names as fallback; arrival via nav.dist <= VISIT_K; select+warp via request_target +
+      enb.warp(); gate via request_target + enb.gate(); undock via enb.undock()). Reuses
+      state.py ledger + logaction.sh, so completion accounting is identical. Validated live
+      2026-07-08 (dev stack): login -> undock -> full Earth survey (25/38 visited, 13 skipped
+      with per-class reasons) -> gate -> ABA survey, multi-sector run. Hard-won driver rules
+      (all live-verified): warp is buoy-graph pathfinding, so a nav with no in-range graph
+      neighbour NEVER engages (BLACKLIST after 2 verified engage-failure rounds + persisted
+      ledger skip); stations have a no-warp standoff ring ~9.5k > VISIT_K (ARRIVE_SLOP
+      engage-refusal-is-arrival); enb.warp() is a TOGGLE so stall re-engage is speed-gated
+      (multi-hop legs legitimately diverge before closing); live-DB nav names differ from
+      ledger dataset spellings (Infiniti/Infinity, Systems/System Express) -- one-to-one
+      difflib >= 0.84 name-join, else real navs are unpickable and the sector false-dries;
+      relocate anchors are used once per dry spell (corridor-scored farthest from A is B and
+      from B is A -- unbounded ping-pong otherwise); post-login enb.state() reads "unknown"
+      for seconds (settle-wait before the undock decision); sectors carry DUPLICATE nav
+      names (ABA has 3 distinct 'Mining Station' objects; Saturn 4 'Abandoned Pathway',
+      8 sectors total in the dataset), so ledger visits are gid-deduped per object
+      (drive_lua MARKED_GIDS + state.py visit-with-gid stamps the consumed row; skip is a
+      name-level concession resolving all sibling rows) -- name-keyed first-match visiting
+      wedged ABA at 28/41 re-warping the nearest already-visited duplicate in place.
+      Remaining to wire: run-sector.sh still calls drive.py (its EXIT_HANG/EXIT_STUCK
+      machinery is screen-driver-shaped); SKILL.md still says SCREEN-READ ONLY (owner-play
+      rule) -- needs an explicit dev-stack-only drive_lua mode carve-out.
 - [ ] `login-to-client`: already mostly Lua (in-game truth via enb channel); replace the
       remaining coordinate clicks where a native exists.
 - [ ] Audit other skills (undock.sh, run-sector.sh, hangcheck.sh) for OCR/click paths that
@@ -257,3 +264,32 @@ plans/29:
   earlier "select_nav is dead-code duplication" claim (it was wrong), marked enb.select_nav
   [!] as the true blocker, and launched a decomp mine for the W/D/C radar nav-cycle handlers.
   Driver is written + read-only-smoke-tested but held uncommitted until select_nav lands.
+- 2026-07-08: Two driver-loop fixes from the 3-sector live demo (Earth -> ABA -> Luna).
+  (1) skipped-is-resolved (4cec4ea5): state.py `remaining` listed skipped nodes, so
+  re-entering a completed sector re-offered its conceded planet and burned ~3 min of
+  engage failures before the blacklist re-skipped it; `remaining` now excludes skipped,
+  so a completed sector instant-resolves on re-entry. (2) gate destination resolution
+  (25cb5860): choose_gate took the nearest gate, which after an instant resolve is
+  always the ARRIVAL gate -- the run ping-ponged Earth <-> ABA and stopped. Gates name
+  their destination ("Sector Gate to Asteroid Belt Alpha"); drive_lua now resolves that
+  suffix to a sid (docs/sectors/sector-ids.md + sector_ids.json) and filters gates whose
+  destination is already surveyed this run or a completed ledger. Live-validated: resumed
+  run instant-resolved Earth (38/38), gated Earth -> Luna, surveyed Luna fresh.
+- 2026-07-08 (2): owner challenged the "warp never engages (no nav path)" skip verdicts --
+  correctly. Live re-test proved both Luna skips were ARRIVALS the driver misread:
+  (a) some navs DE-REGISTER from enb.navs() once the ship closes below ~15k (Luna's
+  shooting ranges), so the registry range poll goes blind exactly at arrival and the
+  subsequent engage refusal (<2k floor: already on top of it) was read as a dead target;
+  (b) planets/moons halt the approach at their body radius (Luna: ~17.9k), outside the
+  12k ARRIVE_SLOP. Fixes: target_dist() (enb.request_target + enb.dist object-level
+  readout, survives de-registration) as the arrival fallback in warp_to's refusal +
+  blind-stall paths; BODY_SLOP (30k) for planet/moon/sun ledger types; is_gate no longer
+  substring-matches "gate" (sent the driver into enb.gate() on plain nav "Nav Earth
+  Gate"). The buoy-graph "no path" theory in the comments was wrong and is rewritten --
+  blacklist is a wedge breaker, not physics. Live-validated: un-skipped both Luna nodes,
+  re-ran -- visit Luna (d=18241, at no-warp standoff), visit Basic Shooting Range Bravo
+  (d=329), Luna 22/24 + 2 genuinely-absent NPCs, then gated via Gate to Alpha Centauri
+  (real gate, fresh destination). Timing truth from actions.log: ABA real survey pace was
+  ~31 min (28 navs in 17 min + 7 in 14); the 2h03m ledger time was 86 min of the
+  dup-name wedge spinning (fixed earlier same day). Earth active time ~42 min across 3
+  debug attempts. Luna clean run: 33.5 min.

@@ -21,7 +21,9 @@
 #   suggest <Sector> <x> <y>      -- rank unvisited nodes by distance from (x,y):
 #                                    farthest first == best "long path" warp targets
 #   reveal <Sector> "<name>"      -- mark a hidden node's "?" as now visible
-#   visit  <Sector> "<name>"      -- mark a node visited (also reveals it)
+#   visit  <Sector> "<name>" [gid]-- mark a node visited (also reveals it); the
+#                                    gid disambiguates duplicate-name rows and
+#                                    makes re-visits idempotent
 #   skip   <Sector> "<name>" [why]-- mark a node UNREACHABLE (never popped on the
 #                                    map even after targeting/approaching). Counts
 #                                    as resolved so the sector can complete.
@@ -99,19 +101,39 @@ def find_node(st, name):
     sys.exit(f"{st['sector']}: no node matching '{name}'")
 
 
+def find_nodes(st, name):
+    """All nodes matching the name. Sectors legitimately carry DUPLICATE nav
+    names (ABA has three distinct 'Mining Station' nodes; Saturn four
+    'Abandoned Pathway' rows), so visit/skip must operate per-row, not
+    first-match -- first-match re-marked the same visited row forever while
+    its duplicate siblings starved (a survey wedged ABA at 28/41 on this)."""
+    key = navdata.norm(name)
+    hits = [n for n in st["nodes"] if navdata.norm(n["name"]) == key]
+    if not hits:
+        sys.exit(f"{st['sector']}: no node matching '{name}'")
+    return hits
+
+
 def cmd_init(args):
     sector = args[0]
     nodes_src = navdata.load(sector)
+    # duplicate names are distinct rows: carry prior progress per
+    # (name, position) so a re-init cannot smear one duplicate's visited
+    # flag across its siblings; the name-only map is the fallback for a
+    # node whose coords changed in the jsonl.
     prior = {}
+    prior_by_name = {}
     if os.path.exists(path(sector)):
         with open(path(sector)) as f:
             for n in json.load(f).get("nodes", []):
-                prior[navdata.norm(n["name"])] = n
+                k = navdata.norm(n["name"])
+                prior[(k, n["x"], n["y"], n["z"])] = n
+                prior_by_name.setdefault(k, n)
     nodes = []
     for s in nodes_src:
         k = navdata.norm(s["name"])
-        p = prior.get(k, {})
-        nodes.append({
+        p = prior.get((k, s["x"], s["y"], s["z"])) or prior_by_name.get(k, {})
+        node = {
             "name": s["name"],
             "type": s["type"],
             "hidden": s["hidden"],
@@ -123,7 +145,10 @@ def cmd_init(args):
             # unreachable: targeted/approached but never popped on the map.
             "skipped": p.get("skipped", False),
             "skip_reason": p.get("skip_reason", ""),
-        })
+        }
+        if "visited_gid" in p:
+            node["visited_gid"] = p["visited_gid"]
+        nodes.append(node)
     # danger zones (places we were wrecked) are permanent -- never wipe them.
     # `started` is the first-touch timestamp: preserve it across re-inits so a
     # resume does not reset the clock; only stamp it the very first time.
@@ -183,9 +208,13 @@ def cmd_status(args):
 
 
 def cmd_remaining(args):
+    # A skipped node is RESOLVED, not remaining: re-entering a surveyed sector
+    # must not re-offer its conceded nodes -- the persisted blacklist skip
+    # exists precisely so a later visit does not re-burn minutes of verified
+    # engage failures on the same unreachable planet.
     st = read(args[0])
     for n in st["nodes"]:
-        if not n["visited"]:
+        if not n["visited"] and not n.get("skipped"):
             print(f"{1 if n['hidden'] else 0}\t{n['x']}\t{n['y']}\t{n['z']}\t{n['name']}")
 
 
@@ -213,19 +242,37 @@ def cmd_reveal(args):
 
 
 def cmd_visit(args):
-    _set(args, revealed=True, visited=True)
+    # visit <S> "<name>" [gid] -- mark ONE node of this name visited. With
+    # duplicate names the optional live-object gid picks the row: a row
+    # already stamped with this gid makes the call an idempotent no-op (the
+    # driver re-marks in-range navs every poll and across restarts);
+    # otherwise the first unvisited row is consumed and stamped.
+    st = read(args[0])
+    hits = find_nodes(st, args[1])
+    gid = int(args[2]) if len(args) > 2 else None
+    if gid is not None and any(n.get("visited_gid") == gid for n in hits):
+        _print_status(st)
+        return
+    n = next((h for h in hits if not h["visited"]), hits[0])
+    n.update(revealed=True, visited=True)
+    if gid is not None:
+        n["visited_gid"] = gid
+    write(st)
+    _print_status(st)
 
 
 def cmd_skip(args):
     reason = args[2] if len(args) > 2 else "unreachable (never popped on the map)"
     # Never mark a nav we already reached as unreachable -- a visited nav is done,
-    # not skipped. Guards the ledger against the visited+skipped double-flag.
+    # not skipped. With duplicate names a skip is a NAME-level concession
+    # ("nothing by this name is reachable now"), so it resolves every
+    # remaining row of the name at once -- the concede loop issues one skip
+    # per name, and leaving a sibling duplicate unresolved would make
+    # `complete` refuse.
     st = read(args[0])
-    n = find_node(st, args[1])
-    if n.get("visited"):
-        _print_status(st)
-        return
-    n.update(skipped=True, skip_reason=reason)
+    for n in find_nodes(st, args[1]):
+        if not n.get("visited"):
+            n.update(skipped=True, skip_reason=reason)
     write(st)
     _print_status(st)
 

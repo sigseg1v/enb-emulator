@@ -338,6 +338,26 @@ constexpr int vec_end = 0x0c;       // vector control block -> end pointer
 constexpr int getdata_vtoff = 0x28; // m0->vtable[+0x28]: the getter WarpPathBuild invokes
 } // namespace warp
 
+// ---- nav registry (0x0099 NAVIGATION / 0x009A NavDelete packet capture) -----
+// "Is this object a NAV?" does not live on the entity: the client keeps a global
+// GameID-keyed map of small nav records, populated by the 0x0099 NAVIGATION
+// packet (one per HAS_NAV static object -- the proxy fabricates it from the
+// server's static-create, see proxy/UDPProxyToClient_linux.cpp) and pruned by
+// 0x009A NavDelete. The entity's own class string is just "Decoration" for most
+// navs (only stargates say "Stargate"), so class-name matching CANNOT identify
+// navs -- it silently dropped every Decoration-class nav from enb.navs(). We
+// hook the two packet Process routines (__thiscall, ECX = the parsed packet
+// object; both return 1 and take no stack args) READ-ONLY and mirror
+// gid -> {signature, visited, navtype, huge} into our own registry, which
+// enb.navs() consults. Packet field layout (the exact fields the native handler
+// copies into its nav record): +0xc gid u32, +0x10 signature f32, +0x14 visited
+// u8, +0x18 navtype i32, +0x1c huge u8 -- byte-identical to the proxy's 0x0099
+// emitter. The registry is cleared at world entry (WorldMgrInit capture):
+// GameIDs are per-sector, so a stale entry from the previous sector could tag
+// an unrelated object in the next one.
+constexpr uintptr_t NavPacketProcess = 0x0073a600;       // 0x0099 NAVIGATION Process
+constexpr uintptr_t NavDeletePacketProcess = 0x0073a710; // 0x009A NavDelete Process
+
 // ---- front-end login flow (EULA / login / character select) -----------------
 // The pre-game screens are driven by a single LoginTask object and its state
 // machine. We capture the LoginTask `this` (ECX) read-only from the per-frame

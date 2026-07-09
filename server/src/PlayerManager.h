@@ -38,6 +38,26 @@ class GMemoryHandler;
 class Object;
 class Player;
 
+// Idle / liveness tuning (read once from env on first use, cached).
+//
+// PlayerIdleReapMs: milliseconds since a player's LastAccessTime before the idle
+//   reaper drops them. The client's Net7Proxy emits a keepalive (opcode 3005)
+//   every ~30s independent of player input, so a live-but-AFK character normally
+//   never trips this -- it only fires when keepalives genuinely stop arriving.
+//   Raised above the old hard-coded 2 min for multibox: an OS-backgrounded client
+//   has a throttled message pump, so keepalive / stage-ack delivery can lag and a
+//   parked alt would otherwise be reaped and forced to relog. Env override:
+//   NET7_PLAYER_IDLE_REAP_MS.
+unsigned long PlayerIdleReapMs();
+// LoginAckTimeoutMs: milliseconds the (re)login / zoning handshake waits for the
+//   client to ack the current login stage before assuming it is dead and dropping
+//   it. Reset on every stage ack; the stage is re-sent every ~2s meanwhile, so a
+//   client that regains foreground catches up on the next resend. Raised above the
+//   old hard-coded ~10s because a backgrounded multibox client throttled by the OS
+//   routinely missed that window during login / gate / dock / undock and had to
+//   relog. Env override: NET7_LOGIN_ACK_TIMEOUT_MS.
+unsigned long LoginAckTimeoutMs();
+
 typedef std::map<unsigned long, unsigned long> PlayerIDMap;
 
 struct Group

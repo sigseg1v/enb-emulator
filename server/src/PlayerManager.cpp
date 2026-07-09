@@ -30,6 +30,44 @@
 #include "ServerManager.h"
 #include "StaticData.h"
 #include "SaveManager.h"   // Phase AM: EmitExternalStatusEvent
+#include <cstdlib>          // getenv / atol for the idle-tuning env overrides
+
+// Read a positive-millisecond tuning value from an env var, falling back to a
+// default when unset / blank / unparseable. Zero or negative is rejected (it
+// would reap instantly) and also falls back. Mirrors ServerManager's idle-tuning
+// reader so both liveness knobs behave the same.
+static unsigned long ReadPositiveMsEnv(const char *name, unsigned long fallback)
+{
+	const char *v = getenv(name);
+	if (!v || !*v)
+		return fallback;
+	long parsed = atol(v);
+	if (parsed <= 0)
+	{
+		LogMessage("%s=\"%s\" is not a positive integer; using default %lu\n",
+			name, v, fallback);
+		return fallback;
+	}
+	return (unsigned long) parsed;
+}
+
+// Old hard-coded value was 2 min; raised to 5 to give an OS-backgrounded multibox
+// alt (throttled message pump -> laggy keepalive delivery) slack before the reaper
+// drops it. Live-but-AFK still never trips this while the 30s proxy keepalive flows.
+unsigned long PlayerIdleReapMs()
+{
+	static unsigned long cached = ReadPositiveMsEnv("NET7_PLAYER_IDLE_REAP_MS", 300000);
+	return cached;
+}
+
+// Old hard-coded value was ~10s (100 login-thread passes at ~100ms each); raised to
+// 90s so a backgrounded multibox client throttled during a login / gate / dock /
+// undock handshake is not dropped before its message pump gets a slice to ack.
+unsigned long LoginAckTimeoutMs()
+{
+	static unsigned long cached = ReadPositiveMsEnv("NET7_LOGIN_ACK_TIMEOUT_MS", 90000);
+	return cached;
+}
 
 // Entry point handed to pthread_create for the per-player login loop.
 // (RunMovementThread is a per-tick helper called from elsewhere, not a
@@ -501,7 +539,7 @@ void PlayerManager::RunLoginThread()
 		{
 			if (p && p->GetLoginStage() != LAST_LOGIN_STAGE)
 			{
-				if (p->IsToBeRemoved() || (p->LastAccessTime() + 2*60000) < current_tick)
+				if (p->IsToBeRemoved() || (p->LastAccessTime() + PlayerIdleReapMs()) < current_tick)
 				{
 					DropPlayerFromGalaxy(p);
 				}
@@ -619,7 +657,7 @@ void PlayerManager::SendUDPOpcodes()
 		//Handle player removal here 
 		if (p)
 		{
-			if (p->IsToBeRemoved() || (p->LastAccessTime() + 2*60000) < current_tick)
+			if (p->IsToBeRemoved() || (p->LastAccessTime() + PlayerIdleReapMs()) < current_tick)
 			{
 				DropPlayerFromGalaxy(p);
 				p->SendPacketCache();
@@ -640,7 +678,7 @@ void PlayerManager::SendUDPPlayerOpcodes(Player *p)
 	//Handle player removal here 
 	if (p && IS_PLAYER(p->GameID()))
 	{
-		if (p->IsToBeRemoved() || (p->LastAccessTime() + 2*60000) < current_tick)
+		if (p->IsToBeRemoved() || (p->LastAccessTime() + PlayerIdleReapMs()) < current_tick)
 		{
 			DropPlayerFromGalaxy(p);
 			p->SendPacketCache();
