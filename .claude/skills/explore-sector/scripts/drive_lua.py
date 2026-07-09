@@ -298,46 +298,66 @@ def lua_bool(call):
 
 
 # ---- game reads -------------------------------------------------------------
-NAV_DUMP = (
-    "local n=enb.navs(); local t={}; "
-    "for _,v in ipairs(n) do "
-    "t[#t+1]=(v.gid or 0)..'\\31'..(v.name or '')..'\\31'.."
-    "string.format('%.1f',v.dist or -1)..'\\31'..(v.class or '') end; "
-    "return table.concat(t,'\\30')"
-)
+# The enbmod cmd/log channel truncates each reply line at 2048 bytes. A full
+# nav dump for a busy belt sector is ~3KB / 77 records, so a single-string dump
+# silently loses everything past record ~53 -- and the lost tail is the DISTANT
+# navs, i.e. exactly the onward/exit GATES choose_gate needs. So page the dump:
+# snapshot enb.navs() into a Lua global once (consistent view), then read fixed-
+# size chunks that each stay well under the 2KB cap.
+NAV_PAGE = 24   # records/page; ~40 B each => ~1KB, safely under the 2048 B line cap
+
+
+def _nav_page_expr(off):
+    snap = "_ndump=enb.navs() or {}; " if off == 0 else ""
+    return (
+        snap + "local t={}; "
+        f"for i={off + 1},math.min(#_ndump,{off + NAV_PAGE}) do local v=_ndump[i]; "
+        "t[#t+1]=(v.gid or 0)..'\\31'..(v.name or '')..'\\31'.."
+        "string.format('%.1f',v.dist or -1)..'\\31'..(v.class or '') end; "
+        "return table.concat(t,'\\30')"
+    )
 
 
 def get_navs():
-    """Live nav list -> [{gid, name, dist(or None), cls}]. dist None == no range read."""
-    r = lua(NAV_DUMP)
-    if r is None or r == "":
-        return []
+    """Live nav list -> [{gid, name, dist(or None), cls}]. dist None == no range
+    read. Paged around the 2KB channel-line cap (see NAV_PAGE): page 0 snapshots
+    the list into a Lua global, later pages read that same snapshot so the view is
+    consistent even though each page is a separate channel round-trip."""
     out = []
-    for rec in r.split(RS):
-        parts = rec.split(US)
-        if len(parts) < 4:
-            continue
-        gid, name, dist, cls = parts[0], parts[1], parts[2], parts[3]
-        try:
-            gid = int(gid)
-        except ValueError:
-            continue
-        try:
-            d = float(dist)
-            d = None if d < 0 else d
-        except ValueError:
-            d = None
-        out.append({"gid": gid, "name": name, "dist": d, "cls": cls})
-        # Remember every gate the instant it enters range, with its nearest
-        # observed distance, so choose_gate can still target one that has since
-        # left range by the sweep's end (see GATES_SEEN).
-        if is_gate(name, cls):
-            key = navdata.norm(name)
-            prev = GATES_SEEN.get(key)
-            best = d if d is not None else (prev or {}).get("dist")
-            if prev is not None and prev.get("dist") is not None and d is not None:
-                best = min(prev["dist"], d)
-            GATES_SEEN[key] = {"gid": gid, "name": name, "dist": best, "cls": cls}
+    off = 0
+    while off < NAV_PAGE * 60:          # hard bound (1440 navs) -- no runaway loop
+        r = lua(_nav_page_expr(off))
+        if not r:                       # None (timeout) or "" (past the end)
+            break
+        recs = r.split(RS)
+        for rec in recs:
+            parts = rec.split(US)
+            if len(parts) < 4:
+                continue
+            gid, name, dist, cls = parts[0], parts[1], parts[2], parts[3]
+            try:
+                gid = int(gid)
+            except ValueError:
+                continue
+            try:
+                d = float(dist)
+                d = None if d < 0 else d
+            except ValueError:
+                d = None
+            out.append({"gid": gid, "name": name, "dist": d, "cls": cls})
+            # Remember every gate the instant it enters range, with its nearest
+            # observed distance, so choose_gate can still target one that has since
+            # left range by the sweep's end (see GATES_SEEN).
+            if is_gate(name, cls):
+                key = navdata.norm(name)
+                prev = GATES_SEEN.get(key)
+                best = d if d is not None else (prev or {}).get("dist")
+                if prev is not None and prev.get("dist") is not None and d is not None:
+                    best = min(prev["dist"], d)
+                GATES_SEEN[key] = {"gid": gid, "name": name, "dist": best, "cls": cls}
+        if len(recs) < NAV_PAGE:        # short page => that was the last one
+            break
+        off += NAV_PAGE
     return out
 
 
@@ -366,6 +386,28 @@ def settle_navs():
         else:
             stable = 0
         prev = c
+        time.sleep(POLL_SLEEP)
+        waited += POLL_SLEEP
+    return navs
+
+
+def settle_well_gates(sector, visited_sids, tried_edges, sid):
+    """A well sector is not surveyed, so choose_gate gets only what one nav read
+    happened to catch -- and a big belt sector renders in bursts (53 -> 77 navs),
+    so the distant EXIT gates (98k-205k units out) populate AFTER settle_navs's
+    2-stable-read cutoff. A fresh process then sees only the nearby accelerator
+    spheres, excludes them (not routable), and false-concedes 'no gate out'.
+
+    Poll for the full render window, accumulating gates into GATES_SEEN (a side
+    effect of get_navs), so choose_gate sees the far exit gate too. Early-exit the
+    instant a routable non-well onward gate is in range. GATES_SEEN is cleared
+    first: this is a new sector and the prior sector's gate memory must not leak in."""
+    GATES_SEEN.clear()
+    navs, waited = [], 0.0
+    while waited < NAV_SETTLE_S + 30:
+        navs = get_navs()
+        if choose_gate(sector, navs, visited_sids, tried_edges, sid) is not None:
+            break
         time.sleep(POLL_SLEEP)
         waited += POLL_SLEEP
     return navs
@@ -889,6 +931,18 @@ def gate_dest_sid(name):
     return DEST_SIDS.get(navdata.norm(name[low.index(" to ") + 4:]))
 
 
+def routable_gate(name):
+    """A gate we can actually CROSS to another sector. Every real transit gate in
+    the dataset is named 'Gate to X' / 'Sector Gate to X' / a 'Wormhole'; an
+    in-sector device (Accelerator Sphere, ...) is picked up by is_gate only
+    because its object CLASS matches 'gate', yet warping to it never flips the
+    sector. Routing via one wastes a warp and, in a gravity-well sector, sends the
+    ship toward the well (warp terminates mid-flight, can strand it). Route only
+    via names that read as an inter-sector gate."""
+    n = name.lower()
+    return " to " in n or "wormhole" in n
+
+
 def gate_into_well(name):
     """True when this gate's DESTINATION is a known gravity-well sector. Warp
     terminates mid-flight in a well sector so we cannot auto-survey it and, worse,
@@ -939,7 +993,9 @@ def choose_gate(sector, navs, visited_sids, tried_edges, sid):
     # the ship). Well sectors are deferred to a manual pass; the reverse gate
     # OUT of a well is not a well destination, so escaping stays possible.
     gates = [g for g in gates
-             if (sid, g["gid"]) not in tried_edges and not gate_into_well(g["name"])]
+             if (sid, g["gid"]) not in tried_edges
+             and routable_gate(g["name"])
+             and not gate_into_well(g["name"])]
     if not gates:
         return None
 
@@ -1278,6 +1334,9 @@ def main():
             if well:
                 logaction(sector, "skip-well",
                           "gravity well -- deferred to manual pass")
+                # Not surveyed, so let the distant exit gates finish rendering
+                # (a belt sector loads in bursts) before choose_gate runs.
+                navs = settle_well_gates(sector, visited_sids, tried_edges, sid)
             elif not transit:
                 pcap_ensure(sector)   # per-sector capture spanning the entry handshake
                 state("init", sector)
