@@ -38,8 +38,12 @@ things the live/attach case needs that the plain explore-sector entry does not:
   standalone injector, `inject.exe --proc client.exe`), OR nothing running yet and a
   working `LaunchNet7.exe` + `.env` credentials so recovery can bring one up.
 - **`Net7Proxy.exe`** running under WINE for a LIVE run (or the launcher's Play will
-  start it). If instead the **docker `net7proxy`** is up, the entry auto-detects a
-  LOCAL run and disables packet capture (never pcap a local Freya run).
+  start it). This skill is **LIVE by construction** -- it always drives the client
+  through the WINE `Net7Proxy.exe`, so capture (`ENB_PCAP`) stays as configured. A
+  docker `net7proxy` idling is only a capture *hazard* (it can muddy the pcap); the
+  entry **warns** and asks you to stop the dev stack, but does not silently flip to
+  LOCAL / disable capture (that false-fired on a cold start, since the WINE proxy
+  does not exist until Play).
 - A filled-in **`.env`** (see below). It is gitignored.
 
 ## Configure (.env)
@@ -100,8 +104,10 @@ clears. Continuously silent past the threshold + a failed liveness probe == wedg
 - **Gravity-well refusal**, **hybrid target order**, **completion = our ledger**,
   and the persistent ledger/action-log accounting are all inherited verbatim from
   the survey engine -- see [`explore-sector`](../explore-sector/SKILL.md).
-- **Capture is LIVE-only.** `ENB_PCAP=1` is honoured only for a WINE-proxy LIVE run;
-  a docker `net7proxy` forces `ENB_PCAP=0`.
+- **Capture is LIVE-only, and this skill is always LIVE.** `ENB_PCAP=1` is honoured
+  as configured (the survey always drives the real WINE `Net7Proxy.exe`). A docker
+  `net7proxy` is only a warned-about capture hazard -- stop the dev stack for a clean
+  pcap; the entry never auto-disables capture.
 
 ## Related skills
 

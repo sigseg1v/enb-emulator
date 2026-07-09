@@ -1083,18 +1083,24 @@ def ensure_in_space():
     """Undock if the character loaded docked. enb.undock() sends the client's own
     STARBASE_REQUEST(action=1) through StationExit; the server launches us. No-op
     (returns false) when already in space.
-    Right after login enb.state() reads "unknown" for a few seconds before it
-    settles to station/space -- checking once at that instant skips the undock,
-    and the driver then reads the docked sub-sector id (1060 -> 10601) with an
-    empty nav registry and stops (attempt 9). Wait for a settled state first."""
-    st = None
+
+    The authoritative "am I actually flying" signal is enb.inspace(), NOT enb.state().
+    Right after login enb.state() reads "unknown" for a few seconds and then flickers
+    "space" WHILE STILL DOCKED (inspace=false) before it settles to "station" -- the
+    old check keyed on state=="space" and returned early on that transient, skipping
+    the undock. The driver then read the docked sub-sector id (2005 -> 20051) with an
+    empty nav registry and stopped. Key entirely off inspace(): true == flying (done),
+    false-once-settled == docked (undock)."""
     settle = time.time() + 90
+    inspace = False
     while time.time() < settle:
-        st = lua("return enb.state()")
-        if st in ("station", "space"):
-            break
-        time.sleep(2)
-    if st != "station":
+        inspace = lua_bool("enb.inspace()")
+        if inspace:
+            return                       # already flying -- nothing to undock
+        if lua("return enb.state()") == "station":
+            break                        # settled docked -- undock below
+        time.sleep(2)                    # else state still "unknown" -- keep settling
+    if inspace:
         return
     print("[drive_lua] docked -- undocking")
     if not lua_bool("enb.undock()"):
@@ -1102,11 +1108,11 @@ def ensure_in_space():
     deadline = time.time() + 90
     while time.time() < deadline:
         time.sleep(2)
-        if lua("return enb.state()") == "space":
+        if lua_bool("enb.inspace()"):
             print("[drive_lua] in space")
             time.sleep(5)  # let the sector scene start populating
             return
-    sys.exit("[drive_lua] undock never reached state=space")
+    sys.exit("[drive_lua] undock never reached in space")
 
 
 def relogin_or_halt(relogins):

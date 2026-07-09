@@ -55,7 +55,9 @@ done
 [ -f "$ENB_LAUNCHNET7" ] || r_die "LaunchNet7.exe not found at ENB_LAUNCHNET7=$ENB_LAUNCHNET7. Set it in $ENV_FILE."
 
 # ---- 1. already in-game? no-op ----------------------------------------------
-if ENB_CLIENT_DIR="$ENB_CLIENT_DIR" bash "$INGAME" >/dev/null 2>&1; then
+# Fast probe: one short channel check (~4s), not the full 120s load-screen wait --
+# recovery is only entered when we already believe the client is down.
+if ENB_INGAME_WAIT=1 ENB_LUA_PROBE_TRIES=12 ENB_CLIENT_DIR="$ENB_CLIENT_DIR" bash "$INGAME" >/dev/null 2>&1; then
     r_log "client already in-game -- nothing to recover."
     exit 0
 fi
@@ -138,12 +140,11 @@ r_log "injecting enbmod: $INJECT --proc client.exe"
     r_log "inject.exe returned non-zero (may already be injected) -- continuing to the in-game check"
 
 # ---- 6. wait for enbmod autologin to reach in-game --------------------------
+# One patient wait (08 polls the channel every 3s internally): ~5 min covers EULA +
+# login + char-enter + scene load. This is the ONE place a long wait is correct.
 r_log "waiting for enbmod autologin to reach in-game (char=$ENB_CHARACTER) ..."
-for _ in $(seq 1 24); do   # ~4 min: EULA + login + char-enter + scene load
-    if ENB_CLIENT_DIR="$ENB_CLIENT_DIR" bash "$INGAME" >/dev/null 2>&1; then
-        r_log "==== RECOVERED: client is in-game ===="
-        exit 0
-    fi
-    sleep 10
-done
+if ENB_INGAME_WAIT=300 ENB_CLIENT_DIR="$ENB_CLIENT_DIR" bash "$INGAME" >/dev/null 2>&1; then
+    r_log "==== RECOVERED: client is in-game ===="
+    exit 0
+fi
 r_die "client relaunched + injected but never reached in-game (autologin creds wrong, or stuck at a screen)."

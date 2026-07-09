@@ -124,14 +124,23 @@ if [ ! -f "$ENB_LAUNCHNET7" ]; then
     fi
 fi
 
-# ---- 6. proxy detect: LIVE (WINE Net7Proxy) vs LOCAL (docker net7proxy) ------
+# ---- 6. proxy: this skill is LIVE by construction -- capture stays as configured -
+# explore-live ALWAYS drives a LIVE client via LaunchNet7 -> WINE Net7Proxy.exe (that
+# is the whole point of the skill), so capture (ENB_PCAP) is always appropriate here.
+# Do NOT flip to LOCAL just because a docker net7proxy happens to be idling: on a cold
+# live start the WINE proxy does not exist until Play is pressed, so that heuristic
+# fires a false LOCAL and silently disables capture (the plain explore-sector entry is
+# the one that may be local -- not this one). A running docker stack is only a capture
+# HAZARD: warn so the operator can stop it for a clean live capture.
 if pgrep -x -- "$ENB_EXPLORE_PROXY_NAME" >/dev/null 2>&1; then
-    note "proxy running (LIVE): $ENB_EXPLORE_PROXY_NAME -- capture stays ENB_PCAP=$ENB_PCAP"
-elif pgrep -x net7proxy >/dev/null 2>&1 || pgrep -f '/app/net7proxy' >/dev/null 2>&1; then
-    export ENB_EXPLORE_PROXY_NAME=net7proxy ENB_PCAP=0
-    note "WINE proxy down but docker net7proxy is up -> LOCAL run: capture disabled (ENB_PCAP=0)"
+    note "WINE proxy already up ($ENB_EXPLORE_PROXY_NAME) -- LIVE; capture ENB_PCAP=$ENB_PCAP"
 else
-    note "no proxy running yet; recovery/LaunchNet7 Play is expected to start $ENB_EXPLORE_PROXY_NAME"
+    note "WINE proxy not up yet; LaunchNet7 Play will start $ENB_EXPLORE_PROXY_NAME -- LIVE; capture ENB_PCAP=$ENB_PCAP"
+fi
+if pgrep -x net7proxy >/dev/null 2>&1 || pgrep -f '/app/net7proxy' >/dev/null 2>&1; then
+    note "WARNING: a docker net7proxy is running. explore-live is a LIVE survey; the local"
+    note "         dev stack is not used and can muddy the capture -- stop it (docker compose"
+    note "         down) unless you deliberately want it up. Capture stays ENB_PCAP=$ENB_PCAP."
 fi
 if [ "$ENB_PCAP" = 1 ]; then
     WORKER="${ENB_PCAP_WORKER:-/usr/local/sbin/freya-pcap-capture}"
@@ -145,7 +154,9 @@ fi
 
 # ---- 7. ensure in-game, recovering (launch+inject+autologin) if needed ------
 INGAME="$SCRIPT_DIR/../../login-to-client/scripts/08-wait-ingame.sh"
-if ! ENB_CLIENT_DIR="$ENB_CLIENT_DIR" bash "$INGAME" >/dev/null 2>&1; then
+# Precheck only: "is a client answering RIGHT NOW?" -- fail in ~4s if the channel is
+# dead (one short probe), never stall the full 120s load-screen wait before recovery.
+if ! ENB_INGAME_WAIT=1 ENB_LUA_PROBE_TRIES=12 ENB_CLIENT_DIR="$ENB_CLIENT_DIR" bash "$INGAME" >/dev/null 2>&1; then
     note "client not in-game -- running recovery to bring it up (LaunchNet7 -> Play -> inject -> autologin)"
     if ! bash "$SCRIPT_DIR/recover.sh"; then
         die "could not bring the client to in-game (see recover.sh output above)."
