@@ -116,6 +116,16 @@ ALIAS = {}
 # 'Mining Station' in place every loop). Seeded from the ledger's visited_gid
 # stamps at sector start so restarts stay idempotent.
 MARKED_GIDS = set()
+# Per-sector gates OBSERVED anywhere during the sweep -> norm(name) -> {gid, name,
+# dist}. choose_gate runs on the nav list from the sweep's FINAL parked position,
+# but in a large sector the onward gates sit 200k+ out and are not in scanner
+# range from wherever the sweep ended -- so "currently listed gates" alone made
+# the run false-conclude "no onward gate" and stop while unsurveyed neighbours
+# were reachable (ABA stopped at 3 sectors with live gates to Beta 1077 + Saturn
+# 1071 both out of range at the parked spot). Every gate that enters range at any
+# point in the sweep is remembered here (nearest observed dist kept), and
+# choose_gate picks from the union so a far gate is still a candidate.
+GATES_SEEN = {}
 
 
 def lkey(name):
@@ -214,6 +224,16 @@ def get_navs():
         except ValueError:
             d = None
         out.append({"gid": gid, "name": name, "dist": d, "cls": cls})
+        # Remember every gate the instant it enters range, with its nearest
+        # observed distance, so choose_gate can still target one that has since
+        # left range by the sweep's end (see GATES_SEEN).
+        if is_gate(name, cls):
+            key = navdata.norm(name)
+            prev = GATES_SEEN.get(key)
+            best = d if d is not None else (prev or {}).get("dist")
+            if prev is not None and prev.get("dist") is not None and d is not None:
+                best = min(prev["dist"], d)
+            GATES_SEEN[key] = {"gid": gid, "name": name, "dist": best, "cls": cls}
     return out
 
 
@@ -784,7 +804,14 @@ def choose_gate(sector, navs, visited_sids):
     alone gates an instantly-resolved resume sector straight back where it
     came from (attempt 16 ping-ponged Earth <-> ABA). A gate whose destination
     cannot be resolved stays eligible."""
+    # Union the gates in range NOW with every gate observed during the sweep: a
+    # 200k+ onward gate is out of range at the parked spot but was seen (and its
+    # gid captured) mid-sweep, and a gid stays targetable after it leaves range.
     gates = [nv for nv in navs if is_gate(nv["name"], nv["cls"])]
+    live_keys = {navdata.norm(g["name"]) for g in gates}
+    for key, g in GATES_SEEN.items():
+        if key not in live_keys:
+            gates.append(g)
 
     def stale(g):
         sid = gate_dest_sid(g["name"])
@@ -806,6 +833,12 @@ def cross_gate(gate):
     before = get_sector_id()
     if not lua_bool(f"enb.request_target({gate['gid']})"):
         return None
+    # A remembered gate (GATES_SEEN) carries its nearest OBSERVED distance, which
+    # may be far smaller than where the ship is parked now; refresh from the live
+    # target readout so warp_to_gate's distance-scaled timeout fits the real leg.
+    cur_d = target_dist(gate["gid"])
+    if cur_d is not None:
+        gate = dict(gate, dist=cur_d)
     # close on the gate first so the transit arms cleanly
     warp_to_gate(gate)
     # let the warp drop out at the gate before firing the transit
@@ -1007,6 +1040,7 @@ def main():
         state("init", sector)
         visited_sids.add(sid)
         SEEN.clear()      # flyby memory + position estimate are per-sector
+        GATES_SEEN.clear()  # observed-gate memory is per-sector too
         EST_POS = None
         BLACKLIST.clear()  # dead-target memory is per-sector too
         WARP_FAILS.clear()
