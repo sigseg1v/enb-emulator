@@ -43,6 +43,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import navdata  # noqa: E402
+from gravity_wells import GRAVITY_WELL_SECTORS  # noqa: E402
 
 # Authoritative sector identity: enb.sector() numeric id -> jsonl stem. Nav-name
 # identification stays only as the fallback for unmapped sectors (needs >=3 names).
@@ -888,6 +889,16 @@ def gate_dest_sid(name):
     return DEST_SIDS.get(navdata.norm(name[low.index(" to ") + 4:]))
 
 
+def gate_into_well(name):
+    """True when this gate's DESTINATION is a known gravity-well sector. Warp
+    terminates mid-flight in a well sector so we cannot auto-survey it and, worse,
+    can strand the ship inside it; the traversal defers well sectors to a manual
+    pass by never routing INTO them. Only the destination is tested, so the
+    reverse gate OUT of a well (dest = a normal sector) is never excluded."""
+    dest = gate_dest_sid(name)
+    return dest is not None and SID_MAP.get(str(dest)) in GRAVITY_WELL_SECTORS
+
+
 def _sector_done(sid):
     """True when the destination's ledger is already complete (persisted
     knowledge, unlike visited_sids which only spans this process)."""
@@ -923,8 +934,12 @@ def choose_gate(sector, navs, visited_sids, tried_edges, sid):
     for key, g in GATES_SEEN.items():
         if key not in live_keys:
             gates.append(g)
-    # Never re-cross a gate we already took from this sector (loop guard).
-    gates = [g for g in gates if (sid, g["gid"]) not in tried_edges]
+    # Never re-cross a gate we already took from this sector (loop guard), and
+    # never route INTO a gravity-well sector (can't auto-survey it, can strand
+    # the ship). Well sectors are deferred to a manual pass; the reverse gate
+    # OUT of a well is not a well destination, so escaping stays possible.
+    gates = [g for g in gates
+             if (sid, g["gid"]) not in tried_edges and not gate_into_well(g["name"])]
     if not gates:
         return None
 
@@ -1247,23 +1262,23 @@ def main():
                     break
                 sector = r.stdout.split("\t")[0].strip()
 
-            # Only SURVEY a sector that is not already complete and not surveyed this
-            # run; otherwise we are just TRANSITING through it to reach fresh space.
-            transit = sid in visited_sids or _sector_done(sid)
+            # A gravity-well sector cannot be auto-surveyed (warp terminates mid-
+            # flight); DEFER it to a manual pass instead of killing the whole run --
+            # skip the survey, log it, and let choose_gate route back out (well-dest
+            # gates are excluded, so we leave toward a normal sector). Only SURVEY a
+            # sector that is not a well, not already complete, and not surveyed this
+            # run; otherwise we are just TRANSITING it to reach fresh space.
+            well = has_gravity_well(sector)
+            transit = well or sid in visited_sids or _sector_done(sid)
+            tag = "well-skip" if well else ("transit" if transit else "survey")
             print(f"[drive_lua] hop {hop}: sid={sid} -> {sector} ({len(navs)} navs) "
-                  f"[{'transit' if transit else 'survey'}]")
-
-            # Gravity-well sectors: warp terminates mid-flight and we cannot
-            # auto-route out, so refuse rather than spin -- same policy as survey.sh.
-            if has_gravity_well(sector):
-                print(f"[drive_lua] {sector} contains a GRAVITY WELL -- refusing "
-                      f"(cannot auto-route out; warp terminates mid-flight). Fly to a "
-                      f"gate manually and re-run.", file=sys.stderr)
-                pcap_stop()
-                sys.exit(EXIT_WELL)
+                  f"[{tag}]")
 
             visited_sids.add(sid)
-            if not transit:
+            if well:
+                logaction(sector, "skip-well",
+                          "gravity well -- deferred to manual pass")
+            elif not transit:
                 pcap_ensure(sector)   # per-sector capture spanning the entry handshake
                 state("init", sector)
                 SEEN.clear()      # flyby memory + position estimate are per-sector
@@ -1277,6 +1292,15 @@ def main():
 
             gate = choose_gate(sector, navs, visited_sids, tried_edges, sid)
             if not gate:
+                if well:
+                    # Boxed inside a well sector with no non-well gate in range --
+                    # a manual flight to a gate is needed. Halt loudly (distinct
+                    # exit) rather than pretend the survey finished cleanly.
+                    print(f"[drive_lua] {sector}: no untried gate OUT of this gravity-"
+                          f"well sector in range -- needs a manual flight to a gate. "
+                          f"Fly out and re-run.", file=sys.stderr)
+                    pcap_stop()
+                    sys.exit(EXIT_WELL)
                 print(f"[drive_lua] {sector}: no untried onward gate -- reachable gate "
                       f"graph exhausted; done.")
                 break
