@@ -17,17 +17,18 @@
 #   2. Kill the wedged/stale client.exe.
 #   3. Launch the real Net-7 launcher (LaunchNet7.exe) under WINE with the autologin
 #      credentials exported, so the client.exe it spawns inherits them.
-#   4. Click Play in the launcher (Play launches net7proxy + client.exe).
+#   4. Press Play in the launcher (the 'p' accelerator; launches net7proxy + client.exe).
 #   5. Wait for the client window, then inject enbmod (inject.exe --proc client.exe).
 #   6. enbmod autologin accepts the EULA, logs in, and enters ENB_CHARACTER from the
 #      inherited env -- wait for the enbmod channel to report in-game (08-wait-ingame).
 # Exit 0 == in-game; non-zero == could not recover (operator/agent must step in).
 #
-# UNVERIFIED end-to-end on this box: there is currently no LaunchNet7 GUI up to pin
-# the Play-button coordinate, so the Play click is coordinate-driven from
-# ENB_LAUNCHNET7_PLAY_XY and, if that is unset, this script screenshots the launcher
-# and stops asking for the coordinate (see step 4). Everything else (launch, window
-# wait, inject, autologin wait) uses proven primitives.
+# Play is triggered by the accelerator key 'p' (verified live: sending 'p' to the
+# launcher window spawns client.exe in ~6s), so recovery needs NO screen coordinate
+# for it. ENB_LAUNCHNET7_PLAY_XY (a window-relative Play-button pixel) and Enter are
+# only fallbacks if the key does not take. Still UNVERIFIED end-to-end on this box:
+# the inject -> autologin -> in-game tail, which needs the .env creds exported onto
+# LaunchNet7 (this box is currently a local-docker config).
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -76,7 +77,7 @@ export FREYA_ACC_NAME="$ENB_ACC_NAME" FREYA_ACC_PASS="$ENB_ACC_PASS" \
 r_log "launching LaunchNet7.exe (prefix=$WINEPREFIX)"
 "$WINE" start /d "C:\\Program Files (x86)\\Net-7\\bin" "LaunchNet7.exe" >/dev/null 2>&1 &
 
-# ---- 4. click Play in the launcher ------------------------------------------
+# ---- 4. press Play in the launcher ------------------------------------------
 # Wait for the launcher window (LaunchNet7 is a .NET WinForms app; match its title).
 launchnet7_win() {
     local id
@@ -94,23 +95,31 @@ LN7_WIN="$(launchnet7_win)"
 xdotool windowactivate --sync "$LN7_WIN" 2>/dev/null
 sleep 1
 
-if [ -n "${ENB_LAUNCHNET7_PLAY_XY:-}" ]; then
-    # window-relative "x,y" -> absolute root coords (XTEST, focus-independent).
-    read -r ax ay _ _ <<<"$(win_abs "$LN7_WIN")"
-    rx="${ENB_LAUNCHNET7_PLAY_XY%,*}"; ry="${ENB_LAUNCHNET7_PLAY_XY#*,}"
-    r_log "clicking Play at window-rel ($rx,$ry) -> abs ($((ax+rx)),$((ay+ry)))"
-    xdotool mousemove --sync $((ax+rx)) $((ay+ry)) click 1
-else
-    # No pinned coordinate: try the launcher's default action (Enter), then, if that
-    # does not spawn the client, screenshot the launcher and ask for the coordinate.
-    r_log "no ENB_LAUNCHNET7_PLAY_XY set -- trying Enter as the default action"
-    xdotool key --window "$LN7_WIN" Return 2>/dev/null
+# Play is the accelerator key 'p' (the underlined P in "Play"). Sending the key to
+# the window needs no coordinate and survives a moved/resized launcher, so it is the
+# primary trigger (verified live: 'p' -> client.exe spawns). If the key does not
+# take, fall back to a pinned Play-button coordinate, then to Enter, then ask.
+r_log "pressing Play (accelerator 'p') on the launcher window"
+xdotool key --window "$LN7_WIN" p 2>/dev/null
+xdotool key p 2>/dev/null   # also to the focused window (WINE key delivery varies)
+
+if ! wait_until 25 2 win_by_class client.exe >/dev/null 2>&1; then
+    if [ -n "${ENB_LAUNCHNET7_PLAY_XY:-}" ]; then
+        # window-relative "x,y" -> absolute root coords (XTEST, focus-independent).
+        read -r ax ay _ _ <<<"$(win_abs "$LN7_WIN")"
+        rx="${ENB_LAUNCHNET7_PLAY_XY%,*}"; ry="${ENB_LAUNCHNET7_PLAY_XY#*,}"
+        r_log "'p' did not start the client -- clicking Play at window-rel ($rx,$ry) -> abs ($((ax+rx)),$((ay+ry)))"
+        xdotool mousemove --sync $((ax+rx)) $((ay+ry)) click 1
+    else
+        r_log "'p' did not start the client -- trying Enter as the default action"
+        xdotool key --window "$LN7_WIN" Return 2>/dev/null
+    fi
     if ! wait_until 25 2 win_by_class client.exe >/dev/null 2>&1; then
         shot="$WORKDIR/launchnet7.png"
         import -window "$LN7_WIN" "$shot" 2>/dev/null || xdotool getdisplaygeometry >/dev/null
-        r_die "Enter did not start the client. Set ENB_LAUNCHNET7_PLAY_XY=<x>,<y> in
-    $ENV_FILE (window-relative pixel of the Play button). Screenshot of the
-    launcher saved to: $shot -- read it to find Play's coordinate."
+        r_die "Play did not start the client (tried 'p', pinned coord, Enter). Set
+    ENB_LAUNCHNET7_PLAY_XY=<x>,<y> in $ENV_FILE (window-relative pixel of the Play
+    button). Screenshot of the launcher saved to: $shot -- read it to find Play."
     fi
 fi
 

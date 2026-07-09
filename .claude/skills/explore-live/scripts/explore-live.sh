@@ -14,8 +14,8 @@
 #   * it resolves the enbmod store dir from the RUNNING client's /proc/<pid>/cwd
 #     (correct for any WINE prefix / mbox slot -- settings.json would be wrong), and
 #   * on a crash/wedge it re-launches the real Net-7 launcher (LaunchNet7.exe),
-#     clicks Play, re-injects enbmod, and lets enbmod autologin return to in-game --
-#     then the survey resumes (recover.sh, wired via ENB_RECOVER_CMD).
+#     presses Play (the 'p' key), re-injects enbmod, and lets enbmod autologin return
+#     to in-game -- then the survey resumes (recover.sh, wired via ENB_RECOVER_CMD).
 #
 # It reuses the explore-sector survey engine (drive_lua.py) unchanged; this skill
 # only owns the live/attach wiring + recovery.

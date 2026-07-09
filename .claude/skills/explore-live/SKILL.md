@@ -1,6 +1,6 @@
 ---
 name: explore-live
-description: Run the sector-exploration survey against a LIVE client you attached enbmod into (native client.exe under WINE + Net7Proxy.exe, no Freya docker stack), with unattended crash recovery -- it resolves the enbmod store dir from the running client's /proc cwd, and on a client crash/wedge it relaunches via the real Net-7 launcher (LaunchNet7.exe), clicks Play, re-injects enbmod, and lets enbmod autologin return to in-game, then resumes. Use when the owner says "explore live" against their own attached client. Reads account/character from a gitignored .env.
+description: Run the sector-exploration survey against a LIVE client you attached enbmod into (native client.exe under WINE + Net7Proxy.exe, no Freya docker stack), with unattended crash recovery -- it resolves the enbmod store dir from the running client's /proc cwd, and on a client crash/wedge it relaunches via the real Net-7 launcher (LaunchNet7.exe), presses Play (the 'p' key), re-injects enbmod, and lets enbmod autologin return to in-game, then resumes. Use when the owner says "explore live" against their own attached client. Reads account/character from a gitignored .env.
 ---
 
 # Explore live (attached client + Net7Proxy, crash-recovering)
@@ -26,10 +26,11 @@ things the live/attach case needs that the plain explore-sector entry does not:
 
 2. **Unattended crash recovery.** If the client crashes or hard-wedges mid-survey,
    the driver runs `recover.sh`: it relaunches the real **Net-7 launcher**
-   (`LaunchNet7.exe`), clicks **Play** (which starts the proxy + client),
-   re-injects **enbmod** (`inject.exe --proc client.exe`), and enbmod's in-client
-   **autologin** accepts the EULA, logs in, and enters the character -- all from the
-   `.env` credentials, no OCR. Then the survey resumes from the persistent ledger.
+   (`LaunchNet7.exe`), presses **Play** (the `p` accelerator key -- no coordinate
+   needed; starts the proxy + client), re-injects **enbmod**
+   (`inject.exe --proc client.exe`), and enbmod's in-client **autologin** accepts
+   the EULA, logs in, and enters the character -- all from the `.env` credentials,
+   no OCR. Then the survey resumes from the persistent ledger.
 
 ## Prerequisites
 
@@ -58,21 +59,22 @@ The values that matter:
 | `ENB_EXPLORE_WORKDIR` | Persistent survey state (ledgers + log + captures), **outside the repo**. |
 | `ENB_WINEPREFIX` | WINE prefix of the EnB install. Blank = auto-detect (running client env, else `$HOME/.wine-enb`). |
 | `ENB_LAUNCHNET7` | Path to `LaunchNet7.exe`. Blank = the standard spot in the prefix (`.../Net-7/bin/LaunchNet7.exe`). |
-| `ENB_LAUNCHNET7_PLAY_XY` | Window-relative `x,y` of the launcher's **Play** button. Blank = recovery tries Enter, else screenshots the launcher and asks for it. |
+| `ENB_LAUNCHNET7_PLAY_XY` | Fallback only. Window-relative `x,y` of the launcher's **Play** button, used if the `p` accelerator key does not start the client. Blank = recovery relies on `p` (verified) and, failing that, Enter, else screenshots the launcher and asks. |
 
 ## How recovery works (and its one manual seed)
 
 `recover.sh` is called both at startup (if the client is not in-game yet) and by
 `drive_lua.py` on a mid-run wedge (via `ENB_RECOVER_CMD`). Steps: no-op if already
 in-game -> kill the stale `client.exe` -> `wine start LaunchNet7.exe` with the
-autologin creds exported -> click Play -> wait for the client window -> inject
+autologin creds exported -> press Play -> wait for the client window -> inject
 enbmod -> wait for the enbmod channel to report in-game.
 
-The **only** coordinate this skill needs is the launcher's **Play** button. It has
-no CLI to skip the GUI, so recovery clicks it. Pin `ENB_LAUNCHNET7_PLAY_XY` once
-(the first run without it screenshots the launcher to `WORKDIR/launchnet7.png` and
-stops asking) and recovery is then fully unattended. Everything else -- launch,
-window wait, inject, autologin -- uses no screen coordinates.
+Recovery needs **no screen coordinate at all**: Play is fired with the `p`
+accelerator key (the underlined P in "Play"), verified live to spawn `client.exe`
+in ~6s. `ENB_LAUNCHNET7_PLAY_XY` (a window-relative Play pixel) and Enter are only
+fallbacks if the key is somehow dropped; the first time even those fail, the
+launcher is screenshotted to `WORKDIR/launchnet7.png` and the coordinate is asked
+for. Launch, window wait, inject, and autologin use no coordinates either.
 
 ## Liveness / wedge detection
 
@@ -94,7 +96,7 @@ clears. Continuously silent past the threshold + a failed liveness probe == wedg
 
 - **Screen-free survey.** All facts/actions go through the enbmod Lua channel
   (`enb.*`), never screenshots. The **only** synthetic input is the launcher Play
-  click during recovery.
+  keypress (`p`) during recovery.
 - **Gravity-well refusal**, **hybrid target order**, **completion = our ledger**,
   and the persistent ledger/action-log accounting are all inherited verbatim from
   the survey engine -- see [`explore-sector`](../explore-sector/SKILL.md).
