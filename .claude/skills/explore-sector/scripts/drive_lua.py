@@ -88,6 +88,12 @@ HANG_SECS = float(os.environ.get("ENB_LUA_HANG_SECS", "150"))
 MANUAL_CLIENT = os.environ.get("ENB_EXPLORE_MANUAL_CLIENT", "0") == "1"
 MAX_RELOGIN = int(os.environ.get("ENB_MAX_RELOGIN", "4"))
 LOGIN_DIR = os.path.join(HERE, "..", "..", "login-to-client", "scripts")
+# Optional external recovery command (the explore-live skill's recover.sh). When
+# set it OWNS bringing a crashed/wedged client back to in-game -- relaunch via the
+# real Net-7 launcher, re-inject enbmod, autologin -- so a MANUAL_CLIENT wedge
+# recovers instead of halting. Run with the driver's env (creds/ENB_CLIENT_DIR
+# inherited); exit 0 == back in-game. Empty -> old behaviour (relogin/halt).
+RECOVER_CMD = os.environ.get("ENB_RECOVER_CMD", "").strip()
 EXIT_HANG = 42   # client wedged and we could not (manual mode) relogin-recover
 EXIT_WELL = 3    # arrived in a gravity-well sector we cannot auto-route out of
 
@@ -159,12 +165,48 @@ def lkey(name):
 
 
 # ---- client command channel -------------------------------------------------
+def _client_pid_cwd():
+    """Resolve the RUNNING client.exe's working dir from /proc/<pid>/cwd, via its
+    X window (xdotool getwindowpid). This is the authoritative enbmod-store dir for
+    a client we ATTACHED to -- an arbitrary WINE prefix / multibox slot the launcher
+    settings.json does NOT know about (settings.json points at whatever OUR launcher
+    last wrote, which is the wrong prefix for an attached client; see the
+    'enbmod dir from /proc cwd' project note). Returns the dir only if it actually
+    holds the enbmod store (enbmod.dll / enbmod.cmd), so it never hands back a
+    launcher window's unrelated cwd."""
+    try:
+        wins = subprocess.run(["xdotool", "search", "--class", "client.exe"],
+                              capture_output=True, text=True, timeout=10)
+        for win in wins.stdout.split():
+            pid = subprocess.run(["xdotool", "getwindowpid", win],
+                                 capture_output=True, text=True, timeout=5).stdout.strip()
+            if not pid:
+                continue
+            try:
+                cwd = os.path.realpath(f"/proc/{pid}/cwd")
+            except OSError:
+                continue
+            if os.path.isfile(os.path.join(cwd, "enbmod.dll")) or \
+               os.path.isfile(os.path.join(cwd, "enbmod.cmd")):
+                return cwd
+    except Exception:
+        pass
+    return None
+
+
 def client_dir():
-    """Resolve the folder holding enbmod.cmd/enbmod.log from the launcher settings
-    (never hardcode -- there can be more than one WINE prefix)."""
+    """Resolve the folder holding enbmod.cmd/enbmod.log. Order:
+      1. ENB_CLIENT_DIR (explicit override; explore-live sets this).
+      2. The running client.exe's /proc/<pid>/cwd (correct for an ATTACHED client
+         in any WINE prefix -- see _client_pid_cwd).
+      3. The launcher settings.json ClientPath (our own launched client).
+    (Never hardcode -- there can be more than one WINE prefix.)"""
     env = os.environ.get("ENB_CLIENT_DIR")
     if env and os.path.isdir(env):
         return env
+    cwd = _client_pid_cwd()
+    if cwd:
+        return cwd
     settings = os.environ.get(
         "ENB_LAUNCHER_SETTINGS",
         os.path.join(HERE, "..", "..", "..", "..", "tools", "LaunchFreya",
@@ -1076,6 +1118,25 @@ def relogin_or_halt(relogins):
     relogin through the login-to-client skill and resume. Exits the process on an
     unrecoverable state; returns normally once the client is back in-game."""
     global _last_alive
+    # An external recovery command (explore-live's recover.sh) supersedes both the
+    # manual-halt and the local relogin: it relaunches the real client via the
+    # Net-7 launcher and re-injects enbmod, then autologin returns us to in-game.
+    if RECOVER_CMD:
+        if relogins > MAX_RELOGIN:
+            print(f"[drive_lua] {relogins} recoveries; giving up.", file=sys.stderr)
+            pcap_stop()
+            sys.exit(1)
+        print(f"[drive_lua] client wedged -> external recovery (#{relogins}): "
+              f"{RECOVER_CMD}", file=sys.stderr)
+        rc = subprocess.run(["bash", "-c", RECOVER_CMD]).returncode
+        if rc != 0:
+            print(f"[drive_lua] recovery command exited {rc}; aborting so the "
+                  f"operator can step in (ledger persists -- re-run to resume).",
+                  file=sys.stderr)
+            pcap_stop()
+            sys.exit(EXIT_HANG)
+        _last_alive = time.time()   # channel is fresh again; reset the hang clock
+        return
     if MANUAL_CLIENT:
         print("[drive_lua] client hard-hung and ENB_EXPLORE_MANUAL_CLIENT=1 -- not "
               "relaunching a client we do not own. Relaunch the client (and your "
