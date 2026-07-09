@@ -35,6 +35,7 @@
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import time
@@ -666,14 +667,67 @@ def corridor_score(sector, anchor, remaining, corridor=18.0):
                <= corridor)
 
 
+def _dest_sids():
+    """norm(sector name) -> sid, for gate-destination resolution. Gate navs
+    name their destination in DISPLAY spelling ('Sector Gate to Asteroid Belt
+    Alpha') while SID_MAP values are ledger keys ('ABA'); the committed sid
+    catalog docs/sectors/sector-ids.md carries the display names."""
+    out = {}
+    for sid, key in SID_MAP.items():
+        out[navdata.norm(key)] = int(sid)
+    md = os.path.join(HERE, "..", "..", "..", "..", "docs", "sectors",
+                      "sector-ids.md")
+    try:
+        with open(md) as f:
+            for m in re.finditer(r"(\d{3,5})\s+([^\W\d][^·\n]*)", f.read()):
+                out.setdefault(navdata.norm(m.group(2)), int(m.group(1)))
+    except OSError:
+        pass
+    return out
+
+
+DEST_SIDS = _dest_sids()
+
+
+def gate_dest_sid(name):
+    """Destination sid named by a gate nav ('Sector Gate to Asteroid Belt
+    Alpha' -> 1076), or None when the suffix resolves to no known sector."""
+    low = name.lower()
+    if " to " not in low:
+        return None
+    return DEST_SIDS.get(navdata.norm(name[low.index(" to ") + 4:]))
+
+
+def _sector_done(sid):
+    """True when the destination's ledger is already complete (persisted
+    knowledge, unlike visited_sids which only spans this process)."""
+    key = SID_MAP.get(str(sid))
+    if key is None:
+        return False
+    try:
+        with open(os.path.join(STATE_DIR, key + ".json")) as f:
+            return json.load(f).get("status") == "complete"
+    except (OSError, json.JSONDecodeError):
+        return False
+
+
 def choose_gate(sector, navs, visited_sids):
-    """Prefer a present gate we have range on; deprioritise the gate we arrived
-    through where we can tell (name mentions the previous sector's planet is hard to
-    know, so for v1 just take the first gate with a known range)."""
+    """Nearest gate whose DESTINATION is neither surveyed this run nor a
+    completed ledger. The arrival gate is always the nearest one, so distance
+    alone gates an instantly-resolved resume sector straight back where it
+    came from (attempt 16 ping-ponged Earth <-> ABA). A gate whose destination
+    cannot be resolved stays eligible."""
     gates = [nv for nv in navs if is_gate(nv["name"], nv["cls"])]
-    gates = [g for g in gates if g["dist"] is not None] or gates
-    gates.sort(key=lambda g: (g["dist"] is None, g["dist"] or 1e18))
-    return gates[0] if gates else None
+
+    def stale(g):
+        sid = gate_dest_sid(g["name"])
+        return sid is not None and (sid in visited_sids or _sector_done(sid))
+
+    fresh = [g for g in gates if not stale(g)]
+    if not fresh:
+        return None
+    fresh.sort(key=lambda g: (g["dist"] is None, g["dist"] or 1e18))
+    return fresh[0]
 
 
 def cross_gate(gate):
@@ -896,7 +950,7 @@ def main():
 
         gate = choose_gate(sector, navs, visited_sids)
         if not gate:
-            print(f"[drive_lua] {sector}: no gate in range -- done.")
+            print(f"[drive_lua] {sector}: no gate to an unsurveyed sector -- done.")
             break
         print(f"[drive_lua] {sector}: gating via {gate['name']} (gid {gate['gid']})")
         logaction(sector, "enter-gate", gate["name"])
