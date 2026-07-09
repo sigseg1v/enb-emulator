@@ -1,5 +1,30 @@
 # Phase AW -- Sector exploration skill (agent-driven nav survey)
 
+- **2026-07-09 NEW `explore-live` skill: attach-aware live survey + crash recovery
+  (commit `ed23dd8c`).** A second entry skill (`.claude/skills/explore-live/`,
+  Freya/MIT) for surveying against a LIVE client the OWNER attached enbmod into
+  (native `client.exe` + `Net7Proxy.exe`, NO Freya docker stack). It reuses the
+  `drive_lua.py` survey engine unchanged and adds only the two attach-case pieces:
+  (1) **path resolution for a client we did not launch** -- `client_dir()` now
+  resolves the enbmod store from the RUNNING `client.exe`'s `/proc/<pid>/cwd` (via
+  its X window), ahead of `settings.json` (which names OUR launcher's last prefix,
+  wrong for an attached client / mbox slot); order is `ENB_CLIENT_DIR` -> /proc cwd
+  -> settings.json. (2) **unattended crash recovery** -- `drive_lua` gained
+  `ENB_RECOVER_CMD`: on a wedge it runs that command instead of manual-halt (exit 0
+  == in-game). `explore-live` wires it to `recover.sh`, which relaunches the real
+  Net-7 launcher (`LaunchNet7.exe`) -> clicks Play -> re-injects enbmod
+  (`inject.exe --proc client.exe`) -> enbmod autologin (creds from the client
+  PROCESS env, no OCR) returns to in-game -> survey resumes from the ledger.
+  Credentials live in a gitignored `.env` (`ENB_ACC_NAME/ACC_PASS/CHARACTER/EULA`)
+  and propagate via the `LaunchNet7` process environment; WINE prefix + launcher
+  path auto-resolve with a screenshot-and-ask fallback for the one non-discoverable
+  coordinate, the launcher Play button (`ENB_LAUNCHNET7_PLAY_XY`). VERIFIED LIVE:
+  path resolution, prefix/launcher/`inject.exe` discovery, creds plumbing, the
+  enbmod channel (in-game in `space`, `[run] 2`). UNVERIFIED end-to-end: the
+  LaunchNet7 -> Play -> inject -> autologin recovery chain (no launcher GUI was up
+  to pin Play coords; this box is a local-docker config) -- flagged in `recover.sh`
+  + SKILL.md, needs a real crash + launcher GUI to validate.
+
 - **2026-07-09 CONVERTED OFF OCR to the enbmod Lua command channel.** The whole
   survey now drives the client through the injected enbmod `enb.*` API instead of
   screenshots/OCR/XTEST -- the same channel `login-to-client` was converted to.
