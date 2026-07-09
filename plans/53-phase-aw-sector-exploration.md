@@ -1,5 +1,26 @@
 # Phase AW -- Sector exploration skill (agent-driven nav survey)
 
+- **2026-07-09 GRAPH TRAVERSAL: survey now reaches sectors BEHIND completed ones
+  (commit `64786eb9`).** `drive_lua.py` was a linear gate-walker: `choose_gate`
+  picked only gates to a FRESH destination and `main()` hard-stopped the entire
+  run the first time a crossing looped back into an already-surveyed/complete
+  sector ("gated into already-surveyed sector NNNN -- stopping"). From a spawn
+  boxed in by done sectors (Ishuan/Yokan) it took two internal gates, looped, and
+  quit after 2 hops -- while the frontier gates (Gate to Sol, Gate to Sirius
+  System) that lead to unexplored space sat untried. Replaced with a bounded graph
+  traversal: `choose_gate(sector, navs, visited_sids, tried_edges, sid)` RANKS
+  every reachable gate (tier 0 = fresh/unresolved dest, tier 1 = done-but-not-yet-
+  entered-this-run = transit THROUGH it to reach the frontier beyond, tier 2 =
+  loop-back last resort), excluding each `(sid, gid)` edge once crossed
+  (`tried_edges`) so it is finite; `main()` separates SURVEY (only for a not-done,
+  not-yet-surveyed sector) from TRANSIT (cross a done sector without re-surveying),
+  drops the loop-back hard-stop, and retries a different gate when one fails to
+  transit instead of killing the run. VERIFIED LIVE: relaunched against the live
+  client, resumed Ganymede (1040) from its ledger at 11/34 with the new `[survey]`
+  tag; earlier old-code run had already reached Ganymede via the frontier
+  `Gate to Sol` from Ishuan, so the frontier-crossing path is exercised. Survey
+  tooling only -- no wire/server behaviour touched.
+
 - **2026-07-09 NEW `explore-live` skill: attach-aware live survey + crash recovery
   (commit `ed23dd8c`).** A second entry skill (`.claude/skills/explore-live/`,
   Freya/MIT) for surveying against a LIVE client the OWNER attached enbmod into
