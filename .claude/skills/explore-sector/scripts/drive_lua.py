@@ -43,8 +43,20 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import navdata  # noqa: E402
 
+# Authoritative sector identity: enb.sector() numeric id -> jsonl stem. Nav-name
+# identification stays only as the fallback for unmapped sectors (needs >=3 names).
+with open(os.path.join(HERE, "..", "..", "..", "..", "docs", "sectors",
+                       "sector_ids.json")) as _f:
+    SID_MAP = json.load(_f)
+
 # ---- tunables (mirror drive.py's, env-overridable) --------------------------
 VISIT_K = float(os.environ.get("ENB_VISIT_K", "8000"))      # within this = visited
+# Engage-refusal arrival slop: a warp exits at the target's no-warp standoff,
+# which for a big-radius object (Earth Station: ~9.5k) sits OUTSIDE VISIT_K, and
+# from inside that ring the next engage refuses (nothing to warp toward). An
+# engage refusal this close IS arrival -- without the slop the station burns two
+# 90s engage cycles and gets blacklisted as unreachable (attempt 10).
+ARRIVE_SLOP = float(os.environ.get("ENB_ARRIVE_SLOP", "12000"))
 NEAR_SWITCH = float(os.environ.get("ENB_NEAR_SWITCH", "0.20"))  # farthest->nearest at 20%
 WARP_TIMEOUT = float(os.environ.get("ENB_WARP_TIMEOUT", "90"))  # max s per warp segment
 POLL_SLEEP = float(os.environ.get("ENB_POLL_SLEEP", "2"))   # in-flight poll cadence
@@ -56,6 +68,50 @@ MAX_SECTORS = int(os.environ.get("ENB_MAX_SECTORS", "40"))  # stop after this ma
 LUA_TIMEOUT = float(os.environ.get("ENB_LUA_TIMEOUT", "6"))  # per-command reply wait
 
 US, RS = "\x1f", "\x1e"  # unit / record separators for the nav dump string
+
+# Ledger jsonl coords are kilo-units: in-game nav range ~= coord distance * 1000
+# (verified: Earth ABA-gate -> High-Earth-gate hypot 115.9 vs live d=117377).
+COORD_SCALE = 1000.0
+
+# Per-sector flyby memory: norm(name) -> gid for EVERY nav the client has listed
+# this sector, in range or not right now. Beltway-style sectors only reveal their
+# mid-sector navs DURING a crossing; by the time a leg ends at a gate they are out
+# of scanner range again, so "currently listed" targeting alone flies straight
+# past 90% of the sector (that false-conceded ABA at 3/41). A gid stays targetable
+# after it leaves range, so remembering it is enough to warp back.
+SEEN = {}
+# Estimated ship position (jsonl kilo-units): the coords of the last ledger node
+# we arrived at. Good enough to rank out-of-range candidates by distance.
+EST_POS = None
+# Per-sector dead targets: norm(name) of every nav whose warp engage failed
+# repeatedly. Warp is a buoy-to-buoy path through the sector's nav graph, so a
+# nav with no neighbour in link range (Earth's planet, 115.8k from the nearest
+# nav) can never be engaged -- request_target succeeds, warp() answers true,
+# zero motion. Without a penalty pick_target re-picks the same dead target
+# every loop (~90s of verified engage attempts each time) and the sector wedges.
+BLACKLIST = set()
+WARP_FAILS = {}  # lkey(name) -> consecutive warp_to engage failures
+# Live-DB name -> ledger name join for spelling variants (norm(live) -> norm(ledger)).
+# The live DB and the ledger dataset spell a handful of navs differently (live
+# "Infiniti Campus" / "Systems Express 1" vs ledger "Infinity Campus" /
+# "System Express 1"); the exact-norm join left those 5 real reachable navs
+# permanently unpickable, so Earth went "dry" at 20/38 and burned its whole
+# relocation budget ping-ponging between two far anchors. Rebuilt per sector.
+ALIAS = {}
+# Per-sector gids whose ledger visit is already recorded. Sectors carry
+# DUPLICATE nav names (ABA has three distinct 'Mining Station' objects), so a
+# visit must consume exactly one ledger row per physical object: keying
+# progress by name alone re-marked the same row forever while the duplicate
+# siblings starved (attempt 14 wedged ABA at 28/41 warping the nearest
+# 'Mining Station' in place every loop). Seeded from the ledger's visited_gid
+# stamps at sector start so restarts stay idempotent.
+MARKED_GIDS = set()
+
+
+def lkey(name):
+    """Ledger key for any nav name (live or ledger spelling)."""
+    k = navdata.norm(name)
+    return ALIAS.get(k, k)
 
 
 # ---- client command channel -------------------------------------------------
@@ -109,8 +165,11 @@ def lua(expr, timeout=LUA_TIMEOUT):
     return None
 
 
-def lua_bool(expr):
-    r = lua(expr)
+def lua_bool(call):
+    """Evaluate a boolean-returning Lua CALL (no 'return' prefix). The channel echoes
+    a bare boolean as the literal '<boolean>' with no value, so wrap in tostring()
+    to get 'true'/'false' back."""
+    r = lua(f"return tostring({call})")
     return bool(r) and "true" in r.lower()
 
 
@@ -179,6 +238,66 @@ def settle_navs():
 
 
 # ---- ledger (state.py) + log (logaction.sh) subprocess wrappers -------------
+STATE_DIR = os.environ.get("ENB_EXPLORE_WORKDIR") or os.path.join(HERE, "..", "state")
+
+
+def ledger_nodes(sector):
+    """All ledger nodes (visited or not). Reads the ledger file directly because
+    state.py has no coords-of-one-node command and the remaining dump excludes
+    visited nodes (we arrive at visited gates too)."""
+    try:
+        with open(os.path.join(STATE_DIR, sector + ".json")) as f:
+            st = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+    return st.get("nodes", [])
+
+
+def ledger_xyz(sector, name):
+    """(x, y, z) of a ledger node (jsonl kilo-units), or None."""
+    key = lkey(name)
+    for n in ledger_nodes(sector):
+        if navdata.norm(n["name"]) == key:
+            return (n["x"], n["y"], n["z"])
+    return None
+
+
+def ledger_name(sector, name):
+    """The ledger's own spelling for a (possibly live-DB-spelled) nav name --
+    state.py matches names by exact norm, so every visit/skip must carry the
+    ledger spelling or it silently lands nowhere."""
+    key = lkey(name)
+    for n in ledger_nodes(sector):
+        if navdata.norm(n["name"]) == key:
+            return n["name"]
+    return name
+
+
+def build_alias(sector, navs):
+    """Join live nav names to ledger node names: exact norm equality claims
+    first, then the unmatched leftovers pair one-to-one by difflib ratio
+    (best pair first, >= 0.84). Populates ALIAS in place."""
+    import difflib
+    ledger = {navdata.norm(n["name"]) for n in ledger_nodes(sector)}
+    live = {navdata.norm(nv["name"]) for nv in navs}
+    pairs = []
+    for lv in live - ledger:
+        if lv in ALIAS:
+            continue
+        for lg in ledger - live:
+            r = difflib.SequenceMatcher(None, lv, lg).ratio()
+            if r >= 0.84:
+                pairs.append((r, lv, lg))
+    pairs.sort(reverse=True)
+    taken = set(ALIAS.values())
+    for r, lv, lg in pairs:
+        if lv in ALIAS or lg in taken:
+            continue
+        ALIAS[lv] = lg
+        taken.add(lg)
+        print(f"  {sector}: name-join live '{lv}' -> ledger '{lg}' ({r:.2f})")
+
+
 def state(*args):
     return subprocess.run([sys.executable, os.path.join(HERE, "state.py"), *args],
                           capture_output=True, text=True)
@@ -219,18 +338,40 @@ def ledger_counts(sector):
 
 
 # ---- driver core ------------------------------------------------------------
+def record_visit(sector, name, gid, dist, note=""):
+    """Ledger-visit one nav OBJECT, deduped by gid. state.py consumes the first
+    unvisited row of the name and stamps the gid on it, so duplicate-name navs
+    each land on their own row; the in-memory set keeps the every-poll re-marks
+    of an in-range nav from spamming the log and the ledger. Returns True when
+    a fresh visit actually landed."""
+    if gid in MARKED_GIDS:
+        return False
+    MARKED_GIDS.add(gid)
+    lname = ledger_name(sector, name)
+    state("visit", sector, lname, str(gid))
+    logaction(sector, "visit", f"{lname} (d={dist:.0f}{note})")
+    return True
+
+
 def mark_in_range(sector, navs):
     """Visit every ledger node whose live nav is within VISIT_K. Returns how many
-    fresh visits landed (used to reset the relocation budget)."""
+    fresh visits landed (used to reset the relocation budget). Also feeds the
+    SEEN flyby memory: every nav listed right now stays targetable later."""
+    for nv in navs:
+        SEEN[lkey(nv["name"])] = nv["gid"]
+    # position estimate: the closest in-range ledger node is where we are. Seeds
+    # EST_POS right after a gate transit and keeps it fresh on every flyby.
+    close = [nv for nv in navs if nv["dist"] is not None and nv["dist"] <= VISIT_K]
+    if close:
+        _arrived(sector, min(close, key=lambda nv: nv["dist"])["name"])
     remaining = ledger_remaining(sector)
     fresh = 0
     for nv in navs:
         if nv["dist"] is None or nv["dist"] > VISIT_K:
             continue
-        node = remaining.get(navdata.norm(nv["name"]))
-        if node:
-            state("visit", sector, node["name"])
-            logaction(sector, "visit", f"{node['name']} (d={nv['dist']:.0f})")
+        if lkey(nv["name"]) not in remaining:
+            continue
+        if record_visit(sector, nv["name"], nv["gid"], nv["dist"]):
             fresh += 1
     return fresh
 
@@ -241,52 +382,288 @@ def is_gate(name, cls):
 
 
 def pick_target(sector, navs):
-    """Choose the next nav to warp to among PRESENT, unvisited, non-gate navs with a
-    known range, using the hybrid farthest/nearest order. Returns a nav dict or None."""
+    """Choose the next nav to warp to, using the hybrid farthest/nearest order.
+    Gates count: they are ledger nodes, and warping to one does NOT transit it
+    (only enb.gate() does). Preference order:
+      1. PRESENT unvisited navs with a live range (certain: in scanner range now).
+      2. SEEN unvisited navs (flyby memory): listed earlier this sector but out of
+         range now; still targetable by gid. Range is estimated from EST_POS and
+         the ledger coords. Without this, a beltway sector whose navs only show
+         mid-crossing false-concedes at 3/41 (attempt 5's ABA).
+    BLACKLIST excludes targets whose warp engage verifiably failed: warp is not
+    point-to-point -- the client pathfinds buoy-to-buoy through the sector's nav
+    graph, and a nav too far from every other nav (Earth's planet sits 115.8k
+    from its nearest neighbour) has no path, so the engage silently no-ops.
+    Without the exclusion the same dead target is re-picked every loop and the
+    sector never progresses (attempt 8 wedged exactly there).
+    Returns a nav dict (with 'seen': True on tier 2) or None."""
     remaining = ledger_remaining(sector)
+    # MARKED_GIDS excludes an already-visited duplicate whose NAME is still in
+    # remaining (its sibling rows are unvisited): without it the picker warps
+    # the nearest 'Mining Station' in place forever instead of the next one.
     cands = [nv for nv in navs
              if nv["dist"] is not None
-             and navdata.norm(nv["name"]) in remaining
-             and not is_gate(nv["name"], nv["cls"])]
+             and lkey(nv["name"]) in remaining
+             and lkey(nv["name"]) not in BLACKLIST
+             and nv["gid"] not in MARKED_GIDS]
+    seen_tier = not cands
+    if seen_tier:
+        for key, node in remaining.items():
+            if key in BLACKLIST:
+                continue
+            gid = SEEN.get(key)
+            if gid is None or gid in MARKED_GIDS:
+                continue
+            d = None
+            if EST_POS is not None:
+                d = math.dist(EST_POS, (node["x"], node["y"], node["z"])) * COORD_SCALE
+            cands.append({"gid": gid, "name": node["name"],
+                          "dist": d if d is not None else 150000.0,
+                          "cls": "", "seen": True})
     if not cands:
         return None
     visited, total = ledger_counts(sector)
     frac = (visited / total) if total else 0.0
     farthest_first = frac < NEAR_SWITCH
-    cands.sort(key=lambda nv: nv["dist"], reverse=farthest_first)
+    # flyby memory is chased NEAREST-first regardless of phase: these are known
+    # points scattered behind us, and the long-crossing rationale (free en-route
+    # pickups on a fresh slice) does not apply to a backtrack.
+    cands.sort(key=lambda nv: nv["dist"], reverse=farthest_first and not seen_tier)
     return cands[0]
+
+
+def ship_speed():
+    """Units/second estimated from nav-range deltas ~1s apart (enb.self() x/y/z are
+    uncalibrated flat-offset reads -- they read 0 in space -- so nav dist closure is
+    the OCR-free equivalent of the speed readout). Max radial rate across every nav
+    with a range: warp is 2000+ u/s, so even well off-axis it clears the threshold;
+    a parked ship shows ~0 against every nav."""
+    a = {nv["gid"]: nv["dist"] for nv in get_navs() if nv["dist"] is not None}
+    t1 = time.time()
+    time.sleep(1.0)
+    b = {nv["gid"]: nv["dist"] for nv in get_navs() if nv["dist"] is not None}
+    t2 = time.time()
+    deltas = [abs(b[g] - a[g]) for g in a if g in b]
+    if not deltas:
+        return None
+    return max(deltas) / max(t2 - t1, 0.5)
+
+
+def ensure_not_warping():
+    """enb.warp() is a TOGGLE: firing it while a warp is active TERMINATES that warp
+    (the drive_lua equivalent of the screen driver's only-click-the-orb-at-speed-0
+    rule). Before engaging, make sure we are not mid-warp: if the ship is moving at
+    warp speed, warp_stop() once and wait for it to slow."""
+    for attempt in range(20):
+        v = ship_speed()
+        if v is None or v < 500:
+            return
+        if attempt == 0:
+            lua("return enb.warp_stop()")
+        time.sleep(2)
+
+
+def get_energy():
+    r = lua("return string.format('%.3f', enb.vitals().energy or -1)")
+    try:
+        v = float(r)
+    except (TypeError, ValueError):
+        return None
+    return None if v < 0 else v
+
+
+def wait_energy(target, timeout=150):
+    """Block until reactor energy >= target (or timeout / unreadable). Warp engage
+    eats ~half the pool up front, and a drained reactor is the main cause of failed
+    engages and mid-leg drop-outs on back-to-back 300k legs; parked recharge is
+    ~1-2%/s, so topping up first is cheap insurance against a wedged leg."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        e = get_energy()
+        if e is None or e >= target:
+            return
+        time.sleep(3)
+
+
+def warp_engage():
+    """Fire enb.warp() and VERIFY the ship actually entered warp. The return value
+    proves NOTHING: warp() is a toggle that answers true on both engage and
+    terminate, and an engage can silently no-op (lingering warp state after a kill,
+    low reactor energy -- engage eats ~half the pool up front). Only motion is
+    proof. First attempt fires if the pool covers one engage; retries demand a
+    near-full recharge (fast retries against an empty reactor just spin)."""
+    for attempt in range(5):
+        wait_energy(0.45 if attempt == 0 else 0.85)
+        lua("return enb.warp()")
+        time.sleep(4.0)  # spin-up: closure shows within a few seconds
+        for _ in range(3):
+            v = ship_speed()
+            if v is not None and v >= 300:
+                return True
+            time.sleep(1.0)
+        time.sleep(WARP_COOLDOWN)
+    return False
+
+
+def warp_timeout(dist):
+    """Seconds to allow for a warp segment: distance / effective speed, never below
+    WARP_TIMEOUT. Effective speed is well under the 2000 u/s warp floor because in
+    an obstructed sector (asteroid belts) the warp drops out repeatedly and each
+    re-engage costs cooldown + spin-up (~50% duty cycle)."""
+    return max(WARP_TIMEOUT, dist / 800.0 + 45.0)
+
+
+def _arrived(sector, name):
+    """Record the arrival position estimate (ledger coords of the reached node)."""
+    global EST_POS
+    xyz = ledger_xyz(sector, name)
+    if xyz is not None:
+        EST_POS = xyz
+
+
+def _visit_at_standoff(sector, name, gid, dist):
+    """Ledger-visit a node reached by engage-refusal inside its no-warp standoff
+    ring (> VISIT_K, so mark_in_range will never mark it -- attempt 11 looped
+    forever re-picking Earth Station because the slop path only set EST_POS)."""
+    record_visit(sector, name, gid, dist, note=", at no-warp standoff")
+    _arrived(sector, name)
 
 
 def warp_to(sector, target):
     """Select + warp to a nav, then poll the flight: mark fly-by navs visited, and
     return when the target is within VISIT_K (arrived) or its range stops closing
-    (arrived-or-stuck) or WARP_TIMEOUT. Returns True if the target was reached."""
+    (arrived-or-stuck) or the distance-scaled timeout. Returns True if reached.
+    Works for SEEN (out-of-range) targets too: the gid is still targetable, the
+    live range simply stays unknown until the ship closes into scanner range."""
     gid, name = target["gid"], target["name"]
-    if not lua_bool(f"return enb.request_target({gid})"):
+    # already there: warp will not engage toward anything closer than ~2k, and
+    # anything within VISIT_K already counts as visited -- do not burn 5 verified
+    # engage attempts (with energy waits) on a target 1.8k away. The visit MUST
+    # land here too: returning without recording spun attempt 14 in place on a
+    # duplicate-name nav (arrive -> nothing marked -> re-picked -> arrive ...).
+    if target["dist"] is not None and target["dist"] <= VISIT_K:
+        record_visit(sector, name, gid, target["dist"])
+        _arrived(sector, name)
+        return True
+    if not lua_bool(f"enb.request_target({gid})"):
+        # a SEEN gid can go stale (object despawned); forget it so pick_target
+        # does not offer it forever.
+        SEEN.pop(lkey(name), None)
         logaction(sector, "target-fail", name)
         return False
-    lua("return enb.warp()")
+    ensure_not_warping()
+    if not warp_engage():
+        # Refusal INSIDE the target's no-warp standoff ring is arrival, not
+        # failure (see ARRIVE_SLOP) -- re-read the live range before judging.
+        cur = next((nv for nv in get_navs()
+                    if lkey(nv["name"]) == lkey(name)), None)
+        if cur and cur["dist"] is not None and cur["dist"] <= ARRIVE_SLOP:
+            _visit_at_standoff(sector, name, gid, cur["dist"])
+            return True
+        # warp_engage already burned 5 verified attempts: this target is not
+        # engaging. Two straight warp_to failures (10 attempts) = dead target
+        # (no nav path to it); blacklist so pick_target/relocate stop offering it.
+        key = lkey(name)
+        WARP_FAILS[key] = WARP_FAILS.get(key, 0) + 1
+        logaction(sector, "warp-fail", name)
+        if WARP_FAILS[key] >= 2:
+            BLACKLIST.add(key)
+            logaction(sector, "blacklist", f"{name} (warp never engages)")
+            # persist the verdict: without the ledger skip a restarted run
+            # re-burns ~3min of verified engage attempts on the same dead target
+            state("skip", sector, ledger_name(sector, name),
+                  "warp never engages (no nav path to target)")
+        return False
     logaction(sector, "warp", f"to {name} (gid {gid}, d={target['dist']:.0f})")
-    deadline = time.time() + WARP_TIMEOUT
-    last_d, stall = target["dist"], 0
-    key = navdata.norm(name)
+    WARP_FAILS.pop(lkey(name), None)
+    deadline = time.time() + warp_timeout(target["dist"])
+    grace = time.time() + 20  # warp spin-up barely closes distance; don't call it a stall
+    last_d, stall, rewarps, blind = target["dist"], 0, 0, 0
+    key = lkey(name)
     while time.time() < deadline:
         time.sleep(POLL_SLEEP)
         navs = get_navs()
         mark_in_range(sector, navs)
-        cur = next((nv for nv in navs if navdata.norm(nv["name"]) == key), None)
+        cur = next((nv for nv in navs if lkey(nv["name"]) == key), None)
         d = cur["dist"] if cur and cur["dist"] is not None else None
         if d is not None and d <= VISIT_K:
+            _arrived(sector, name)
             return True
-        if d is not None:
-            if d >= last_d - 200:      # not closing -> arrived-at-min or stuck
+        if d is None:
+            # target (still) out of scanner range: no range to watch, so watch
+            # MOTION instead -- a mid-leg drop-out here would otherwise idle the
+            # ship until the full deadline.
+            blind += 1
+            if blind % 5 == 0 and time.time() > grace:
+                v = ship_speed()
+                if v is not None and v < 300:
+                    if rewarps < 12 and warp_engage():
+                        rewarps += 1
+                        grace = time.time() + 15
+                        continue
+                    return False
+            continue
+        blind = 0
+        if d >= last_d - 200:          # not closing -> warp dropped out, or arrived
+            if time.time() > grace:
                 stall += 1
                 if stall >= 3:
-                    return d <= VISIT_K
-            else:
-                stall = 0
-            last_d = d
+                    # Not closing is NOT proof the warp dropped: the client
+                    # pathfinds buoy-to-buoy, and a multi-hop leg can fly AWAY
+                    # from the final target for a while (the Earth Station path
+                    # opens with a 65k->149k divergence). Firing enb.warp() --
+                    # a TOGGLE -- while still at warp speed CANCELS the leg
+                    # (attempt 12 aborted every 99k relocate ~26s in). Only
+                    # treat a stall as a drop-out when the ship is genuinely
+                    # slow; otherwise keep riding the path (the distance-scaled
+                    # deadline still bounds the whole flight).
+                    v = ship_speed()
+                    if v is not None and v >= 300:
+                        stall = 0
+                        continue
+                    # Still far from the target: the warp dropped mid-leg
+                    # (obstruction / drop-out, routine in an asteroid belt).
+                    # Re-engage IN PLACE -- exiting to the outer loop pays
+                    # ~15s of ledger churn per 16k hop. ALWAYS BE WARPING.
+                    if rewarps < 12 and warp_engage():
+                        rewarps += 1
+                        grace = time.time() + 15
+                        stall = 0
+                        continue
+                    # re-engage refused: inside the target's no-warp standoff
+                    # ring (a station's is ~9.5k, outside VISIT_K) = arrival
+                    if d <= ARRIVE_SLOP:
+                        _visit_at_standoff(sector, name, gid, d)
+                        return True
+                    return False
+        else:
+            stall = 0
+        last_d = d
     return False
+
+
+def _seg_dist(p, a, b):
+    """Distance from point p to segment a-b (3D, kilo-units)."""
+    ax, ay, az = a
+    vx, vy, vz = b[0] - ax, b[1] - ay, b[2] - az
+    wx, wy, wz = p[0] - ax, p[1] - ay, p[2] - az
+    vv = vx * vx + vy * vy + vz * vz
+    t = 0.0 if vv == 0 else max(0.0, min(1.0, (wx * vx + wy * vy + wz * vz) / vv))
+    return math.dist(p, (ax + t * vx, ay + t * vy, az + t * vz))
+
+
+def corridor_score(sector, anchor, remaining, corridor=18.0):
+    """How many unvisited ledger nodes lie within `corridor` kilo-units of the
+    flight line from EST_POS to this anchor nav. 0 when we cannot place either
+    endpoint (falls back to plain farthest-first via the sort tiebreak)."""
+    if EST_POS is None:
+        return 0
+    dst = ledger_xyz(sector, anchor["name"])
+    if dst is None:
+        return 0
+    return sum(1 for node in remaining.values()
+               if _seg_dist((node["x"], node["y"], node["z"]), EST_POS, dst)
+               <= corridor)
 
 
 def choose_gate(sector, navs, visited_sids):
@@ -300,29 +677,44 @@ def choose_gate(sector, navs, visited_sids):
 
 
 def cross_gate(gate):
-    """Warp to the gate, fire enb.gate(), and poll enb.sector() for the flip.
-    Returns the new sector id, or None if it never changed."""
+    """Warp to the gate, wait for the warp to drop out (a gate() fired mid-warp at
+    8k is outside activation range and is silently ignored), then fire enb.gate()
+    and poll enb.sector() for the flip -- retrying the transit a few times since
+    the first fire can land while still decelerating. Returns the new sector id,
+    or None if it never changed."""
     before = get_sector_id()
-    if not lua_bool(f"return enb.request_target({gate['gid']})"):
+    if not lua_bool(f"enb.request_target({gate['gid']})"):
         return None
     # close on the gate first so the transit arms cleanly
     warp_to_gate(gate)
-    lua("return enb.gate()")
-    deadline = time.time() + GATE_TIMEOUT
-    while time.time() < deadline:
+    # let the warp drop out at the gate before firing the transit
+    slow_deadline = time.time() + 30
+    while time.time() < slow_deadline:
+        v = ship_speed()
+        if v is None or v < 300:
+            break
         time.sleep(2)
-        now = get_sector_id()
-        if now is not None and now != before:
-            return now
+    for _ in range(3):
+        lua(f"return enb.request_target({gate['gid']})")
+        lua("return enb.gate()")
+        deadline = time.time() + GATE_TIMEOUT
+        while time.time() < deadline:
+            time.sleep(2)
+            now = get_sector_id()
+            if now is not None and now != before:
+                return now
     return None
 
 
 def warp_to_gate(gate):
     """Like warp_to but for a gate (no ledger join needed): warp and close to <VISIT_K."""
     lua(f"return enb.request_target({gate['gid']})")
-    lua("return enb.warp()")
-    deadline = time.time() + WARP_TIMEOUT
-    last_d, stall = gate["dist"] or 1e18, 0
+    ensure_not_warping()
+    if not warp_engage():
+        return
+    deadline = time.time() + warp_timeout(gate["dist"] or 100000.0)
+    grace = time.time() + 20
+    last_d, stall, rewarps = gate["dist"] or 1e18, 0, 0
     key = navdata.norm(gate["name"])
     while time.time() < deadline:
         time.sleep(POLL_SLEEP)
@@ -332,9 +724,23 @@ def warp_to_gate(gate):
             return
         if d is not None:
             if d >= last_d - 200:
-                stall += 1
-                if stall >= 3:
-                    return
+                if time.time() > grace:
+                    stall += 1
+                    if stall >= 3:
+                        # multi-hop legs can diverge before closing; a toggle
+                        # mid-warp cancels the leg (see warp_to). Re-engage
+                        # only when genuinely slow.
+                        v = ship_speed()
+                        if v is not None and v >= 300:
+                            stall = 0
+                            continue
+                        # mid-leg drop-out: re-engage in place (verified)
+                        if rewarps < 12 and warp_engage():
+                            rewarps += 1
+                            grace = time.time() + 15
+                            stall = 0
+                            continue
+                        return
             else:
                 stall = 0
             last_d = d
@@ -344,9 +750,17 @@ def survey_sector(sector):
     """Drive one sector to completion via the Lua channel. Returns the final nav
     list (so the caller can pick a gate) once every reachable node is resolved."""
     logaction(sector, "sector-enter", "")
+    # resume support: rows visited by a prior run carry their gid stamp; seed
+    # the dedup set so a restart neither re-logs them nor lets a duplicate-name
+    # visit land on an already-consumed row.
+    for n in ledger_nodes(sector):
+        if n.get("visited_gid") is not None:
+            MARKED_GIDS.add(n["visited_gid"])
     reloc = 0
+    used_anchors = set()
     while True:
         navs = get_navs()
+        build_alias(sector, navs)
         mark_in_range(sector, navs)
         visited, total = ledger_counts(sector)
         remaining = ledger_remaining(sector)
@@ -359,15 +773,28 @@ def survey_sector(sector):
                   f"(d={target['dist']:.0f})")
             warp_to(sector, target)
             reloc = 0
+            used_anchors.clear()
             time.sleep(WARP_COOLDOWN)
             continue
         # nothing reachable in range but unvisited nodes remain: relocate to drag a
         # fresh slice of the sector into scanner range, bounded by RELOC_MAX.
-        far = [nv for nv in navs if nv["dist"] is not None
-               and not is_gate(nv["name"], nv["cls"])]
+        # Gates are fine relocation anchors too (warping to one does not transit it).
+        # Anchor choice is CORRIDOR-SCORED: prefer the present nav whose flight line
+        # from our estimated position passes the most unvisited ledger nodes --
+        # perimeter (gate-to-gate) hops never scan a sector's center, but a crossing
+        # leg lists mid-sector navs as it passes and SEEN remembers them.
+        # Each anchor is used at most once per dry spell: corridor-scored farthest
+        # from anchor A is B and from B is A, so without the memory the budget
+        # burns ping-ponging one A<->B pair (attempt 13 bounced Accelerator <->
+        # ABA gate three times).
+        far = [nv for nv in navs if nv["dist"] is not None and nv["dist"] > VISIT_K
+               and lkey(nv["name"]) not in BLACKLIST
+               and lkey(nv["name"]) not in used_anchors]
         if far and reloc < RELOC_MAX:
-            far.sort(key=lambda nv: nv["dist"], reverse=True)
+            far.sort(key=lambda nv: (corridor_score(sector, nv, remaining),
+                                     nv["dist"]), reverse=True)
             reloc += 1
+            used_anchors.add(lkey(far[0]["name"]))
             print(f"  {sector}: dry -- relocate {reloc}/{RELOC_MAX} to "
                   f"{far[0]['name']} (d={far[0]['dist']:.0f})")
             logaction(sector, "relocate", f"{far[0]['name']} (d={far[0]['dist']:.0f})")
@@ -375,11 +802,18 @@ def survey_sector(sector):
                 # payoff (a new nav entering range) resets the budget in mark_in_range
                 if mark_in_range(sector, get_navs()) > 0:
                     reloc = 0
+                    used_anchors.clear()
             time.sleep(WARP_COOLDOWN)
             continue
-        # relocation budget spent: the remainder is a scanner dead-zone. Skip it.
+        # relocation budget spent: the remainder is unreachable. Skip it, saying why.
         for key, node in remaining.items():
-            state("skip", sector, node["name"], "unreachable (never entered scanner range)")
+            if key in BLACKLIST:
+                reason = "warp never engages (no nav path to target)"
+            elif key in SEEN:
+                reason = "unreachable (never entered visit range)"
+            else:
+                reason = "not in live nav registry (absent from this sector's spawns)"
+            state("skip", sector, node["name"], reason)
             logaction(sector, "skip", node["name"])
         print(f"  {sector}: conceded {len(remaining)} unreachable node(s)")
         break
@@ -388,28 +822,75 @@ def survey_sector(sector):
     return get_navs()
 
 
+def ensure_in_space():
+    """Undock if the character loaded docked. enb.undock() sends the client's own
+    STARBASE_REQUEST(action=1) through StationExit; the server launches us. No-op
+    (returns false) when already in space.
+    Right after login enb.state() reads "unknown" for a few seconds before it
+    settles to station/space -- checking once at that instant skips the undock,
+    and the driver then reads the docked sub-sector id (1060 -> 10601) with an
+    empty nav registry and stops (attempt 9). Wait for a settled state first."""
+    st = None
+    settle = time.time() + 90
+    while time.time() < settle:
+        st = lua("return enb.state()")
+        if st in ("station", "space"):
+            break
+        time.sleep(2)
+    if st != "station":
+        return
+    print("[drive_lua] docked -- undocking")
+    if not lua_bool("enb.undock()"):
+        sys.exit("[drive_lua] enb.undock() refused (world mgr not captured?)")
+    deadline = time.time() + 90
+    while time.time() < deadline:
+        time.sleep(2)
+        if lua("return enb.state()") == "space":
+            print("[drive_lua] in space")
+            time.sleep(5)  # let the sector scene start populating
+            return
+    sys.exit("[drive_lua] undock never reached state=space")
+
+
 def main():
+    global EST_POS
     print(f"[drive_lua] client dir: {CDIR}")
     # sanity: channel alive?
     if lua("return 1+1") != "2":
         sys.exit("[drive_lua] enbmod channel not answering -- is the client in-game with mods?")
+    ensure_in_space()
 
     visited_sids = set()
     for hop in range(MAX_SECTORS):
         sid = get_sector_id()
         navs = settle_navs()
-        names = [nv["name"] for nv in navs]
-        # identify the sector from the (exact, non-OCR) nav names
-        r = subprocess.run([sys.executable, os.path.join(HERE, "navdata.py"),
-                            "identify", *names], capture_output=True, text=True)
-        if r.returncode != 0 or not r.stdout.strip():
-            print(f"[drive_lua] sid={sid}: could not identify sector from "
-                  f"{len(names)} navs; stopping.")
-            break
-        sector = r.stdout.split("\t")[0].strip()
+        sector = SID_MAP.get(str(sid))
+        if sector is None:
+            # no map entry (unsurveyed sector): fall back to identify-by-nav-names,
+            # but only with real evidence -- a single shared name like "Sector Gate
+            # to Earth" matches many sectors and misidentifying corrupts a ledger
+            # (attempt 6 surveyed High Earth into the ABA ledger off 1 nav).
+            names = [nv["name"] for nv in navs]
+            if len(names) < 3:
+                print(f"[drive_lua] sid={sid}: unmapped and only {len(names)} nav "
+                      f"name(s) -- not enough to identify safely; stopping.")
+                break
+            r = subprocess.run([sys.executable, os.path.join(HERE, "navdata.py"),
+                                "identify", *names], capture_output=True, text=True)
+            if r.returncode != 0 or not r.stdout.strip():
+                print(f"[drive_lua] sid={sid}: could not identify sector from "
+                      f"{len(names)} navs; stopping.")
+                break
+            sector = r.stdout.split("\t")[0].strip()
         print(f"[drive_lua] hop {hop}: sid={sid} -> {sector} ({len(navs)} navs)")
         state("init", sector)
         visited_sids.add(sid)
+        SEEN.clear()      # flyby memory + position estimate are per-sector
+        EST_POS = None
+        BLACKLIST.clear()  # dead-target memory is per-sector too
+        WARP_FAILS.clear()
+        ALIAS.clear()      # live<->ledger name join is per-sector
+        MARKED_GIDS.clear()  # gid-visit dedup is per-sector (reseeded from ledger)
 
         navs = survey_sector(sector)
 
