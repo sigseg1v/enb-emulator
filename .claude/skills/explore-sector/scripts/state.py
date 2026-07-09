@@ -208,9 +208,13 @@ def cmd_status(args):
 
 
 def cmd_remaining(args):
+    # A skipped node is RESOLVED, not remaining: re-entering a surveyed sector
+    # must not re-offer its conceded nodes -- the persisted blacklist skip
+    # exists precisely so a later visit does not re-burn minutes of verified
+    # engage failures on the same unreachable planet.
     st = read(args[0])
     for n in st["nodes"]:
-        if not n["visited"]:
+        if not n["visited"] and not n.get("skipped"):
             print(f"{1 if n['hidden'] else 0}\t{n['x']}\t{n['y']}\t{n['z']}\t{n['name']}")
 
 
