@@ -901,12 +901,20 @@ def _sector_done(sid):
         return False
 
 
-def choose_gate(sector, navs, visited_sids):
-    """Nearest gate whose DESTINATION is neither surveyed this run nor a
-    completed ledger. The arrival gate is always the nearest one, so distance
-    alone gates an instantly-resolved resume sector straight back where it
-    came from (attempt 16 ping-ponged Earth <-> ABA). A gate whose destination
-    cannot be resolved stays eligible."""
+def choose_gate(sector, navs, visited_sids, tried_edges, sid):
+    """Pick the next gate to cross from the CURRENT sector (sid), for a graph
+    traversal that reaches unexplored sectors even when they sit BEHIND already-
+    completed ones. The old linear walk picked only gates to a fresh destination
+    and the main loop stopped dead the first time a crossing looped back into a
+    surveyed sector -- so from a spawn boxed in by done sectors (Ishuan/Yokan)
+    it took two internal gates, looped, and quit while the frontier gates
+    (Gate to Sol, Gate to Sirius System) sat untried.
+
+    Now: gates are ranked so a FRESH destination is tried first, then a done
+    sector we have NOT yet entered this run (transit through it to reach what is
+    beyond), then -- last resort -- a sector we already entered this run. Each
+    (sid, gid) edge is crossed at most once (tried_edges), so the traversal is
+    finite: it exhausts the reachable gate graph and only then concedes."""
     # Union the gates in range NOW with every gate observed during the sweep: a
     # 200k+ onward gate is out of range at the parked spot but was seen (and its
     # gid captured) mid-sweep, and a gid stays targetable after it leaves range.
@@ -915,16 +923,23 @@ def choose_gate(sector, navs, visited_sids):
     for key, g in GATES_SEEN.items():
         if key not in live_keys:
             gates.append(g)
-
-    def stale(g):
-        sid = gate_dest_sid(g["name"])
-        return sid is not None and (sid in visited_sids or _sector_done(sid))
-
-    fresh = [g for g in gates if not stale(g)]
-    if not fresh:
+    # Never re-cross a gate we already took from this sector (loop guard).
+    gates = [g for g in gates if (sid, g["gid"]) not in tried_edges]
+    if not gates:
         return None
-    fresh.sort(key=lambda g: (g["dist"] is None, g["dist"] or 1e18))
-    return fresh[0]
+
+    def tier(g):
+        dest = gate_dest_sid(g["name"])
+        if dest is None:
+            return 0                      # unknown dest: unresolved onward gate, likely frontier
+        if not _sector_done(dest) and dest not in visited_sids:
+            return 0                      # a known-fresh sector to survey
+        if dest not in visited_sids:
+            return 1                      # done, but not entered this run: transit through it
+        return 2                          # already entered this run: last-resort loop-back
+
+    gates.sort(key=lambda g: (tier(g), g["dist"] is None, g["dist"] or 1e18))
+    return gates[0]
 
 
 def cross_gate(gate):
@@ -1202,11 +1217,13 @@ def main():
     ensure_in_space()
 
     visited_sids = set()
+    tried_edges = set()   # (sid, gid) gates crossed this run -- the traversal loop guard
     hop = 0
     relogins = 0
-    # A hop advances only on a clean survey+cross; a client hang re-enters the
-    # SAME hop (the ledger persists, so survey_sector resumes) after relogin, so
-    # the counter is not consumed by recovery. run-sector.sh's role, inlined.
+    # A hop advances on every gate crossing (a survey OR a transit through a done
+    # sector to reach the frontier beyond it); a client hang re-enters the SAME
+    # hop (the ledger persists, so survey_sector resumes) after relogin, so the
+    # counter is not consumed by recovery. run-sector.sh's role, inlined.
     while hop < MAX_SECTORS:
         try:
             sid = get_sector_id()
@@ -1229,7 +1246,12 @@ def main():
                           f"{len(names)} navs; stopping.")
                     break
                 sector = r.stdout.split("\t")[0].strip()
-            print(f"[drive_lua] hop {hop}: sid={sid} -> {sector} ({len(navs)} navs)")
+
+            # Only SURVEY a sector that is not already complete and not surveyed this
+            # run; otherwise we are just TRANSITING through it to reach fresh space.
+            transit = sid in visited_sids or _sector_done(sid)
+            print(f"[drive_lua] hop {hop}: sid={sid} -> {sector} ({len(navs)} navs) "
+                  f"[{'transit' if transit else 'survey'}]")
 
             # Gravity-well sectors: warp terminates mid-flight and we cannot
             # auto-route out, so refuse rather than spin -- same policy as survey.sh.
@@ -1240,33 +1262,35 @@ def main():
                 pcap_stop()
                 sys.exit(EXIT_WELL)
 
-            pcap_ensure(sector)   # per-sector capture spanning the entry handshake
-            state("init", sector)
             visited_sids.add(sid)
-            SEEN.clear()      # flyby memory + position estimate are per-sector
-            GATES_SEEN.clear()  # observed-gate memory is per-sector too
-            EST_POS = None
-            BLACKLIST.clear()  # dead-target memory is per-sector too
-            WARP_FAILS.clear()
-            ALIAS.clear()      # live<->ledger name join is per-sector
-            MARKED_GIDS.clear()  # gid-visit dedup is per-sector (reseeded from ledger)
+            if not transit:
+                pcap_ensure(sector)   # per-sector capture spanning the entry handshake
+                state("init", sector)
+                SEEN.clear()      # flyby memory + position estimate are per-sector
+                GATES_SEEN.clear()  # observed-gate memory is per-sector too
+                EST_POS = None
+                BLACKLIST.clear()  # dead-target memory is per-sector too
+                WARP_FAILS.clear()
+                ALIAS.clear()      # live<->ledger name join is per-sector
+                MARKED_GIDS.clear()  # gid-visit dedup is per-sector (reseeded from ledger)
+                navs = survey_sector(sector)
 
-            navs = survey_sector(sector)
-
-            gate = choose_gate(sector, navs, visited_sids)
+            gate = choose_gate(sector, navs, visited_sids, tried_edges, sid)
             if not gate:
-                print(f"[drive_lua] {sector}: no gate to an unsurveyed sector -- done.")
+                print(f"[drive_lua] {sector}: no untried onward gate -- reachable gate "
+                      f"graph exhausted; done.")
                 break
             print(f"[drive_lua] {sector}: gating via {gate['name']} (gid {gate['gid']})")
             logaction(sector, "enter-gate", gate["name"])
+            tried_edges.add((sid, gate["gid"]))   # mark BEFORE crossing so a failed transit is not retried
             new_sid = cross_gate(gate)
             if new_sid is None:
-                print("[drive_lua] gate transit did not flip the sector id -- stopping.")
-                break
-            if new_sid in visited_sids:
-                print(f"[drive_lua] gated into already-surveyed sector {new_sid} -- "
-                      f"stopping (v1 has no multi-gate route planner).")
-                break
+                # Transit failed (gate would not fire / locked / undersized approach).
+                # The edge is already marked tried; stay in this sector and pick a
+                # different gate next iteration instead of killing the whole run.
+                print(f"[drive_lua] {sector}: gate '{gate['name']}' did not transit -- "
+                      f"trying another gate.")
+                continue
             time.sleep(WARP_COOLDOWN)
             hop += 1
         except ClientHang as e:
