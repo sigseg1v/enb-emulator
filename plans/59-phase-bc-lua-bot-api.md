@@ -264,3 +264,14 @@ plans/29:
   earlier "select_nav is dead-code duplication" claim (it was wrong), marked enb.select_nav
   [!] as the true blocker, and launched a decomp mine for the W/D/C radar nav-cycle handlers.
   Driver is written + read-only-smoke-tested but held uncommitted until select_nav lands.
+- 2026-07-08: Two driver-loop fixes from the 3-sector live demo (Earth -> ABA -> Luna).
+  (1) skipped-is-resolved (4cec4ea5): state.py `remaining` listed skipped nodes, so
+  re-entering a completed sector re-offered its conceded planet and burned ~3 min of
+  engage failures before the blacklist re-skipped it; `remaining` now excludes skipped,
+  so a completed sector instant-resolves on re-entry. (2) gate destination resolution
+  (25cb5860): choose_gate took the nearest gate, which after an instant resolve is
+  always the ARRIVAL gate -- the run ping-ponged Earth <-> ABA and stopped. Gates name
+  their destination ("Sector Gate to Asteroid Belt Alpha"); drive_lua now resolves that
+  suffix to a sid (docs/sectors/sector-ids.md + sector_ids.json) and filters gates whose
+  destination is already surveyed this run or a completed ledger. Live-validated: resumed
+  run instant-resolved Earth (38/38), gated Earth -> Luna, surveyed Luna fresh.
