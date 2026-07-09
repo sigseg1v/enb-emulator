@@ -3808,3 +3808,35 @@ moot; the SOLVED block above is the truth):**
 - **Setup**: `just rebuild server` (no wire change, no DB reseed). Optionally tune
   `NET7_LOGIN_ACK_TIMEOUT_MS` / `NET7_PLAYER_IDLE_REAP_MS` in the server service env
   if the defaults need adjusting for a given machine's throttling behaviour.
+
+## [ ] CV-GATECAM-STALE -- gate fly-in camera suppressed once the player left the sector
+
+- **What changed (server, 2026-07-08)**: `SectorManager::Gate()` schedules the
+  gate fly-in camera control (B_CAMERA_CONTROL timed call, 5800ms after the gate
+  activation). The timed-call dispatch in `SectorManager.cpp` now sends it ONLY
+  if the player is still in this sector (`p->GetSector() == m_SectorID`). NO
+  wire-format change -- the packet bytes are untouched; a stale copy is simply
+  not sent to a player who already completed the transit and was handed off to
+  the destination sector.
+- **Why**: a client that completes the transit fast (sends gate Action 18 and 19
+  back-to-back, e.g. the enbmod `enb.gate()` primitive) is already in the NEW
+  sector when the 5.8s camera control arrives. The client then plays a gate
+  camera sequence for a gate that no longer exists around it, and the sequence's
+  completion callback re-shows the loading screen in blank mode AFTER the new
+  sector's START packet (the only thing that dismisses the load screen) has
+  already been processed -- the client sits on "Loading." forever. Proxy trace
+  evidence: stale lone verb-0x13 gate-finish packets (frames #25327, #26852,
+  both gid 100390) fired minutes after transiting that gate, at the moment of
+  the NEXT transit -- the dangling native gate-finish flushing. Every fast raw
+  transit wedged; it self-healed invisibly only when another transit followed.
+- **Verified (dev client, 2026-07-08)**: Luna -> Earth transit via `enb.gate()`
+  after the fix: sector flipped at t+4s, load screen dismissed at START and its
+  shown flag stayed clear at t+8/14/22/40s (previously it re-showed blank at
+  ~t+6-10s on every transit). Screenshot confirms in-space in Earth.
+- **What to look for (real client)**: fly a NORMAL gate transit (approach the
+  gate, activate it, let the fly-in camera play). Natively the player is still
+  in the departure sector at the 5.8s mark, so the guard must pass and the
+  fly-in camera sequence must play exactly as before, and the loading screen
+  must appear and dismiss normally on arrival. Regression would be: no fly-in
+  camera on a normal gate transit.
+- **Setup**: `just rebuild server`. No DB reseed.

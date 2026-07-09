@@ -1368,7 +1368,13 @@ void SectorManager::MakeTimedCall(TimeNode *this_node)
 			if (p) BuffTimeout(p);
 			break;
         case B_CAMERA_CONTROL:
-            if (p) p->SendCameraControl(node.i1, node.i2);
+            // Gate() schedules this 5.8s after the gate activation. A client that
+            // completes the transit before then (sends Action 19 without waiting
+            // for the fly-in) has already been handed off to the destination
+            // sector; delivering the old sector's gate camera there makes the
+            // client re-show its loading screen with nothing left to dismiss it.
+            // Only send while the player is still in this sector.
+            if (p && p->GetSector() == m_SectorID) p->SendCameraControl(node.i1, node.i2);
             break;
 		case B_LOCAL_GATE:
 			if (p) p->HandleLocalGate(node.i1, node.i2);
