@@ -1,5 +1,27 @@
 # Phase AW -- Sector exploration skill (agent-driven nav survey)
 
+- **2026-07-09 CONVERTED OFF OCR to the enbmod Lua command channel.** The whole
+  survey now drives the client through the injected enbmod `enb.*` API instead of
+  screenshots/OCR/XTEST -- the same channel `login-to-client` was converted to.
+  `drive_lua.py` (already the multi-hop driver) gained the last pieces the OCR
+  wrapper scripts owned: (1) hang-recovery/relogin ported from `run-sector.sh` --
+  the Lua channel IS the liveness signal (enbmod's poll is pump-clocked, so a
+  wedge stops answering `enbmod.cmd`); `lua()` raises `ClientHang` after the
+  channel is silent past `ENB_LUA_HANG_SECS` (150s, above a gate-load screen) AND
+  a `return 1+1` probe fails, and `main()` relogins (local stack) or HALTS (manual/
+  live, exit 42) then resumes the SAME hop from the persisted ledger; (2)
+  per-sector `pcap.sh ensure`/`stop`; (3) gravity-well refusal (`gravity_wells.py`,
+  exit 3). `explore-live.sh` repointed at `drive_lua.py` with an in-game
+  precondition (`08-wait-ingame.sh`) and now sources the login skill's `lib.sh`
+  for `client_win`. **Deleted 24 OCR scripts** (drive.py, survey.sh, run-sector.sh,
+  enum_fast.py, all read-*/map/warp/shield/gate/rescue/undock helpers, the old
+  lib.sh) + `navdata.cmd_predict` (map-pixel projection) -- net -5.5k LOC. SKILL.md
+  + .env.example rewritten for the Lua path. Verified: hang-detection offline
+  harness (raise-on-wedge + recover), and a LIVE end-to-end run (client in ABG
+  1079 -> sector detected via enb.sector(), 26 navs settled, correctly refused as
+  a gravity well, pcap stopped, exit 3). Warp/nav/gate path already proven live
+  (Luna 21/24 -> Earth hop). This closes the "convert explore-sector off OCR" task.
+
 - **2026-06-24 map-reposition planet-filter fix.** Live on HighEarth the map-click
   SEVERE-stuck fallback kept warping toward the "Earth" PLANET marker (parked 37k out,
   warp never closes). The direct-marker branch already self-skips a planet target after

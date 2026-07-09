@@ -37,7 +37,7 @@ action="${1:-}"; sector="${2:-}"
 # Capture is for the LIVE reference server ONLY -- NEVER for a local freya run
 # (owner rule, 2026-06-22). explore-live.sh forces ENB_PCAP=0 the moment it
 # detects the docker proxy, but that downgrade only matters if THIS script
-# honours it: drive.py calls `pcap.sh ensure <sector>` unconditionally, so the
+# honours it: drive_lua.py calls `pcap.sh ensure <sector>` unconditionally, so the
 # gate has to live here, at the single chokepoint every capture-starting action
 # passes through. With ENB_PCAP=0 the start/rotate/ensure actions no-op (exit 0,
 # no tcpdump ever spawns); `stop` still runs so a capture left over from a prior
@@ -88,7 +88,7 @@ case "$action" in
     ensure)
         # Make sure SOME capture is running and labelled for <sector>: relabel an
         # already-running capture (e.g. the char-select placeholder) to <sector>,
-        # or start a fresh one. Idempotent -- safe to call at drive.py startup
+        # or start a fresh one. Idempotent -- safe to call at drive_lua.py startup
         # whether we just logged in, resumed mid-sector, or just crossed a gate.
         [ -n "$sector" ] || { echo "usage: pcap.sh ensure <sector>" >&2; exit 2; }
         worker_ready || { echo "[pcap] SKIP -- capture worker not configured (scripts/pcap-install.sh)." >&2; exit 0; }

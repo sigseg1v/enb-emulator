@@ -66,9 +66,9 @@ def cmd_sectors(_args):
 
 
 def cmd_match(args):
-    # match <Sector> <ocr name...> -- map an OCR'd nav name (which may have small
-    # errors like "Soace" for "Space") to the closest authoritative node name in
-    # the sector. Prints "<best name>\t<ratio>". Used after read-navname.sh.
+    # match <Sector> <ocr name...> -- map a possibly-misspelled nav name to the
+    # closest authoritative node name in the sector. Prints "<best name>\t<ratio>".
+    # A manual helper; the driver joins live<->ledger names in-process (build_alias).
     if len(args) < 2:
         sys.exit("match: usage: match <Sector> <ocr name...>")
     import difflib
@@ -83,54 +83,6 @@ def cmd_match(args):
     if not best:
         sys.exit("match: sector has no nodes")
     print(f"{best}\t{best_r:.2f}")
-
-
-def cmd_predict(args):
-    # predict <Sector> -- given a few ANCHORS (a map pixel paired with the node's
-    # NAME, which we identify reliably via click->Dest->match) read from stdin, solve
-    # the affine map world(x,y) -> screen pixel and print the PREDICTED pixel for
-    # every node in the sector. Use it to click nodes the detector misses and to see
-    # which known nodes should be on-screen (in body) vs need a warp to bring in.
-    #
-    # We anchor on NAMES, not on the X/Y/Z readout's OCR'd numbers: the game font's
-    # digits mis-OCR (8->6), but the node name is reliable and its true x/y comes
-    # from the JSON -- so the transform carries no OCR-number error.
-    #
-    # stdin: one anchor per line "<px> <py> <node name...>" (>=3, non-colinear).
-    # stdout (one per node): "<px> <py> <inbody|OUT> <type> <name>"
-    if not args:
-        sys.exit("predict: usage: predict <Sector>  (anchors '<px> <py> <name>' on stdin)")
-    sector = args[0]
-    nodes = load(sector)
-    by_name = {norm(n.get("name")): n for n in nodes}
-    P, S = [], []   # world rows [x,y,1] and screen rows [px,py]
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
-        parts = line.split()
-        if len(parts) < 3:
-            continue
-        px, py, name = parts[0], parts[1], " ".join(parts[2:])
-        n = by_name.get(norm(name))
-        if not n:
-            sys.stderr.write(f"predict: anchor name not in sector: {name}\n")
-            continue
-        P.append([float(n["x"]), float(n["y"]), 1.0])
-        S.append([float(px), float(py)])
-    if len(P) < 3:
-        sys.exit("predict: need >=3 valid anchors (got %d)" % len(P))
-    import numpy as np
-    A = np.array(P)
-    B = np.array(S)
-    M, *_ = np.linalg.lstsq(A, B, rcond=None)   # 3x2: world[x,y,1] -> [px,py]
-    # map body bounds (window-rel), same as detect-nodes default search box-ish
-    L, T, R, Bb = 22, 232, 760, 786
-    for n in nodes:
-        w = np.array([float(n["x"]), float(n["y"]), 1.0])
-        px, py = (w @ M)
-        inb = "inbody" if (L <= px <= R and T <= py <= Bb) else "OUT"
-        print(f"{int(round(px))} {int(round(py))} {inb} {n.get('type')} {n.get('name')}")
 
 
 def cmd_identify(args):
@@ -195,7 +147,7 @@ def main():
     if len(sys.argv) < 2:
         sys.exit("usage: navdata.py {list|sectors|identify} ...")
     cmds = {"list": cmd_list, "sectors": cmd_sectors, "identify": cmd_identify,
-            "match": cmd_match, "predict": cmd_predict}
+            "match": cmd_match}
     cmd = sys.argv[1]
     if cmd not in cmds:
         sys.exit(f"unknown command: {cmd}")

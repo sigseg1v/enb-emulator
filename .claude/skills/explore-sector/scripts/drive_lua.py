@@ -74,6 +74,30 @@ GATE_TIMEOUT = float(os.environ.get("ENB_GATE_TIMEOUT", "30"))  # s to wait for 
 MAX_SECTORS = int(os.environ.get("ENB_MAX_SECTORS", "40"))  # stop after this many sectors
 LUA_TIMEOUT = float(os.environ.get("ENB_LUA_TIMEOUT", "6"))  # per-command reply wait
 
+# ---- hang recovery / relogin (ports run-sector.sh's role for the Lua path) ---
+# The enbmod Lua channel IS the liveness signal: enbmod's command poll is clocked
+# off the client's message pump, so a HARD-HUNG client stops answering enbmod.cmd
+# entirely (this is also why heavy per-tick instrumentation can freeze a live
+# client -- a wedged pump answers nothing). A scene LOAD also silences the channel,
+# but only briefly (a gate transit's load screen clears in well under 90s); a wedge
+# never clears. So the channel is declared dead only after it has been continuously
+# unresponsive for HANG_SECS (comfortably above the worst-case load), and only once
+# a direct liveness probe confirms it -- then main() relogins (local stack) or halts
+# (manual/live client we do not own), exactly as run-sector.sh did around drive.py.
+HANG_SECS = float(os.environ.get("ENB_LUA_HANG_SECS", "150"))
+MANUAL_CLIENT = os.environ.get("ENB_EXPLORE_MANUAL_CLIENT", "0") == "1"
+MAX_RELOGIN = int(os.environ.get("ENB_MAX_RELOGIN", "4"))
+LOGIN_DIR = os.path.join(HERE, "..", "..", "login-to-client", "scripts")
+EXIT_HANG = 42   # client wedged and we could not (manual mode) relogin-recover
+EXIT_WELL = 3    # arrived in a gravity-well sector we cannot auto-route out of
+
+
+class ClientHang(Exception):
+    """The enbmod Lua channel went silent past HANG_SECS and a direct liveness
+    probe confirmed the client is wedged (not merely mid scene-load). Raised by
+    lua(); caught in main()'s hop loop, which relogins + resumes or halts."""
+
+
 US, RS = "\x1f", "\x1e"  # unit / record separators for the nav dump string
 
 # Ledger jsonl coords are kilo-units: in-game nav range ~= coord distance * 1000
@@ -163,10 +187,11 @@ def _log_len():
         return 0
 
 
-def lua(expr, timeout=LUA_TIMEOUT):
-    """Run one Lua line through the enbmod channel; return the FIRST new [run]
-    payload (everything after '[run] '), CR-stripped. None on timeout / no output.
-    The DLL writes CRLF, so \\r must be stripped before any compare (bit us once)."""
+def _lua_raw(expr, timeout):
+    """Send one Lua line and return the FIRST new [run] payload (everything after
+    '[run] '), CR-stripped, or None on timeout. The DLL writes CRLF, so \\r must be
+    stripped before any compare (bit us once). No hang detection -- used both by the
+    normal path (lua) and by the liveness probe, so it must never recurse."""
     start = _log_len()
     with open(CMD, "a") as f:
         f.write(expr + "\n")
@@ -182,6 +207,42 @@ def lua(expr, timeout=LUA_TIMEOUT):
             if ln.startswith("[run] "):
                 return ln[len("[run] "):]
         time.sleep(0.15)
+    return None
+
+
+# time.time() of the last successful channel reply -- the clock the hang detector
+# measures silence against. None until the first reply (so a dead-at-startup client
+# fails main()'s sanity check cleanly rather than raising a mid-run hang).
+_last_alive = None
+
+
+def _probe_alive():
+    """Direct liveness confirmation: does the channel answer 1+1 at all? A few
+    quick tries -- a wedged client (pump stalled) answers none of them."""
+    for _ in range(3):
+        if _lua_raw("return 1+1", LUA_TIMEOUT) is not None:
+            return True
+    return False
+
+
+def lua(expr, timeout=LUA_TIMEOUT):
+    """Run one Lua line through the enbmod channel; return the FIRST new [run]
+    payload, CR-stripped. None on timeout / no output.
+
+    Raises ClientHang when the channel has been silent past HANG_SECS AND a direct
+    liveness probe confirms the client is wedged. A gate-transit load screen (the
+    channel's routine silence) stays under HANG_SECS, so it never trips this; only a
+    real wedge does. main() catches ClientHang to relogin + resume or halt."""
+    global _last_alive
+    r = _lua_raw(expr, timeout)
+    now = time.time()
+    if r is not None:
+        _last_alive = now
+        return r
+    if _last_alive is None:
+        _last_alive = now            # first-ever contact: start the clock, don't hang
+    elif now - _last_alive > HANG_SECS and not _probe_alive():
+        raise ClientHang(f"channel silent {now - _last_alive:.0f}s (> {HANG_SECS:.0f}s)")
     return None
 
 
@@ -1006,6 +1067,65 @@ def ensure_in_space():
     sys.exit("[drive_lua] undock never reached state=space")
 
 
+def relogin_or_halt(relogins):
+    """Recover a wedged client, mirroring run-sector.sh's hang branch. In
+    manual-client mode we do NOT own the client (the operator launched it under
+    WINE against the live server), so we cannot relaunch it -- HALT for the
+    operator to relaunch + re-run (the ledger persists, so a re-run resumes where
+    it left off), exactly as run-sector.sh does. Otherwise (local stack) kill +
+    relogin through the login-to-client skill and resume. Exits the process on an
+    unrecoverable state; returns normally once the client is back in-game."""
+    global _last_alive
+    if MANUAL_CLIENT:
+        print("[drive_lua] client hard-hung and ENB_EXPLORE_MANUAL_CLIENT=1 -- not "
+              "relaunching a client we do not own. Relaunch the client (and your "
+              "proxy) yourself, then re-run to resume (the ledger persists).",
+              file=sys.stderr)
+        pcap_stop()
+        sys.exit(EXIT_HANG)
+    if relogins > MAX_RELOGIN:
+        print(f"[drive_lua] {relogins} hangs; giving up.", file=sys.stderr)
+        pcap_stop()
+        sys.exit(1)
+    print(f"[drive_lua] hard hang -> kill + relogin (#{relogins}) ...", file=sys.stderr)
+    subprocess.run(["bash", os.path.join(LOGIN_DIR, "login.sh")])
+    # login.sh's in-client auto-login owns EULA/credentials/char-enter; if 08 timed
+    # out the client is most likely still loading the scene -- just re-poll it.
+    ok = False
+    for _ in range(4):
+        if subprocess.run(["bash", os.path.join(LOGIN_DIR, "08-wait-ingame.sh")],
+                          capture_output=True).returncode == 0:
+            ok = True
+            break
+        time.sleep(5)
+    if not ok:
+        print(f"[drive_lua] relogin #{relogins} failed; aborting.", file=sys.stderr)
+        pcap_stop()
+        sys.exit(1)
+    _last_alive = time.time()   # channel is fresh again; reset the hang clock
+
+
+def pcap_ensure(sector):
+    """Best-effort: start/relabel a per-sector packet capture (pcap.sh self-gates
+    on ENB_PCAP and worker availability, so this no-ops on a local run or an
+    uninstalled worker). Called at each sector entry so the capture spans the
+    sector's entry handshake, exactly as drive.py did."""
+    subprocess.run(["bash", os.path.join(HERE, "pcap.sh"), "ensure", sector])
+
+
+def pcap_stop():
+    subprocess.run(["bash", os.path.join(HERE, "pcap.sh"), "stop"])
+
+
+def has_gravity_well(sector):
+    """True when the sector contains a gravity well (gravity_wells.py exits 2).
+    Warp terminates mid-flight in a well sector and we cannot auto-route out, so
+    the survey refuses it -- same policy as the screen survey (survey.sh)."""
+    return subprocess.run(
+        [sys.executable, os.path.join(HERE, "gravity_wells.py"), sector],
+        capture_output=True, text=True).returncode != 0
+
+
 def main():
     global EST_POS
     print(f"[drive_lua] client dir: {CDIR}")
@@ -1015,55 +1135,84 @@ def main():
     ensure_in_space()
 
     visited_sids = set()
-    for hop in range(MAX_SECTORS):
-        sid = get_sector_id()
-        navs = settle_navs()
-        sector = SID_MAP.get(str(sid))
-        if sector is None:
-            # no map entry (unsurveyed sector): fall back to identify-by-nav-names,
-            # but only with real evidence -- a single shared name like "Sector Gate
-            # to Earth" matches many sectors and misidentifying corrupts a ledger
-            # (attempt 6 surveyed High Earth into the ABA ledger off 1 nav).
-            names = [nv["name"] for nv in navs]
-            if len(names) < 3:
-                print(f"[drive_lua] sid={sid}: unmapped and only {len(names)} nav "
-                      f"name(s) -- not enough to identify safely; stopping.")
-                break
-            r = subprocess.run([sys.executable, os.path.join(HERE, "navdata.py"),
-                                "identify", *names], capture_output=True, text=True)
-            if r.returncode != 0 or not r.stdout.strip():
-                print(f"[drive_lua] sid={sid}: could not identify sector from "
-                      f"{len(names)} navs; stopping.")
-                break
-            sector = r.stdout.split("\t")[0].strip()
-        print(f"[drive_lua] hop {hop}: sid={sid} -> {sector} ({len(navs)} navs)")
-        state("init", sector)
-        visited_sids.add(sid)
-        SEEN.clear()      # flyby memory + position estimate are per-sector
-        GATES_SEEN.clear()  # observed-gate memory is per-sector too
-        EST_POS = None
-        BLACKLIST.clear()  # dead-target memory is per-sector too
-        WARP_FAILS.clear()
-        ALIAS.clear()      # live<->ledger name join is per-sector
-        MARKED_GIDS.clear()  # gid-visit dedup is per-sector (reseeded from ledger)
+    hop = 0
+    relogins = 0
+    # A hop advances only on a clean survey+cross; a client hang re-enters the
+    # SAME hop (the ledger persists, so survey_sector resumes) after relogin, so
+    # the counter is not consumed by recovery. run-sector.sh's role, inlined.
+    while hop < MAX_SECTORS:
+        try:
+            sid = get_sector_id()
+            navs = settle_navs()
+            sector = SID_MAP.get(str(sid))
+            if sector is None:
+                # no map entry (unsurveyed sector): fall back to identify-by-nav-
+                # names, but only with real evidence -- a single shared name like
+                # "Sector Gate to Earth" matches many sectors and misidentifying
+                # corrupts a ledger (attempt 6 surveyed High Earth into ABA off 1 nav).
+                names = [nv["name"] for nv in navs]
+                if len(names) < 3:
+                    print(f"[drive_lua] sid={sid}: unmapped and only {len(names)} nav "
+                          f"name(s) -- not enough to identify safely; stopping.")
+                    break
+                r = subprocess.run([sys.executable, os.path.join(HERE, "navdata.py"),
+                                    "identify", *names], capture_output=True, text=True)
+                if r.returncode != 0 or not r.stdout.strip():
+                    print(f"[drive_lua] sid={sid}: could not identify sector from "
+                          f"{len(names)} navs; stopping.")
+                    break
+                sector = r.stdout.split("\t")[0].strip()
+            print(f"[drive_lua] hop {hop}: sid={sid} -> {sector} ({len(navs)} navs)")
 
-        navs = survey_sector(sector)
+            # Gravity-well sectors: warp terminates mid-flight and we cannot
+            # auto-route out, so refuse rather than spin -- same policy as survey.sh.
+            if has_gravity_well(sector):
+                print(f"[drive_lua] {sector} contains a GRAVITY WELL -- refusing "
+                      f"(cannot auto-route out; warp terminates mid-flight). Fly to a "
+                      f"gate manually and re-run.", file=sys.stderr)
+                pcap_stop()
+                sys.exit(EXIT_WELL)
 
-        gate = choose_gate(sector, navs, visited_sids)
-        if not gate:
-            print(f"[drive_lua] {sector}: no gate to an unsurveyed sector -- done.")
-            break
-        print(f"[drive_lua] {sector}: gating via {gate['name']} (gid {gate['gid']})")
-        logaction(sector, "enter-gate", gate["name"])
-        new_sid = cross_gate(gate)
-        if new_sid is None:
-            print(f"[drive_lua] gate transit did not flip the sector id -- stopping.")
-            break
-        if new_sid in visited_sids:
-            print(f"[drive_lua] gated into already-surveyed sector {new_sid} -- stopping "
-                  f"(v1 has no multi-gate route planner).")
-            break
-        time.sleep(WARP_COOLDOWN)
+            pcap_ensure(sector)   # per-sector capture spanning the entry handshake
+            state("init", sector)
+            visited_sids.add(sid)
+            SEEN.clear()      # flyby memory + position estimate are per-sector
+            GATES_SEEN.clear()  # observed-gate memory is per-sector too
+            EST_POS = None
+            BLACKLIST.clear()  # dead-target memory is per-sector too
+            WARP_FAILS.clear()
+            ALIAS.clear()      # live<->ledger name join is per-sector
+            MARKED_GIDS.clear()  # gid-visit dedup is per-sector (reseeded from ledger)
+
+            navs = survey_sector(sector)
+
+            gate = choose_gate(sector, navs, visited_sids)
+            if not gate:
+                print(f"[drive_lua] {sector}: no gate to an unsurveyed sector -- done.")
+                break
+            print(f"[drive_lua] {sector}: gating via {gate['name']} (gid {gate['gid']})")
+            logaction(sector, "enter-gate", gate["name"])
+            new_sid = cross_gate(gate)
+            if new_sid is None:
+                print("[drive_lua] gate transit did not flip the sector id -- stopping.")
+                break
+            if new_sid in visited_sids:
+                print(f"[drive_lua] gated into already-surveyed sector {new_sid} -- "
+                      f"stopping (v1 has no multi-gate route planner).")
+                break
+            time.sleep(WARP_COOLDOWN)
+            hop += 1
+        except ClientHang as e:
+            # The client wedged mid-hop. Recover (relogin, local stack) or halt
+            # (manual/live client). On success, re-enter the SAME hop: get_sector_id
+            # + survey_sector resume from the persisted ledger, no hop consumed.
+            print(f"[drive_lua] CLIENT HANG: {e}", file=sys.stderr)
+            relogins += 1
+            relogin_or_halt(relogins)
+            print(f"[drive_lua] resumed in-game after hang #{relogins}; "
+                  f"re-detecting sector.", file=sys.stderr)
+            continue
+    pcap_stop()
     print("[drive_lua] survey run finished.")
     print(state("summary").stdout)
 
