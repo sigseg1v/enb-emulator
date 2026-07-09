@@ -275,3 +275,21 @@ plans/29:
   suffix to a sid (docs/sectors/sector-ids.md + sector_ids.json) and filters gates whose
   destination is already surveyed this run or a completed ledger. Live-validated: resumed
   run instant-resolved Earth (38/38), gated Earth -> Luna, surveyed Luna fresh.
+- 2026-07-08 (2): owner challenged the "warp never engages (no nav path)" skip verdicts --
+  correctly. Live re-test proved both Luna skips were ARRIVALS the driver misread:
+  (a) some navs DE-REGISTER from enb.navs() once the ship closes below ~15k (Luna's
+  shooting ranges), so the registry range poll goes blind exactly at arrival and the
+  subsequent engage refusal (<2k floor: already on top of it) was read as a dead target;
+  (b) planets/moons halt the approach at their body radius (Luna: ~17.9k), outside the
+  12k ARRIVE_SLOP. Fixes: target_dist() (enb.request_target + enb.dist object-level
+  readout, survives de-registration) as the arrival fallback in warp_to's refusal +
+  blind-stall paths; BODY_SLOP (30k) for planet/moon/sun ledger types; is_gate no longer
+  substring-matches "gate" (sent the driver into enb.gate() on plain nav "Nav Earth
+  Gate"). The buoy-graph "no path" theory in the comments was wrong and is rewritten --
+  blacklist is a wedge breaker, not physics. Live-validated: un-skipped both Luna nodes,
+  re-ran -- visit Luna (d=18241, at no-warp standoff), visit Basic Shooting Range Bravo
+  (d=329), Luna 22/24 + 2 genuinely-absent NPCs, then gated via Gate to Alpha Centauri
+  (real gate, fresh destination). Timing truth from actions.log: ABA real survey pace was
+  ~31 min (28 navs in 17 min + 7 in 14); the 2h03m ledger time was 86 min of the
+  dup-name wedge spinning (fixed earlier same day). Earth active time ~42 min across 3
+  debug attempts. Luna clean run: 33.5 min.

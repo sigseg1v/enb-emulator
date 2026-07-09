@@ -58,6 +58,12 @@ VISIT_K = float(os.environ.get("ENB_VISIT_K", "8000"))      # within this = visi
 # engage refusal this close IS arrival -- without the slop the station burns two
 # 90s engage cycles and gets blacklisted as unreachable (attempt 10).
 ARRIVE_SLOP = float(os.environ.get("ENB_ARRIVE_SLOP", "12000"))
+# Planets/moons/suns halt an approach at the BODY's radius, far outside
+# ARRIVE_SLOP (Luna parks the ship at ~17.9k from center): an engage refusal or
+# parked stall against a body-class node inside this ring is arrival at the
+# body, not a dead target. The old single slop blacklisted Luna as "warp never
+# engages" after it had flown 31k -> 17.9k and was sitting on the boundary.
+BODY_SLOP = float(os.environ.get("ENB_BODY_SLOP", "30000"))
 NEAR_SWITCH = float(os.environ.get("ENB_NEAR_SWITCH", "0.20"))  # farthest->nearest at 20%
 WARP_TIMEOUT = float(os.environ.get("ENB_WARP_TIMEOUT", "90"))  # max s per warp segment
 POLL_SLEEP = float(os.environ.get("ENB_POLL_SLEEP", "2"))   # in-flight poll cadence
@@ -85,11 +91,14 @@ SEEN = {}
 # we arrived at. Good enough to rank out-of-range candidates by distance.
 EST_POS = None
 # Per-sector dead targets: norm(name) of every nav whose warp engage failed
-# repeatedly. Warp is a buoy-to-buoy path through the sector's nav graph, so a
-# nav with no neighbour in link range (Earth's planet, 115.8k from the nearest
-# nav) can never be engaged -- request_target succeeds, warp() answers true,
-# zero motion. Without a penalty pick_target re-picks the same dead target
-# every loop (~90s of verified engage attempts each time) and the sector wedges.
+# repeatedly (request_target succeeds, warp() answers true, zero motion) and
+# that arrival detection could not account for. This is a LAST-RESORT wedge
+# breaker, not a physics claim: warp engages toward anything (players, mobs,
+# bodies) -- the two "no path" verdicts of the 3-sector demo were both
+# ARRIVALS the driver misread (nav de-registered at close range / planet body
+# radius outside the slop), which target_dist()/BODY_SLOP now catch first.
+# Without the penalty pick_target re-picks the same dead target every loop
+# (~90s of verified engage attempts each time) and the sector wedges.
 BLACKLIST = set()
 WARP_FAILS = {}  # lkey(name) -> consecutive warp_to engage failures
 # Live-DB name -> ledger name join for spelling variants (norm(live) -> norm(ledger)).
@@ -263,6 +272,22 @@ def ledger_xyz(sector, name):
     return None
 
 
+def ledger_type(sector, name):
+    """The ledger node's object type ('planet', 'moon', 'station', ...), or None."""
+    key = lkey(name)
+    for n in ledger_nodes(sector):
+        if navdata.norm(n["name"]) == key:
+            return n.get("type")
+    return None
+
+
+def arrive_slop(sector, name):
+    """Engage-refusal arrival slop for this node: body-class nodes stop the ship
+    at their radius, well outside the ~9.5k station standoff ring."""
+    t = (ledger_type(sector, name) or "").lower()
+    return BODY_SLOP if t in ("planet", "moon", "sun", "star") else ARRIVE_SLOP
+
+
 def ledger_name(sector, name):
     """The ledger's own spelling for a (possibly live-DB-spelled) nav name --
     state.py matches names by exact norm, so every visit/skip must carry the
@@ -378,8 +403,13 @@ def mark_in_range(sector, navs):
 
 
 def is_gate(name, cls):
+    """A TRANSIT gate, not a nav that merely mentions one. Every real gate in
+    the dataset is named 'Sector Gate to X' / 'Gate to X'; 'Nav Earth Gate' /
+    'Nav Centauri Gate' are ordinary navs parked NEAR a gate (live cls is nil
+    for both, so the name is all there is). The old substring match sent the
+    driver into enb.gate() on a plain nav and the transit no-op'd the run."""
     n, c = name.lower(), (cls or "").lower()
-    return "gate" in n or "gate" in c or "wormhole" in c
+    return "gate to " in n or "wormhole" in n or "gate" in c or "wormhole" in c
 
 
 def pick_target(sector, navs):
@@ -391,12 +421,11 @@ def pick_target(sector, navs):
          range now; still targetable by gid. Range is estimated from EST_POS and
          the ledger coords. Without this, a beltway sector whose navs only show
          mid-crossing false-concedes at 3/41 (attempt 5's ABA).
-    BLACKLIST excludes targets whose warp engage verifiably failed: warp is not
-    point-to-point -- the client pathfinds buoy-to-buoy through the sector's nav
-    graph, and a nav too far from every other nav (Earth's planet sits 115.8k
-    from its nearest neighbour) has no path, so the engage silently no-ops.
-    Without the exclusion the same dead target is re-picked every loop and the
-    sector never progresses (attempt 8 wedged exactly there).
+    BLACKLIST excludes targets whose warp engage verifiably failed twice AND
+    that arrival detection could not account for (see the BLACKLIST comment up
+    top: a wedge breaker, not a physics claim). Without the exclusion the same
+    dead target is re-picked every loop and the sector never progresses
+    (attempt 8 wedged exactly there).
     Returns a nav dict (with 'seen': True on tier 2) or None."""
     remaining = ledger_remaining(sector)
     # MARKED_GIDS excludes an already-visited duplicate whose NAME is still in
@@ -486,6 +515,25 @@ def wait_energy(target, timeout=150):
         time.sleep(3)
 
 
+def target_dist(gid):
+    """Object-level distance to gid via the TARGET readout (enb.request_target +
+    enb.dist), or None. This survives nav DE-REGISTRATION: some navs (Luna's
+    shooting ranges) drop off the nav registry once the ship closes below ~15k,
+    so the registry range read goes blind exactly when arrival must be judged --
+    the survey then misread "parked on top of the target, engage refuses under
+    the ~2k floor" as "warp never engages" and blacklisted a reached node.
+    enb.dist() reads the CURRENT target and lags a retarget by a tick, so
+    request first and read on a later command."""
+    if not lua_bool(f"enb.request_target({gid})"):
+        return None
+    time.sleep(0.5)
+    r = lua("return tostring(enb.dist())")
+    try:
+        return float(r)
+    except (TypeError, ValueError):
+        return None
+
+
 def warp_engage():
     """Fire enb.warp() and VERIFY the ship actually entered warp. The return value
     proves NOTHING: warp() is a toggle that answers true on both engage and
@@ -555,15 +603,23 @@ def warp_to(sector, target):
     ensure_not_warping()
     if not warp_engage():
         # Refusal INSIDE the target's no-warp standoff ring is arrival, not
-        # failure (see ARRIVE_SLOP) -- re-read the live range before judging.
+        # failure (see ARRIVE_SLOP/BODY_SLOP) -- re-read the range before
+        # judging. The registry can be blind here (nav de-registered at close
+        # range), so fall back to the object-level target readout.
         cur = next((nv for nv in get_navs()
                     if lkey(nv["name"]) == lkey(name)), None)
-        if cur and cur["dist"] is not None and cur["dist"] <= ARRIVE_SLOP:
-            _visit_at_standoff(sector, name, gid, cur["dist"])
-            return True
+        d = cur["dist"] if cur and cur["dist"] is not None else target_dist(gid)
+        if d is not None:
+            if d <= VISIT_K:
+                record_visit(sector, name, gid, d)
+                _arrived(sector, name)
+                return True
+            if d <= arrive_slop(sector, name):
+                _visit_at_standoff(sector, name, gid, d)
+                return True
         # warp_engage already burned 5 verified attempts: this target is not
-        # engaging. Two straight warp_to failures (10 attempts) = dead target
-        # (no nav path to it); blacklist so pick_target/relocate stop offering it.
+        # engaging and we are provably NOT on top of it. Two straight warp_to
+        # failures (10 attempts) = blacklist so pick_target stops offering it.
         key = lkey(name)
         WARP_FAILS[key] = WARP_FAILS.get(key, 0) + 1
         logaction(sector, "warp-fail", name)
@@ -573,7 +629,7 @@ def warp_to(sector, target):
             # persist the verdict: without the ledger skip a restarted run
             # re-burns ~3min of verified engage attempts on the same dead target
             state("skip", sector, ledger_name(sector, name),
-                  "warp never engages (no nav path to target)")
+                  "warp never engages (repeated verified engage failure)")
         return False
     logaction(sector, "warp", f"to {name} (gid {gid}, d={target['dist']:.0f})")
     WARP_FAILS.pop(lkey(name), None)
@@ -591,13 +647,23 @@ def warp_to(sector, target):
             _arrived(sector, name)
             return True
         if d is None:
-            # target (still) out of scanner range: no range to watch, so watch
-            # MOTION instead -- a mid-leg drop-out here would otherwise idle the
-            # ship until the full deadline.
+            # No registry range to watch: either the target is still out of
+            # scanner range, or it DE-REGISTERED because we are on top of it
+            # (Luna's shooting ranges vanish from the nav list below ~15k). So
+            # when the ship stops moving, judge by the object-level target
+            # readout before calling it a drop-out.
             blind += 1
             if blind % 5 == 0 and time.time() > grace:
                 v = ship_speed()
                 if v is not None and v < 300:
+                    td = target_dist(gid)
+                    if td is not None and td <= VISIT_K:
+                        record_visit(sector, name, gid, td)
+                        _arrived(sector, name)
+                        return True
+                    if td is not None and td <= arrive_slop(sector, name):
+                        _visit_at_standoff(sector, name, gid, td)
+                        return True
                     if rewarps < 12 and warp_engage():
                         rewarps += 1
                         grace = time.time() + 15
@@ -632,8 +698,9 @@ def warp_to(sector, target):
                         stall = 0
                         continue
                     # re-engage refused: inside the target's no-warp standoff
-                    # ring (a station's is ~9.5k, outside VISIT_K) = arrival
-                    if d <= ARRIVE_SLOP:
+                    # ring (a station's is ~9.5k, a planet/moon's its body
+                    # radius -- Luna parks the ship at ~17.9k) = arrival
+                    if d <= arrive_slop(sector, name):
                         _visit_at_standoff(sector, name, gid, d)
                         return True
                     return False
