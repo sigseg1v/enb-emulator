@@ -1033,17 +1033,85 @@ def gate_into_well(name):
     return dest is not None and SID_MAP.get(str(dest)) in GRAVITY_WELL_SECTORS
 
 
+def _sector_status(key):
+    """Persisted status of a ledger BY KEY: 'complete', 'in-progress', or None when
+    no ledger exists yet (an undiscovered sector)."""
+    try:
+        with open(os.path.join(STATE_DIR, key + ".json")) as f:
+            return json.load(f).get("status")
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def _sector_done(sid):
     """True when the destination's ledger is already complete (persisted
     knowledge, unlike visited_sids which only spans this process)."""
     key = SID_MAP.get(str(sid))
-    if key is None:
-        return False
-    try:
-        with open(os.path.join(STATE_DIR, key + ".json")) as f:
-            return json.load(f).get("status") == "complete"
-    except (OSError, json.JSONDecodeError):
-        return False
+    return key is not None and _sector_status(key) == "complete"
+
+
+def _gate_graph():
+    """Undirected sector graph from EVERY ledger's gate list, plus the FRONTIER set.
+    adj: sector key -> set(neighbour keys). A key is FRONTIER when it is a gate
+    destination that still needs surveying (no ledger yet = undiscovered, or a
+    ledger not marked complete) and is NOT a gravity well (we never route into a
+    well). Gates are two-way in EnB, so edges are undirected -- this is what lets
+    the BFS below measure how far a frontier lies BEYOND a completed sector, so the
+    walker heads toward real unexplored space instead of into a completed dead-end
+    (a done sector whose gates all loop back among done sectors, e.g. Ceres)."""
+    import glob
+    adj, frontier = {}, set()
+    for f in glob.glob(os.path.join(STATE_DIR, "*.json")):
+        key = os.path.basename(f)[:-5]
+        try:
+            with open(f) as fh:
+                d = json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(d, dict) or "nodes" not in d:
+            continue
+        for n in d["nodes"]:
+            if n.get("type") != "gate":
+                continue
+            name = n["name"]
+            # only gates we would actually cross count for routing: an in-sector
+            # accelerator sphere is not a route, and a gate INTO a well is refused.
+            if not routable_gate(name) or gate_into_well(name):
+                continue
+            dsid = gate_dest_sid(name)
+            if dsid is None:
+                # destination name resolves to no known sid -> almost certainly an
+                # UNDISCOVERED sector. Standing in `key` you are one gate from the
+                # unknown, so `key` itself borders the frontier (a BFS dist-0 source).
+                frontier.add(key)
+                continue
+            dkey = SID_MAP.get(str(dsid))
+            if dkey is None:
+                frontier.add(key)
+                continue
+            adj.setdefault(key, set()).add(dkey)
+            adj.setdefault(dkey, set()).add(key)
+            if dkey not in GRAVITY_WELL_SECTORS and _sector_status(dkey) != "complete":
+                frontier.add(dkey)
+    return adj, frontier
+
+
+def _frontier_hops(adj, frontier):
+    """Multi-source BFS: min hop count from every sector key to the nearest frontier
+    sector over the undirected gate graph. A key absent from the result cannot reach
+    any frontier (a completed dead-end) and is treated as infinitely far."""
+    from collections import deque
+    dist, dq = {}, deque()
+    for k in frontier:
+        dist[k] = 0
+        dq.append(k)
+    while dq:
+        u = dq.popleft()
+        for v in adj.get(u, ()):
+            if v not in dist:
+                dist[v] = dist[u] + 1
+                dq.append(v)
+    return dist
 
 
 def choose_gate(sector, navs, visited_sids, tried_edges, sid):
@@ -1079,17 +1147,30 @@ def choose_gate(sector, navs, visited_sids, tried_edges, sid):
     if not gates:
         return None
 
-    def tier(g):
+    # Frontier-directed routing: a one-hop tier walk wanders into completed
+    # dead-ends (Mercury -> Venus -> Ceres, where Ceres only gates back to Venus)
+    # before backtracking to the real unexplored frontier (Saturn -> Asteroid Belt
+    # Alpha, Akerons Gate -> Aragoth). Rank a transit through a DONE sector by how
+    # few hops the nearest frontier lies BEYOND it, so the walker heads toward
+    # unexplored space; a done sector with no reachable frontier sorts last.
+    adj, frontier = _gate_graph()
+    fhops = _frontier_hops(adj, frontier)
+    INF = float("inf")
+
+    def rank(g):
+        """Lower is better."""
+        phys = (g["dist"] is None, g["dist"] or 1e18)
         dest = gate_dest_sid(g["name"])
         if dest is None:
-            return 0                      # unknown dest: unresolved onward gate, likely frontier
+            return (0, 0, 0, *phys)          # unresolved dest name: likely a frontier gate
         if not _sector_done(dest) and dest not in visited_sids:
-            return 0                      # a known-fresh sector to survey
-        if dest not in visited_sids:
-            return 1                      # done, but not entered this run: transit through it
-        return 2                          # already entered this run: last-resort loop-back
+            return (0, 0, 0, *phys)          # a sector still needing survey, reached directly
+        dkey = SID_MAP.get(str(dest))
+        hops = fhops.get(dkey, INF)          # frontier distance BEYOND this done sector
+        revisit = 1 if dest in visited_sids else 0
+        return (1, hops, revisit, *phys)
 
-    gates.sort(key=lambda g: (tier(g), g["dist"] is None, g["dist"] or 1e18))
+    gates.sort(key=rank)
     return gates[0]
 
 
