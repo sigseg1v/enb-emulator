@@ -1,5 +1,27 @@
 # Phase AW -- Sector exploration skill (agent-driven nav survey)
 
+- **2026-07-09 INCAP AUTO-RECOVERY WAS DEAD-ON-ARRIVAL (falsy-zero bug) -- FIXED
+  + VALIDATED LIVE.** The distress->tow recovery added in the entry below NEVER
+  FIRED for the exact case it exists for. `check_incapacitated`'s debounce re-read
+  was `if not enb.inspace() or (hull_frac() or 1.0) > 0.0: return` -- but an
+  incapacitated hull reads exactly `0.0`, and in Python `0.0 or 1.0 == 1.0` (0.0 is
+  falsy), so a genuine incap was coerced to 1.0 and the guard bailed every time.
+  Observed live: the LV122 ship sat incapacitated (hull 0/18000, "COMPUTER: you
+  cannot do this while incapacitated") in Ishuan (sid 2005) while the driver tried
+  every onward gate -- all refused by the server because incap refuses ALL actions
+  -- then declared "reachable gate graph exhausted; done" and exited: a FALSE
+  completion caused entirely by the unrecovered incap. Two fixes in `drive_lua.py`:
+  (1) capture the hull into `h2` and test `h2 is None or h2 > 0.0` explicitly so a
+  real `0.0` proceeds to recovery; (2) `tried_edges.clear()` in the `ShipRecovered`
+  handler -- gates marked "tried" during incap are FALSE failures (the server
+  refused everything, not that gate), and since the tow lands at the same sector's
+  station and undocks back into it, without the clear it re-hits "graph exhausted"
+  on its own already-tried gates. VALIDATED LIVE 2026-07-09: relaunched against the
+  live incap ship; `incap-recover` -> tow (retry #1 missed a click, #2 landed) ->
+  `incap-recovered` at Ishuan Station -> undock -> `enter-gate Gate to Capella
+  System` (crossed OUT, hull restored, tried_edges cleared). Recovery is now
+  genuinely automated end-to-end, not just when a human drives the clicks.
+
 - **2026-07-09 FREYA NEVER-EXPLORE + AUTOMATED INCAP DISTRESS->TOW RECOVERY
   (owner-directed).** The frontier walker routed the survey ship THROUGH
   `Akerons Gate`'s "Gate to Aragoth System" into **Freya (sid 1750)** and the

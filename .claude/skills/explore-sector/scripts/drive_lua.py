@@ -880,8 +880,9 @@ def check_incapacitated(sector):
     if h is None or h > 0.0:
         return
     time.sleep(1.0)                          # debounce a transient/stale 0 read
-    if not lua_bool("enb.inspace()") or (hull_frac() or 1.0) > 0.0:
-        return
+    h2 = hull_frac()                          # 0.0 is a REAL incap value: test `is None`
+    if not lua_bool("enb.inspace()") or h2 is None or h2 > 0.0:  # explicitly -- `h2 or 1.0`
+        return                               # would coerce a genuine 0.0 hull to 1.0 and bail
     recover_incapacitated(sector)
     raise ShipRecovered(f"towed out of {sector} after hull-0 incapacitation")
 
@@ -1731,9 +1732,16 @@ def main():
             time.sleep(WARP_COOLDOWN)
             hop += 1
         except ShipRecovered as e:
-            # Ship was incapacitated and auto-towed to a station (a different
-            # sector). Recovery already undocked us; re-enter the loop to re-detect
-            # the sector fresh -- no hop consumed (the tow is not a survey step).
+            # Ship was incapacitated and auto-towed to a station (often the SAME
+            # sector's station -- the tow lands at the last registered station).
+            # Recovery already undocked us; re-enter the loop to re-detect the
+            # sector fresh -- no hop consumed (the tow is not a survey step).
+            # Drop tried-gate memory: any gate marked "tried" while incapacitated
+            # was a FALSE failure (at hull 0 the server refuses EVERY action, not
+            # just that gate), so those edges must be retryable now the hull is
+            # restored -- else a tow back into the same sector immediately hits the
+            # "graph exhausted" false-completion on its own already-tried gates.
+            tried_edges.clear()
             print(f"[drive_lua] {e}; re-detecting sector.", file=sys.stderr)
             continue
         except ClientHang as e:
