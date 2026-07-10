@@ -20,6 +20,7 @@ import type {
     Mail,
     MyListing,
     PostListingInput,
+    SearchResult,
     SendMailInput,
     ServerStatus,
     Session,
@@ -35,6 +36,7 @@ import {
     MOCK_LISTINGS,
     MOCK_MAIL,
     MOCK_MY_LISTINGS,
+    MOCK_SEARCH,
     MOCK_PROFILE,
     MOCK_SERVER,
     MOCK_SESSION,
@@ -180,6 +182,21 @@ export async function fetchMyAvatars(): Promise<AvatarLocation[]> {
     if (USE_MOCK) return structuredClone(MOCK_MY_AVATARS);
     const r = await getJSON<{ avatars: AvatarLocation[] | null }>('/api/galaxy/me');
     return r.avatars ?? [];
+}
+
+// Item search: fuzzy item-name lookup returning each item's level,
+// manufacturable flag, and the mobs that drop it (combat level + sector).
+// Public, read-only game-catalogue data.
+export async function searchItems(query: string): Promise<SearchResult> {
+    const q = query.trim();
+    if (USE_MOCK) {
+        const lc = q.toLowerCase();
+        return {
+            query: q,
+            results: MOCK_SEARCH.filter(i => i.name.toLowerCase().includes(lc)),
+        };
+    }
+    return getJSON<SearchResult>(`/api/search?q=${enc(q)}`);
 }
 
 // avatar is the selected topbar character: the wallet to debit. The server

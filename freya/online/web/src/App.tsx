@@ -17,6 +17,7 @@ import { Profile } from './screens/Profile';
 import { Mailbox } from './screens/Mailbox';
 import { AuctionHouse } from './screens/AuctionHouse';
 import { Vault } from './screens/Vault';
+import { Search } from './screens/Search';
 import { Account } from './screens/Account';
 
 const STATUS_POLL_MS = 60_000;
@@ -37,9 +38,9 @@ export default function App() {
     // screen, so a logged-in refresh doesn't flash the login form.
     const [booting, setBooting] = useState(true);
     const [server, setServer] = useState<ServerStatusT>({ status: 'OFFLINE', players: 0 });
-    const [tab, setTab] = useState<'galaxy' | 'profile' | 'mail' | 'ah' | 'vault' | 'account'>(
-        'galaxy',
-    );
+    const [tab, setTab] = useState<
+        'galaxy' | 'profile' | 'mail' | 'ah' | 'vault' | 'search' | 'account'
+    >('galaxy');
     const [mail, setMail] = useState<Mail[]>([]);
     const [listings, setListings] = useState<Listing[]>([]);
     const [vault, setVault] = useState<Record<string, VaultSlot[]>>({});
@@ -181,6 +182,12 @@ export default function App() {
                         <span className="tab__glyph">⊟</span> Vault
                     </button>
                     <button
+                        className={'tab' + (tab === 'search' ? ' tab--active' : '')}
+                        onClick={() => setTab('search')}
+                    >
+                        <span className="tab__glyph">⌕</span> Search
+                    </button>
+                    <button
                         className={'tab' + (tab === 'account' ? ' tab--active' : '')}
                         onClick={() => setTab('account')}
                     >
@@ -256,6 +263,7 @@ export default function App() {
                         toast={toast}
                     />
                 )}
+                {tab === 'search' && <Search />}
                 {tab === 'account' && <Account username={session.username} toast={toast} />}
             </div>
 

@@ -87,6 +87,9 @@ func (s *apiServer) routes() http.Handler {
 	// The logged-in account's own characters and the sectors they sit in (for
 	// personal star markers on the map). Auth-gated -- it is per-account data.
 	mux.HandleFunc("GET /api/galaxy/me", s.handleGalaxyMe)
+	// Item search: name -> stats + dropping mobs (combat level + sector). Public
+	// (no auth) -- it is read-only game-catalogue data, like /api/galaxy.
+	mux.HandleFunc("GET /api/search", s.handleSearch)
 	// AH + mailbox mutations (Go 1.22 method+wildcard patterns).
 	mux.HandleFunc("POST /api/auction", s.handlePostListing)
 	mux.HandleFunc("POST /api/auction/{id}/bid", s.handleBid)
