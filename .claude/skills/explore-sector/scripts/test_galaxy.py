@@ -42,6 +42,16 @@ print("\npaired-name wormhole (Antares Frontier <-> Vishao's Cove):")
 check(D.gate_dest_sid("Vishao's Gate", 1505) == VC, "Vishao's Gate from Antares Frontier -> Vishao's Cove")
 check(D.gate_dest_sid("Vishao's Gate", VC) == 1505, "Vishao's Gate from Vishao's Cove -> Antares Frontier")
 
+print("\npaired-name wormhole is ROUTABLE (name lacks ' to '/'wormhole' -- needs galaxy resolve):")
+# Regression guard: a named wormhole must be routable when the source sector is
+# known, or the walker false-concludes 'no onward gate' and strands the run
+# (Antares Frontier stopped on exactly this -- routable_gate ignored the galaxy map).
+check(D.routable_gate("Vishao's Gate", 1505) is True, "Vishao's Gate routable from Antares Frontier (with src_sid)")
+check(D.routable_gate("Vishao´s Gate", 1505) is True, "accented 'Vishao´s Gate' routable from Antares Frontier")
+check(D.routable_gate("Vishao's Gate") is False, "Vishao's Gate NOT routable without src_sid (name heuristic alone)")
+check(D.routable_gate("Accelerator Sphere", 1505) is False, "in-sector device stays non-routable even with src_sid")
+check(D.routable_gate("Gate to Jupiter") is True, "plain 'Gate to X' still routable by name alone")
+
 print("\ninter-system gate resolves by source system:")
 check(D.gate_dest_sid("Gate to Beta Hydri System", SATURN) == GLENN,
       "Gate to Beta Hydri System from Saturn -> Glenn")

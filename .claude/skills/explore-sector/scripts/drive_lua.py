@@ -1208,16 +1208,25 @@ def gate_dest_sid(name, src_sid=None):
     return DEST_SIDS.get(suffix) or GATE_DEST_OVERRIDES.get(suffix)
 
 
-def routable_gate(name):
-    """A gate we can actually CROSS to another sector. Every real transit gate in
-    the dataset is named 'Gate to X' / 'Sector Gate to X' / a 'Wormhole'; an
-    in-sector device (Accelerator Sphere, ...) is picked up by is_gate only
-    because its object CLASS matches 'gate', yet warping to it never flips the
-    sector. Routing via one wastes a warp and, in a gravity-well sector, sends the
-    ship toward the well (warp terminates mid-flight, can strand it). Route only
-    via names that read as an inter-sector gate."""
+def routable_gate(name, src_sid=None):
+    """A gate we can actually CROSS to another sector. Most real transit gates are
+    named 'Gate to X' / 'Sector Gate to X' / a 'Wormhole'; an in-sector device
+    (Accelerator Sphere, ...) is picked up by is_gate only because its object CLASS
+    matches 'gate', yet warping to it never flips the sector. Routing via one wastes
+    a warp and, in a gravity-well sector, sends the ship toward the well (warp
+    terminates mid-flight, can strand it).
+
+    But a PAIRED-NAME WORMHOLE ('Vishao's Gate' 1505<->1935, 'Ancient Gate'
+    3670<->3675) reads as neither pattern, so the name heuristic alone wrongly
+    rejects it and the sector false-concludes 'no onward gate' (Antares Frontier
+    stranded on exactly this). The galaxy map DOES resolve those from the source
+    sector, so when src_sid is known, a name the galaxy resolves to a real
+    destination sector is routable too. An accelerator sphere resolves to nothing,
+    so it stays non-routable."""
     n = name.lower()
-    return " to " in n or "wormhole" in n
+    if " to " in n or "wormhole" in n:
+        return True
+    return src_sid is not None and gate_dest_sid(name, src_sid) is not None
 
 
 def _sector_forbidden(key):
@@ -1351,7 +1360,7 @@ def _gate_graph():
             # only gates we would actually cross count for routing: an in-sector
             # accelerator sphere is not a route, and a gate INTO a forbidden sector
             # (well or NEVER_EXPLORE) is refused.
-            if not routable_gate(name) or gate_forbidden(name, src_sid):
+            if not routable_gate(name, src_sid) or gate_forbidden(name, src_sid):
                 continue
             # A gate we KNOW will not transit is not an edge and does NOT border
             # the frontier -- skip it, or its unresolved dest name falsely marks
@@ -1422,7 +1431,7 @@ def choose_gate(sector, navs, visited_sids, tried_edges, sid, leaving_defer=Fals
     # OUT of a well is not a well destination, so escaping stays possible.
     gates = [g for g in gates
              if (sid, g["gid"]) not in tried_edges
-             and routable_gate(g["name"])
+             and routable_gate(g["name"], sid)
              and not gate_forbidden(g["name"], sid)]
     if leaving_defer:
         # Leaving a DEFERRED sector (gravity well / NEVER_EXPLORE): only exit toward
