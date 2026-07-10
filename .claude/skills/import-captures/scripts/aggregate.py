@@ -43,6 +43,7 @@
 #
 # Output per sector: navs / resources / mobs (the import sets) plus stations /
 # gates / planets (report-only) and the exclusion tally.
+import calendar
 import collections
 import glob
 import json
@@ -132,6 +133,31 @@ def cap_timestamp(path):
         return "0_%020d" % int(os.path.getmtime(path))
     except OSError:
         return "0"
+
+
+# A capture starts in whatever sector we were flying when it began -- i.e. the
+# sector the PREVIOUS, time-adjacent capture ended in. We only chain that across a
+# small time gap: a larger gap means the survey stopped and re-logged in somewhere
+# unknown, so the previous end sector is no longer where we are. Sector-to-sector
+# in one continuous session is minutes; 30 min is a generous continuity window.
+SESSION_GAP_SECS = 30 * 60
+
+
+def cap_epoch(path):
+    """UTC epoch seconds from the filename stamp (for session-gap chaining), or
+    the file mtime, or None."""
+    m = re.search(r"(\d{8})T(\d{6})Z", os.path.basename(path))
+    if m:
+        try:
+            return calendar.timegm(
+                (int(m.group(1)[:4]), int(m.group(1)[4:6]), int(m.group(1)[6:8]),
+                 int(m.group(2)[:2]), int(m.group(2)[2:4]), int(m.group(2)[4:6]), 0, 0, 0))
+        except ValueError:
+            pass
+    try:
+        return int(os.path.getmtime(path))
+    except OSError:
+        return None
 
 
 def norm_marker(sec, valid):
@@ -230,6 +256,8 @@ def main():
     merged = {}          # global gkey -> kept record (with ._cat, .sector, ._conf)
     excl = collections.Counter()
     relabels = []        # (capture, marker_sec, true_sec, votes) for the report
+    prev_end = None      # end sector of the previous (time-adjacent) capture
+    prev_ts = None       # its epoch, for the session-gap chain check
 
     def fold(store, key, rec):
         """Merge rec into store[key], keeping the higher-confidence sector and the
@@ -252,26 +280,58 @@ def main():
             (m["frame"], s) for m in d.get("markers", [])
             for s in (norm_marker(int(m["sector"]), valid),) if s is not None)
 
+        # The filename sector prefix -- the no-marker fallback, and the end-sector
+        # for chaining into the NEXT capture's pre-marker objects.
+        fname_sector = norm2id.get(norm(fname.split("__")[0]))
+        cur_ts = cap_epoch(path)
+
         cap_sector = None
         if not markers:
-            cap_sector = norm2id.get(norm(fname.split("__")[0]))
+            cap_sector = fname_sector
             if cap_sector is None:
                 excl["capture_unresolved_no_marker"] += len(d.get("objects", []))
+                prev_end, prev_ts = None, cur_ts   # unknown sector breaks the chain
                 continue
+
+        # Objects before the first in-stream marker belong to the sector we were
+        # flying when the capture began -- the sector the previous, time-adjacent
+        # capture ended in. Chain it only within one session (see SESSION_GAP_SECS);
+        # nav corroboration (segment_true_sector) still overrides it wherever the
+        # pre-marker segment's OWN navs point elsewhere, and a pre-marker nav always
+        # resolves authoritatively by name regardless.
+        pre_sector = None
+        if markers and prev_end is not None and prev_ts is not None \
+                and cur_ts is not None and 0 <= cur_ts - prev_ts <= SESSION_GAP_SECS:
+            pre_sector = prev_end
+
+        # This capture's end sector, for the NEXT capture's chain.
+        prev_end = markers[-1][1] if markers else cap_sector
+        prev_ts = cur_ts
 
         objs = d.get("objects", [])
 
         # Pass 1: tag each object with its marker-segment sector and category.
         tagged = []
         for o in objs:
-            mseg = cap_sector if cap_sector is not None \
-                else derive_sector(o.get("frame") or 0, markers)
-            if mseg is None:
-                excl["before_first_marker"] += 1
-                continue
+            if cap_sector is not None:
+                mseg = cap_sector
+            else:
+                mseg = derive_sector(o.get("frame") or 0, markers)
+                if mseg is None:                 # pre-first-marker
+                    mseg = pre_sector
             cat = categorize(o)
             if cat == "player":
                 excl["player"] += 1
+                continue
+            if mseg is None:
+                # No segment sector to place it in. A NAV still resolves by NAME
+                # (authoritative -- segment is irrelevant), so keep it. A mob or
+                # resource cannot be placed without a segment, so drop it rather
+                # than invent a location.
+                if cat == "nav":
+                    tagged.append((o, None, cat))
+                else:
+                    excl["before_first_marker"] += 1
                 continue
             tagged.append((o, mseg, cat))
 
@@ -286,7 +346,7 @@ def main():
         for mseg in set(m for _, m, _ in tagged):
             ts, conf = segment_true_sector(mseg, seg_navs.get(mseg, []), nav2secs)
             seg_true[mseg] = (ts, conf)
-            if ts != mseg:
+            if ts != mseg and mseg is not None:
                 relabels.append((fname, mseg, ts, conf))
 
         # Pass 3a: assign each object's final sector + confidence and collapse by

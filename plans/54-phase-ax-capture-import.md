@@ -281,6 +281,31 @@ per-sector file directly into psql.
   a player already in a fixed sector must re-enter it (gate out/in or relog) to
   see the corrected models.
 
+- [x] **AX-19** pre-first-marker object recovery (owner: my earlier "that data
+  is unrecoverable without a re-fly" claim was WRONG -- "bullshit... you are just
+  lazy"). A capture opens mid-flight in the sector we were already in, so objects
+  arriving in range before the first in-stream handoff were being DROPPED
+  (`before_first_marker`, ~469-706 objects across the corpus). They are fully
+  attributable without any re-fly: (a) navs already resolve by NAME via the jsonl
+  independent of markers; (b) a pre-marker mob/resource segment inherits the END
+  sector of the immediately-preceding capture in the same play session (the sector
+  we were flying when this capture began), chained only within `SESSION_GAP_SECS`
+  (30 min) by the `...T......Z` filename timestamps, then run through the SAME
+  nav-corroboration relabel as any other segment; (c) a pre-marker segment with no
+  navs AND no same-session predecessor still drops (attributing it would invent a
+  location). `aggregate.py` implements the chain + `cap_epoch()` timestamp parse.
+  Validated: Swooping Eagle 052139Z gates SwoopingEagle->Ishuan mid-capture; its
+  133 pre-marker resources correctly attribute to SwoopingEagle via the chain from
+  predecessor 051559Z (not to Ishuan); Freya pre-marker objects correctly relabel
+  to Ishuan (8 nav votes). Net effect: 10 per-sector files regenerated, import
+  total 1868 -> 2045 sector_objects (+177: +152 harvestable, +25 mob spawns),
+  Swooping Eagle 54 -> 212. Regenerated against an isolated throwaway pristine base
+  (`-p freya-import`, `ENB_SKIP_CAPTURE_SEED=1`, host port 5459) and applied the 10
+  files + `_purge`/`_mob_templates` directly to the live dev DB with
+  `ON_ERROR_STOP=1` (every file exited 0, live counts match the throwaway regen
+  exactly: 2045/1396/623). `SKILL.md` sector-assignment section updated. DB content
+  + skill tooling only -- no wire/server/proxy change, no `plans/29` CV entry.
+
 ## Notes
 
 - Mobs are NO LONGER skipped. The 8 names previously absent from `mob_base`
@@ -289,8 +314,11 @@ per-sector file directly into psql.
   synthesized clone templates (mob_id >= 900000) -- see AX-5b. The clone is a
   COMPLETE same-asset `mob_base` row, so it does NOT hit the Default-mob crash
   (that comes from a missing/incomplete template, not a present one).
-- Final aggregate exclusions: before_first_marker 469, player 47,
-  capture_unresolved_no_marker 4, drop_loot_or_deco 263, no_position 1.
+- Final aggregate exclusions (after AX-19 recovery): before_first_marker 244
+  (was 469-706 -- these are nav-less pre-marker segments with no same-session
+  predecessor, i.e. the first capture of a session or a >30-min gap; attributing
+  them would be guessing a location), player 47, capture_unresolved_no_marker 4,
+  drop_loot_or_deco 263, no_position 1.
 - No wire change, no server/proxy/login change -> no `plans/29` CV entry. This is
   DB content tooling only.
 - The import was applied to the running DEV DB during AX-9 validation (idempotent;

@@ -57,6 +57,20 @@ it runs once); the prerequisite is that the base seeds have already run.
      trusted), so legitimately mixed gate segments keep their marker. It is the
      correction for "if a nav was misattributed by believing the wrong sector, the
      mobs from that same belief were too."
+   - **Objects created BEFORE the first sector marker are recovered, not dropped.**
+     A capture opens mid-flight in the sector we were already in, and objects can
+     arrive in range before the first in-stream handoff. Their sector is determined
+     three ways, most-authoritative first: (a) navs resolve by NAME via the jsonl
+     regardless of markers, so a pre-marker nav is placed correctly with no guess;
+     (b) a pre-marker mob/resource segment is provisionally tagged with the end
+     sector of the immediately-preceding capture in the same play session (the
+     sector we were flying when this capture began), chained only when the two
+     captures are within `SESSION_GAP_SECS` (30 min) by their `...T......Z`
+     filename timestamps, then subject to the SAME nav-corroboration relabel as any
+     other segment; (c) if a pre-marker segment has NO navs to corroborate AND no
+     same-session predecessor to chain from, it is still dropped -- attributing it
+     would be inventing a location. This never trusts the capture filename for a
+     mob/resource (only for a genuinely marker-less capture whose name resolves).
    - **Dedup is two-level, because gids are session-scoped** (the same gid number is
      reused for unrelated objects across captures). WITHIN one capture a gid is
      stable, so objects are first collapsed by gid -- keeping the higher-confidence
