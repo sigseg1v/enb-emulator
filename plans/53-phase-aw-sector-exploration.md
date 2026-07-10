@@ -1,5 +1,41 @@
 # Phase AW -- Sector exploration skill (agent-driven nav survey)
 
+- **2026-07-09 FRONTIER-DIRECTED GATE ROUTING -- stop dead-end wandering
+  (commit `ec9216dc`, supersedes the `64786eb9` tier walk).** The graph traversal
+  from `64786eb9` reached sectors behind completed ones but ranked gates with only
+  a ONE-HOP `tier()` lookahead (fresh=0, done-not-visited-this-run=1, visited=2).
+  With one hop of foresight it could not distinguish a done sector that transits
+  TOWARD the frontier from a done dead-end. From the Sol cluster it walked
+  `Mercury -> Venus -> Ceres` and thrashed the Venus/Ceres/Mercury triangle
+  (`Ceres` only gates back to `Venus`; live actions.log showed
+  Ceres->Mercury->Ceres->Venus bouncing) before backtracking to the real frontier.
+  Owner flagged it: "if left mercury, went to venus, and is now flying to ceres,
+  why?". Replaced `tier()` with frontier-directed BFS:
+  - `_gate_graph()` builds an undirected sector graph over EVERY ledger's routable,
+    non-well gates, plus the FRONTIER set (a dest that still needs surveying). A
+    COMPLETED sector whose onward gate name resolves to no known sid is itself a
+    dist-0 frontier source -- standing there you are one gate from undiscovered
+    space (`Akerons Gate -> Aragoth`, `Saturn -> Asteroid Belt Alpha` resolve this
+    way, so those onward gates were previously invisible to routing).
+  - `_frontier_hops()` = multi-source BFS, min hops from each sector to any frontier.
+  - `rank()`: a fresh/unresolved dest still sorts first; a transit through a DONE
+    sector now sorts by how few hops the nearest frontier lies BEYOND it, then a
+    revisit flag, then physical distance. A done dead-end (no reachable frontier)
+    sorts last.
+  VERIFIED OFFLINE against the live ledgers: from `Venus` it now picks `Mercury`
+  (fhops=2) over `Ceres` (fhops=4); from `Mercury` it picks `Pluto` (fhops=1)
+  toward `Akerons Gate`, escaping the Sol dead-end instead of bouncing in it.
+  Relaunched live against the running client. Survey tooling only.
+
+- **2026-07-09 REACTOR-DRAIN-ZONE UNWARPABLE SKIP (commit `5918f194`).** A nav
+  named "reactor drain zone" cancels every warp ~1s after engage (the zone kills
+  drive), so the picker retargeted it forever, cancelling each warp -- the ship
+  never went anywhere. Fix: `UNWARPABLE_NAME_SUBSTRINGS` + `is_unwarpable()`, and
+  `resolve_unwarpable_navs()` (run each loop, like `resolve_body_navs`) takes such
+  navs OUT of `remaining` with a `skip` ("warp cancels ~1s after engage, cannot
+  reach; flying elsewhere"), so the survey flies to a real nav instead. `pick_target`
+  and the seen-tier / relocate lists all exclude it as a backstop. Survey tooling only.
+
 - **2026-07-09 PLANET-BODY WARP-SPAM FIX (commit `6f3243af`).** The Ceres survey
   wedged ping-ponging warp between `Ceres` (d=292k) and `Thule` (d=15k): both are
   the planet BODIES, the client refuses to warp into a body (`target too close`)
