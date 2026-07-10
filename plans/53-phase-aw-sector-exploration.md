@@ -1,5 +1,21 @@
 # Phase AW -- Sector exploration skill (agent-driven nav survey)
 
+- **2026-07-09 PLANET-BODY WARP-SPAM FIX (commit `6f3243af`).** The Ceres survey
+  wedged ping-ponging warp between `Ceres` (d=292k) and `Thule` (d=15k): both are
+  the planet BODIES, the client refuses to warp into a body (`target too close`)
+  and holds the ship at the body radius, so the farthest-first picker re-selected
+  them every loop and never marked either -> infinite warp spam. The existing
+  body-class standoff (`arrive_slop`) keyed off the LEDGER type, but these nodes
+  are typed generic `object` there, not `planet`; only the LIVE nav class from
+  `enb.navs()` reports `Planet`. Fix keys off the live class: `BODY_CLASSES` +
+  `is_body_class()`, and `resolve_body_navs()` (run each loop before `pick_target`)
+  takes body navs OUT of `remaining` -- visits one already inside `BODY_SLOP`
+  (as close as the game allows), skips a far one (cannot approach). `pick_target`
+  also excludes body-class navs as a backstop. The real waypoints around a body
+  (`Ceres 1..6`, ...) are separate nav-point nodes the survey still visits normally.
+  VERIFIED LIVE: Ceres survey unstuck from 2/16 -- `Ceres` skipped, `Thule` visited,
+  survey advanced onto the nav-points. Survey tooling only.
+
 - **2026-07-09 NAV-DUMP PAGING + non-transit-gate exclusion + well-gate settle
   (commit `e07797eb`).** Three linked fixes surfaced by the ship getting stuck in
   the Asteroid Belt Beta (ABB, sid 1077) gravity-well sector, unable to route out.
