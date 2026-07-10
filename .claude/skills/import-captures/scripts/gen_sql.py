@@ -48,6 +48,13 @@ REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
 OUT_DIR = os.path.join(REPO, "db", "postgres", "capture_import")
 WRAPPER = os.path.join(REPO, "db", "postgres", "seed_captures.sql")
 
+# Single source of truth for jsonl-filename -> sector aliases (ABA -> Asteroid
+# Belt Alpha, etc.). Shared with aggregate.py so the two nav catalogs cannot
+# drift -- both must resolve the same set of jsonl files, or a nav aggregate
+# places gets re-dropped here as "not-in-jsonl".
+sys.path.insert(0, HERE)
+from aggregate import JSONL_SECTOR_ALIAS  # noqa: E402
+
 SYNTH_BASE = 1_000_000          # synthetic sector_object_id: above max existing (~200528) + Phase Y
 MOB_SYNTH_BASE = 900_000        # synthetic mob_base.mob_id: above max real (~2114), below SYNTH_BASE
 REPLACE_RADIUS = 5000.0         # "within 5k" replacement radius
@@ -85,7 +92,10 @@ def load_nav_jsonl(norm2id):
     idx = collections.defaultdict(set)
     jdir = os.path.join(REPO, "docs", "sectors", "json")
     for path in sorted(glob.glob(os.path.join(jdir, "*.jsonl"))):
-        sid = norm2id.get(norm(os.path.basename(path)[:-6]))
+        base = os.path.basename(path)[:-6]
+        sid = norm2id.get(norm(base))
+        if sid is None and norm(base) in JSONL_SECTOR_ALIAS:
+            sid = norm2id.get(norm(JSONL_SECTOR_ALIAS[norm(base)]))
         if sid is None:
             continue
         with open(path) as fh:

@@ -101,6 +101,29 @@ def repo_root():
     sys.exit("aggregate: could not locate repo root (docs/sectors/json) above this script")
 
 
+# jsonl files whose basename does not norm-match the DB sector name (abbreviations
+# and divergent spellings). Without this, every nav in these catalogs resolves to
+# NO sector and is dropped -- including navs for sectors we import (Asteroid Belt
+# Alpha, Pluto and Charon). Maps basename-norm -> the DB sector NAME (resolved via
+# norm2id below). PLANET-SURFACE catalogs (PlanetDahin, PlanetArduinne, ...) are
+# deliberately NOT listed: their navs are on the planet surface, a different sector
+# instance than the space sector, so folding them into the space sector would be
+# wrong. MoonRisco / FishBowl have no matching DB sector and stay ignored.
+JSONL_SECTOR_ALIAS = {
+    "aba": "Asteroid Belt Alpha",
+    "abb": "Asteroid Belt Beta",
+    "abg": "Asteroid Belt Gamma",
+    "altair3": "Altair III",
+    "ceres": "Ceres/Thule",
+    "equatorial": "Equatorial Earth",
+    "mazzaroth": "Mazzaroth Maelstrom",
+    "mondara": "Mondara Maelstrom",
+    "nifleheim": "Nifleheim Cloud",
+    "pluto": "Pluto and Charon",
+    "todesengel": "der Todesengel",
+}
+
+
 def load_nav_jsonl(norm2id):
     """norm(nav name) -> set of sector_ids it is listed in, from
     docs/sectors/json/<Sector>.jsonl. THE authoritative nav membership source."""
@@ -108,7 +131,10 @@ def load_nav_jsonl(norm2id):
     nav2secs = collections.defaultdict(set)
     unmatched_files = []
     for path in sorted(glob.glob(os.path.join(root, "docs", "sectors", "json", "*.jsonl"))):
-        sid = norm2id.get(norm(os.path.basename(path)[:-6]))
+        base = os.path.basename(path)[:-6]
+        sid = norm2id.get(norm(base))
+        if sid is None and norm(base) in JSONL_SECTOR_ALIAS:
+            sid = norm2id.get(norm(JSONL_SECTOR_ALIAS[norm(base)]))
         if sid is None:
             unmatched_files.append(os.path.basename(path))
             continue
@@ -239,6 +265,30 @@ def segment_true_sector(marker_sec, seg_navs, nav2secs):
     return marker_sec, marker_votes
 
 
+def premarker_nav_sector(objs, first_frame, nav2secs):
+    """The sector the pre-first-marker window was flown in, derived from the navs
+    seen in that window (resolved authoritatively by name). A capture that has no
+    time-adjacent predecessor to chain from can still be anchored this way: the
+    navs visible before the first gate marker ARE the starting sector. Returns the
+    dominant sector only when the evidence is unambiguous (>=3 resolving votes and
+    a strict majority over every other sector combined), else None -- a split or
+    thin window stays anchorless rather than inventing a location for its mobs."""
+    votes = collections.Counter()
+    for o in objs:
+        if (o.get("frame") or 0) >= first_frame:
+            continue                              # has a real marker segment
+        if categorize(o) != "nav" or not o.get("name"):
+            continue
+        for s in nav2secs.get(norm(o["name"]), ()):
+            votes[s] += 1
+    if not votes:
+        return None
+    top_sec, top_votes = votes.most_common(1)[0]
+    if top_votes >= 3 and top_votes > sum(votes.values()) - top_votes:
+        return top_sec
+    return None
+
+
 def main():
     id2name, norm2id = sector_names()
     valid = set(id2name)
@@ -284,31 +334,41 @@ def main():
         # for chaining into the NEXT capture's pre-marker objects.
         fname_sector = norm2id.get(norm(fname.split("__")[0]))
         cur_ts = cap_epoch(path)
+        objs = d.get("objects", [])
 
         cap_sector = None
         if not markers:
             cap_sector = fname_sector
             if cap_sector is None:
-                excl["capture_unresolved_no_marker"] += len(d.get("objects", []))
+                excl["capture_unresolved_no_marker"] += len(objs)
                 prev_end, prev_ts = None, cur_ts   # unknown sector breaks the chain
                 continue
 
         # Objects before the first in-stream marker belong to the sector we were
-        # flying when the capture began -- the sector the previous, time-adjacent
-        # capture ended in. Chain it only within one session (see SESSION_GAP_SECS);
-        # nav corroboration (segment_true_sector) still overrides it wherever the
-        # pre-marker segment's OWN navs point elsewhere, and a pre-marker nav always
-        # resolves authoritatively by name regardless.
+        # flying when the capture began. Two independent ways to know that sector,
+        # in increasing authority:
+        #   (a) CHAIN -- the sector the previous, time-adjacent capture ended in
+        #       (only within one session, see SESSION_GAP_SECS; a larger gap means
+        #       we re-logged in somewhere unknown).
+        #   (b) OWN NAVS -- the navs visible in the pre-marker window resolve by
+        #       name to the starting sector directly. This is authoritative and
+        #       overrides the chained guess: a capture with no predecessor to chain
+        #       from is still fully anchored whenever its opening window names a
+        #       sector, so its mobs/resources are placed instead of dropped.
+        # Whichever we pick, nav corroboration (segment_true_sector) still gets the
+        # final say in Pass 2, and a pre-marker nav always resolves by name anyway.
         pre_sector = None
         if markers and prev_end is not None and prev_ts is not None \
                 and cur_ts is not None and 0 <= cur_ts - prev_ts <= SESSION_GAP_SECS:
             pre_sector = prev_end
+        if markers:
+            own = premarker_nav_sector(objs, markers[0][0], nav2secs)
+            if own is not None:
+                pre_sector = own
 
         # This capture's end sector, for the NEXT capture's chain.
         prev_end = markers[-1][1] if markers else cap_sector
         prev_ts = cur_ts
-
-        objs = d.get("objects", [])
 
         # Pass 1: tag each object with its marker-segment sector and category.
         tagged = []

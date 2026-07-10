@@ -12,13 +12,13 @@ DELETE FROM sector_nav_points WHERE sector_object_id IN (SELECT sector_object_id
 DELETE FROM sector_objects WHERE sector_id = 1750 AND sector_object_id >= 1000000;
 
 -- 3. inserts (parents first, then child rows)
-INSERT INTO sector_objects (sector_object_id, base_asset_id, h, s, v, type, scale, position_x, position_y, position_z, orientation_u, orientation_v, orientation_w, orientation_z, name, appears_in_radar, radar_range, sector_id, gate_to, sound_effect_id, sound_effect_range) VALUES (1000577, 0, 0.0, 0.0, 0.0, 0, 1.0, -11983.177, -83402.12, -506.99973, 0.0, 0.0, 0.0, 0.0, 'Mist Runner', 0, 5000.0, 1750, NULL, NULL, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
-INSERT INTO sector_objects (sector_object_id, base_asset_id, h, s, v, type, scale, position_x, position_y, position_z, orientation_u, orientation_v, orientation_w, orientation_z, name, appears_in_radar, radar_range, sector_id, gate_to, sound_effect_id, sound_effect_range) VALUES (1000578, 0, 0.0, 0.0, 0.0, 0, 1.0, -11229.362, -83726.87, 194.00052, 0.0, 0.0, 0.0, 0.0, 'Mist Lord', 0, 5000.0, 1750, NULL, NULL, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
-INSERT INTO sector_objects_mob (mob_id, mob_count, mob_spawn_radius, respawn_time, delayed_spawn, group_aggro) VALUES (1000577, 1, 0, 90, 0, 0) ON CONFLICT DO NOTHING;
-INSERT INTO mob_spawn_group (id, spawn_group_id, mob_id, group_index) VALUES (1000577, 1000577, 899, 0) ON CONFLICT (id) DO NOTHING;
-INSERT INTO sector_nav_points (sector_object_id, nav_type, signature, is_huge, sector_id, base_xp, exploration_range, object_radius_patch) VALUES (1000577, 0, 7000.0, 0, 1750, 0, 3000.0, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
-INSERT INTO sector_objects_mob (mob_id, mob_count, mob_spawn_radius, respawn_time, delayed_spawn, group_aggro) VALUES (1000578, 1, 0, 90, 0, 0) ON CONFLICT DO NOTHING;
-INSERT INTO mob_spawn_group (id, spawn_group_id, mob_id, group_index) VALUES (1000578, 1000578, 898, 0) ON CONFLICT (id) DO NOTHING;
-INSERT INTO sector_nav_points (sector_object_id, nav_type, signature, is_huge, sector_id, base_xp, exploration_range, object_radius_patch) VALUES (1000578, 0, 7000.0, 0, 1750, 0, 3000.0, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
+INSERT INTO sector_objects (sector_object_id, base_asset_id, h, s, v, type, scale, position_x, position_y, position_z, orientation_u, orientation_v, orientation_w, orientation_z, name, appears_in_radar, radar_range, sector_id, gate_to, sound_effect_id, sound_effect_range) VALUES (1000574, 0, 0.0, 0.0, 0.0, 0, 1.0, -11983.177, -83402.12, -506.99973, 0.0, 0.0, 0.0, 0.0, 'Mist Runner', 0, 5000.0, 1750, NULL, NULL, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
+INSERT INTO sector_objects (sector_object_id, base_asset_id, h, s, v, type, scale, position_x, position_y, position_z, orientation_u, orientation_v, orientation_w, orientation_z, name, appears_in_radar, radar_range, sector_id, gate_to, sound_effect_id, sound_effect_range) VALUES (1000575, 0, 0.0, 0.0, 0.0, 0, 1.0, -11229.362, -83726.87, 194.00052, 0.0, 0.0, 0.0, 0.0, 'Mist Lord', 0, 5000.0, 1750, NULL, NULL, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
+INSERT INTO sector_objects_mob (mob_id, mob_count, mob_spawn_radius, respawn_time, delayed_spawn, group_aggro) VALUES (1000574, 1, 0, 90, 0, 0) ON CONFLICT DO NOTHING;
+INSERT INTO mob_spawn_group (id, spawn_group_id, mob_id, group_index) VALUES (1000574, 1000574, 899, 0) ON CONFLICT (id) DO NOTHING;
+INSERT INTO sector_nav_points (sector_object_id, nav_type, signature, is_huge, sector_id, base_xp, exploration_range, object_radius_patch) VALUES (1000574, 0, 7000.0, 0, 1750, 0, 3000.0, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
+INSERT INTO sector_objects_mob (mob_id, mob_count, mob_spawn_radius, respawn_time, delayed_spawn, group_aggro) VALUES (1000575, 1, 0, 90, 0, 0) ON CONFLICT DO NOTHING;
+INSERT INTO mob_spawn_group (id, spawn_group_id, mob_id, group_index) VALUES (1000575, 1000575, 898, 0) ON CONFLICT (id) DO NOTHING;
+INSERT INTO sector_nav_points (sector_object_id, nav_type, signature, is_huge, sector_id, base_xp, exploration_range, object_radius_patch) VALUES (1000575, 0, 7000.0, 0, 1750, 0, 3000.0, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
 
 COMMIT;
