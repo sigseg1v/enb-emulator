@@ -65,6 +65,18 @@ ARRIVE_SLOP = float(os.environ.get("ENB_ARRIVE_SLOP", "12000"))
 # body, not a dead target. The old single slop blacklisted Luna as "warp never
 # engages" after it had flown 31k -> 17.9k and was sitting on the boundary.
 BODY_SLOP = float(os.environ.get("ENB_BODY_SLOP", "30000"))
+# A live nav whose CLASS is a celestial body (Planet/Moon/Sun/Star) is the body
+# itself, not a waypoint we fly to: warp holds off at its radius ("target too
+# close"), so re-picking it just spams a warp that never engages. The ledger types
+# these as generic "object" (Ceres, Thule), so the ledger type is NOT enough to
+# tell them apart from a real object waypoint -- only the live nav class is.
+BODY_CLASSES = frozenset({"planet", "moon", "sun", "star"})
+
+
+def is_body_class(cls):
+    return (cls or "").strip().lower() in BODY_CLASSES
+
+
 NEAR_SWITCH = float(os.environ.get("ENB_NEAR_SWITCH", "0.20"))  # farthest->nearest at 20%
 WARP_TIMEOUT = float(os.environ.get("ENB_WARP_TIMEOUT", "90"))  # max s per warp segment
 POLL_SLEEP = float(os.environ.get("ENB_POLL_SLEEP", "2"))   # in-flight poll cadence
@@ -568,6 +580,34 @@ def mark_in_range(sector, navs):
     return fresh
 
 
+def resolve_body_navs(sector, navs):
+    """Take celestial-body nav nodes (live class Planet/Moon/Sun/Star) OUT of the
+    remaining set so the picker never targets one -- warp holds off at a body's
+    radius, so re-picking it just spams 'target too close' forever (Ceres/Thule
+    ping-pong). A body already inside BODY_SLOP is as close as the game lets us
+    get, so count it visited; a far body cannot be approached and is skipped. The
+    real waypoints around it (Ceres 1..6, ...) are separate nav-point nodes the
+    survey still visits normally. Returns True if it resolved at least one."""
+    remaining = ledger_remaining(sector)
+    hit = False
+    for nv in navs:
+        if not is_body_class(nv["cls"]):
+            continue
+        key = lkey(nv["name"])
+        if key not in remaining or nv["gid"] in MARKED_GIDS:
+            continue
+        d = nv["dist"]
+        if d is not None and d <= BODY_SLOP:
+            record_visit(sector, nv["name"], nv["gid"], d, note=" body")
+        else:
+            lname = ledger_name(sector, nv["name"])
+            state("skip", sector, lname,
+                  f"{nv['cls'] or 'body'} -- warp holds off at its radius, cannot approach")
+            logaction(sector, "skip", f"{lname} ({nv['cls'] or 'body'})")
+        hit = True
+    return hit
+
+
 def is_gate(name, cls):
     """A TRANSIT gate, not a nav that merely mentions one. Every real gate in
     the dataset is named 'Sector Gate to X' / 'Gate to X'; 'Nav Earth Gate' /
@@ -601,7 +641,8 @@ def pick_target(sector, navs):
              if nv["dist"] is not None
              and lkey(nv["name"]) in remaining
              and lkey(nv["name"]) not in BLACKLIST
-             and nv["gid"] not in MARKED_GIDS]
+             and nv["gid"] not in MARKED_GIDS
+             and not is_body_class(nv["cls"])]
     seen_tier = not cands
     if seen_tier:
         for key, node in remaining.items():
@@ -1105,6 +1146,7 @@ def survey_sector(sector):
         navs = get_navs()
         build_alias(sector, navs)
         mark_in_range(sector, navs)
+        resolve_body_navs(sector, navs)
         visited, total = ledger_counts(sector)
         remaining = ledger_remaining(sector)
         if not remaining:
