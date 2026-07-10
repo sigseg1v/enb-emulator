@@ -51,6 +51,21 @@ with open(os.path.join(HERE, "..", "..", "..", "..", "docs", "sectors",
                        "sector_ids.json")) as _f:
     SID_MAP = json.load(_f)
 
+# ledger key -> sid, for source-aware gate resolution (galaxy, below).
+KEY_TO_SID = {key: int(sid) for sid, key in SID_MAP.items()}
+
+# Galaxy gate-routing map (data/galaxy.json, built by build_galaxy.py from the
+# content DB + the enbmaps system-membership table). It tells us where a gate
+# LEADS: a sector gate's destination sid, a paired-name wormhole's far endpoint,
+# and -- resolved by source system -- where a 'Gate to <System>' inter-system
+# gate lands. Absent file => every galaxy-backed lookup is skipped and gate
+# resolution falls back to the name-suffix path below (no regression).
+try:
+    with open(os.path.join(HERE, "..", "data", "galaxy.json")) as _f:
+        GALAXY = json.load(_f)
+except (OSError, json.JSONDecodeError):
+    GALAXY = None
+
 # ---- tunables (mirror drive.py's, env-overridable) --------------------------
 VISIT_K = float(os.environ.get("ENB_VISIT_K", "8000"))      # within this = visited
 # Engage-refusal arrival slop: a warp exits at the target's no-warp standoff,
@@ -1158,11 +1173,34 @@ GATE_DEST_OVERRIDES = {navdata.norm("Aragoth System"): 1750}
 NEVER_EXPLORE_SECTORS = frozenset({"Freya"})
 
 
-def gate_dest_sid(name):
-    """Destination sid named by a gate nav ('Sector Gate to Asteroid Belt
-    Alpha' -> 1076), or None when the suffix resolves to no known sector. A few
-    gate phrases that resolve to no committed sid but land in a known sector are
-    pinned via GATE_DEST_OVERRIDES."""
+def gate_dest_sid(name, src_sid=None):
+    """Destination sid a gate nav leads to, or None when it cannot be resolved
+    (an unresolved name is treated as a frontier -> crossed blind and the far
+    sector re-identified on arrival).
+
+    Resolution order, most precise first:
+      1. galaxy per-source map (needs src_sid): the exact gate name from THIS
+         sector -- covers sector gates and paired-name wormholes ('Vishao's Gate'
+         resolves to Vishao's Cove from Antares Frontier, the reverse from
+         Vishao's Cove).
+      2. galaxy system gate (needs src_sid): 'Gate to <System>' lands in that
+         system's entry sector, which depends on the system we leave FROM.
+      3. galaxy direction-agnostic sector-gate map (no src_sid needed).
+      4. the legacy name-SUFFIX resolution (DEST_SIDS / GATE_DEST_OVERRIDES) --
+         the src-independent backstop, incl. the Freya death-guard override."""
+    nn = navdata.norm(name)
+    if GALAXY is not None and src_sid is not None:
+        bysec = GALAXY["gate_dest_by_sector"].get(str(src_sid))
+        if bysec and nn in bysec:
+            return int(bysec[nn])
+        dst_sys = GALAXY["system_gate"].get(nn)
+        if dst_sys:
+            src_sys = GALAXY["sector_system"].get(str(src_sid))
+            land = GALAXY["system_entry"].get(f"{src_sys}>{dst_sys}") if src_sys else None
+            if isinstance(land, int):
+                return land
+    if GALAXY is not None and nn in GALAXY["gate_dest"]:
+        return int(GALAXY["gate_dest"][nn])
     low = name.lower()
     if " to " not in low:
         return None
@@ -1190,14 +1228,17 @@ def _sector_forbidden(key):
     return key in GRAVITY_WELL_SECTORS or key in NEVER_EXPLORE_SECTORS
 
 
-def gate_forbidden(name):
+def gate_forbidden(name, src_sid=None):
     """True when this gate's DESTINATION is a forbidden sector (gravity well or
     NEVER_EXPLORE). Warp terminates mid-flight in a well and a NEVER_EXPLORE sector
     kills the ship, so the traversal never routes INTO either; both are deferred to
     a manual pass. Only the destination is tested, so the reverse gate OUT of a
     forbidden sector (dest = a normal sector) is never excluded -- escaping stays
-    possible."""
-    dest = gate_dest_sid(name)
+    possible. With src_sid the galaxy map resolves 'Gate to <System>' inter-system
+    gates too, so a lethal system entry (any system whose landing sector is
+    NEVER_EXPLORE, e.g. Aragoth System -> Freya) is guarded generally, not just via
+    the one pinned suffix override."""
+    dest = gate_dest_sid(name, src_sid)
     return dest is not None and _sector_forbidden(SID_MAP.get(str(dest)))
 
 
@@ -1302,6 +1343,7 @@ def _gate_graph():
             continue
         if not isinstance(d, dict) or "nodes" not in d:
             continue
+        src_sid = KEY_TO_SID.get(key)
         for n in d["nodes"]:
             if n.get("type") != "gate":
                 continue
@@ -1309,14 +1351,14 @@ def _gate_graph():
             # only gates we would actually cross count for routing: an in-sector
             # accelerator sphere is not a route, and a gate INTO a forbidden sector
             # (well or NEVER_EXPLORE) is refused.
-            if not routable_gate(name) or gate_forbidden(name):
+            if not routable_gate(name) or gate_forbidden(name, src_sid):
                 continue
             # A gate we KNOW will not transit is not an edge and does NOT border
             # the frontier -- skip it, or its unresolved dest name falsely marks
             # this sector as bordering unexplored space and the walker fixates.
             if gate_is_locked(key, name):
                 continue
-            dsid = gate_dest_sid(name)
+            dsid = gate_dest_sid(name, src_sid)
             if dsid is None:
                 # destination name resolves to no known sid -> almost certainly an
                 # UNDISCOVERED sector. Standing in `key` you are one gate from the
@@ -1381,14 +1423,14 @@ def choose_gate(sector, navs, visited_sids, tried_edges, sid, leaving_defer=Fals
     gates = [g for g in gates
              if (sid, g["gid"]) not in tried_edges
              and routable_gate(g["name"])
-             and not gate_forbidden(g["name"])]
+             and not gate_forbidden(g["name"], sid)]
     if leaving_defer:
         # Leaving a DEFERRED sector (gravity well / NEVER_EXPLORE): only exit toward
         # a KNOWN, non-forbidden sector, so we retreat to surveyed space instead of
         # diving deeper into an unknown (possibly lethal) cluster behind it -- the
         # Freya cluster (Ragnarok/Nifleheim/...) is deferred to a manual pass.
         gates = [g for g in gates
-                 if (d := gate_dest_sid(g["name"])) is not None
+                 if (d := gate_dest_sid(g["name"], sid)) is not None
                  and SID_MAP.get(str(d)) is not None
                  and not _sector_forbidden(SID_MAP.get(str(d)))]
     if not gates:
@@ -1420,7 +1462,7 @@ def choose_gate(sector, navs, visited_sids, tried_edges, sid, leaving_defer=Fals
     def rank(g):
         """Lower is better."""
         phys = (g["dist"] is None, g["dist"] or 1e18)
-        dest = gate_dest_sid(g["name"])
+        dest = gate_dest_sid(g["name"], sid)
         if dest is None:
             return (0, 0, 0, *phys)          # unresolved dest name: likely a frontier gate
         if not _sector_done(dest) and dest not in visited_sids:
