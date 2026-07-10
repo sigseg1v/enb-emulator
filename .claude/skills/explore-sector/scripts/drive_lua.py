@@ -77,6 +77,21 @@ def is_body_class(cls):
     return (cls or "").strip().lower() in BODY_CLASSES
 
 
+# Some hazard navs cancel the warp drive ~1s after engage (the environment kills
+# it), so a warp can NEVER close on them -- re-targeting just burns a self-
+# cancelling warp forever, the same ping-pong the planet bodies caused. Unlike a
+# body (which the ship can at least coast up to its radius and count as reached),
+# these are unreachable by warp outright, so they are skipped, never visited-at-
+# range. The client reports no distinct object class for them (they read like an
+# ordinary nav), so the NAME is the only discriminator.
+UNWARPABLE_NAME_SUBSTRINGS = ("reactor drain zone",)
+
+
+def is_unwarpable(name):
+    n = (name or "").lower()
+    return any(s in n for s in UNWARPABLE_NAME_SUBSTRINGS)
+
+
 NEAR_SWITCH = float(os.environ.get("ENB_NEAR_SWITCH", "0.20"))  # farthest->nearest at 20%
 WARP_TIMEOUT = float(os.environ.get("ENB_WARP_TIMEOUT", "90"))  # max s per warp segment
 POLL_SLEEP = float(os.environ.get("ENB_POLL_SLEEP", "2"))   # in-flight poll cadence
@@ -608,6 +623,29 @@ def resolve_body_navs(sector, navs):
     return hit
 
 
+def resolve_unwarpable_navs(sector, navs):
+    """Skip warp-cancelling hazard navs (Reactor Drain Zone, ...) out of the
+    remaining set so the picker never targets one and the survey flies elsewhere.
+    A warp toward one self-cancels ~1s after engage, so it can never be reached by
+    warp -- unlike a body it is skipped outright, not counted at range. If the ship
+    happened to already be within VISIT_K, mark_in_range (run just before this)
+    already visited it, so a still-remaining one is genuinely unreachable."""
+    remaining = ledger_remaining(sector)
+    hit = False
+    for nv in navs:
+        if not is_unwarpable(nv["name"]):
+            continue
+        key = lkey(nv["name"])
+        if key not in remaining or nv["gid"] in MARKED_GIDS:
+            continue
+        lname = ledger_name(sector, nv["name"])
+        state("skip", sector, lname, "reactor drain zone -- warp cancels ~1s after "
+              "engage, cannot reach; flying elsewhere")
+        logaction(sector, "skip", f"{lname} (reactor drain zone)")
+        hit = True
+    return hit
+
+
 def is_gate(name, cls):
     """A TRANSIT gate, not a nav that merely mentions one. Every real gate in
     the dataset is named 'Sector Gate to X' / 'Gate to X'; 'Nav Earth Gate' /
@@ -642,11 +680,12 @@ def pick_target(sector, navs):
              and lkey(nv["name"]) in remaining
              and lkey(nv["name"]) not in BLACKLIST
              and nv["gid"] not in MARKED_GIDS
-             and not is_body_class(nv["cls"])]
+             and not is_body_class(nv["cls"])
+             and not is_unwarpable(nv["name"])]
     seen_tier = not cands
     if seen_tier:
         for key, node in remaining.items():
-            if key in BLACKLIST:
+            if key in BLACKLIST or is_unwarpable(node["name"]):
                 continue
             gid = SEEN.get(key)
             if gid is None or gid in MARKED_GIDS:
@@ -1147,6 +1186,7 @@ def survey_sector(sector):
         build_alias(sector, navs)
         mark_in_range(sector, navs)
         resolve_body_navs(sector, navs)
+        resolve_unwarpable_navs(sector, navs)
         visited, total = ledger_counts(sector)
         remaining = ledger_remaining(sector)
         if not remaining:
@@ -1174,7 +1214,9 @@ def survey_sector(sector):
         # ABA gate three times).
         far = [nv for nv in navs if nv["dist"] is not None and nv["dist"] > VISIT_K
                and lkey(nv["name"]) not in BLACKLIST
-               and lkey(nv["name"]) not in used_anchors]
+               and lkey(nv["name"]) not in used_anchors
+               and not is_body_class(nv["cls"])
+               and not is_unwarpable(nv["name"])]
         if far and reloc < RELOC_MAX:
             far.sort(key=lambda nv: (corridor_score(sector, nv, remaining),
                                      nv["dist"]), reverse=True)
