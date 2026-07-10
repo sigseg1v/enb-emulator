@@ -1218,6 +1218,69 @@ def _sector_done(sid):
     return key is not None and _sector_status(key) == "complete"
 
 
+# --- Persistent locked-gate memory -----------------------------------------
+# A gate that will not transit (a level/faction/quest-gated crossing the survey
+# ship cannot pass) is remembered ACROSS runs so we do not waste the first pick
+# on it every single run and, worse, keep reading it as a border to unexplored
+# space (a locked gate whose destination name does not resolve otherwise looks
+# like a frontier gate -> the walker fixates on it forever). Stored in the
+# workdir as {"<SectorKey>|<norm(gateName)>": "__locked__"} -- keyed by NAME (the
+# gid is session-scoped and changes run to run, so it cannot key the memory).
+GATE_EDGES_PATH = os.path.join(STATE_DIR, "gate_edges.json")
+GATE_LOCKED = "__locked__"
+
+
+def _load_gate_edges():
+    try:
+        with open(GATE_EDGES_PATH) as f:
+            d = json.load(f)
+            return d if isinstance(d, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+GATE_EDGES = _load_gate_edges()
+
+
+def _gate_edge_key(sector_key, gate_name):
+    return f"{sector_key}|{navdata.norm(gate_name)}"
+
+
+def gate_is_locked(sector_key, gate_name):
+    """True when this (sector, gate) crossing is remembered as non-transitable."""
+    return GATE_EDGES.get(_gate_edge_key(sector_key, gate_name)) == GATE_LOCKED
+
+
+def _save_gate_edges():
+    try:
+        tmp = GATE_EDGES_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(GATE_EDGES, f, indent=2, sort_keys=True)
+        os.replace(tmp, GATE_EDGES_PATH)
+    except OSError:
+        pass
+
+
+def record_gate_lock(sector_key, gate_name):
+    """Persist that this gate would not transit, so future runs skip it first."""
+    k = _gate_edge_key(sector_key, gate_name)
+    if GATE_EDGES.get(k) == GATE_LOCKED:
+        return
+    GATE_EDGES[k] = GATE_LOCKED
+    _save_gate_edges()
+
+
+def clear_gate_lock(sector_key, gate_name):
+    """A gate we thought was locked just transited -- drop the stale lock so it is
+    no longer deferred to last every run (self-heals a false positive or a gate
+    that has since become passable)."""
+    k = _gate_edge_key(sector_key, gate_name)
+    if GATE_EDGES.get(k) != GATE_LOCKED:
+        return
+    del GATE_EDGES[k]
+    _save_gate_edges()
+
+
 def _gate_graph():
     """Undirected sector graph from EVERY ledger's gate list, plus the FRONTIER set.
     adj: sector key -> set(neighbour keys). A key is FRONTIER when it is a gate
@@ -1247,6 +1310,11 @@ def _gate_graph():
             # accelerator sphere is not a route, and a gate INTO a forbidden sector
             # (well or NEVER_EXPLORE) is refused.
             if not routable_gate(name) or gate_forbidden(name):
+                continue
+            # A gate we KNOW will not transit is not an edge and does NOT border
+            # the frontier -- skip it, or its unresolved dest name falsely marks
+            # this sector as bordering unexplored space and the walker fixates.
+            if gate_is_locked(key, name):
                 continue
             dsid = gate_dest_sid(name)
             if dsid is None:
@@ -1325,6 +1393,19 @@ def choose_gate(sector, navs, visited_sids, tried_edges, sid, leaving_defer=Fals
                  and not _sector_forbidden(SID_MAP.get(str(d)))]
     if not gates:
         return None
+
+    # Persistent locked-gate memory: a crossing remembered as non-transitable is
+    # held back so we do not waste the first pick on it every run. It is only a
+    # DEFERRAL, never a hard exclusion -- if every fresh gate is exhausted we fall
+    # back to retrying a locked one (a persistent lock can be stale, and retrying
+    # it beats a false "graph exhausted" concession that strands the run).
+    fresh = [g for g in gates if not gate_is_locked(sector, g["name"])]
+    if not fresh:
+        g = gates[0]
+        print(f"[drive_lua] {sector}: only locked gates remain -- retrying "
+              f"'{g['name']}' (persistent lock may be stale).")
+        return g
+    gates = fresh
 
     # Frontier-directed routing: a one-hop tier walk wanders into completed
     # dead-ends (Mercury -> Venus -> Ceres, where Ceres only gates back to Venus)
@@ -1643,6 +1724,11 @@ def main():
     while hop < MAX_SECTORS:
         try:
             sid = get_sector_id()
+            # Observed-gate memory is PER-SECTOR: clear it before settle_navs
+            # repopulates it for THIS sector, so a pure transit hop (which never
+            # hits the survey-path reset below) cannot carry a prior sector's gate
+            # gids into choose_gate and fire request_target on a stale target.
+            GATES_SEEN.clear()
             navs = settle_navs()
             sector = SID_MAP.get(str(sid))
             if sector is None:
@@ -1694,7 +1780,6 @@ def main():
                 pcap_ensure(sector)   # per-sector capture spanning the entry handshake
                 state("init", sector)
                 SEEN.clear()      # flyby memory + position estimate are per-sector
-                GATES_SEEN.clear()  # observed-gate memory is per-sector too
                 EST_POS = None
                 BLACKLIST.clear()  # dead-target memory is per-sector too
                 WARP_FAILS.clear()
@@ -1726,9 +1811,22 @@ def main():
                 # Transit failed (gate would not fire / locked / undersized approach).
                 # The edge is already marked tried; stay in this sector and pick a
                 # different gate next iteration instead of killing the whole run.
-                print(f"[drive_lua] {sector}: gate '{gate['name']}' did not transit -- "
-                      f"trying another gate.")
+                # Persist the lock so future runs skip it first -- but ONLY when the
+                # hull is healthy: a transit failure at low/zero hull is a FALSE
+                # failure (incapacitated -> the server refuses EVERY action), and
+                # ShipRecovered clears tried_edges for exactly that reason; poisoning
+                # the persistent cache there would permanently blacklist a good gate.
+                hp = hull_frac()
+                if hp is not None and hp <= 0.25:
+                    print(f"[drive_lua] {sector}: gate '{gate['name']}' did not "
+                          f"transit (hull {hp:.2f} -- not recording a lock); "
+                          f"trying another gate.")
+                else:
+                    record_gate_lock(sector, gate["name"])
+                    print(f"[drive_lua] {sector}: gate '{gate['name']}' did not "
+                          f"transit -- recorded locked; trying another gate.")
                 continue
+            clear_gate_lock(sector, gate["name"])   # transited -> drop any stale lock
             time.sleep(WARP_COOLDOWN)
             hop += 1
         except ShipRecovered as e:

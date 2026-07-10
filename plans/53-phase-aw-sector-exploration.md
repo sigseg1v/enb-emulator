@@ -1629,3 +1629,53 @@ Continuing the Ishuan->Glenn survey. Three things happened:
     (Sector Gate to Slayton, Yamuna`s Weft) and it wrecked the ship at 6/23. Re-grinding
     it just re-wrecks; once recovered, the better route is to gate OUT to a safer sector
     rather than keep surveying Carpenter with this hull.
+
+## AW-8 -- port persistent locked-gate memory into drive_lua.py (2026-07-10)
+
+The OCR-era driver (`drive.py` / `gate_route.py` / `survey.sh`, all deleted in the
+Lua rewrite) had PERSISTENT locked-gate memory: a crossing that would not transit
+was recorded `__locked__` in the workdir `gate_edges.json`, ranked last, and NOT
+counted as frontier (AW-3 item 4, AW-4 reachability boundary). The Lua rewrite
+(`drive_lua.py`) reimplemented gate routing as `choose_gate` + `_gate_graph` but
+never ported that memory, so the file sat orphaned and three bugs regressed:
+
+1. **Phantom-frontier poison.** A locked gate whose destination name does not
+   resolve (`gate_dest_sid` -> None: `Gate to Sirius System`, `Gate to Sol`, the
+   wormhole wefts) was read by `_gate_graph` as "one gate from the unknown" and
+   marked its sector a BFS frontier source, and by `choose_gate.rank` as the
+   best (0,0,0) tier -- so the walker fixated on the same impassable gate every
+   run and `_frontier_hops` kept routing toward a sector with nothing reachable.
+2. **No cross-run lock.** `tried_edges` is per-run (and cleared on ShipRecovered),
+   so a genuinely locked gate was re-tried first on every fresh run -- Groundhog
+   Day, wasting the first pick + a warp-to-gate every launch.
+3. **GATES_SEEN cross-sector leak.** `get_navs` accumulates observed gates into the
+   module-global `GATES_SEEN`; it was cleared only on the SURVEY path, so a pure
+   TRANSIT hop (done/visited sector) carried the PRIOR sector's gate gids into
+   `choose_gate`, which could fire `request_target` on a stale gid.
+
+Fix (`drive_lua.py`, client-only):
+- `GATE_EDGES` loaded from the workdir `gate_edges.json` at startup;
+  `gate_is_locked(sector_key, gate_name)` (keyed by NAME -- the gid is
+  session-scoped), `record_gate_lock`, `clear_gate_lock` (atomic tmp+replace).
+- `_gate_graph` skips a locked gate entirely -- not an edge, not a frontier.
+- `choose_gate` defers locked gates behind fresh ones, but NEVER hard-excludes:
+  if every fresh gate is exhausted it retries a locked one (stale-lock escape) so
+  a wrong persistent lock can never falsely concede "graph exhausted" and strand
+  the run.
+- Main loop records a lock when `cross_gate` returns None, but ONLY at healthy
+  hull (a non-crossing at hull <=0.25 is the incapacitated false-failure that
+  ShipRecovered handles -- poisoning the cache there would blacklist a good gate).
+  A successful crossing calls `clear_gate_lock`, self-healing a stale/false lock
+  or a gate that has since become passable.
+- `GATES_SEEN.clear()` moved to the TOP of each hop (before `settle_navs`
+  repopulates it for the current sector), fixing the transit-hop leak; the
+  redundant survey-path clear removed.
+
+Single-failure locking (vs the OCR era's FAIL_LIMIT=2) is safe here because
+`cross_gate` already retries the transit 3x from close range internally, and the
+escape + unlock net removes any stranding risk. Validated offline against the real
+module + workdir: locked gate no longer enters the frontier set (was True unlocked
+-> False locked), a fresh gate is preferred over a locked one, an only-locked gate
+is still returned (escape, not None), and record/clear round-trips atomically
+without clobbering existing entries. Client-only -> no server/proxy wire change,
+no plans/29 CV entry.
