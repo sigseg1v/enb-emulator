@@ -1,5 +1,65 @@
 # Phase AW -- Sector exploration skill (agent-driven nav survey)
 
+- **2026-07-10 AUTO-SURVEY HAS REACHED ITS PRACTICAL LIMIT; DEATH-LOOP ROOT-CAUSED;
+  SHIP RECOVERED + PARKED; NOT RESTARTED.** The live walker was found death-looping
+  the Capella cluster (Ishuan/Yokan/Ganymede) and had again wandered into Freya
+  (survey path: 338 `Freya` action lines 03:00-03:15, `Freya.json` status
+  `in-progress`, 4 navs visited, 2 `incap-recover` total). It exited "graph
+  exhausted" leaving the LV122 ship incapacitated in Ishuan (sid 2005, hull 0.0,
+  inspace). I ran the distress->tow recovery ONLY (no undock) and **parked the char
+  docked at a station**; the survey driver is dead and NOT restarted (verified: no
+  drive_lua.py / wrapper process; a `ugrep ... drive_lua` monitor false-matches the
+  /proc scan -- ignore it).
+
+  **Why it death-loops (root cause):** `drive_lua.py` has NO learned/failed-gate
+  memory. The OCR-era driver did (the orphaned `gate_edges.json` in the workdir,
+  which records e.g. `Ishuan|gatetosol -> __locked__`, `Kailaasa|gatetosolsystem ->
+  __locked__`, `Yokan|systemgatetosiriussystem -> __locked__`, `Ishuan|gatetocapella
+  system -> Yokan`, `Yokan|gatetocastorsystem -> Ishuan`); the Lua-channel rewrite
+  never ported it (`grep gate_edges drive_lua.py` = nothing). Consequences: every
+  inter-system gate name ("Gate to Sol", "Gate to Castor System", "System Gate to
+  Castor", ...) resolves to `dest_sid=None`, which (a) ranks it tier-0 "frontier" in
+  `choose_gate` and (b) makes its SOURCE sector a phantom frontier in `_gate_graph`
+  -- so nearly every hub sector sits at `hops_to_frontier=0`, the BFS gradient is
+  flat, and the walker cannot plan a path. It retries the same LOCKED inter-cluster
+  gates every cycle (the 6-second back-to-back `enter-gate` pairs = `cross_gate`
+  returning None), bounces Ishuan<->Yokan, dies, is towed back, repeats. Secondary
+  bug: `GATES_SEEN` is only cleared in the survey branch, never on transit sectors,
+  so gates observed in one hub leak into the candidate list of the next (the log
+  shows "Ishuan" entering Ganymede/Kailaasa gates it does not own -> instant
+  request_target fail).
+
+  **Freya re-entry:** the guards are CORRECT in the on-disk code
+  (`gate_forbidden("Akeron's Gate to Aragoth System")=True`, `SID_MAP['1750']=Freya`,
+  `NEVER_EXPLORE={Freya}`). The 02:54 crossing came from a running process that
+  PREDATED the 2026-07-09 `GATE_DEST_OVERRIDES` commit -- a restart with current code
+  will not repeat that specific crossing. But the deeper hole (no locked-gate memory)
+  remains: without it the walker keeps re-selecting forbidden/locked gates.
+
+  **What is actually left (none of it auto-reachable by a screen-only single ship --
+  it is the owner's reserved MANUAL/SUPERVISED pass):**
+  - CONFIRMED unreachable/lethal: Earth (`skip Incapacitated Earthcorps Patrol`;
+    HighEarth `skip ... scanner dead-zone`), Slayton/Shepard (Carpenter
+    `wreck-detected destroyed near Sector Gate to Slayton` + `death zone`),
+    XipeTotec/Tlaloc (SwoopingEagle `warp-stall ... unreachable, stuck at 206.12k`),
+    the Freya cluster (never-explore), and the type-41 gravity wells.
+  - REACHED-but-never-cross-ATTEMPTED (the only maybe-surveyable remainder, 3):
+    Europa + Io (Jupiter ledger marks both gates `visited=True`, d<3k, but there is
+    NO `enter-gate` for either anywhere in actions.log) and KitarasVeil (Dahin
+    `visit Sector Gate to Kitara's Veil @1.02k`, no cross attempt). The walker
+    touched these gates and moved on without trying the transit.
+
+  **Recommendation (owner decision -- cost vs. live-char risk):** do NOT restart the
+  current walker; it will resume the death-loop and re-accrue xp debt on the real
+  char for zero reachable gain. Either (A) port failed/locked-gate memory into
+  `drive_lua.py` (record `(src_sid, gate) -> dest|__locked__` on each transit/fail;
+  consult it in `gate_dest_sid`/`_gate_graph`/`choose_gate`) so a clean run TERMINATES
+  at "everything reachable is done" instead of death-looping, and on that run make
+  `choose_gate` actually attempt the 3 reached-but-uncrossed gates (Europa/Io/
+  KitarasVeil); or (B) declare the 27-sector auto-survey complete and roll the entire
+  remainder into the manual pass. 27 sectors are surveyed; the auto method has no
+  reachable frontier left.
+
 - **2026-07-09 INCAP AUTO-RECOVERY WAS DEAD-ON-ARRIVAL (falsy-zero bug) -- FIXED
   + VALIDATED LIVE.** The distress->tow recovery added in the entry below NEVER
   FIRED for the exact case it exists for. `check_incapacitated`'s debounce re-read
