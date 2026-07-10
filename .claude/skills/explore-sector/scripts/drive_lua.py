@@ -1170,7 +1170,10 @@ GATE_DEST_OVERRIDES = {navdata.norm("Aragoth System"): 1750}
 # with pirates, basically no safe nodes, even Brisings is dangerous within seconds
 # -- only pass thru, never explore"; it destroyed the LV122 survey ship. Keyed by
 # ledger key. Any sector reachable ONLY through one of these is deferred too.
-NEVER_EXPLORE_SECTORS = frozenset({"Freya"})
+# Cooper (owner 2026-07-10): a RAID sector -- "mobs will 1 shot me even at lvl 122".
+# Fleeing is pointless (a one-shot kills before any evade), so never enter or dwell:
+# pass thru only, gate straight on into Grissom.
+NEVER_EXPLORE_SECTORS = frozenset({"Freya", "Cooper"})
 
 
 def gate_dest_sid(name, src_sid=None):
@@ -1837,6 +1840,17 @@ def main():
                 ALIAS.clear()      # live<->ledger name join is per-sector
                 MARKED_GIDS.clear()  # gid-visit dedup is per-sector (reseeded from ledger)
                 navs = survey_sector(sector)
+            else:
+                # Plain transit: already surveyed/done or re-entered this run, so we
+                # do NOT survey -- but the onward gate can start well outside scanner
+                # range at the entry point (a big sector loads its far gates in
+                # bursts). Reading navs ONCE at entry and handing that to choose_gate
+                # false-concedes "gate graph exhausted" while the exit is still
+                # rendering. Let the distant gates settle first, same as the deferred
+                # path but without the safe-only exit restriction (we are just passing
+                # through, any untried onward gate is fair game).
+                navs = settle_well_gates(sector, visited_sids, tried_edges, sid,
+                                         leaving_defer=False)
 
             gate = choose_gate(sector, navs, visited_sids, tried_edges, sid,
                                leaving_defer=defer)
