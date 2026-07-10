@@ -1,5 +1,42 @@
 # Phase AW -- Sector exploration skill (agent-driven nav survey)
 
+- **2026-07-09 FREYA NEVER-EXPLORE + AUTOMATED INCAP DISTRESS->TOW RECOVERY
+  (owner-directed).** The frontier walker routed the survey ship THROUGH
+  `Akerons Gate`'s "Gate to Aragoth System" into **Freya (sid 1750)** and the
+  Freya pirates destroyed the LV122 ship (hull 0, stuck spinning warp-fails).
+  Freya is a huge gravity well WITH pirate density so lethal the owner says even
+  Brisings is unsafe within seconds -- "only pass thru, never explore". Two fixes:
+  - **Never route INTO Freya, and defer the cluster behind it.** Freya has NO
+    type-41 OT_GWELL object, so it does NOT belong in `gravity_wells.py` (whose
+    provenance is strictly type-41 rows). Added a distinct `NEVER_EXPLORE_SECTORS
+    = {"Freya"}` in `drive_lua.py`. The routing hole was that "Gate to Aragoth
+    System" (Freya's SYSTEM name) resolved to no sid, so `_gate_graph` read it as
+    unexplored frontier and routed straight in; `GATE_DEST_OVERRIDES = {"Aragoth
+    System": 1750}` pins it. `gate_into_well` -> `gate_forbidden` (+ `_sector_
+    forbidden` helper) now refuses gates into a well OR a NEVER_EXPLORE sector, and
+    the `_gate_graph` frontier set excludes both. `choose_gate`/`settle_well_gates`
+    take `leaving_defer` so that if the ship is ever INSIDE a deferred sector it
+    exits only toward a KNOWN, non-forbidden sector (never deeper into the lethal
+    Jotunheim/Ragnarok/Nifleheim/Centauri cluster, which is thereby deferred to a
+    manual pass -- it is reachable only through Freya). VERIFIED OFFLINE: "Gate to
+    Aragoth System" and "Gate to Freya" both -> dest 1750, forbidden=True.
+  - **Auto-recover an incapacitated ship instead of halting.** `check_
+    incapacitated` (called at the top of the survey loop and each hop) now, on a
+    debounced in-space hull-0 read, runs the owner-taught distress->tow flow:
+    `enb.freya_ui_on = false` to reveal the native distress orb our hide-ui mod
+    hides (setting the flag directly is enough -- no Ctrl+U handler needed, the
+    earlier failure was purely a wrong click coord on the "000" readout, not the
+    orb), click the orb (win 633,858) to open the Station Mechanic comm dialog,
+    click "I need a tow" MID button-bar (win 400,617 -- the left text-edge click
+    did NOT register live), poll `enb.state()=="station"` for the tow, restore the
+    Freya HUD, and `ensure_in_space()` to undock and resume. Raises `ShipRecovered`
+    so `main()` re-detects the (now different) sector, no hop consumed. Retries the
+    two clicks 3x; HALTS only if the tow never lands or the station did not repair
+    the hull (avoids a tow loop). VALIDATED LIVE 2026-07-09: recovered the dead
+    Starstrukk from Freya -> towed to Ishuan Station (Castor). Survey tooling only;
+    no server/proxy/client change. Future option (owner hint): mine decomp for a
+    distress action to add an enbmod primitive and drop the click path entirely.
+
 - **2026-07-09 FRONTIER-DIRECTED GATE ROUTING -- stop dead-end wandering
   (commit `ec9216dc`, supersedes the `64786eb9` tier walk).** The graph traversal
   from `64786eb9` reached sectors behind completed ones but ranked gates with only
