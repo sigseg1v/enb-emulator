@@ -10,7 +10,17 @@
 -- synthetic mob_base clone templates (must load before the spawns)
 \ir capture_import/_mob_templates.sql
 
+\ir capture_import/1005_Mercury.sql
+\ir capture_import/1010_Venus.sql
 \ir capture_import/1020_High_Earth.sql
+\ir capture_import/1040_Ganymede.sql
+\ir capture_import/1070_Jupiter.sql
+\ir capture_import/1071_Saturn.sql
+\ir capture_import/1072_Uranus.sql
+\ir capture_import/1074_Pluto_and_Charon.sql
+\ir capture_import/1075_Akerons_Gate.sql
+\ir capture_import/1076_Asteroid_Belt_Alpha.sql
+\ir capture_import/1750_Freya.sql
 \ir capture_import/1910_Kailaasa.sql
 \ir capture_import/1920_Yokan.sql
 \ir capture_import/1925_Dahin.sql
