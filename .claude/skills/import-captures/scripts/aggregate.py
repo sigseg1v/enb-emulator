@@ -64,6 +64,12 @@ NAV_JSONL_TYPES = {"nav-point", "hidden-nav-point", "special-nav-point"}
 # any mob segment's nav-vote count, so a nav never loses a gid collision to a mob.
 NAV_CONF = 10_000
 
+# Confidence for a mob/resource whose sector was set by WALL-CLOCK binning against
+# the survey driver's sector-map.tsv boundaries. Ground truth from the driver's
+# in-game map-title reads, so it wins gid collisions against a marker/nav-vote
+# attribution the same way an authoritative nav does.
+WALLCLOCK_CONF = 10_000
+
 
 def norm(s):
     """Alphanumeric-normalize a name for matching (jsonl uses curly apostrophes
@@ -121,6 +127,13 @@ JSONL_SECTOR_ALIAS = {
     "nifleheim": "Nifleheim Cloud",
     "pluto": "Pluto and Charon",
     "todesengel": "der Todesengel",
+    # Not a jsonl basename: "Maeldun's Weft" is a wormhole-exit pocket the driver's
+    # map-title read reports as the current sector, but it has no DB sector row of
+    # its own -- it is a nav WITHIN Kailaasa (docs/sectors/json/Kailaasa.jsonl).
+    # Alias its wall-clock window to Kailaasa so its mobs/resources are attributed
+    # to their true home instead of being dropped (and silence the unresolved
+    # -boundary warning, which is reserved for genuinely-missing real sectors).
+    "maeldunsweft": "Kailaasa",
 }
 
 
@@ -147,6 +160,123 @@ def load_nav_jsonl(norm2id):
                 if o.get("type") in NAV_JSONL_TYPES and o.get("name"):
                     nav2secs[norm(o["name"])].add(sid)
     return nav2secs, unmatched_files
+
+
+def iso_epoch(iso):
+    """UTC epoch seconds from an ISO `YYYY-MM-DDThh:mm:ssZ` string, or None."""
+    m = re.match(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z", iso)
+    if not m:
+        return None
+    return calendar.timegm(tuple(int(g) for g in m.groups()) + (0, 0, 0))
+
+
+def _is_gate_or_placeholder(name):
+    """True for sector-map.tsv rows that legitimately have no DB sector: the survey
+    driver's transient "entry" marker and the in-flight gate titles it reads off the
+    map while crossing ("Gate to Sol System", "Sector Gate to Dahin", "System Gate
+    to Aragoth"). These are the rows load_sector_bounds skips silently; any OTHER
+    unresolved name is a real sector and must be surfaced, not swallowed."""
+    n = norm(name)
+    if n == "entry":
+        return True
+    low = name.strip().lower()
+    return low.startswith("gate to") or low.startswith("sector gate to") \
+        or low.startswith("system gate to")
+
+
+def load_sector_bounds(norm2id):
+    """token (the `YYYYMMDDThhmmssZ` in a pcap name) -> sorted list of
+    (epoch_seconds, sector_id) sector BOUNDARIES the survey driver recorded for
+    that run, from <ENB_CAPS_DIR>/captures/sector-map.tsv.
+
+    A continuous survey run writes one boundary row at each in-game sector change
+    (`<iso-utc>\\t<sector-name>\\t<pcap-filename>`); all rows of one run share the
+    run's START token in their pcap filename (the single continuous capture is
+    relabelled at each boundary, so its final on-disk name is the LAST sector). The
+    iso-utc column is the driver's wall-clock at the moment it read the new sector
+    from the in-game MAP TITLE -- the SAME system clock the pcap packet timestamps
+    use -- so an object's capture epoch bins directly to the sector whose boundary
+    most recently preceded it (`wallclock_sector`).
+
+    This is the AUTHORITATIVE segmenter for a multi-sector transit capture. The
+    in-stream sector carriers (0x0036 SERVER_REDIRECT, 0x003A SERVER_HANDOFF,
+    0x006F GLOBAL_TICKET) are galaxy-map/adjacency NOISE decoupled from actual
+    flight -- for a transit blob they never reliably name the sector currently
+    being flown, so a whole ~30-min entry-sector stay can land with NO usable
+    marker and its mobs/resources get mis-tagged or dropped (the Grissom
+    data-loss). Wall-clock against the driver's map reads is the only reliable fix.
+    Navs are unaffected: they always resolve by NAME via the jsonl.
+
+    Placeholder / gate rows ("entry", "Gate to ... System", "Sector Gate to ...")
+    do not resolve to a DB sector and are skipped, so a real sector's window
+    absorbs the brief gate interval. Missing file / unset ENB_CAPS_DIR yields an
+    empty map (the feature is optional; captures with no run in the map fall back
+    to the marker/nav-vote logic)."""
+    caps = os.environ.get("ENB_CAPS_DIR")
+    if not caps:
+        return {}
+    path = os.path.join(caps, "captures", "sector-map.tsv")
+    if not os.path.isfile(path):
+        alt = os.path.join(caps, "sector-map.tsv")
+        if os.path.isfile(alt):
+            path = alt
+    bounds = collections.defaultdict(list)
+    unresolved = collections.Counter()
+    try:
+        fh = open(path)
+    except OSError:
+        return {}
+    with fh:
+        for line in fh:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < 3:
+                continue
+            iso, name, pcap = parts[0], parts[1], parts[2]
+            m = re.search(r"\d{8}T\d{6}Z", pcap)
+            if not m:
+                continue
+            n = norm(name)
+            sid = norm2id.get(n)
+            if sid is None and n in JSONL_SECTOR_ALIAS:
+                sid = norm2id.get(norm(JSONL_SECTOR_ALIAS[n]))
+            if sid is None:
+                # Gate/placeholder rows ("entry", "Gate to ... System", "Sector Gate
+                # to ...") legitimately have no DB sector -- a real sector's window
+                # absorbs the brief gate interval, so skip them silently. But a name
+                # that is NOT a gate/placeholder and still does not resolve is a REAL
+                # sector whose whole wall-clock window we would silently mis-bin into
+                # its neighbour (the ABA/Pluto data-loss). Surface it loudly so a
+                # missing alias gets added, never silently dropped.
+                if not _is_gate_or_placeholder(name):
+                    unresolved[name] += 1
+                continue
+            ep = iso_epoch(iso)
+            if ep is None:
+                continue
+            bounds[m.group(0)].append((ep, sid))
+    for tok in bounds:
+        bounds[tok].sort()
+    if unresolved:
+        print("aggregate: WARNING -- sector-map.tsv boundary name(s) did NOT resolve "
+              "to a DB sector and were dropped (their window mis-bins into the "
+              "previous sector -- add a JSONL_SECTOR_ALIAS entry): "
+              + ", ".join(f"{nm!r}x{c}" for nm, c in unresolved.most_common()),
+              file=sys.stderr)
+    return dict(bounds)
+
+
+def wallclock_sector(epoch, seq):
+    """Sector of the last boundary at/before this object's capture epoch. An object
+    seen before the first boundary is clamped to the first (entry) sector -- a
+    capture opens a few seconds into the entry sector, before the driver's first
+    map read. seq is the sorted [(epoch, sector_id)] for the capture's run."""
+    sec = seq[0][1]
+    for bep, bsid in seq:
+        if epoch >= bep:
+            sec = bsid
+        else:
+            break
+    return sec
 
 
 def cap_timestamp(path):
@@ -297,6 +427,11 @@ def main():
         print(f"aggregate: WARNING -- {len(unmatched)} jsonl file(s) did not match a "
               f"sector and were ignored: {', '.join(unmatched[:8])}"
               f"{' ...' if len(unmatched) > 8 else ''}")
+    bounds_by_tok = load_sector_bounds(norm2id)
+    if bounds_by_tok:
+        multi = sum(1 for b in bounds_by_tok.values() if len(b) > 1)
+        print(f"aggregate: sector-map.tsv loaded -- {len(bounds_by_tok)} capture "
+              f"run(s) have driver wall-clock boundaries ({multi} multi-sector)")
 
     files = sorted(glob.glob(os.path.join(WORK, "objjson", "*.json")),
                    key=cap_timestamp)
@@ -306,6 +441,7 @@ def main():
     merged = {}          # global gkey -> kept record (with ._cat, .sector, ._conf)
     excl = collections.Counter()
     relabels = []        # (capture, marker_sec, true_sec, votes) for the report
+    wc_runs = []         # (capture, {sector_id: count}) wall-clock-binned windows
     prev_end = None      # end sector of the previous (time-adjacent) capture
     prev_ts = None       # its epoch, for the session-gap chain check
 
@@ -355,8 +491,16 @@ def main():
         #       overrides the chained guess: a capture with no predecessor to chain
         #       from is still fully anchored whenever its opening window names a
         #       sector, so its mobs/resources are placed instead of dropped.
-        # Whichever we pick, nav corroboration (segment_true_sector) still gets the
-        # final say in Pass 2, and a pre-marker nav always resolves by name anyway.
+        #   (c) DRIVER GROUND TRUTH -- the survey driver's sector-map.tsv records
+        #       the sector we entered this session in, read from the in-game map
+        #       title. This BEATS (a) and (b): a transit run's entry sector often
+        #       has NO in-stream marker (its whole stay is pre-marker) and its
+        #       pre-marker navs are galaxy-map adjacency noise (foreign sectors),
+        #       so (b) returns nothing and the entry sector's mobs/resources would
+        #       be dropped -- exactly the Grissom data-loss. When we have it, we
+        #       also EXEMPT this segment from the Pass-2 nav-vote relabel (below):
+        #       the noise navs would otherwise vote the entry sector's own mobs to
+        #       a foreign sector.
         pre_sector = None
         if markers and prev_end is not None and prev_ts is not None \
                 and cur_ts is not None and 0 <= cur_ts - prev_ts <= SESSION_GAP_SECS:
@@ -366,55 +510,69 @@ def main():
             if own is not None:
                 pre_sector = own
 
+        # The driver's wall-clock boundary sequence for this run, if we have one.
+        # When present it is the AUTHORITATIVE sector source for mobs/resources
+        # (binned by each object's capture epoch); the marker/pre_sector logic
+        # above is the fallback for captures/objects not covered by it.
+        m = re.search(r"\d{8}T\d{6}Z", fname)
+        wseq = bounds_by_tok.get(m.group(0)) if m else None
+
         # This capture's end sector, for the NEXT capture's chain.
         prev_end = markers[-1][1] if markers else cap_sector
         prev_ts = cur_ts
 
-        # Pass 1: tag each object with its marker-segment sector and category.
+        # Pass 1: tag each object with its category, its WALL-CLOCK sector
+        # (authoritative for mobs/resources when the run has a boundary sequence),
+        # and its marker-segment sector (the fallback, and the nav multi-sector
+        # tiebreak). The mob/resource drop decision is deferred to Pass 3a because
+        # wall-clock can place an object the marker logic could not.
         tagged = []
         for o in objs:
+            cat = categorize(o)
+            if cat == "player":
+                excl["player"] += 1
+                continue
+            wc = None
+            if wseq is not None and o.get("epoch") is not None:
+                wc = wallclock_sector(o["epoch"], wseq)
             if cap_sector is not None:
                 mseg = cap_sector
             else:
                 mseg = derive_sector(o.get("frame") or 0, markers)
                 if mseg is None:                 # pre-first-marker
                     mseg = pre_sector
-            cat = categorize(o)
-            if cat == "player":
-                excl["player"] += 1
-                continue
-            if mseg is None:
-                # No segment sector to place it in. A NAV still resolves by NAME
-                # (authoritative -- segment is irrelevant), so keep it. A mob or
-                # resource cannot be placed without a segment, so drop it rather
-                # than invent a location.
-                if cat == "nav":
-                    tagged.append((o, None, cat))
-                else:
-                    excl["before_first_marker"] += 1
-                continue
-            tagged.append((o, mseg, cat))
+            tagged.append((o, mseg, cat, wc))
 
         # Pass 2: per marker-segment, decide the MOB/RESOURCE sector from the navs
         # seen in that same segment (jsonl-resolved). Navs themselves are resolved
         # authoritatively below, independent of this.
         seg_navs = collections.defaultdict(list)
-        for o, mseg, cat in tagged:
+        for o, mseg, cat, wc in tagged:
             if cat == "nav" and o.get("name"):
                 seg_navs[mseg].append(o["name"])
         seg_true = {}
-        for mseg in set(m for _, m, _ in tagged):
+        cap_relabels = []    # deferred: only reported if the marker path is used
+        for mseg in set(m for _, m, _, _ in tagged):
+            if mseg is None:
+                continue
             ts, conf = segment_true_sector(mseg, seg_navs.get(mseg, []), nav2secs)
             seg_true[mseg] = (ts, conf)
-            if ts != mseg and mseg is not None:
-                relabels.append((fname, mseg, ts, conf))
+            if ts != mseg:
+                cap_relabels.append((fname, mseg, ts, conf))
 
         # Pass 3a: assign each object's final sector + confidence and collapse by
-        # gid WITHIN this capture (gid is session-stable here). This is where the
-        # same physical object seen on both sides of a relabel boundary collapses
-        # to its highest-confidence sector.
+        # (category, gid) WITHIN this capture. The server RECYCLES a GameID across
+        # unrelated objects within one long transit capture -- the same gid is a mob
+        # (0x0004) in one sector and a resource (0x2019) in another -- so folding on
+        # the gid ALONE would collapse those two real objects into one (the later /
+        # equal-confidence write wins, and resources dominate, so the mob is silently
+        # converted to a resource -- observed 189 of 241 mob gids lost in a single
+        # capture). Keying on (cat, gid) keeps each real object; within one store a
+        # gid maps to exactly one object, so this still merges an object seen twice.
         cap = {}
-        for o, mseg, cat in tagged:
+        wc_placed = collections.Counter()
+        used_marker = False   # did any mob/resource fall through to the marker path?
+        for o, mseg, cat, wc in tagged:
             if cat == "nav":
                 secs = nav2secs.get(norm(o.get("name")))
                 if not secs:
@@ -423,16 +581,33 @@ def main():
                 if len(secs) == 1:
                     sec = next(iter(secs))
                 else:
-                    ts = seg_true[mseg][0]
-                    sec = ts if ts in secs else min(secs)
+                    # Prefer the sector we were physically in: wall-clock, then the
+                    # marker segment's corroborated sector, else lowest id.
+                    pref = wc if wc in secs else \
+                        (seg_true.get(mseg, (None,))[0] if mseg is not None else None)
+                    sec = pref if pref in secs else min(secs)
                 conf = NAV_CONF
-            else:
+            elif wc is not None:                 # authoritative wall-clock bin
+                sec, conf = wc, WALLCLOCK_CONF
+                wc_placed[sec] += 1
+            elif mseg is not None:               # marker/nav-vote fallback
                 sec, conf = seg_true[mseg]
+                used_marker = True
+            else:
+                # No wall-clock and no marker segment -- placing this mob/resource
+                # would be inventing a location, so drop it.
+                excl["before_first_marker"] += 1
+                continue
             o = dict(o)
             o["sector"] = sec
             o["_cat"] = cat
             o["_conf"] = conf
-            fold(cap, o["gid"], o)
+            fold(cap, (cat, o["gid"]), o)
+
+        if wc_placed:
+            wc_runs.append((fname, dict(wc_placed)))
+        if used_marker:
+            relabels.extend(cap_relabels)
 
         # Pass 3b: fold this capture's deduped objects into the global store.
         # Navs key on (sector, normalized-name) -- gid-free, so a nav can never
@@ -490,6 +665,13 @@ def main():
               f"navs={len(s['navs']):3d} resources={len(s['resources']):4d} "
               f"mobs={len(s['mobs']):3d} stations={len(s['stations'])} "
               f"gates={len(s['gates'])} planets={len(s['planets'])}")
+    if wc_runs:
+        print("\nwall-clock-binned runs (sector-map.tsv boundaries, mob/resource "
+              "objects per sector):")
+        for fn, dist in wc_runs:
+            parts = ", ".join(f"{id2name.get(s, s)}={n}"
+                              for s, n in sorted(dist.items(), key=lambda kv: -kv[1]))
+            print(f"  {fn}: {parts}")
     if relabels:
         print("\nsegment relabels (marker -> jsonl-corroborated sector):")
         for fn, mseg, ts, conf in relabels:

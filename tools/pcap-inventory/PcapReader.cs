@@ -47,6 +47,10 @@ public static class PcapReader
         uint U32(ReadOnlySpan<byte> s) =>
             le ? BinaryPrimitives.ReadUInt32LittleEndian(s) : BinaryPrimitives.ReadUInt32BigEndian(s);
 
+        // The two ns magics (0xA1B23C4D / its byte-swap) store the sub-second
+        // field in nanoseconds; the classic us magics store microseconds.
+        bool nano = magic is 0xA1B23C4D or 0x4D3CB2A1;
+
         uint linkType = U32(d.AsSpan(20, 4)) & 0xFFFF;
         int linkLen = linkType switch
         {
@@ -63,12 +67,16 @@ public static class PcapReader
         int off = 24; // after the global header
         while (off + 16 <= d.Length)
         {
+            // record header: ts_sec@0, ts_frac@4 (us or ns), incl_len@8, orig_len@12
+            uint tsSec = U32(d.AsSpan(off, 4));
+            uint tsFrac = U32(d.AsSpan(off + 4, 4));
+            long tsMicros = (long)tsSec * 1_000_000 + (nano ? tsFrac / 1000 : tsFrac);
             int inclLen = (int)U32(d.AsSpan(off + 8, 4));
             int dataOff = off + 16;
             if (inclLen <= 0 || dataOff + inclLen > d.Length) yield break; // truncated
             var frame = d.AsSpan(dataOff, inclLen);
 
-            var dg = TryParse(frame, (int)linkType, linkLen);
+            var dg = TryParse(frame, (int)linkType, linkLen, tsMicros);
             if (dg is { } v) yield return v;
 
             off = dataOff + inclLen;
@@ -77,7 +85,7 @@ public static class PcapReader
 
     // Skip the link header, then parse IPv4 -> UDP -> payload. For Ethernet the
     // EtherType is checked; SLL/SLL2/raw start the IPv4 header at a fixed offset.
-    private static PcapNgReader.Datagram? TryParse(ReadOnlySpan<byte> frame, int linkType, int linkLen)
+    private static PcapNgReader.Datagram? TryParse(ReadOnlySpan<byte> frame, int linkType, int linkLen, long tsMicros)
     {
         if (frame.Length < linkLen + 20) return null;
         if (linkType == 1)
@@ -100,6 +108,6 @@ public static class PcapReader
         int ulen = BinaryPrimitives.ReadUInt16BigEndian(udp.Slice(4, 2));
         int payLen = Math.Min(ulen - 8, udp.Length - 8);
         if (payLen <= 0) return null;
-        return new PcapNgReader.Datagram(src, sport, dst, dport, udp.Slice(8, payLen).ToArray());
+        return new PcapNgReader.Datagram(src, sport, dst, dport, udp.Slice(8, payLen).ToArray(), tsMicros);
     }
 }

@@ -12,7 +12,7 @@ DELETE FROM sector_nav_points WHERE sector_object_id IN (SELECT sector_object_id
 DELETE FROM sector_objects WHERE sector_id = 1040 AND sector_object_id >= 1000000;
 
 -- 3. inserts (parents first, then child rows)
-INSERT INTO sector_objects (sector_object_id, base_asset_id, h, s, v, type, scale, position_x, position_y, position_z, orientation_u, orientation_v, orientation_w, orientation_z, name, appears_in_radar, radar_range, sector_id, gate_to, sound_effect_id, sound_effect_range) VALUES (1000198, 0, 0.0, 0.0, 0.0, 37, 1.0, -55765.5, 46571.7, 0.0, 0.0, 0.0, 0.0, 0.0, 'Monument to Ganymede Highport', 0, 7000.0, 1040, NULL, NULL, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
-INSERT INTO sector_nav_points (sector_object_id, nav_type, signature, is_huge, sector_id, base_xp, exploration_range, object_radius_patch) VALUES (1000198, 1, 7000.0, 0, 1040, 0, 3000.0, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
+INSERT INTO sector_objects (sector_object_id, base_asset_id, h, s, v, type, scale, position_x, position_y, position_z, orientation_u, orientation_v, orientation_w, orientation_z, name, appears_in_radar, radar_range, sector_id, gate_to, sound_effect_id, sound_effect_range) VALUES (1000258, 0, 0.0, 0.0, 0.0, 37, 1.0, -55765.5, 46571.7, 0.0, 0.0, 0.0, 0.0, 0.0, 'Monument to Ganymede Highport', 0, 7000.0, 1040, NULL, NULL, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
+INSERT INTO sector_nav_points (sector_object_id, nav_type, signature, is_huge, sector_id, base_xp, exploration_range, object_radius_patch) VALUES (1000258, 1, 7000.0, 0, 1040, 0, 3000.0, NULL) ON CONFLICT (sector_object_id) DO NOTHING;
 
 COMMIT;

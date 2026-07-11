@@ -18,7 +18,12 @@ namespace N7.Tools.PcapInventory;
 /// </summary>
 public static class PcapNgReader
 {
-    public readonly record struct Datagram(string SrcIp, int SrcPort, string DstIp, int DstPort, byte[] Payload)
+    // TimestampMicros is the packet capture time in microseconds since the Unix
+    // epoch (0 if the reader could not recover it). The importer uses it to bin
+    // objects into sectors by the survey driver's wall-clock sector-map, which is
+    // the only reliable segmentation for a multi-sector transit capture (the
+    // in-stream sector carriers are galaxy-map noise -- see aggregate.py).
+    public readonly record struct Datagram(string SrcIp, int SrcPort, string DstIp, int DstPort, byte[] Payload, long TimestampMicros)
     {
         public string FlowKey => $"{SrcIp}:{SrcPort}->{DstIp}:{DstPort}";
     }
@@ -49,11 +54,17 @@ public static class PcapNgReader
                 int body = off + 8;
                 if (body + 20 <= d.Length)
                 {
+                    // ts is a 64-bit count of time units since the epoch; the unit
+                    // is the interface's if_tsresol (default 10^-6 = microseconds,
+                    // which is what tcpdump writes and all we need here).
+                    uint tsHi = BinaryPrimitives.ReadUInt32LittleEndian(d.AsSpan(body + 4, 4));
+                    uint tsLo = BinaryPrimitives.ReadUInt32LittleEndian(d.AsSpan(body + 8, 4));
+                    long tsMicros = (long)(((ulong)tsHi << 32) | tsLo);
                     int capLen = (int)BinaryPrimitives.ReadUInt32LittleEndian(d.AsSpan(body + 12, 4));
                     int dataOff = body + 20;
                     if (capLen > 0 && dataOff + capLen <= d.Length)
                     {
-                        var dg = TryParseEthernetUdp(d.AsSpan(dataOff, capLen));
+                        var dg = TryParseEthernetUdp(d.AsSpan(dataOff, capLen), tsMicros);
                         if (dg is { } v) yield return v;
                     }
                 }
@@ -64,7 +75,7 @@ public static class PcapNgReader
     }
 
     // Ethernet(14) -> IPv4(IHL*4) -> UDP(8) -> payload. Returns null if not IPv4/UDP.
-    private static Datagram? TryParseEthernetUdp(ReadOnlySpan<byte> frame)
+    private static Datagram? TryParseEthernetUdp(ReadOnlySpan<byte> frame, long tsMicros)
     {
         if (frame.Length < 14) return null;
         ushort ethType = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(12, 2));
@@ -84,6 +95,6 @@ public static class PcapNgReader
         int ulen = BinaryPrimitives.ReadUInt16BigEndian(udp.Slice(4, 2));
         int payLen = Math.Min(ulen - 8, udp.Length - 8);
         if (payLen <= 0) return null;
-        return new Datagram(src, sport, dst, dport, udp.Slice(8, payLen).ToArray());
+        return new Datagram(src, sport, dst, dport, udp.Slice(8, payLen).ToArray(), tsMicros);
     }
 }
