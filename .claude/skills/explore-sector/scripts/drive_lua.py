@@ -1161,7 +1161,15 @@ DEST_SIDS = _dest_sids()
 # routes straight in). 'Gate to Aragoth System' from Akerons Gate lands in Freya
 # (1750), a pirate-lethal NEVER_EXPLORE sector; without this the survey ship was
 # routed into it and destroyed (owner 2026-07-09).
-GATE_DEST_OVERRIDES = {navdata.norm("Aragoth System"): 1750}
+# 'Pirate Gate to Smuggler's Run' from Inverness (4025) deposits the ship in
+# BlackbeardsWake (3605), a pirate-lethal NEVER_EXPLORE sector -- galaxy only maps it
+# under the 'Sector Gate to Blackbeards Wake' name, so the live 'Smuggler's Run' name
+# resolves to nothing and reads as fresh frontier (preferred) without this override
+# (owner 2026-07-11: died there mid-sweep).
+GATE_DEST_OVERRIDES = {
+    navdata.norm("Aragoth System"): 1750,
+    navdata.norm("Smuggler's Run"): 3605,
+}
 
 # Owner-directed NEVER-EXPLORE sectors: hostile-spawn-lethal sectors the auto
 # survey must never enter or survey -- only defer to a manual/supervised pass.
@@ -1173,7 +1181,15 @@ GATE_DEST_OVERRIDES = {navdata.norm("Aragoth System"): 1750}
 # Cooper (owner 2026-07-10): a RAID sector -- "mobs will 1 shot me even at lvl 122".
 # Fleeing is pointless (a one-shot kills before any evade), so never enter or dwell:
 # pass thru only, gate straight on into Grissom.
-NEVER_EXPLORE_SECTORS = frozenset({"Freya", "Cooper"})
+# BlackbeardsWake (owner 2026-07-11): behind the "Pirate Gate to Smuggler's Run" from
+# Inverness; Dai Dai Lo Elite Red Dragon pirates killed the survey ship mid-sweep.
+# Moto (owner 2026-07-11): already surveyed manually this run; a 61-Cygni dead-end
+# branch off Aganju the owner does not want the auto survey to backtrack into. The
+# Aganju->Moto gate is intra-system ("Sector Gate to Moto"/"Accelerator to Moto"),
+# both of which resolve to 1160, so NEVER_EXPLORE membership alone catches it (no
+# GATE_DEST_OVERRIDES entry needed -- 61 Cygni's "System Gate" name would ambiguate
+# to Aganju itself, so must NOT be overridden to Moto).
+NEVER_EXPLORE_SECTORS = frozenset({"Freya", "Cooper", "BlackbeardsWake", "Moto", "XipeTotec"})
 
 
 def gate_dest_sid(name, src_sid=None):
@@ -1227,6 +1243,13 @@ def routable_gate(name, src_sid=None):
     destination sector is routable too. An accelerator sphere resolves to nothing,
     so it stays non-routable."""
     n = name.lower()
+    # '[Under Construction]' gates are placeholders for sectors that were never
+    # finished -- warping to one never flips the sector (it deposits the ship back
+    # where it started), so the walker reads the unresolved dest as fresh frontier
+    # and wastes a crossing on it every time (owner 2026-07-11: "Xango is a fake
+    # sector, doesn't exist"). Never treat one as routable.
+    if "under construction" in n:
+        return False
     if " to " in n or "wormhole" in n:
         return True
     return src_sid is not None and gate_dest_sid(name, src_sid) is not None
@@ -1236,7 +1259,11 @@ def _sector_forbidden(key):
     """True when a sector KEY must never be routed INTO by the auto survey: a
     gravity well (warp terminates mid-flight, can strand the ship) or an owner-
     directed NEVER_EXPLORE sector (pirate-lethal, e.g. Freya). Both are deferred
-    to a manual pass -- the traversal only ever transits OUT of one, never in."""
+    to a manual pass -- the traversal only ever transits OUT of one, never in.
+    ENB_WELL_ALLOW (owner-confirmed flyable) exempts a sector from the well gate;
+    ENB_EXPLORE_WELLS drops the well gate entirely (only NEVER_EXPLORE remains)."""
+    if EXPLORE_WELLS or key in WELL_ALLOW:
+        return key in NEVER_EXPLORE_SECTORS
     return key in GRAVITY_WELL_SECTORS or key in NEVER_EXPLORE_SECTORS
 
 
@@ -1750,10 +1777,29 @@ def pcap_stop():
     subprocess.run(["bash", os.path.join(HERE, "pcap.sh"), "stop"])
 
 
+# Owner override: sectors the DB-derived well list flags but the owner (game
+# authority) has confirmed are flyable. The type-41 rows behind gravity_wells.py
+# can be bad/synthetic (e.g. an implausible 150k-unit radius), so a confirmed
+# sector name in ENB_WELL_ALLOW (comma-separated) is surveyed as normal frontier.
+WELL_ALLOW = frozenset(
+    s.strip() for s in os.environ.get("ENB_WELL_ALLOW", "").split(",") if s.strip())
+
+# Aggressive-frontier mode: stop treating gravity wells as off-limits at all, so
+# the survey both CROSSES INTO and SURVEYS well-flagged sectors instead of
+# retreating to explored space when a completed sector's only forward gates lead
+# into wells. The genuinely-lethal NEVER_EXPLORE guard (Freya) still holds. Warp
+# can terminate mid-flight in a well, so a well sector may only get partial
+# coverage -- accepted in this mode; the point is to reach new sectors.
+EXPLORE_WELLS = os.environ.get("ENB_EXPLORE_WELLS") == "1"
+
+
 def has_gravity_well(sector):
     """True when the sector contains a gravity well (gravity_wells.py exits 2).
     Warp terminates mid-flight in a well sector and we cannot auto-route out, so
-    the survey refuses it -- same policy as the screen survey (survey.sh)."""
+    the survey refuses it -- same policy as the screen survey (survey.sh).
+    ENB_WELL_ALLOW (per-sector) and ENB_EXPLORE_WELLS (global) override this."""
+    if EXPLORE_WELLS or sector in WELL_ALLOW:
+        return False
     return subprocess.run(
         [sys.executable, os.path.join(HERE, "gravity_wells.py"), sector],
         capture_output=True, text=True).returncode != 0
