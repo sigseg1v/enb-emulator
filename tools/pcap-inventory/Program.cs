@@ -95,11 +95,41 @@ int? currentSector = null;
 var gidSector = new Dictionary<int, int>();
 var gidFirstFrame = new Dictionary<int, int>();
 var markers = new List<(int frame, string op, int sector)>();
+// Per-object capture time. currentEpochMicros is the pcap timestamp of the
+// datagram currently being processed; gidEpoch pins each gid to the wall-clock
+// of its CREATE. The importer bins objects into sectors by this wall-clock
+// against the survey driver's sector-map, which is the only reliable
+// segmentation for a multi-sector transit capture (the in-stream sector carriers
+// 0x0036/0x003A/0x006F are galaxy-map noise -- see aggregate.py).
+long currentEpochMicros = 0;
+var gidEpoch = new Dictionary<int, long>();
 void TagCreate(int gid, int frame)
 {
     if (!gidFirstFrame.ContainsKey(gid)) gidFirstFrame[gid] = frame;
     if (currentSector is { } sec && !gidSector.ContainsKey(gid))
         gidSector[gid] = sec;
+    if (currentEpochMicros != 0 && !gidEpoch.ContainsKey(gid))
+        gidEpoch[gid] = currentEpochMicros;
+}
+
+// The server recycles a GameID across UNRELATED objects within one long transit
+// capture: the same gid is a mob (0x0004, tracked in `world`) in one sector and a
+// resource (0x2019, tracked in `resources`) in another. Those are two real objects
+// that must each import at their own position/sector, so the resource store keeps
+// its OWN create context -- sharing gidSector/gidFirstFrame/gidEpoch with the world
+// store would tag whichever object was created second with the first one's sector
+// and wall-clock epoch, mis-binning it. (Within a single store a gid is not reused
+// across sectors -- measured 0 recycles -- so first-write-wins is exact per store.)
+var resSector = new Dictionary<int, int>();
+var resFirstFrame = new Dictionary<int, int>();
+var resEpoch = new Dictionary<int, long>();
+void TagResource(int gid, int frame)
+{
+    if (!resFirstFrame.ContainsKey(gid)) resFirstFrame[gid] = frame;
+    if (currentSector is { } sec && !resSector.ContainsKey(gid))
+        resSector[gid] = sec;
+    if (currentEpochMicros != 0 && !resEpoch.ContainsKey(gid))
+        resEpoch[gid] = currentEpochMicros;
 }
 
 var readDatagrams = PcapReader.IsClassicPcap(inputPath)
@@ -110,6 +140,7 @@ int datagrams = 0, frames = 0;
 foreach (var dg in readDatagrams)
 {
     datagrams++;
+    currentEpochMicros = dg.TimestampMicros;
     if (!reassemblers.TryGetValue(dg.FlowKey, out var ra))
         reassemblers[dg.FlowKey] = ra = new SectorStreamReassembler();
 
@@ -141,7 +172,7 @@ foreach (var dg in readDatagrams)
         if (op == 0x2019)
         {
             int rgid = BinaryPrimitives.ReadInt32LittleEndian(body[..4]);
-            TagCreate(rgid, frames);
+            TagResource(rgid, frames);
             DecodeResource(body, resources);
             continue;
         }
@@ -163,7 +194,8 @@ foreach (var dg in readDatagrams)
 if (jsonMode)
 {
     string json = BuildJson(inputPath, datagrams, frames, world, resources,
-        relationships, gidSector, gidFirstFrame, markers);
+        relationships, gidSector, gidFirstFrame, gidEpoch,
+        resSector, resFirstFrame, resEpoch, markers);
     File.WriteAllText(outputPath, json);
 }
 else
@@ -242,10 +274,24 @@ static string BuildJson(string inputPath, int datagrams, int frames,
     Dictionary<int, (int reaction, bool attacking)> relationships,
     Dictionary<int, int> gidSector,
     Dictionary<int, int> gidFirstFrame,
+    Dictionary<int, long> gidEpoch,
+    Dictionary<int, int> resSector,
+    Dictionary<int, int> resFirstFrame,
+    Dictionary<int, long> resEpoch,
     List<(int frame, string op, int sector)> markers)
 {
     int? Sec(int gid) => gidSector.TryGetValue(gid, out var s) ? s : null;
     int? Frame(int gid) => gidFirstFrame.TryGetValue(gid, out var f) ? f : null;
+    // Unix epoch seconds of the object's CREATE (null if the reader recovered no
+    // timestamp). Wall-clock is the importer's authoritative sector segmenter.
+    double? Epoch(int gid) => gidEpoch.TryGetValue(gid, out var us) && us != 0
+        ? us / 1_000_000.0 : (double?)null;
+    // Resource-store create context (kept separate so a gid shared with a world
+    // object tags each with its OWN sector/frame/epoch -- see TagResource).
+    int? ResSec(int gid) => resSector.TryGetValue(gid, out var s) ? s : null;
+    int? ResFrame(int gid) => resFirstFrame.TryGetValue(gid, out var f) ? f : null;
+    double? ResEpoch(int gid) => resEpoch.TryGetValue(gid, out var us) && us != 0
+        ? us / 1_000_000.0 : (double?)null;
 
     var objs = new List<object>();
     foreach (var t in world.NearestTo(0).Select(t => t.Obj))
@@ -256,6 +302,7 @@ static string BuildJson(string inputPath, int datagrams, int frames,
             gid = t.GameId,
             sector = Sec(t.GameId),
             frame = Frame(t.GameId),
+            epoch = Epoch(t.GameId),
             createType = t.CreateType,
             name = t.Name,
             baseAsset = t.BaseAsset,
@@ -283,8 +330,9 @@ static string BuildJson(string inputPath, int datagrams, int frames,
         objs.Add(new
         {
             gid = kv.Key,
-            sector = Sec(kv.Key),
-            frame = Frame(kv.Key),
+            sector = ResSec(kv.Key),
+            frame = ResFrame(kv.Key),
+            epoch = ResEpoch(kv.Key),
             createType = (int?)38,
             name = name.Length == 0 ? null : name,
             baseAsset = (short?)(short)ba,

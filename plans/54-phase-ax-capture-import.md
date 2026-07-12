@@ -281,6 +281,73 @@ per-sector file directly into psql.
   a player already in a fixed sector must re-enter it (gate out/in or relog) to
   see the corrected models.
 
+- [x] **AX-19** pre-first-marker object recovery (owner: my earlier "that data
+  is unrecoverable without a re-fly" claim was WRONG -- "bullshit... you are just
+  lazy"). A capture opens mid-flight in the sector we were already in, so objects
+  arriving in range before the first in-stream handoff were being DROPPED
+  (`before_first_marker`, ~469-706 objects across the corpus). They are fully
+  attributable without any re-fly: (a) navs already resolve by NAME via the jsonl
+  independent of markers; (b) a pre-marker mob/resource segment inherits the END
+  sector of the immediately-preceding capture in the same play session (the sector
+  we were flying when this capture began), chained only within `SESSION_GAP_SECS`
+  (30 min) by the `...T......Z` filename timestamps, then run through the SAME
+  nav-corroboration relabel as any other segment; (c) a pre-marker segment with no
+  navs AND no same-session predecessor still drops (attributing it would invent a
+  location). `aggregate.py` implements the chain + `cap_epoch()` timestamp parse.
+  Validated: Swooping Eagle 052139Z gates SwoopingEagle->Ishuan mid-capture; its
+  133 pre-marker resources correctly attribute to SwoopingEagle via the chain from
+  predecessor 051559Z (not to Ishuan); Freya pre-marker objects correctly relabel
+  to Ishuan (8 nav votes). Net effect: 10 per-sector files regenerated, import
+  total 1868 -> 2045 sector_objects (+177: +152 harvestable, +25 mob spawns),
+  Swooping Eagle 54 -> 212. Regenerated against an isolated throwaway pristine base
+  (`-p freya-import`, `ENB_SKIP_CAPTURE_SEED=1`, host port 5459) and applied the 10
+  files + `_purge`/`_mob_templates` directly to the live dev DB with
+  `ON_ERROR_STOP=1` (every file exited 0, live counts match the throwaway regen
+  exactly: 2045/1396/623). `SKILL.md` sector-assignment section updated. DB content
+  + skill tooling only -- no wire/server/proxy change, no `plans/29` CV entry.
+
+- [x] **AX-20** finish the AX-19 recovery properly (owner: my "244 unrecoverable"
+  claim was still "bullshit... lazy" -- partition every capture by gate and
+  attribute EVERY segment). Two fixes to the aggregate/gen_sql pipeline:
+  - **Pre-marker OWN-nav anchoring.** AX-19 only anchored a pre-first-marker
+    mob/resource window when a same-session predecessor existed (the chain). But
+    the pre-marker window's OWN navs resolve by name independent of any marker, so
+    they identify the starting sector directly even with no chained predecessor.
+    New `premarker_nav_sector()` votes the pre-window's resolvable nav names and
+    anchors the window to the dominant sector when `top_votes >= 3` and it
+    outvotes the rest combined. Recovers **134 of the 244** before-first-marker
+    drops: Freya 192742Z's 89 pre-marker objects -> Ishuan (8 nav votes vs 1/1/1),
+    SwoopingEagle 180612Z's 45 -> Swooping Eagle (29 votes, unanimous). The
+    remaining **110 are genuinely anchorless**: two Yokan captures (61 + 41) whose
+    pre-marker windows contain ZERO navs and have no same-session predecessor, plus
+    8 lone singletons likewise nav-less -- attributing them WOULD be inventing a
+    location, so they still drop. This is now a proven floor, not a lazy default.
+  - **jsonl filename->sector alias.** `load_nav_jsonl` matched a nav catalog file
+    to a sector by normalizing its basename against the DB sector name, so
+    abbreviations (`ABA`->Asteroid Belt Alpha, `ABB`->...Beta, `ABG`->...Gamma) and
+    divergent spellings (`Pluto`->Pluto and Charon, `Ceres`->Ceres/Thule,
+    `Nifleheim`->Nifleheim Cloud, `Todesengel`->der Todesengel, ...) were silently
+    unmatched -- those sectors' navs never loaded, so nav-corroboration could not
+    relabel their segments. Added a module-level `JSONL_SECTOR_ALIAS` map
+    (single source of truth) consulted on match miss, imported into `gen_sql.py`
+    (which carried its own buggy copy of the matcher) to prevent drift.
+    `nav_not_in_jsonl` 181 -> 128. Consequence: the `ABA__...154834Z` capture is a
+    GM-`/wormhole`-noisy belt survey whose spurious in-stream markers
+    (Ganymede/Ishuan/Jupiter/Saturn/Akerons/Pluto/Uranus/Neptune...) were the ONLY
+    reason Jupiter/Saturn/Akerons ever got captured objects. With the belt nav
+    catalogs now loaded, nav-corroboration correctly re-attributes those segments
+    to Asteroid Belt Alpha and Beta (the three belt catalogs share ZERO nav names,
+    so the vote is unambiguous). Net: `1070_Jupiter.sql`, `1071_Saturn.sql`,
+    `1075_Akerons_Gate.sql` DELETED (their only rows were the misattribution), new
+    `1077_Asteroid_Belt_Beta.sql` added, 1076 (ABA) updated.
+  - **Reconciled against the live DB after `down -v` + pristine-base regen + apply**
+    (2029 synth `sector_objects`: 1374 resources, 628 mobs, 27 net-new navs, 17
+    clone templates): mobs aggregate 628 == live 628 exactly; resources aggregate
+    1609 minus the AX-18 non-Asteroid/Hulk asset drops == 1374 live harvestable;
+    navs insert-if-absent so only 27 are net-new over the base seeds. 20 per-sector
+    files touched (16 modified, 3 deleted, 1 new) + wrapper. DB content + skill
+    tooling only -- no wire/server/proxy change, no `plans/29` CV entry.
+
 ## Notes
 
 - Mobs are NO LONGER skipped. The 8 names previously absent from `mob_base`
@@ -289,7 +356,11 @@ per-sector file directly into psql.
   synthesized clone templates (mob_id >= 900000) -- see AX-5b. The clone is a
   COMPLETE same-asset `mob_base` row, so it does NOT hit the Default-mob crash
   (that comes from a missing/incomplete template, not a present one).
-- Final aggregate exclusions: before_first_marker 469, player 47,
+- Final aggregate exclusions (after AX-20 recovery): before_first_marker 110
+  (was 469-706 pre-AX-19, 244 after AX-19, now 110 after AX-20 own-nav anchoring --
+  these remaining are nav-LESS pre-marker segments with no same-session
+  predecessor: two Yokan captures with 0 navs, 61 + 41 objects, plus 8 nav-less
+  singletons; attributing them would be guessing a location), player 47,
   capture_unresolved_no_marker 4, drop_loot_or_deco 263, no_position 1.
 - No wire change, no server/proxy/login change -> no `plans/29` CV entry. This is
   DB content tooling only.

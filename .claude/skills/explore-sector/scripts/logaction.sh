@@ -5,8 +5,8 @@
 #
 # logaction.sh <sector> <action> [detail...] -- append one timestamped line to
 # the PERSISTENT, GITIGNORED action log (../state/actions.log). Every concrete
-# step gets a line: open-map, select-node, warp, reveal, select-gate, enter-gate,
-# load-screen, sector-enter, complete, reroute, etc. This is the auditable record
+# step gets a line: sector-enter, visit, warp, relocate, skip, enter-gate,
+# complete, etc. This is the auditable record
 # the owner asked for: a sector counts as DONE only when our log + ledger show we
 # visited every node ourselves (a player having flown it before does NOT count).
 #

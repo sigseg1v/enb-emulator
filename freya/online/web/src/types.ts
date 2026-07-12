@@ -261,3 +261,25 @@ export interface VaultTransferInput {
     slot: number;
     itemId: number;
 }
+
+// One mob that drops a searched item, with its combat level and the sector it
+// spawns in. sector is "" when the mob has no resolved spawn location.
+export interface SearchDrop {
+    mob: string;
+    combatLevel: number;
+    sector: string;
+}
+
+// One matched item in a /api/search response.
+export interface SearchItem {
+    id: string;
+    name: string;
+    level: number;
+    manufacturable: boolean;
+    drops: SearchDrop[];
+}
+
+export interface SearchResult {
+    query: string;
+    results: SearchItem[];
+}

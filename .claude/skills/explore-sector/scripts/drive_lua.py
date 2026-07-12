@@ -43,12 +43,28 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import navdata  # noqa: E402
+from gravity_wells import GRAVITY_WELL_SECTORS  # noqa: E402
 
 # Authoritative sector identity: enb.sector() numeric id -> jsonl stem. Nav-name
 # identification stays only as the fallback for unmapped sectors (needs >=3 names).
 with open(os.path.join(HERE, "..", "..", "..", "..", "docs", "sectors",
                        "sector_ids.json")) as _f:
     SID_MAP = json.load(_f)
+
+# ledger key -> sid, for source-aware gate resolution (galaxy, below).
+KEY_TO_SID = {key: int(sid) for sid, key in SID_MAP.items()}
+
+# Galaxy gate-routing map (data/galaxy.json, built by build_galaxy.py from the
+# content DB + the enbmaps system-membership table). It tells us where a gate
+# LEADS: a sector gate's destination sid, a paired-name wormhole's far endpoint,
+# and -- resolved by source system -- where a 'Gate to <System>' inter-system
+# gate lands. Absent file => every galaxy-backed lookup is skipped and gate
+# resolution falls back to the name-suffix path below (no regression).
+try:
+    with open(os.path.join(HERE, "..", "data", "galaxy.json")) as _f:
+        GALAXY = json.load(_f)
+except (OSError, json.JSONDecodeError):
+    GALAXY = None
 
 # ---- tunables (mirror drive.py's, env-overridable) --------------------------
 VISIT_K = float(os.environ.get("ENB_VISIT_K", "8000"))      # within this = visited
@@ -64,15 +80,89 @@ ARRIVE_SLOP = float(os.environ.get("ENB_ARRIVE_SLOP", "12000"))
 # body, not a dead target. The old single slop blacklisted Luna as "warp never
 # engages" after it had flown 31k -> 17.9k and was sitting on the boundary.
 BODY_SLOP = float(os.environ.get("ENB_BODY_SLOP", "30000"))
+# A live nav whose CLASS is a celestial body (Planet/Moon/Sun/Star) is the body
+# itself, not a waypoint we fly to: warp holds off at its radius ("target too
+# close"), so re-picking it just spams a warp that never engages. The ledger types
+# these as generic "object" (Ceres, Thule), so the ledger type is NOT enough to
+# tell them apart from a real object waypoint -- only the live nav class is.
+BODY_CLASSES = frozenset({"planet", "moon", "sun", "star"})
+
+
+def is_body_class(cls):
+    return (cls or "").strip().lower() in BODY_CLASSES
+
+
+# Some hazard navs cancel the warp drive ~1s after engage (the environment kills
+# it), so a warp can NEVER close on them -- re-targeting just burns a self-
+# cancelling warp forever, the same ping-pong the planet bodies caused. Unlike a
+# body (which the ship can at least coast up to its radius and count as reached),
+# these are unreachable by warp outright, so they are skipped, never visited-at-
+# range. The client reports no distinct object class for them (they read like an
+# ordinary nav), so the NAME is the only discriminator.
+UNWARPABLE_NAME_SUBSTRINGS = ("reactor drain zone",)
+
+
+def is_unwarpable(name):
+    n = (name or "").lower()
+    return any(s in n for s in UNWARPABLE_NAME_SUBSTRINGS)
+
+
 NEAR_SWITCH = float(os.environ.get("ENB_NEAR_SWITCH", "0.20"))  # farthest->nearest at 20%
 WARP_TIMEOUT = float(os.environ.get("ENB_WARP_TIMEOUT", "90"))  # max s per warp segment
 POLL_SLEEP = float(os.environ.get("ENB_POLL_SLEEP", "2"))   # in-flight poll cadence
 WARP_COOLDOWN = float(os.environ.get("ENB_WARP_COOLDOWN", "5"))  # >=5s between warps
 NAV_SETTLE_S = float(os.environ.get("ENB_NAV_SETTLE", "20"))    # wait for scene to populate
 RELOC_MAX = int(os.environ.get("ENB_RELOC_MAX", "4"))       # relocations before conceding
+# Cross-system transit: an onward inter-system gate sits at the far sector edge
+# (69k-194k units out in a Cygni->Sol run), far beyond scanner range (~22k), so it
+# NEVER renders by waiting at the entry point -- the ship must fly toward it to drag
+# it into range. REPO_MAX bounds how many reposition hops we take to reveal it;
+# REPO_CAP rejects a pathological far anchor (a 398k edge dock) so a reposition
+# always lands somewhere useful.
+REPO_MAX = int(os.environ.get("ENB_REPO_MAX", "7"))         # reposition hops to reveal a far gate
+REPO_CAP = float(os.environ.get("ENB_REPO_CAP", "150000"))  # never reposition past this distance
 GATE_TIMEOUT = float(os.environ.get("ENB_GATE_TIMEOUT", "30"))  # s to wait for sector flip
 MAX_SECTORS = int(os.environ.get("ENB_MAX_SECTORS", "40"))  # stop after this many sectors
 LUA_TIMEOUT = float(os.environ.get("ENB_LUA_TIMEOUT", "6"))  # per-command reply wait
+
+# ---- hang recovery / relogin (ports run-sector.sh's role for the Lua path) ---
+# The enbmod Lua channel IS the liveness signal: enbmod's command poll is clocked
+# off the client's message pump, so a HARD-HUNG client stops answering enbmod.cmd
+# entirely (this is also why heavy per-tick instrumentation can freeze a live
+# client -- a wedged pump answers nothing). A scene LOAD also silences the channel,
+# but only briefly (a gate transit's load screen clears in well under 90s); a wedge
+# never clears. So the channel is declared dead only after it has been continuously
+# unresponsive for HANG_SECS (comfortably above the worst-case load), and only once
+# a direct liveness probe confirms it -- then main() relogins (local stack) or halts
+# (manual/live client we do not own), exactly as run-sector.sh did around drive.py.
+HANG_SECS = float(os.environ.get("ENB_LUA_HANG_SECS", "150"))
+MANUAL_CLIENT = os.environ.get("ENB_EXPLORE_MANUAL_CLIENT", "0") == "1"
+MAX_RELOGIN = int(os.environ.get("ENB_MAX_RELOGIN", "4"))
+LOGIN_DIR = os.path.join(HERE, "..", "..", "login-to-client", "scripts")
+# Optional external recovery command (the explore-live skill's recover.sh). When
+# set it OWNS bringing a crashed/wedged client back to in-game -- relaunch via the
+# real Net-7 launcher, re-inject enbmod, autologin -- so a MANUAL_CLIENT wedge
+# recovers instead of halting. Run with the driver's env (creds/ENB_CLIENT_DIR
+# inherited); exit 0 == back in-game. Empty -> old behaviour (relogin/halt).
+RECOVER_CMD = os.environ.get("ENB_RECOVER_CMD", "").strip()
+EXIT_HANG = 42   # client wedged and we could not (manual mode) relogin-recover
+EXIT_WELL = 3    # arrived in a gravity-well sector we cannot auto-route out of
+EXIT_INCAP = 44  # ship incapacitated (hull 0) -- no respawn primitive, halt for manual revive
+
+
+class ClientHang(Exception):
+    """The enbmod Lua channel went silent past HANG_SECS and a direct liveness
+    probe confirmed the client is wedged (not merely mid scene-load). Raised by
+    lua(); caught in main()'s hop loop, which relogins + resumes or halts."""
+
+
+class ShipRecovered(Exception):
+    """The ship was incapacitated (hull 0) and auto distress->tow relocated it to
+    a station (a DIFFERENT sector than the one being surveyed). Raised by
+    check_incapacitated() after recovery + undock; caught in main()'s hop loop,
+    which re-detects the sector from scratch (no hop consumed). survey_sector does
+    NOT catch it -- its loop must abort, since the ship is no longer where it was."""
+
 
 US, RS = "\x1f", "\x1e"  # unit / record separators for the nav dump string
 
@@ -116,6 +206,16 @@ ALIAS = {}
 # 'Mining Station' in place every loop). Seeded from the ledger's visited_gid
 # stamps at sector start so restarts stay idempotent.
 MARKED_GIDS = set()
+# Per-sector gates OBSERVED anywhere during the sweep -> norm(name) -> {gid, name,
+# dist}. choose_gate runs on the nav list from the sweep's FINAL parked position,
+# but in a large sector the onward gates sit 200k+ out and are not in scanner
+# range from wherever the sweep ended -- so "currently listed gates" alone made
+# the run false-conclude "no onward gate" and stop while unsurveyed neighbours
+# were reachable (ABA stopped at 3 sectors with live gates to Beta 1077 + Saturn
+# 1071 both out of range at the parked spot). Every gate that enters range at any
+# point in the sweep is remembered here (nearest observed dist kept), and
+# choose_gate picks from the union so a far gate is still a candidate.
+GATES_SEEN = {}
 
 
 def lkey(name):
@@ -125,12 +225,48 @@ def lkey(name):
 
 
 # ---- client command channel -------------------------------------------------
+def _client_pid_cwd():
+    """Resolve the RUNNING client.exe's working dir from /proc/<pid>/cwd, via its
+    X window (xdotool getwindowpid). This is the authoritative enbmod-store dir for
+    a client we ATTACHED to -- an arbitrary WINE prefix / multibox slot the launcher
+    settings.json does NOT know about (settings.json points at whatever OUR launcher
+    last wrote, which is the wrong prefix for an attached client; see the
+    'enbmod dir from /proc cwd' project note). Returns the dir only if it actually
+    holds the enbmod store (enbmod.dll / enbmod.cmd), so it never hands back a
+    launcher window's unrelated cwd."""
+    try:
+        wins = subprocess.run(["xdotool", "search", "--class", "client.exe"],
+                              capture_output=True, text=True, timeout=10)
+        for win in wins.stdout.split():
+            pid = subprocess.run(["xdotool", "getwindowpid", win],
+                                 capture_output=True, text=True, timeout=5).stdout.strip()
+            if not pid:
+                continue
+            try:
+                cwd = os.path.realpath(f"/proc/{pid}/cwd")
+            except OSError:
+                continue
+            if os.path.isfile(os.path.join(cwd, "enbmod.dll")) or \
+               os.path.isfile(os.path.join(cwd, "enbmod.cmd")):
+                return cwd
+    except Exception:
+        pass
+    return None
+
+
 def client_dir():
-    """Resolve the folder holding enbmod.cmd/enbmod.log from the launcher settings
-    (never hardcode -- there can be more than one WINE prefix)."""
+    """Resolve the folder holding enbmod.cmd/enbmod.log. Order:
+      1. ENB_CLIENT_DIR (explicit override; explore-live sets this).
+      2. The running client.exe's /proc/<pid>/cwd (correct for an ATTACHED client
+         in any WINE prefix -- see _client_pid_cwd).
+      3. The launcher settings.json ClientPath (our own launched client).
+    (Never hardcode -- there can be more than one WINE prefix.)"""
     env = os.environ.get("ENB_CLIENT_DIR")
     if env and os.path.isdir(env):
         return env
+    cwd = _client_pid_cwd()
+    if cwd:
+        return cwd
     settings = os.environ.get(
         "ENB_LAUNCHER_SETTINGS",
         os.path.join(HERE, "..", "..", "..", "..", "tools", "LaunchFreya",
@@ -153,10 +289,11 @@ def _log_len():
         return 0
 
 
-def lua(expr, timeout=LUA_TIMEOUT):
-    """Run one Lua line through the enbmod channel; return the FIRST new [run]
-    payload (everything after '[run] '), CR-stripped. None on timeout / no output.
-    The DLL writes CRLF, so \\r must be stripped before any compare (bit us once)."""
+def _lua_raw(expr, timeout):
+    """Send one Lua line and return the FIRST new [run] payload (everything after
+    '[run] '), CR-stripped, or None on timeout. The DLL writes CRLF, so \\r must be
+    stripped before any compare (bit us once). No hang detection -- used both by the
+    normal path (lua) and by the liveness probe, so it must never recurse."""
     start = _log_len()
     with open(CMD, "a") as f:
         f.write(expr + "\n")
@@ -175,6 +312,42 @@ def lua(expr, timeout=LUA_TIMEOUT):
     return None
 
 
+# time.time() of the last successful channel reply -- the clock the hang detector
+# measures silence against. None until the first reply (so a dead-at-startup client
+# fails main()'s sanity check cleanly rather than raising a mid-run hang).
+_last_alive = None
+
+
+def _probe_alive():
+    """Direct liveness confirmation: does the channel answer 1+1 at all? A few
+    quick tries -- a wedged client (pump stalled) answers none of them."""
+    for _ in range(3):
+        if _lua_raw("return 1+1", LUA_TIMEOUT) is not None:
+            return True
+    return False
+
+
+def lua(expr, timeout=LUA_TIMEOUT):
+    """Run one Lua line through the enbmod channel; return the FIRST new [run]
+    payload, CR-stripped. None on timeout / no output.
+
+    Raises ClientHang when the channel has been silent past HANG_SECS AND a direct
+    liveness probe confirms the client is wedged. A gate-transit load screen (the
+    channel's routine silence) stays under HANG_SECS, so it never trips this; only a
+    real wedge does. main() catches ClientHang to relogin + resume or halt."""
+    global _last_alive
+    r = _lua_raw(expr, timeout)
+    now = time.time()
+    if r is not None:
+        _last_alive = now
+        return r
+    if _last_alive is None:
+        _last_alive = now            # first-ever contact: start the clock, don't hang
+    elif now - _last_alive > HANG_SECS and not _probe_alive():
+        raise ClientHang(f"channel silent {now - _last_alive:.0f}s (> {HANG_SECS:.0f}s)")
+    return None
+
+
 def lua_bool(call):
     """Evaluate a boolean-returning Lua CALL (no 'return' prefix). The channel echoes
     a bare boolean as the literal '<boolean>' with no value, so wrap in tostring()
@@ -184,36 +357,66 @@ def lua_bool(call):
 
 
 # ---- game reads -------------------------------------------------------------
-NAV_DUMP = (
-    "local n=enb.navs(); local t={}; "
-    "for _,v in ipairs(n) do "
-    "t[#t+1]=(v.gid or 0)..'\\31'..(v.name or '')..'\\31'.."
-    "string.format('%.1f',v.dist or -1)..'\\31'..(v.class or '') end; "
-    "return table.concat(t,'\\30')"
-)
+# The enbmod cmd/log channel truncates each reply line at 2048 bytes. A full
+# nav dump for a busy belt sector is ~3KB / 77 records, so a single-string dump
+# silently loses everything past record ~53 -- and the lost tail is the DISTANT
+# navs, i.e. exactly the onward/exit GATES choose_gate needs. So page the dump:
+# snapshot enb.navs() into a Lua global once (consistent view), then read fixed-
+# size chunks that each stay well under the 2KB cap.
+NAV_PAGE = 24   # records/page; ~40 B each => ~1KB, safely under the 2048 B line cap
+
+
+def _nav_page_expr(off):
+    snap = "_ndump=enb.navs() or {}; " if off == 0 else ""
+    return (
+        snap + "local t={}; "
+        f"for i={off + 1},math.min(#_ndump,{off + NAV_PAGE}) do local v=_ndump[i]; "
+        "t[#t+1]=(v.gid or 0)..'\\31'..(v.name or '')..'\\31'.."
+        "string.format('%.1f',v.dist or -1)..'\\31'..(v.class or '') end; "
+        "return table.concat(t,'\\30')"
+    )
 
 
 def get_navs():
-    """Live nav list -> [{gid, name, dist(or None), cls}]. dist None == no range read."""
-    r = lua(NAV_DUMP)
-    if r is None or r == "":
-        return []
+    """Live nav list -> [{gid, name, dist(or None), cls}]. dist None == no range
+    read. Paged around the 2KB channel-line cap (see NAV_PAGE): page 0 snapshots
+    the list into a Lua global, later pages read that same snapshot so the view is
+    consistent even though each page is a separate channel round-trip."""
     out = []
-    for rec in r.split(RS):
-        parts = rec.split(US)
-        if len(parts) < 4:
-            continue
-        gid, name, dist, cls = parts[0], parts[1], parts[2], parts[3]
-        try:
-            gid = int(gid)
-        except ValueError:
-            continue
-        try:
-            d = float(dist)
-            d = None if d < 0 else d
-        except ValueError:
-            d = None
-        out.append({"gid": gid, "name": name, "dist": d, "cls": cls})
+    off = 0
+    while off < NAV_PAGE * 60:          # hard bound (1440 navs) -- no runaway loop
+        r = lua(_nav_page_expr(off))
+        if not r:                       # None (timeout) or "" (past the end)
+            break
+        recs = r.split(RS)
+        for rec in recs:
+            parts = rec.split(US)
+            if len(parts) < 4:
+                continue
+            gid, name, dist, cls = parts[0], parts[1], parts[2], parts[3]
+            try:
+                gid = int(gid)
+            except ValueError:
+                continue
+            try:
+                d = float(dist)
+                d = None if d < 0 else d
+            except ValueError:
+                d = None
+            out.append({"gid": gid, "name": name, "dist": d, "cls": cls})
+            # Remember every gate the instant it enters range, with its nearest
+            # observed distance, so choose_gate can still target one that has since
+            # left range by the sweep's end (see GATES_SEEN).
+            if is_gate(name, cls):
+                key = navdata.norm(name)
+                prev = GATES_SEEN.get(key)
+                best = d if d is not None else (prev or {}).get("dist")
+                if prev is not None and prev.get("dist") is not None and d is not None:
+                    best = min(prev["dist"], d)
+                GATES_SEEN[key] = {"gid": gid, "name": name, "dist": best, "cls": cls}
+        if len(recs) < NAV_PAGE:        # short page => that was the last one
+            break
+        off += NAV_PAGE
     return out
 
 
@@ -244,6 +447,123 @@ def settle_navs():
         prev = c
         time.sleep(POLL_SLEEP)
         waited += POLL_SLEEP
+    return navs
+
+
+def reposition_to_reveal(sector, used):
+    """Drag a fresh slice of the sector into scanner range by warping to the FARTHEST
+    warpable non-gate, non-body nav within REPO_CAP that we have not already used as
+    an anchor. This is how a far cross-system exit gate (69k-194k out, past scanner
+    range) is REVEALED: waiting never renders it, only flying toward it does. Returns
+    True if it repositioned, False if no fresh anchor is left. `used` accumulates the
+    anchors we have burned so a reposition never ping-pongs back to the same nav."""
+    navs = get_navs()
+    far = [n for n in navs
+           if n["dist"] is not None and VISIT_K < n["dist"] < REPO_CAP
+           and navdata.norm(n["name"]) not in used
+           and not is_body_class(n["cls"])
+           and not is_unwarpable(n["name"])
+           and not is_gate(n["name"], n["cls"])]
+    if not far:
+        return False
+    far.sort(key=lambda n: n["dist"], reverse=True)
+    anchor = far[0]
+    used.add(navdata.norm(anchor["name"]))
+    print(f"[drive_lua] {sector}: reposition -> {anchor['name']!r} "
+          f"(d={anchor['dist']:.0f}) to reveal a far gate")
+    warp_to_gate(anchor)          # closes to <VISIT_K of a plain nav (no transit)
+    time.sleep(WARP_COOLDOWN)
+    return True
+
+
+def settle_well_gates(sector, visited_sids, tried_edges, sid, leaving_defer=False,
+                      reveal=False):
+    """A well sector is not surveyed, so choose_gate gets only what one nav read
+    happened to catch -- and a big belt sector renders in bursts (53 -> 77 navs),
+    so the distant EXIT gates (98k-205k units out) populate AFTER settle_navs's
+    2-stable-read cutoff. A fresh process then sees only the nearby accelerator
+    spheres, excludes them (not routable), and false-concedes 'no gate out'.
+
+    Poll for the full render window, accumulating gates into GATES_SEEN (a side
+    effect of get_navs), so choose_gate sees the far exit gate too. Early-exit the
+    instant a routable non-well onward gate is in range. GATES_SEEN is cleared
+    first: this is a new sector and the prior sector's gate memory must not leak in.
+
+    When `reveal` is set (plain transit through a done sector, NOT a well/never-
+    explore exit), a passive wait alone cannot pull in an onward gate that sits at
+    the far sector edge -- so once the render window closes with no gate in range we
+    REPOSITION toward the far edge (reposition_to_reveal) and re-poll, up to REPO_MAX
+    hops. This is what makes cross-system transit work: the inter-system gate lives
+    69k-194k out and only comes into scanner range after we fly toward it.
+
+    PREFER-FRESH in reveal mode: a done transit sector often has BOTH a nearby
+    done-hub gate (in range at the entry point) AND a gate to a directly-adjacent
+    UNSURVEYED sector (at the far edge, out of range). choose_gate ranks the fresh
+    gate first, but it can only pick from what is REVEALED -- so if we stop the
+    instant the nearby done-hub gate appears, the fresh gate never renders and the
+    walker takes the done-hub transit, thrashing among completed sectors
+    (Saturn->Akerons->Pluto->Akerons...). So when this sector's ledger-known gate
+    graph shows it BORDERS the frontier directly, we hold out through the whole
+    reveal budget for a FRESH-destination gate, repositioning to surface it, and
+    only fall back to a done-transit if the fresh gate never comes into range. When
+    the sector does NOT border a fresh neighbour, the done-transit toward a frontier
+    that lies further out genuinely IS the best move -- take the first gate revealed."""
+    GATES_SEEN.clear()
+
+    def _pick():
+        return choose_gate(sector, navs, visited_sids, tried_edges, sid,
+                           leaving_defer=leaving_defer)
+
+    def _is_fresh(g):
+        """True when g leads to a sector still needing survey (or an undiscovered
+        one) -- exactly choose_gate's top-priority (0,0,0) rank tier."""
+        if g is None:
+            return False
+        dest = gate_dest_sid(g["name"], sid)
+        if dest is None:
+            return True                       # undiscovered dest -> frontier gate
+        return (not _sector_done(dest)) and (dest not in visited_sids)
+
+    def _poll(budget, want_fresh):
+        nonlocal navs
+        waited = 0.0
+        while waited < budget:
+            navs = get_navs()
+            g = _pick()
+            if g is not None and (not want_fresh or _is_fresh(g)):
+                return True
+            time.sleep(POLL_SLEEP)
+            waited += POLL_SLEEP
+        return False
+
+    navs = []
+    if not reveal:
+        _poll(NAV_SETTLE_S + 30, want_fresh=False)
+        return navs
+
+    # Does this sector border the frontier directly (a fresh neighbour reachable in
+    # ONE gate)? The gate graph is built from every ledger, so a completed transit
+    # sector's own ledger already lists all its gates -- we know Saturn borders the
+    # unsurveyed belts even before those far gates render. If so, hold out for the
+    # fresh gate; otherwise the best move is a done-transit toward a further frontier.
+    adj, frontier = _gate_graph()
+    key = SID_MAP.get(str(sid))
+    want_fresh = key is not None and (
+        key in frontier or any(nb in frontier for nb in adj.get(key, ())))
+
+    if _poll(NAV_SETTLE_S + 30, want_fresh=want_fresh):
+        return navs
+    # Onward gate not in range yet: fly toward the sector edge to reveal it, holding
+    # the same fresh preference. If want_fresh and the reveal budget is spent without
+    # a fresh gate surfacing, return navs anyway -- choose_gate then takes the best
+    # done-transit now in range (a legitimate fallback: this sector's adjacent-fresh
+    # gate is a scanner dead-zone, so route onward toward the frontier instead).
+    used = set()
+    for _ in range(REPO_MAX):
+        if not reposition_to_reveal(sector, used):
+            break
+        if _poll(NAV_SETTLE_S, want_fresh=want_fresh):
+            return navs
     return navs
 
 
@@ -402,6 +722,57 @@ def mark_in_range(sector, navs):
     return fresh
 
 
+def resolve_body_navs(sector, navs):
+    """Take celestial-body nav nodes (live class Planet/Moon/Sun/Star) OUT of the
+    remaining set so the picker never targets one -- warp holds off at a body's
+    radius, so re-picking it just spams 'target too close' forever (Ceres/Thule
+    ping-pong). A body already inside BODY_SLOP is as close as the game lets us
+    get, so count it visited; a far body cannot be approached and is skipped. The
+    real waypoints around it (Ceres 1..6, ...) are separate nav-point nodes the
+    survey still visits normally. Returns True if it resolved at least one."""
+    remaining = ledger_remaining(sector)
+    hit = False
+    for nv in navs:
+        if not is_body_class(nv["cls"]):
+            continue
+        key = lkey(nv["name"])
+        if key not in remaining or nv["gid"] in MARKED_GIDS:
+            continue
+        d = nv["dist"]
+        if d is not None and d <= BODY_SLOP:
+            record_visit(sector, nv["name"], nv["gid"], d, note=" body")
+        else:
+            lname = ledger_name(sector, nv["name"])
+            state("skip", sector, lname,
+                  f"{nv['cls'] or 'body'} -- warp holds off at its radius, cannot approach")
+            logaction(sector, "skip", f"{lname} ({nv['cls'] or 'body'})")
+        hit = True
+    return hit
+
+
+def resolve_unwarpable_navs(sector, navs):
+    """Skip warp-cancelling hazard navs (Reactor Drain Zone, ...) out of the
+    remaining set so the picker never targets one and the survey flies elsewhere.
+    A warp toward one self-cancels ~1s after engage, so it can never be reached by
+    warp -- unlike a body it is skipped outright, not counted at range. If the ship
+    happened to already be within VISIT_K, mark_in_range (run just before this)
+    already visited it, so a still-remaining one is genuinely unreachable."""
+    remaining = ledger_remaining(sector)
+    hit = False
+    for nv in navs:
+        if not is_unwarpable(nv["name"]):
+            continue
+        key = lkey(nv["name"])
+        if key not in remaining or nv["gid"] in MARKED_GIDS:
+            continue
+        lname = ledger_name(sector, nv["name"])
+        state("skip", sector, lname, "reactor drain zone -- warp cancels ~1s after "
+              "engage, cannot reach; flying elsewhere")
+        logaction(sector, "skip", f"{lname} (reactor drain zone)")
+        hit = True
+    return hit
+
+
 def is_gate(name, cls):
     """A TRANSIT gate, not a nav that merely mentions one. Every real gate in
     the dataset is named 'Sector Gate to X' / 'Gate to X'; 'Nav Earth Gate' /
@@ -435,11 +806,13 @@ def pick_target(sector, navs):
              if nv["dist"] is not None
              and lkey(nv["name"]) in remaining
              and lkey(nv["name"]) not in BLACKLIST
-             and nv["gid"] not in MARKED_GIDS]
+             and nv["gid"] not in MARKED_GIDS
+             and not is_body_class(nv["cls"])
+             and not is_unwarpable(nv["name"])]
     seen_tier = not cands
     if seen_tier:
         for key, node in remaining.items():
-            if key in BLACKLIST:
+            if key in BLACKLIST or is_unwarpable(node["name"]):
                 continue
             gid = SEEN.get(key)
             if gid is None or gid in MARKED_GIDS:
@@ -500,6 +873,135 @@ def get_energy():
     except (TypeError, ValueError):
         return None
     return None if v < 0 else v
+
+
+def hull_frac():
+    """Live hull fill fraction (0.0 == incapacitated) via enb.vitals(), or None if
+    unreadable. A ship at hull 0 is INCAPACITATED: the server refuses every action
+    ('COMPUTER: you cannot do this while incapacitated'), so it cannot warp or gate
+    -- check_incapacitated() catches this and auto distress->tows it to a station."""
+    r = lua("return string.format('%.3f', enb.vitals().hull or -1)")
+    try:
+        v = float(r)
+    except (TypeError, ValueError):
+        return None
+    return None if v < 0 else v
+
+
+# Native-HUD click targets for incap recovery (client-window-relative pixels, the
+# 1280x960 render). The incapacitation flow is the ONLY native-HUD click path left
+# in the (otherwise Lua-only) survey: neither the distress orb nor the comm-dialog
+# reply has an enbmod primitive. Coords verified live 2026-07-09.
+DISTRESS_ORB_XY = (633, 858)   # native HUD distress orb (the warp-orb slot); a click
+                               # opens the Station Mechanic comm dialog when incapacitated
+TOW_REPLY_XY = (400, 617)      # 'I need a tow' reply -- click the MIDDLE of the button
+                               # bar, not the left text edge (the edge click did not
+                               # register live; mid-bar did)
+_WIN_ORIGIN = None
+
+
+def _xwin_int(info, label):
+    m = re.search(rf"{re.escape(label)}:\s*(-?\d+)", info)
+    return int(m.group(1)) if m else None
+
+
+def _client_win_origin():
+    """(abs_x, abs_y) of the client.exe game window's upper-left, cached. Used only
+    by incap recovery for absolute XTEST clicks on the native HUD (no keyboard focus
+    needed -- same input path as the login/explore skills). Filters to the 1280x960
+    game window, never a small child/launcher window."""
+    global _WIN_ORIGIN
+    if _WIN_ORIGIN is not None:
+        return _WIN_ORIGIN
+    ids = subprocess.run(["xdotool", "search", "--class", "client.exe"],
+                         capture_output=True, text=True).stdout.split()
+    for win in ids:
+        info = subprocess.run(["xwininfo", "-id", win],
+                              capture_output=True, text=True).stdout
+        ax, ay = _xwin_int(info, "Absolute upper-left X"), _xwin_int(info, "Absolute upper-left Y")
+        w, h = _xwin_int(info, "Width"), _xwin_int(info, "Height")
+        if ax is None or w is None:
+            continue
+        if w >= 1024 and h >= 720:            # the game window, not a child/launcher
+            _WIN_ORIGIN = (ax, ay)
+            return _WIN_ORIGIN
+    return None
+
+
+def _click_win(wx, wy):
+    """XTEST click at a client-window-relative pixel."""
+    o = _client_win_origin()
+    if o is None:
+        raise RuntimeError("client.exe window not found for incap-recovery click")
+    subprocess.run(["xdotool", "mousemove", "--sync",
+                    str(o[0] + wx), str(o[1] + wy), "click", "1"])
+
+
+def recover_incapacitated(sector):
+    """Automated distress->tow recovery of an incapacitated (hull 0) ship -- the
+    owner-taught in-game revive: hail the Station Mechanic via the native distress
+    orb, request a tow, and get towed to the last registered station.
+
+    Our hide-ui mod hides the native distress orb, so we first drop to the native
+    HUD (`enb.freya_ui_on = false` -- setting the flag directly is enough to make
+    the orb hit-testable; no Ctrl+U handler run needed, verified live). Then two
+    clicks (orb -> 'I need a tow'), poll the authoritative state for the station
+    arrival, restore the Freya HUD, and undock to resume. Retries the two-click
+    sequence a few times (a missed orb/reply click just re-opens the dialog).
+    HALTS only if the tow never lands or the station did not repair the hull."""
+    logaction(sector, "incap-recover", "hull 0 -- distress->tow to last station")
+    print(f"[drive_lua] SHIP INCAPACITATED in {sector} (hull 0) -- auto distress->tow "
+          f"to last registered station ...", file=sys.stderr)
+    lua("enb.freya_ui_on = false")   # reveal the native HUD (distress orb + comm dialog)
+    time.sleep(1.0)
+    towed = False
+    for attempt in range(1, 4):
+        _click_win(*DISTRESS_ORB_XY)          # opens the Station Mechanic comm dialog
+        time.sleep(1.5)
+        _click_win(*TOW_REPLY_XY)             # 'I need a tow'
+        deadline = time.time() + 60           # tow is server-driven -- poll for arrival
+        while time.time() < deadline:
+            if lua("return enb.state()") == "station":
+                towed = True
+                break
+            time.sleep(3)
+        if towed:
+            break
+        print(f"[drive_lua] tow request #{attempt} did not land -- retrying orb+reply",
+              file=sys.stderr)
+    lua("enb.freya_ui_on = true")             # restore the Freya HUD regardless of outcome
+    if not towed:
+        print("[drive_lua] distress->tow did not complete after 3 tries -- HALTING for "
+              "manual revive (ledger persists; re-run to resume).", file=sys.stderr)
+        pcap_stop()
+        sys.exit(EXIT_INCAP)
+    logaction(sector, "incap-recovered", "towed to last registered station")
+    print("[drive_lua] towed to station -- undocking to resume survey", file=sys.stderr)
+    ensure_in_space()
+    h = hull_frac()
+    if h is not None and h <= 0.0:
+        print("[drive_lua] hull STILL 0 after tow+undock -- station did not repair; "
+              "HALTING to avoid a tow loop (manual revive needed).", file=sys.stderr)
+        pcap_stop()
+        sys.exit(EXIT_INCAP)
+
+
+def check_incapacitated(sector):
+    """If the ship is incapacitated (hull 0), auto distress->tow it back to a
+    station and RAISE ShipRecovered so the caller re-detects the sector. Only fires
+    in space (a docked ship also reads hull 0) and debounces one second (a single
+    stale 0 during a hiccup must not trigger a tow). No-op when the ship is alive."""
+    if not lua_bool("enb.inspace()"):
+        return                               # docked / loading -- hull 0 is not incap here
+    h = hull_frac()
+    if h is None or h > 0.0:
+        return
+    time.sleep(1.0)                          # debounce a transient/stale 0 read
+    h2 = hull_frac()                          # 0.0 is a REAL incap value: test `is None`
+    if not lua_bool("enb.inspace()") or h2 is None or h2 > 0.0:  # explicitly -- `h2 or 1.0`
+        return                               # would coerce a genuine 0.0 hull to 1.0 and bail
+    recover_incapacitated(sector)
+    raise ShipRecovered(f"towed out of {sector} after hull-0 incapacitation")
 
 
 def wait_energy(target, timeout=150):
@@ -755,46 +1257,458 @@ def _dest_sids():
 
 DEST_SIDS = _dest_sids()
 
+# Gates whose NAME resolves to no committed sid but that physically deposit the
+# ship in a KNOWN sector -- map the destination phrase to the sid it lands in, so
+# the resolver flags it (else the frontier walker reads it as unexplored space and
+# routes straight in). 'Gate to Aragoth System' from Akerons Gate lands in Freya
+# (1750), a pirate-lethal NEVER_EXPLORE sector; without this the survey ship was
+# routed into it and destroyed (owner 2026-07-09).
+# 'Pirate Gate to Smuggler's Run' from Inverness (4025) deposits the ship in
+# BlackbeardsWake (3605), a pirate-lethal NEVER_EXPLORE sector -- galaxy only maps it
+# under the 'Sector Gate to Blackbeards Wake' name, so the live 'Smuggler's Run' name
+# resolves to nothing and reads as fresh frontier (preferred) without this override
+# (owner 2026-07-11: died there mid-sweep).
+GATE_DEST_OVERRIDES = {
+    navdata.norm("Aragoth System"): 1750,
+    navdata.norm("Smuggler's Run"): 3605,
+}
 
-def gate_dest_sid(name):
-    """Destination sid named by a gate nav ('Sector Gate to Asteroid Belt
-    Alpha' -> 1076), or None when the suffix resolves to no known sector."""
+# Owner-directed NEVER-EXPLORE sectors: hostile-spawn-lethal sectors the auto
+# survey must never enter or survey -- only defer to a manual/supervised pass.
+# Distinct from a type-41 gravity well (gravity_wells.py): these have no OT_GWELL
+# object, the hazard is pirate density. Freya (owner 2026-07-09): "huge grav well
+# with pirates, basically no safe nodes, even Brisings is dangerous within seconds
+# -- only pass thru, never explore"; it destroyed the LV122 survey ship. Keyed by
+# ledger key. Any sector reachable ONLY through one of these is deferred too.
+# Cooper (owner 2026-07-10): a RAID sector -- "mobs will 1 shot me even at lvl 122".
+# Fleeing is pointless (a one-shot kills before any evade), so never enter or dwell:
+# pass thru only, gate straight on into Grissom.
+# BlackbeardsWake (owner 2026-07-11): behind the "Pirate Gate to Smuggler's Run" from
+# Inverness; Dai Dai Lo Elite Red Dragon pirates killed the survey ship mid-sweep.
+# Moto (owner 2026-07-11): already surveyed manually this run; a 61-Cygni dead-end
+# branch off Aganju the owner does not want the auto survey to backtrack into. The
+# Aganju->Moto gate is intra-system ("Sector Gate to Moto"/"Accelerator to Moto"),
+# both of which resolve to 1160, so NEVER_EXPLORE membership alone catches it (no
+# GATE_DEST_OVERRIDES entry needed -- 61 Cygni's "System Gate" name would ambiguate
+# to Aganju itself, so must NOT be overridden to Moto).
+# Paramis (owner 2026-07-12): the other half of the Smugglers Run system (3605
+# BlackbeardsWake + 3610 Paramis). "Sector Gate to Smuggler's Run" is a Red Dragon
+# factioned-gate ("do NOT go to smugglers run thats a faction gate") -- the transit
+# verb is refused off-faction, so the router would look stuck, and it dumps into
+# pirate-lethal space if it did transit. The OdinRex gate resolves to 3605
+# (BlackbeardsWake, already forbidden); this forbids 3610 as well so the WHOLE
+# Smugglers Run system is excluded no matter which gate/sid a route resolves to.
+NEVER_EXPLORE_SECTORS = frozenset({"Freya", "Cooper", "BlackbeardsWake", "Moto", "XipeTotec", "Paramis"})
+
+# Class-only gate destinations -- the nine race "class planets", each reachable ONLY
+# through a gate the server locks to a single character class (sector_objects_stargates
+# .classSpecific=1, faction_id = the one class allowed; enforced in the server's
+# StaticMap::OnTargeted). A gate whose class does not match the survey character is
+# silently refused the transit verb, so enb.gate() fires and NOTHING happens -- the
+# router looks "stuck". EVERY gate into these sectors is class-locked (no unrestricted
+# way in), so we forbid the destinations outright: the auto survey never routes into
+# them (owner: "do not go through class only gates anymore"). Any that need surveying
+# are a manual flight on a matching-class character.
+#   1036 Mars Alpha (PW)   1030 Mars Beta (PE)   1037 Mars Gamma (PT)
+#   1015 Luna (TW)         1020 High Earth (TT)  1025 Equatorial Earth (TE)
+#   1052 Io (JE)           1055 Europa (JW)      1040 Ganymede (JT)
+CLASS_ONLY_GATE_DEST_SIDS = frozenset({1036, 1030, 1037, 1015, 1020, 1025, 1052, 1055, 1040})
+
+# Several class-only gates are named generically ("System Gate to Sol", "Gate to
+# Sol System", "Gate to Sol") and galaxy.json carries NO edge for them, so
+# gate_dest_sid returns None -- which the router reads as an unresolved frontier
+# gate and would cross BLIND, straight into a class lock that stalls the run. The
+# destination-sid guard above cannot catch a None dest, so these are pinned by
+# their exact (source sector sid, gate name) instead, from sector_objects_stargates.
+# Each pair is one class-locked gate object; the name is normalized to match the
+# live wire nav name. (Callisto Training Yard, 978, is a newbie instance the survey
+# never enters, but is listed for completeness.)
+CLASS_GATE_EDGES = frozenset(
+    (sid, navdata.norm(nm)) for sid, nm in (
+        (1065, "Gate to Mars Alpha"),      (3530, "System Gate to Sol"),        # Mars Alpha PW
+        (1065, "Gate to Mars Beta"),       (2215, "System Gate to Sol"),        # Mars Beta  PE
+        (1065, "Gate to Mars Gamma"),      (1310, "System Gate to Mars Gamma"), # Mars Gamma PT
+        (1060, "Sector Gate to Luna"),     (1425, "Gate to Sol System"),        # Luna       TW
+        (1060, "Sector Gate to High Earth"), (4015, "Gate to High Earth"),      # High Earth TT
+        (1060, "Accelerator to Equatorial Earth"), (1205, "System Gate to Sol"),# Equatorial TE
+        (1070, "Sector Gate to Io"),       (1910, "Gate to Sol System"),        # Io         JE
+        (978,  "Accelerator to Io"),
+        (1070, "Sector Gate to Europa"),   (4120, "Gate to Sol System"),        # Europa     JW
+        (978,  "Accellrtator to Europa"),
+        (1070, "Sector Gate to Ganymede"), (2005, "Gate to Sol"),               # Ganymede   JT
+        (978,  "Accellerator to Ganymede"),
+    )
+)
+
+
+def is_class_gate(name, src_sid):
+    """True when this exact (source sector, gate) is one of the class-only gates
+    (server-verified from sector_objects_stargates.classSpecific), whether or not
+    its destination resolves in galaxy.json."""
+    return src_sid is not None and (src_sid, navdata.norm(name)) in CLASS_GATE_EDGES
+
+
+def gate_dest_sid(name, src_sid=None):
+    """Destination sid a gate nav leads to, or None when it cannot be resolved
+    (an unresolved name is treated as a frontier -> crossed blind and the far
+    sector re-identified on arrival).
+
+    Resolution order, most precise first:
+      1. galaxy per-source map (needs src_sid): the exact gate name from THIS
+         sector -- covers sector gates and paired-name wormholes ('Vishao's Gate'
+         resolves to Vishao's Cove from Antares Frontier, the reverse from
+         Vishao's Cove).
+      2. galaxy system gate (needs src_sid): 'Gate to <System>' lands in that
+         system's entry sector, which depends on the system we leave FROM.
+      3. galaxy direction-agnostic sector-gate map (no src_sid needed).
+      4. the legacy name-SUFFIX resolution (DEST_SIDS / GATE_DEST_OVERRIDES) --
+         the src-independent backstop, incl. the Freya death-guard override."""
+    nn = navdata.norm(name)
+    if GALAXY is not None and src_sid is not None:
+        bysec = GALAXY["gate_dest_by_sector"].get(str(src_sid))
+        if bysec and nn in bysec:
+            return int(bysec[nn])
+        dst_sys = GALAXY["system_gate"].get(nn)
+        if dst_sys:
+            src_sys = GALAXY["sector_system"].get(str(src_sid))
+            land = GALAXY["system_entry"].get(f"{src_sys}>{dst_sys}") if src_sys else None
+            if isinstance(land, int):
+                return land
+    if GALAXY is not None and nn in GALAXY["gate_dest"]:
+        return int(GALAXY["gate_dest"][nn])
     low = name.lower()
     if " to " not in low:
         return None
-    return DEST_SIDS.get(navdata.norm(name[low.index(" to ") + 4:]))
+    suffix = navdata.norm(name[low.index(" to ") + 4:])
+    return DEST_SIDS.get(suffix) or GATE_DEST_OVERRIDES.get(suffix)
+
+
+def routable_gate(name, src_sid=None):
+    """A gate we can actually CROSS to another sector. Most real transit gates are
+    named 'Gate to X' / 'Sector Gate to X' / a 'Wormhole'; an in-sector device
+    (Accelerator Sphere, ...) is picked up by is_gate only because its object CLASS
+    matches 'gate', yet warping to it never flips the sector. Routing via one wastes
+    a warp and, in a gravity-well sector, sends the ship toward the well (warp
+    terminates mid-flight, can strand it).
+
+    But a PAIRED-NAME WORMHOLE ('Vishao's Gate' 1505<->1935, 'Ancient Gate'
+    3670<->3675) reads as neither pattern, so the name heuristic alone wrongly
+    rejects it and the sector false-concludes 'no onward gate' (Antares Frontier
+    stranded on exactly this). The galaxy map DOES resolve those from the source
+    sector, so when src_sid is known, a name the galaxy resolves to a real
+    destination sector is routable too. An accelerator sphere resolves to nothing,
+    so it stays non-routable."""
+    n = name.lower()
+    # '[Under Construction]' gates are placeholders for sectors that were never
+    # finished -- warping to one never flips the sector (it deposits the ship back
+    # where it started), so the walker reads the unresolved dest as fresh frontier
+    # and wastes a crossing on it every time (owner 2026-07-11: "Xango is a fake
+    # sector, doesn't exist"). Never treat one as routable.
+    if "under construction" in n:
+        return False
+    if " to " in n or "wormhole" in n:
+        return True
+    return src_sid is not None and gate_dest_sid(name, src_sid) is not None
+
+
+def _sector_forbidden(key):
+    """True when a sector KEY must never be routed INTO by the auto survey: a
+    gravity well (warp terminates mid-flight, can strand the ship) or an owner-
+    directed NEVER_EXPLORE sector (pirate-lethal, e.g. Freya). Both are deferred
+    to a manual pass -- the traversal only ever transits OUT of one, never in.
+    ENB_WELL_ALLOW (owner-confirmed flyable) exempts a sector from the well gate;
+    ENB_EXPLORE_WELLS drops the well gate entirely (only NEVER_EXPLORE remains)."""
+    if EXPLORE_WELLS or key in WELL_ALLOW:
+        return key in NEVER_EXPLORE_SECTORS
+    return key in GRAVITY_WELL_SECTORS or key in NEVER_EXPLORE_SECTORS
+
+
+def gate_forbidden(name, src_sid=None):
+    """True when this gate's DESTINATION is a forbidden sector (gravity well or
+    NEVER_EXPLORE). Warp terminates mid-flight in a well and a NEVER_EXPLORE sector
+    kills the ship, so the traversal never routes INTO either; both are deferred to
+    a manual pass. Only the destination is tested, so the reverse gate OUT of a
+    forbidden sector (dest = a normal sector) is never excluded -- escaping stays
+    possible. With src_sid the galaxy map resolves 'Gate to <System>' inter-system
+    gates too, so a lethal system entry (any system whose landing sector is
+    NEVER_EXPLORE, e.g. Aragoth System -> Freya) is guarded generally, not just via
+    the one pinned suffix override.
+
+    A class-only gate (dest in CLASS_ONLY_GATE_DEST_SIDS) is also forbidden: the
+    server refuses its transit verb to any character not of the gate's class, so
+    firing it just stalls the run. All gates into those nine sectors are class-
+    locked, so forbidding the destination blocks every one of them. The generically
+    -named class gates whose dest does not resolve are caught by is_class_gate."""
+    if is_class_gate(name, src_sid):
+        return True
+    dest = gate_dest_sid(name, src_sid)
+    if dest is None:
+        return False
+    if dest in CLASS_ONLY_GATE_DEST_SIDS:
+        return True
+    return _sector_forbidden(SID_MAP.get(str(dest)))
+
+
+def _sector_status(key):
+    """Persisted status of a ledger BY KEY: 'complete', 'in-progress', or None when
+    no ledger exists yet (an undiscovered sector)."""
+    try:
+        with open(os.path.join(STATE_DIR, key + ".json")) as f:
+            return json.load(f).get("status")
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 def _sector_done(sid):
     """True when the destination's ledger is already complete (persisted
     knowledge, unlike visited_sids which only spans this process)."""
     key = SID_MAP.get(str(sid))
-    if key is None:
-        return False
+    return key is not None and _sector_status(key) == "complete"
+
+
+# --- Persistent locked-gate memory -----------------------------------------
+# A gate that will not transit (a level/faction/quest-gated crossing the survey
+# ship cannot pass) is remembered ACROSS runs so we do not waste the first pick
+# on it every single run and, worse, keep reading it as a border to unexplored
+# space (a locked gate whose destination name does not resolve otherwise looks
+# like a frontier gate -> the walker fixates on it forever). Stored in the
+# workdir as {"<SectorKey>|<norm(gateName)>": "__locked__"} -- keyed by NAME (the
+# gid is session-scoped and changes run to run, so it cannot key the memory).
+GATE_EDGES_PATH = os.path.join(STATE_DIR, "gate_edges.json")
+GATE_LOCKED = "__locked__"
+
+
+def _load_gate_edges():
     try:
-        with open(os.path.join(STATE_DIR, key + ".json")) as f:
-            return json.load(f).get("status") == "complete"
+        with open(GATE_EDGES_PATH) as f:
+            d = json.load(f)
+            return d if isinstance(d, dict) else {}
     except (OSError, json.JSONDecodeError):
-        return False
+        return {}
 
 
-def choose_gate(sector, navs, visited_sids):
-    """Nearest gate whose DESTINATION is neither surveyed this run nor a
-    completed ledger. The arrival gate is always the nearest one, so distance
-    alone gates an instantly-resolved resume sector straight back where it
-    came from (attempt 16 ping-ponged Earth <-> ABA). A gate whose destination
-    cannot be resolved stays eligible."""
+GATE_EDGES = _load_gate_edges()
+
+
+def _gate_edge_key(sector_key, gate_name):
+    return f"{sector_key}|{navdata.norm(gate_name)}"
+
+
+def gate_is_locked(sector_key, gate_name):
+    """True when this (sector, gate) crossing is remembered as non-transitable."""
+    return GATE_EDGES.get(_gate_edge_key(sector_key, gate_name)) == GATE_LOCKED
+
+
+def _save_gate_edges():
+    try:
+        tmp = GATE_EDGES_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(GATE_EDGES, f, indent=2, sort_keys=True)
+        os.replace(tmp, GATE_EDGES_PATH)
+    except OSError:
+        pass
+
+
+def record_gate_lock(sector_key, gate_name):
+    """Persist that this gate would not transit, so future runs skip it first."""
+    k = _gate_edge_key(sector_key, gate_name)
+    if GATE_EDGES.get(k) == GATE_LOCKED:
+        return
+    GATE_EDGES[k] = GATE_LOCKED
+    _save_gate_edges()
+
+
+def clear_gate_lock(sector_key, gate_name):
+    """A gate we thought was locked just transited -- drop the stale lock so it is
+    no longer deferred to last every run (self-heals a false positive or a gate
+    that has since become passable)."""
+    k = _gate_edge_key(sector_key, gate_name)
+    if GATE_EDGES.get(k) != GATE_LOCKED:
+        return
+    del GATE_EDGES[k]
+    _save_gate_edges()
+
+
+def _gate_graph():
+    """Undirected sector graph from EVERY ledger's gate list, plus the FRONTIER set.
+    adj: sector key -> set(neighbour keys). A key is FRONTIER when it is a gate
+    destination that still needs surveying (no ledger yet = undiscovered, or a
+    ledger not marked complete) and is NOT forbidden (a gravity well or a
+    NEVER_EXPLORE sector -- we never route into either). Gates are two-way in EnB,
+    so edges are undirected -- this is what lets
+    the BFS below measure how far a frontier lies BEYOND a completed sector, so the
+    walker heads toward real unexplored space instead of into a completed dead-end
+    (a done sector whose gates all loop back among done sectors, e.g. Ceres)."""
+    import glob
+    adj, frontier = {}, set()
+    for f in glob.glob(os.path.join(STATE_DIR, "*.json")):
+        key = os.path.basename(f)[:-5]
+        try:
+            with open(f) as fh:
+                d = json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(d, dict) or "nodes" not in d:
+            continue
+        src_sid = KEY_TO_SID.get(key)
+        for n in d["nodes"]:
+            if n.get("type") != "gate":
+                continue
+            name = n["name"]
+            # only gates we would actually cross count for routing: an in-sector
+            # accelerator sphere is not a route, and a gate INTO a forbidden sector
+            # (well or NEVER_EXPLORE) is refused.
+            if not routable_gate(name, src_sid) or gate_forbidden(name, src_sid):
+                continue
+            # A gate we KNOW will not transit is not an edge and does NOT border
+            # the frontier -- skip it, or its unresolved dest name falsely marks
+            # this sector as bordering unexplored space and the walker fixates.
+            if gate_is_locked(key, name):
+                continue
+            dsid = gate_dest_sid(name, src_sid)
+            if dsid is None:
+                # destination name resolves to no known sid -> almost certainly an
+                # UNDISCOVERED sector. Standing in `key` you are one gate from the
+                # unknown, so `key` itself borders the frontier (a BFS dist-0 source)
+                # -- UNLESS `key` is itself a forbidden sector we never route into
+                # (a well / never-explore), which must not seed the frontier.
+                if not _sector_forbidden(key):
+                    frontier.add(key)
+                continue
+            dkey = SID_MAP.get(str(dsid))
+            if dkey is None:
+                if not _sector_forbidden(key):
+                    frontier.add(key)
+                continue
+            adj.setdefault(key, set()).add(dkey)
+            adj.setdefault(dkey, set()).add(key)
+            if not _sector_forbidden(dkey) and _sector_status(dkey) != "complete":
+                frontier.add(dkey)
+    return adj, frontier
+
+
+def _frontier_hops(adj, frontier):
+    """Multi-source BFS: min hop count from every sector key to the nearest frontier
+    sector over the undirected gate graph. A key absent from the result cannot reach
+    any frontier (a completed dead-end) and is treated as infinitely far.
+
+    A FORBIDDEN sector (gravity well / never-explore) can be a frontier TARGET but is
+    never a transit WAYPOINT: the auto survey enters it only to defer, never to fly
+    onward, so we must not expand the BFS THROUGH it. Without this guard the frontier
+    behind never-explore Freya (Jotunheim/Nifleheim/Ragnarok/OdinsBelt) looks reachable
+    via ...->Akerons->Freya->Jotunheim, so the walker heads for Akerons, cannot cross
+    into Freya, retreats, and oscillates among the completed Sol hubs. Skipping
+    expansion from a forbidden node makes such a walled-off frontier correctly
+    unreachable, so the walker concedes cleanly instead of thrashing."""
+    from collections import deque
+    dist, dq = {}, deque()
+    for k in frontier:
+        dist[k] = 0
+        dq.append(k)
+    while dq:
+        u = dq.popleft()
+        if _sector_forbidden(u):
+            continue
+        for v in adj.get(u, ()):
+            if v not in dist:
+                dist[v] = dist[u] + 1
+                dq.append(v)
+    return dist
+
+
+def choose_gate(sector, navs, visited_sids, tried_edges, sid, leaving_defer=False):
+    """Pick the next gate to cross from the CURRENT sector (sid), for a graph
+    traversal that reaches unexplored sectors even when they sit BEHIND already-
+    completed ones. The old linear walk picked only gates to a fresh destination
+    and the main loop stopped dead the first time a crossing looped back into a
+    surveyed sector -- so from a spawn boxed in by done sectors (Ishuan/Yokan)
+    it took two internal gates, looped, and quit while the frontier gates
+    (Gate to Sol, Gate to Sirius System) sat untried.
+
+    Now: gates are ranked so a FRESH destination is tried first, then a done
+    sector we have NOT yet entered this run (transit through it to reach what is
+    beyond), then -- last resort -- a sector we already entered this run. Each
+    (sid, gid) edge is crossed at most once (tried_edges), so the traversal is
+    finite: it exhausts the reachable gate graph and only then concedes."""
+    # Union the gates in range NOW with every gate observed during the sweep: a
+    # 200k+ onward gate is out of range at the parked spot but was seen (and its
+    # gid captured) mid-sweep, and a gid stays targetable after it leaves range.
     gates = [nv for nv in navs if is_gate(nv["name"], nv["cls"])]
-
-    def stale(g):
-        sid = gate_dest_sid(g["name"])
-        return sid is not None and (sid in visited_sids or _sector_done(sid))
-
-    fresh = [g for g in gates if not stale(g)]
-    if not fresh:
+    live_keys = {navdata.norm(g["name"]) for g in gates}
+    for key, g in GATES_SEEN.items():
+        if key not in live_keys:
+            gates.append(g)
+    # Never re-cross a gate we already took from this sector (loop guard), and
+    # never route INTO a gravity-well sector (can't auto-survey it, can strand
+    # the ship). Well sectors are deferred to a manual pass; the reverse gate
+    # OUT of a well is not a well destination, so escaping stays possible.
+    gates = [g for g in gates
+             if (sid, g["gid"]) not in tried_edges
+             and routable_gate(g["name"], sid)
+             and not gate_forbidden(g["name"], sid)]
+    if leaving_defer:
+        # Leaving a DEFERRED sector (gravity well / NEVER_EXPLORE): only exit toward
+        # a KNOWN, non-forbidden sector, so we retreat to surveyed space instead of
+        # diving deeper into an unknown (possibly lethal) cluster behind it -- the
+        # Freya cluster (Ragnarok/Nifleheim/...) is deferred to a manual pass.
+        gates = [g for g in gates
+                 if (d := gate_dest_sid(g["name"], sid)) is not None
+                 and SID_MAP.get(str(d)) is not None
+                 and not _sector_forbidden(SID_MAP.get(str(d)))]
+    if not gates:
         return None
-    fresh.sort(key=lambda g: (g["dist"] is None, g["dist"] or 1e18))
-    return fresh[0]
+
+    # Persistent locked-gate memory: a crossing remembered as non-transitable is
+    # held back so we do not waste the first pick on it every run. It is only a
+    # DEFERRAL, never a hard exclusion -- if every fresh gate is exhausted we fall
+    # back to retrying a locked one (a persistent lock can be stale, and retrying
+    # it beats a false "graph exhausted" concession that strands the run).
+    fresh = [g for g in gates if not gate_is_locked(sector, g["name"])]
+    if not fresh:
+        g = gates[0]
+        print(f"[drive_lua] {sector}: only locked gates remain -- retrying "
+              f"'{g['name']}' (persistent lock may be stale).")
+        return g
+    gates = fresh
+
+    # Frontier-directed routing: a one-hop tier walk wanders into completed
+    # dead-ends (Mercury -> Venus -> Ceres, where Ceres only gates back to Venus)
+    # before backtracking to the real unexplored frontier (Saturn -> Asteroid Belt
+    # Alpha, Akerons Gate -> Aragoth). Rank a transit through a DONE sector by how
+    # few hops the nearest frontier lies BEYOND it, so the walker heads toward
+    # unexplored space; a done sector with no reachable frontier sorts last.
+    adj, frontier = _gate_graph()
+    fhops = _frontier_hops(adj, frontier)
+    INF = float("inf")
+
+    def rank(g):
+        """Lower is better."""
+        phys = (g["dist"] is None, g["dist"] or 1e18)
+        dest = gate_dest_sid(g["name"], sid)
+        if dest is None:
+            return (0, 0, 0, *phys)          # unresolved dest name: likely a frontier gate
+        if not _sector_done(dest) and dest not in visited_sids:
+            return (0, 0, 0, *phys)          # a sector still needing survey, reached directly
+        dkey = SID_MAP.get(str(dest))
+        hops = fhops.get(dkey, INF)          # frontier distance BEYOND this done sector
+        revisit = 1 if dest in visited_sids else 0
+        return (1, hops, revisit, *phys)
+
+    gates.sort(key=rank)
+    best = gates[0]
+    # Concede when the best candidate is a DEAD transit: a done sector whose frontier
+    # lies infinitely far (rank tier 1 with hops==INF), i.e. no unexplored sector is
+    # reachable from here at all -- the remaining frontier is walled off behind a
+    # never-explore/well sector we refuse to auto-cross. Returning the gate anyway
+    # just wanders among completed sectors forever (the Sol<->Akerons<->Pluto
+    # oscillation). None makes the main loop report "gate graph exhausted" and stop
+    # cleanly. leaving_defer is exempt: escaping a well toward ANY safe done sector is
+    # still the right move even when no frontier lies beyond it.
+    if not leaving_defer:
+        r = rank(best)
+        if r[0] == 1 and r[1] == INF:
+            return None
+    return best
 
 
 def cross_gate(gate):
@@ -806,6 +1720,12 @@ def cross_gate(gate):
     before = get_sector_id()
     if not lua_bool(f"enb.request_target({gate['gid']})"):
         return None
+    # A remembered gate (GATES_SEEN) carries its nearest OBSERVED distance, which
+    # may be far smaller than where the ship is parked now; refresh from the live
+    # target readout so warp_to_gate's distance-scaled timeout fits the real leg.
+    cur_d = target_dist(gate["gid"])
+    if cur_d is not None:
+        gate = dict(gate, dist=cur_d)
     # close on the gate first so the transit arms cleanly
     warp_to_gate(gate)
     # let the warp drop out at the gate before firing the transit
@@ -880,9 +1800,12 @@ def survey_sector(sector):
     reloc = 0
     used_anchors = set()
     while True:
+        check_incapacitated(sector)   # hull 0 -> auto distress->tow (raises ShipRecovered)
         navs = get_navs()
         build_alias(sector, navs)
         mark_in_range(sector, navs)
+        resolve_body_navs(sector, navs)
+        resolve_unwarpable_navs(sector, navs)
         visited, total = ledger_counts(sector)
         remaining = ledger_remaining(sector)
         if not remaining:
@@ -910,7 +1833,9 @@ def survey_sector(sector):
         # ABA gate three times).
         far = [nv for nv in navs if nv["dist"] is not None and nv["dist"] > VISIT_K
                and lkey(nv["name"]) not in BLACKLIST
-               and lkey(nv["name"]) not in used_anchors]
+               and lkey(nv["name"]) not in used_anchors
+               and not is_body_class(nv["cls"])
+               and not is_unwarpable(nv["name"])]
         if far and reloc < RELOC_MAX:
             far.sort(key=lambda nv: (corridor_score(sector, nv, remaining),
                                      nv["dist"]), reverse=True)
@@ -947,18 +1872,24 @@ def ensure_in_space():
     """Undock if the character loaded docked. enb.undock() sends the client's own
     STARBASE_REQUEST(action=1) through StationExit; the server launches us. No-op
     (returns false) when already in space.
-    Right after login enb.state() reads "unknown" for a few seconds before it
-    settles to station/space -- checking once at that instant skips the undock,
-    and the driver then reads the docked sub-sector id (1060 -> 10601) with an
-    empty nav registry and stops (attempt 9). Wait for a settled state first."""
-    st = None
+
+    The authoritative "am I actually flying" signal is enb.inspace(), NOT enb.state().
+    Right after login enb.state() reads "unknown" for a few seconds and then flickers
+    "space" WHILE STILL DOCKED (inspace=false) before it settles to "station" -- the
+    old check keyed on state=="space" and returned early on that transient, skipping
+    the undock. The driver then read the docked sub-sector id (2005 -> 20051) with an
+    empty nav registry and stopped. Key entirely off inspace(): true == flying (done),
+    false-once-settled == docked (undock)."""
     settle = time.time() + 90
+    inspace = False
     while time.time() < settle:
-        st = lua("return enb.state()")
-        if st in ("station", "space"):
-            break
-        time.sleep(2)
-    if st != "station":
+        inspace = lua_bool("enb.inspace()")
+        if inspace:
+            return                       # already flying -- nothing to undock
+        if lua("return enb.state()") == "station":
+            break                        # settled docked -- undock below
+        time.sleep(2)                    # else state still "unknown" -- keep settling
+    if inspace:
         return
     print("[drive_lua] docked -- undocking")
     if not lua_bool("enb.undock()"):
@@ -966,11 +1897,108 @@ def ensure_in_space():
     deadline = time.time() + 90
     while time.time() < deadline:
         time.sleep(2)
-        if lua("return enb.state()") == "space":
+        if lua_bool("enb.inspace()"):
             print("[drive_lua] in space")
             time.sleep(5)  # let the sector scene start populating
             return
-    sys.exit("[drive_lua] undock never reached state=space")
+    sys.exit("[drive_lua] undock never reached in space")
+
+
+def relogin_or_halt(relogins):
+    """Recover a wedged client, mirroring run-sector.sh's hang branch. In
+    manual-client mode we do NOT own the client (the operator launched it under
+    WINE against the live server), so we cannot relaunch it -- HALT for the
+    operator to relaunch + re-run (the ledger persists, so a re-run resumes where
+    it left off), exactly as run-sector.sh does. Otherwise (local stack) kill +
+    relogin through the login-to-client skill and resume. Exits the process on an
+    unrecoverable state; returns normally once the client is back in-game."""
+    global _last_alive
+    # An external recovery command (explore-live's recover.sh) supersedes both the
+    # manual-halt and the local relogin: it relaunches the real client via the
+    # Net-7 launcher and re-injects enbmod, then autologin returns us to in-game.
+    if RECOVER_CMD:
+        if relogins > MAX_RELOGIN:
+            print(f"[drive_lua] {relogins} recoveries; giving up.", file=sys.stderr)
+            pcap_stop()
+            sys.exit(1)
+        print(f"[drive_lua] client wedged -> external recovery (#{relogins}): "
+              f"{RECOVER_CMD}", file=sys.stderr)
+        rc = subprocess.run(["bash", "-c", RECOVER_CMD]).returncode
+        if rc != 0:
+            print(f"[drive_lua] recovery command exited {rc}; aborting so the "
+                  f"operator can step in (ledger persists -- re-run to resume).",
+                  file=sys.stderr)
+            pcap_stop()
+            sys.exit(EXIT_HANG)
+        _last_alive = time.time()   # channel is fresh again; reset the hang clock
+        return
+    if MANUAL_CLIENT:
+        print("[drive_lua] client hard-hung and ENB_EXPLORE_MANUAL_CLIENT=1 -- not "
+              "relaunching a client we do not own. Relaunch the client (and your "
+              "proxy) yourself, then re-run to resume (the ledger persists).",
+              file=sys.stderr)
+        pcap_stop()
+        sys.exit(EXIT_HANG)
+    if relogins > MAX_RELOGIN:
+        print(f"[drive_lua] {relogins} hangs; giving up.", file=sys.stderr)
+        pcap_stop()
+        sys.exit(1)
+    print(f"[drive_lua] hard hang -> kill + relogin (#{relogins}) ...", file=sys.stderr)
+    subprocess.run(["bash", os.path.join(LOGIN_DIR, "login.sh")])
+    # login.sh's in-client auto-login owns EULA/credentials/char-enter; if 08 timed
+    # out the client is most likely still loading the scene -- just re-poll it.
+    ok = False
+    for _ in range(4):
+        if subprocess.run(["bash", os.path.join(LOGIN_DIR, "08-wait-ingame.sh")],
+                          capture_output=True).returncode == 0:
+            ok = True
+            break
+        time.sleep(5)
+    if not ok:
+        print(f"[drive_lua] relogin #{relogins} failed; aborting.", file=sys.stderr)
+        pcap_stop()
+        sys.exit(1)
+    _last_alive = time.time()   # channel is fresh again; reset the hang clock
+
+
+def pcap_ensure(sector):
+    """Best-effort: start/relabel a per-sector packet capture (pcap.sh self-gates
+    on ENB_PCAP and worker availability, so this no-ops on a local run or an
+    uninstalled worker). Called at each sector entry so the capture spans the
+    sector's entry handshake, exactly as drive.py did."""
+    subprocess.run(["bash", os.path.join(HERE, "pcap.sh"), "ensure", sector])
+
+
+def pcap_stop():
+    subprocess.run(["bash", os.path.join(HERE, "pcap.sh"), "stop"])
+
+
+# Owner override: sectors the DB-derived well list flags but the owner (game
+# authority) has confirmed are flyable. The type-41 rows behind gravity_wells.py
+# can be bad/synthetic (e.g. an implausible 150k-unit radius), so a confirmed
+# sector name in ENB_WELL_ALLOW (comma-separated) is surveyed as normal frontier.
+WELL_ALLOW = frozenset(
+    s.strip() for s in os.environ.get("ENB_WELL_ALLOW", "").split(",") if s.strip())
+
+# Aggressive-frontier mode: stop treating gravity wells as off-limits at all, so
+# the survey both CROSSES INTO and SURVEYS well-flagged sectors instead of
+# retreating to explored space when a completed sector's only forward gates lead
+# into wells. The genuinely-lethal NEVER_EXPLORE guard (Freya) still holds. Warp
+# can terminate mid-flight in a well, so a well sector may only get partial
+# coverage -- accepted in this mode; the point is to reach new sectors.
+EXPLORE_WELLS = os.environ.get("ENB_EXPLORE_WELLS") == "1"
+
+
+def has_gravity_well(sector):
+    """True when the sector contains a gravity well (gravity_wells.py exits 2).
+    Warp terminates mid-flight in a well sector and we cannot auto-route out, so
+    the survey refuses it -- same policy as the screen survey (survey.sh).
+    ENB_WELL_ALLOW (per-sector) and ENB_EXPLORE_WELLS (global) override this."""
+    if EXPLORE_WELLS or sector in WELL_ALLOW:
+        return False
+    return subprocess.run(
+        [sys.executable, os.path.join(HERE, "gravity_wells.py"), sector],
+        capture_output=True, text=True).returncode != 0
 
 
 def main():
@@ -982,54 +2010,174 @@ def main():
     ensure_in_space()
 
     visited_sids = set()
-    for hop in range(MAX_SECTORS):
-        sid = get_sector_id()
-        navs = settle_navs()
-        sector = SID_MAP.get(str(sid))
-        if sector is None:
-            # no map entry (unsurveyed sector): fall back to identify-by-nav-names,
-            # but only with real evidence -- a single shared name like "Sector Gate
-            # to Earth" matches many sectors and misidentifying corrupts a ledger
-            # (attempt 6 surveyed High Earth into the ABA ledger off 1 nav).
-            names = [nv["name"] for nv in navs]
-            if len(names) < 3:
-                print(f"[drive_lua] sid={sid}: unmapped and only {len(names)} nav "
-                      f"name(s) -- not enough to identify safely; stopping.")
-                break
-            r = subprocess.run([sys.executable, os.path.join(HERE, "navdata.py"),
-                                "identify", *names], capture_output=True, text=True)
-            if r.returncode != 0 or not r.stdout.strip():
-                print(f"[drive_lua] sid={sid}: could not identify sector from "
-                      f"{len(names)} navs; stopping.")
-                break
-            sector = r.stdout.split("\t")[0].strip()
-        print(f"[drive_lua] hop {hop}: sid={sid} -> {sector} ({len(navs)} navs)")
-        state("init", sector)
-        visited_sids.add(sid)
-        SEEN.clear()      # flyby memory + position estimate are per-sector
-        EST_POS = None
-        BLACKLIST.clear()  # dead-target memory is per-sector too
-        WARP_FAILS.clear()
-        ALIAS.clear()      # live<->ledger name join is per-sector
-        MARKED_GIDS.clear()  # gid-visit dedup is per-sector (reseeded from ledger)
+    tried_edges = set()   # (sid, gid) gates crossed this run -- the traversal loop guard
+    hop = 0
+    relogins = 0
+    # A hop advances on every gate crossing (a survey OR a transit through a done
+    # sector to reach the frontier beyond it); a client hang re-enters the SAME
+    # hop (the ledger persists, so survey_sector resumes) after relogin, so the
+    # counter is not consumed by recovery. run-sector.sh's role, inlined.
+    while hop < MAX_SECTORS:
+        try:
+            sid = get_sector_id()
+            # Observed-gate memory is PER-SECTOR: clear it before settle_navs
+            # repopulates it for THIS sector, so a pure transit hop (which never
+            # hits the survey-path reset below) cannot carry a prior sector's gate
+            # gids into choose_gate and fire request_target on a stale target.
+            GATES_SEEN.clear()
+            navs = settle_navs()
+            sector = SID_MAP.get(str(sid))
+            if sector is None:
+                # no map entry (unsurveyed sector): fall back to identify-by-nav-
+                # names, but only with real evidence -- a single shared name like
+                # "Sector Gate to Earth" matches many sectors and misidentifying
+                # corrupts a ledger (attempt 6 surveyed High Earth into ABA off 1 nav).
+                names = [nv["name"] for nv in navs]
+                if len(names) < 3:
+                    print(f"[drive_lua] sid={sid}: unmapped and only {len(names)} nav "
+                          f"name(s) -- not enough to identify safely; stopping.")
+                    break
+                r = subprocess.run([sys.executable, os.path.join(HERE, "navdata.py"),
+                                    "identify", *names], capture_output=True, text=True)
+                if r.returncode != 0 or not r.stdout.strip():
+                    print(f"[drive_lua] sid={sid}: could not identify sector from "
+                          f"{len(names)} navs; stopping.")
+                    break
+                sector = r.stdout.split("\t")[0].strip()
 
-        navs = survey_sector(sector)
+            # A gravity-well sector cannot be auto-surveyed (warp terminates mid-
+            # flight); DEFER it to a manual pass instead of killing the whole run --
+            # skip the survey, log it, and let choose_gate route back out (well-dest
+            # gates are excluded, so we leave toward a normal sector). Only SURVEY a
+            # sector that is not a well, not already complete, and not surveyed this
+            # run; otherwise we are just TRANSITING it to reach fresh space.
+            check_incapacitated(sector)   # hull 0 -> auto distress->tow (raises ShipRecovered)
 
-        gate = choose_gate(sector, navs, visited_sids)
-        if not gate:
-            print(f"[drive_lua] {sector}: no gate to an unsurveyed sector -- done.")
-            break
-        print(f"[drive_lua] {sector}: gating via {gate['name']} (gid {gate['gid']})")
-        logaction(sector, "enter-gate", gate["name"])
-        new_sid = cross_gate(gate)
-        if new_sid is None:
-            print(f"[drive_lua] gate transit did not flip the sector id -- stopping.")
-            break
-        if new_sid in visited_sids:
-            print(f"[drive_lua] gated into already-surveyed sector {new_sid} -- stopping "
-                  f"(v1 has no multi-gate route planner).")
-            break
-        time.sleep(WARP_COOLDOWN)
+            well = has_gravity_well(sector)
+            no_explore = sector in NEVER_EXPLORE_SECTORS
+            defer = well or no_explore   # skip-survey; only transit OUT to safe space
+            transit = defer or sid in visited_sids or _sector_done(sid)
+            tag = ("well-skip" if well else "no-explore-skip" if no_explore
+                   else "transit" if transit else "survey")
+            print(f"[drive_lua] hop {hop}: sid={sid} -> {sector} ({len(navs)} navs) "
+                  f"[{tag}]")
+
+            visited_sids.add(sid)
+            if defer:
+                logaction(sector, "skip-well" if well else "skip-no-explore",
+                          "gravity well -- deferred to manual pass" if well else
+                          "never-explore (hostile) -- deferred to manual pass")
+                # Not surveyed, so let the distant exit gates finish rendering
+                # (a belt sector loads in bursts) before choose_gate runs; route out
+                # only toward known safe space (never deeper into the cluster).
+                navs = settle_well_gates(sector, visited_sids, tried_edges, sid,
+                                         leaving_defer=True)
+            elif not transit:
+                pcap_ensure(sector)   # per-sector capture spanning the entry handshake
+                state("init", sector)
+                SEEN.clear()      # flyby memory + position estimate are per-sector
+                EST_POS = None
+                BLACKLIST.clear()  # dead-target memory is per-sector too
+                WARP_FAILS.clear()
+                ALIAS.clear()      # live<->ledger name join is per-sector
+                MARKED_GIDS.clear()  # gid-visit dedup is per-sector (reseeded from ledger)
+                navs = survey_sector(sector)
+            else:
+                # Plain transit: already surveyed/done or re-entered this run, so we
+                # do NOT survey -- but the onward gate can start well outside scanner
+                # range at the entry point (a big sector loads its far gates in
+                # bursts). Reading navs ONCE at entry and handing that to choose_gate
+                # false-concedes "gate graph exhausted" while the exit is still
+                # rendering. Let the distant gates settle first, same as the deferred
+                # path but without the safe-only exit restriction (we are just passing
+                # through, any untried onward gate is fair game). REVEAL is on here:
+                # a cross-system exit gate sits at the far sector edge, past scanner
+                # range, so we reposition toward it to bring it into range instead of
+                # false-conceding "gate graph exhausted" from the entry point.
+                navs = settle_well_gates(sector, visited_sids, tried_edges, sid,
+                                         leaving_defer=False, reveal=True)
+
+            gate = choose_gate(sector, navs, visited_sids, tried_edges, sid,
+                               leaving_defer=defer)
+            if not gate:
+                if defer:
+                    # Boxed inside a deferred (well / never-explore) sector with no
+                    # safe exit gate in range -- a manual flight to a gate is needed.
+                    # Halt loudly (distinct exit) rather than pretend it finished.
+                    kind = "gravity-well" if well else "never-explore (hostile)"
+                    print(f"[drive_lua] {sector}: no untried safe gate OUT of this "
+                          f"{kind} sector in range -- needs a manual flight to a gate. "
+                          f"Fly out and re-run.", file=sys.stderr)
+                    pcap_stop()
+                    sys.exit(EXIT_WELL)
+                # Non-deferred (a sector we just surveyed): the onward gate may be a
+                # far edge gate the survey never flew near, so it is not in range and
+                # not in GATES_SEEN. Before conceding, reposition toward the sector
+                # edge to reveal it -- the same move that makes cross-system transit
+                # work, applied to the leave-after-survey case.
+                used = set()
+                for _ in range(REPO_MAX):
+                    if not reposition_to_reveal(sector, used):
+                        break
+                    navs = get_navs()
+                    gate = choose_gate(sector, navs, visited_sids, tried_edges, sid,
+                                       leaving_defer=defer)
+                    if gate:
+                        break
+                if not gate:
+                    print(f"[drive_lua] {sector}: no untried onward gate -- reachable "
+                          f"gate graph exhausted; done.")
+                    break
+            print(f"[drive_lua] {sector}: gating via {gate['name']} (gid {gate['gid']})")
+            logaction(sector, "enter-gate", gate["name"])
+            tried_edges.add((sid, gate["gid"]))   # mark BEFORE crossing so a failed transit is not retried
+            new_sid = cross_gate(gate)
+            if new_sid is None:
+                # Transit failed (gate would not fire / locked / undersized approach).
+                # The edge is already marked tried; stay in this sector and pick a
+                # different gate next iteration instead of killing the whole run.
+                # Persist the lock so future runs skip it first -- but ONLY when the
+                # hull is healthy: a transit failure at low/zero hull is a FALSE
+                # failure (incapacitated -> the server refuses EVERY action), and
+                # ShipRecovered clears tried_edges for exactly that reason; poisoning
+                # the persistent cache there would permanently blacklist a good gate.
+                hp = hull_frac()
+                if hp is not None and hp <= 0.25:
+                    print(f"[drive_lua] {sector}: gate '{gate['name']}' did not "
+                          f"transit (hull {hp:.2f} -- not recording a lock); "
+                          f"trying another gate.")
+                else:
+                    record_gate_lock(sector, gate["name"])
+                    print(f"[drive_lua] {sector}: gate '{gate['name']}' did not "
+                          f"transit -- recorded locked; trying another gate.")
+                continue
+            clear_gate_lock(sector, gate["name"])   # transited -> drop any stale lock
+            time.sleep(WARP_COOLDOWN)
+            hop += 1
+        except ShipRecovered as e:
+            # Ship was incapacitated and auto-towed to a station (often the SAME
+            # sector's station -- the tow lands at the last registered station).
+            # Recovery already undocked us; re-enter the loop to re-detect the
+            # sector fresh -- no hop consumed (the tow is not a survey step).
+            # Drop tried-gate memory: any gate marked "tried" while incapacitated
+            # was a FALSE failure (at hull 0 the server refuses EVERY action, not
+            # just that gate), so those edges must be retryable now the hull is
+            # restored -- else a tow back into the same sector immediately hits the
+            # "graph exhausted" false-completion on its own already-tried gates.
+            tried_edges.clear()
+            print(f"[drive_lua] {e}; re-detecting sector.", file=sys.stderr)
+            continue
+        except ClientHang as e:
+            # The client wedged mid-hop. Recover (relogin, local stack) or halt
+            # (manual/live client). On success, re-enter the SAME hop: get_sector_id
+            # + survey_sector resume from the persisted ledger, no hop consumed.
+            print(f"[drive_lua] CLIENT HANG: {e}", file=sys.stderr)
+            relogins += 1
+            relogin_or_halt(relogins)
+            print(f"[drive_lua] resumed in-game after hang #{relogins}; "
+                  f"re-detecting sector.", file=sys.stderr)
+            continue
+    pcap_stop()
     print("[drive_lua] survey run finished.")
     print(state("summary").stdout)
 

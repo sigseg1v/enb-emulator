@@ -20,6 +20,7 @@ import type {
     GalaxyMap,
     GalaxyOccupancy,
     AvatarLocation,
+    SearchItem,
 } from './types';
 import { rarityFor } from './lib/rarity';
 
@@ -661,3 +662,26 @@ export const MOCK_SKILLS: Record<string, SkillView[]> = {
         { id: 1, name: 'Beam Weapon', category: 'Combat', level: 3, maxLevel: 9 },
     ],
 };
+
+// Item-search mock (VITE_MOCK=1). A couple of real-shaped items so the Search
+// screen renders without a backend.
+export const MOCK_SEARCH: SearchItem[] = [
+    {
+        id: '1001',
+        name: 'Alluring Laser Class J',
+        level: 4,
+        manufacturable: true,
+        drops: [
+            { mob: 'InfinitiCorp Bruiser', combatLevel: 25, sector: 'Aganju' },
+            { mob: 'Manitor Prime', combatLevel: 28, sector: 'Roc' },
+            { mob: 'InfinitiCorp Merchantman', combatLevel: 17, sector: '' },
+        ],
+    },
+    {
+        id: '1002',
+        name: 'Amber Bile Drenched Spines',
+        level: 9,
+        manufacturable: false,
+        drops: [{ mob: 'Chitin Broodling', combatLevel: 12, sector: 'Aganju' }],
+    },
+];

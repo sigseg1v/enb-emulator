@@ -1,0 +1,1202 @@
+{
+"adjacency": {
+"1005": [
+1010,
+1074
+],
+"1010": [
+1005,
+1077,
+1078
+],
+"1015": [
+973,
+1060
+],
+"1020": [
+973,
+1060,
+4015
+],
+"1025": [
+973,
+1060
+],
+"1030": [
+974,
+1065
+],
+"1036": [
+974,
+1065
+],
+"1037": [
+974,
+1065,
+1310
+],
+"1040": [
+978,
+1070
+],
+"1052": [
+978,
+1070
+],
+"1055": [
+978,
+1070
+],
+"1060": [
+1015,
+1020,
+1025,
+1076
+],
+"1065": [
+1030,
+1036,
+1037,
+1079
+],
+"1070": [
+1040,
+1052,
+1055,
+1071
+],
+"1071": [
+1070,
+1072,
+1075,
+1076,
+1077,
+1079,
+4515
+],
+"1072": [
+1071,
+1073,
+1074
+],
+"1073": [
+1072
+],
+"1074": [
+1005,
+1072,
+1075
+],
+"1075": [
+1071,
+1074,
+1750
+],
+"1076": [
+1060,
+1071,
+1077
+],
+"1077": [
+1010,
+1071,
+1076,
+1079
+],
+"1078": [
+1010
+],
+"1079": [
+1065,
+1071,
+1077
+],
+"1115": [
+1160,
+4025
+],
+"1160": [
+1115,
+1310,
+3650
+],
+"1205": [
+1215,
+1290
+],
+"1215": [
+1205,
+1750
+],
+"1290": [
+1205
+],
+"1305": [
+1309,
+1310,
+3650
+],
+"1309": [
+1305
+],
+"1310": [
+1037,
+1160,
+1305,
+2210
+],
+"1425": [
+1430
+],
+"1430": [
+1425,
+1440,
+1750
+],
+"1440": [
+1430
+],
+"1505": [
+1935
+],
+"1705": [
+1710,
+1730
+],
+"1710": [
+1705,
+1715,
+1725
+],
+"1715": [
+1710,
+1730
+],
+"1720": [
+1725,
+1735,
+2215
+],
+"1725": [
+1710,
+1720
+],
+"1730": [
+1705,
+1715
+],
+"1735": [
+1720,
+1740,
+3610
+],
+"1740": [
+1735,
+1745,
+1750
+],
+"1745": [
+1740,
+1750
+],
+"1750": [
+1075,
+1215,
+1430,
+1740,
+1745,
+1755
+],
+"1755": [
+1750
+],
+"1910": [
+1920,
+1925
+],
+"1915": [
+1925,
+1935
+],
+"1920": [
+1910,
+2005,
+4120
+],
+"1925": [
+1910,
+1915
+],
+"1935": [
+1505,
+1915
+],
+"2005": [
+1920,
+2010
+],
+"2010": [
+2005,
+2015
+],
+"2015": [
+2010
+],
+"2210": [
+1310,
+2215,
+3515
+],
+"2215": [
+1720,
+2210
+],
+"2305": [
+2310
+],
+"2310": [
+2305,
+2315
+],
+"2315": [
+2310,
+2410
+],
+"2405": [
+2410
+],
+"2410": [
+2315,
+2405
+],
+"3515": [
+2210,
+3530,
+3595,
+3650
+],
+"3530": [
+3515
+],
+"3595": [
+3515
+],
+"3605": [
+3610,
+4025,
+4115,
+4530
+],
+"3610": [
+1735,
+3605,
+3615
+],
+"3615": [
+3610
+],
+"3650": [
+1160,
+1305,
+3515
+],
+"3670": [
+3675
+],
+"3675": [
+3670
+],
+"4015": [
+1020,
+4025,
+4520
+],
+"4025": [
+1115,
+3605,
+4015,
+4030
+],
+"4030": [
+4025
+],
+"4115": [
+3605,
+4120
+],
+"4120": [
+1920,
+4115,
+4195,
+4515
+],
+"4195": [
+4120
+],
+"4505": [
+4510
+],
+"4510": [
+4505,
+4515,
+4520
+],
+"4515": [
+1071,
+4120,
+4510,
+4520
+],
+"4520": [
+4015,
+4510,
+4515,
+4525
+],
+"4525": [
+4520,
+4530
+],
+"4530": [
+3605,
+4525,
+4535
+],
+"4535": [
+4530
+],
+"973": [
+1015,
+1020,
+1025
+],
+"974": [
+1030,
+1036,
+1037
+],
+"978": [
+1040,
+1052,
+1055
+]
+},
+"gate_dest": {
+"acceleratortoakeronsgate": 1075,
+"acceleratortoearth": 1060,
+"acceleratortoequatorialearth": 1025,
+"acceleratortohighearth": 1020,
+"acceleratortoluna": 1015,
+"acceleratortomargesi": 1205,
+"acceleratortomercury": 1005,
+"acceleratortomoto": 1160,
+"acceleratortoneptune": 1073,
+"acceleratortonostrandvor": 1305,
+"acceleratortoplutoandcharon": 1074,
+"acceleratortoprimus": 3515,
+"acceleratortosaturn": 1071,
+"acceleratortouranus": 1072,
+"acceleratortovenus": 1010,
+"accelleratortoganymede": 1040,
+"accelleratortoio": 1052,
+"accelleratortomarsalpha": 1036,
+"accelleratortomarsbeta": 1030,
+"accelleratortomarsgamma": 1037,
+"accellrtatortoeuropa": 1055,
+"gatetohighearth": 1020,
+"gatetojupiter": 1070,
+"gatetomars": 1065,
+"gatetomarsalpha": 1036,
+"gatetomarsbeta": 1030,
+"gatetomarsgamma": 1037,
+"gatetonostrandvor": 1305,
+"gatetozweihander": 1425,
+"sectoracceleratortoswoopingeagle": 4120,
+"sectorgatetoachenar": 2315,
+"sectorgatetoadrielprime": 1215,
+"sectorgatetoaganju": 1115,
+"sectorgatetoakeronsgate": 1075,
+"sectorgatetoaragothprime": 1710,
+"sectorgatetoarduinne": 4030,
+"sectorgatetoashlansveil": 2410,
+"sectorgatetoasteroidbeltalpha": 1076,
+"sectorgatetoasteroidbeltbeta": 1077,
+"sectorgatetoasteroidbeltgamma": 1079,
+"sectorgatetoblackbeardswake": 3605,
+"sectorgatetocarpenter": 4520,
+"sectorgatetocassiopeiasbelt": 2305,
+"sectorgatetochandilar": 2310,
+"sectorgatetocooper": 4535,
+"sectorgatetodahin": 1925,
+"sectorgatetodertodesengel": 1440,
+"sectorgatetoearth": 1060,
+"sectorgatetoendriago": 2210,
+"sectorgatetoeuropa": 1055,
+"sectorgatetofenris": 1730,
+"sectorgatetofreya": 1750,
+"sectorgatetofreyaandakeronsgate": 1750,
+"sectorgatetoganymede": 1040,
+"sectorgatetoglenn": 4515,
+"sectorgatetogrissom": 4530,
+"sectorgatetohighearth": 1020,
+"sectorgatetoinverness": 4025,
+"sectorgatetoio": 1052,
+"sectorgatetoishuan": 2005,
+"sectorgatetojotunheim": 1740,
+"sectorgatetojupiter": 1070,
+"sectorgatetokailaasa": 1910,
+"sectorgatetokitarasveil": 1915,
+"sectorgatetolagarto": 2215,
+"sectorgatetoluna": 1015,
+"sectorgatetomargesi": 1205,
+"sectorgatetomars": 1065,
+"sectorgatetomenorb": 2010,
+"sectorgatetomercury": 1005,
+"sectorgatetomuspelheim": 1725,
+"sectorgatetonebiros": 2015,
+"sectorgatetonewedinburgh": 4015,
+"sectorgatetonifleheimcloud": 1755,
+"sectorgatetonostrandvor": 1305,
+"sectorgatetoodinrex": 1735,
+"sectorgatetoodinsbelt": 1720,
+"sectorgatetoparamis": 3610,
+"sectorgatetoprimus": 3515,
+"sectorgatetoragnarok": 1745,
+"sectorgatetosaturn": 1071,
+"sectorgatetoshepard": 4525,
+"sectorgatetoslayton": 4510,
+"sectorgatetosulanihighport": 2405,
+"sectorgatetoswoopingeagle": 4120,
+"sectorgatetotarsis": 3530,
+"sectorgatetothevalkyrietwins": 1705,
+"sectorgatetovarensgirdle": 1715,
+"sectorgatetovenus": 1010,
+"sectorgatetovishaoscove": 1935,
+"sectorgatetowitberg": 1430,
+"sectorgatetoxipetotec": 4115,
+"sectorgatetoyokan": 1920,
+"systemgatetoaltairiii": 1310,
+"systemgatetomarsgamma": 1037
+},
+"gate_dest_by_sector": {
+"1005": {
+"acceleratortovenus": 1010
+},
+"1010": {
+"sectorgatetoasteroidbeltbeta": 1077,
+"sectorgatetomercury": 1005
+},
+"1015": {
+"sectorgatetoearth": 1060
+},
+"1020": {
+"sectorgatetoearth": 1060
+},
+"1025": {
+"acceleratortoearth": 1060
+},
+"1030": {
+"gatetomars": 1065
+},
+"1036": {
+"gatetomars": 1065
+},
+"1037": {
+"gatetomars": 1065
+},
+"1040": {
+"sectorgatetojupiter": 1070
+},
+"1052": {
+"sectorgatetojupiter": 1070
+},
+"1055": {
+"gatetojupiter": 1070
+},
+"1060": {
+"acceleratortoequatorialearth": 1025,
+"sectorgatetoasteroidbeltalpha": 1076,
+"sectorgatetohighearth": 1020,
+"sectorgatetoluna": 1015
+},
+"1065": {
+"gatetomarsalpha": 1036,
+"gatetomarsbeta": 1030,
+"gatetomarsgamma": 1037,
+"sectorgatetoasteroidbeltgamma": 1079
+},
+"1070": {
+"sectorgatetoeuropa": 1055,
+"sectorgatetoganymede": 1040,
+"sectorgatetoio": 1052,
+"sectorgatetosaturn": 1071
+},
+"1071": {
+"acceleratortouranus": 1072,
+"sectorgatetoakeronsgate": 1075,
+"sectorgatetoasteroidbeltalpha": 1076,
+"sectorgatetoasteroidbeltbeta": 1077,
+"sectorgatetoasteroidbeltgamma": 1079,
+"sectorgatetojupiter": 1070
+},
+"1072": {
+"acceleratortoneptune": 1073,
+"acceleratortoplutoandcharon": 1074,
+"acceleratortosaturn": 1071
+},
+"1073": {
+"acceleratortouranus": 1072
+},
+"1074": {
+"acceleratortoakeronsgate": 1075,
+"acceleratortomercury": 1005,
+"acceleratortouranus": 1072
+},
+"1075": {
+"sectorgatetosaturn": 1071
+},
+"1076": {
+"sectorgatetoasteroidbeltbeta": 1077,
+"sectorgatetoearth": 1060,
+"sectorgatetosaturn": 1071
+},
+"1077": {
+"sectorgatetoasteroidbeltalpha": 1076,
+"sectorgatetoasteroidbeltgamma": 1079,
+"sectorgatetosaturn": 1071,
+"sectorgatetovenus": 1010
+},
+"1078": {
+"sectorgatetovenus": 1010
+},
+"1079": {
+"sectorgatetoasteroidbeltbeta": 1077,
+"sectorgatetomars": 1065,
+"sectorgatetosaturn": 1071
+},
+"1160": {
+"sectorgatetoaganju": 1115
+},
+"1205": {
+"sectorgatetoadrielprime": 1215
+},
+"1215": {
+"sectorgatetomargesi": 1205
+},
+"1290": {
+"acceleratortomargesi": 1205
+},
+"1305": {
+"systemgatetoaltairiii": 1310
+},
+"1309": {
+"gatetonostrandvor": 1305
+},
+"1310": {
+"sectorgatetonostrandvor": 1305,
+"systemgatetomarsgamma": 1037
+},
+"1425": {
+"sectorgatetowitberg": 1430
+},
+"1430": {
+"gatetozweihander": 1425,
+"sectorgatetodertodesengel": 1440
+},
+"1440": {
+"sectorgatetowitberg": 1430
+},
+"1505": {
+"vishaosgate": 1935
+},
+"1705": {
+"sectorgatetoaragothprime": 1710,
+"sectorgatetofenris": 1730
+},
+"1710": {
+"sectorgatetomuspelheim": 1725,
+"sectorgatetothevalkyrietwins": 1705,
+"sectorgatetovarensgirdle": 1715
+},
+"1715": {
+"sectorgatetoaragothprime": 1710,
+"sectorgatetofenris": 1730
+},
+"1720": {
+"sectorgatetomuspelheim": 1725,
+"sectorgatetoodinrex": 1735
+},
+"1725": {
+"sectorgatetoaragothprime": 1710,
+"sectorgatetoodinsbelt": 1720
+},
+"1730": {
+"sectorgatetothevalkyrietwins": 1705,
+"sectorgatetovarensgirdle": 1715
+},
+"1735": {
+"sectorgatetojotunheim": 1740,
+"sectorgatetoodinsbelt": 1720,
+"sectorgatetoparamis": 3610
+},
+"1740": {
+"sectorgatetofreya": 1750,
+"sectorgatetoodinrex": 1735,
+"sectorgatetoragnarok": 1745
+},
+"1745": {
+"sectorgatetofreyaandakeronsgate": 1750,
+"sectorgatetojotunheim": 1740
+},
+"1750": {
+"sectorgatetojotunheim": 1740,
+"sectorgatetonifleheimcloud": 1755,
+"sectorgatetoragnarok": 1745
+},
+"1755": {
+"sectorgatetofreya": 1750
+},
+"1910": {
+"sectorgatetodahin": 1925,
+"sectorgatetoyokan": 1920
+},
+"1915": {
+"sectorgatetodahin": 1925,
+"sectorgatetovishaoscove": 1935
+},
+"1920": {
+"sectorgatetokailaasa": 1910
+},
+"1925": {
+"sectorgatetokailaasa": 1910,
+"sectorgatetokitarasveil": 1915
+},
+"1935": {
+"sectorgatetokitarasveil": 1915,
+"vishaosgate": 1505
+},
+"2005": {
+"sectorgatetomenorb": 2010
+},
+"2010": {
+"sectorgatetoishuan": 2005,
+"sectorgatetonebiros": 2015
+},
+"2015": {
+"sectorgatetomenorb": 2010
+},
+"2210": {
+"sectorgatetolagarto": 2215
+},
+"2215": {
+"sectorgatetoendriago": 2210
+},
+"2305": {
+"sectorgatetochandilar": 2310
+},
+"2310": {
+"sectorgatetoachenar": 2315,
+"sectorgatetocassiopeiasbelt": 2305
+},
+"2315": {
+"sectorgatetoashlansveil": 2410,
+"sectorgatetochandilar": 2310
+},
+"2405": {
+"sectorgatetoashlansveil": 2410
+},
+"2410": {
+"sectorgatetoachenar": 2315,
+"sectorgatetosulanihighport": 2405
+},
+"3515": {
+"sectorgatetotarsis": 3530
+},
+"3530": {
+"sectorgatetoprimus": 3515
+},
+"3595": {
+"sectorgatetoprimus": 3515
+},
+"3605": {
+"sectorgatetoparamis": 3610
+},
+"3610": {
+"sectorgatetoblackbeardswake": 3605,
+"sectorgatetoodinrex": 1735
+},
+"3615": {
+"sectorgatetoparamis": 3610
+},
+"3650": {
+"acceleratortomoto": 1160,
+"acceleratortonostrandvor": 1305,
+"acceleratortoprimus": 3515
+},
+"3670": {
+"ancientgate": 3675
+},
+"3675": {
+"ancientgate": 3670
+},
+"4015": {
+"gatetohighearth": 1020,
+"sectorgatetoinverness": 4025
+},
+"4025": {
+"sectorgatetoarduinne": 4030,
+"sectorgatetonewedinburgh": 4015
+},
+"4030": {
+"sectorgatetoinverness": 4025
+},
+"4115": {
+"sectorgatetoswoopingeagle": 4120
+},
+"4120": {
+"sectorgatetoxipetotec": 4115
+},
+"4195": {
+"sectoracceleratortoswoopingeagle": 4120
+},
+"4505": {
+"sectorgatetoslayton": 4510
+},
+"4510": {
+"sectorgatetocarpenter": 4520,
+"sectorgatetoglenn": 4515
+},
+"4515": {
+"sectorgatetocarpenter": 4520,
+"sectorgatetoslayton": 4510
+},
+"4520": {
+"sectorgatetoglenn": 4515,
+"sectorgatetoshepard": 4525,
+"sectorgatetoslayton": 4510
+},
+"4525": {
+"sectorgatetocarpenter": 4520,
+"sectorgatetogrissom": 4530
+},
+"4530": {
+"sectorgatetocooper": 4535,
+"sectorgatetoshepard": 4525
+},
+"4535": {
+"sectorgatetogrissom": 4530
+},
+"973": {
+"acceleratortoequatorialearth": 1025,
+"acceleratortohighearth": 1020,
+"acceleratortoluna": 1015
+},
+"974": {
+"accelleratortomarsalpha": 1036,
+"accelleratortomarsbeta": 1030,
+"accelleratortomarsgamma": 1037
+},
+"978": {
+"accelleratortoganymede": 1040,
+"accelleratortoio": 1052,
+"accellrtatortoeuropa": 1055
+}
+},
+"sector_system": {
+"1005": "Sol",
+"1010": "Sol",
+"1060": "Sol",
+"1065": "Sol",
+"1070": "Sol",
+"1071": "Sol",
+"1072": "Sol",
+"1073": "Sol",
+"1074": "Sol",
+"1075": "Sol",
+"1076": "Sol",
+"1077": "Sol",
+"1078": "Sol",
+"1079": "Sol",
+"1115": "61 Cygni",
+"1160": "61 Cygni",
+"1205": "Proxima Centauri",
+"1215": "Proxima Centauri",
+"1305": "Altair",
+"1310": "Altair",
+"1425": "Alpha Centauri",
+"1430": "Alpha Centauri",
+"1440": "Alpha Centauri",
+"1505": "Antares",
+"1705": "Aragoth",
+"1710": "Aragoth",
+"1715": "Aragoth",
+"1720": "Aragoth",
+"1725": "Aragoth",
+"1730": "Aragoth",
+"1735": "Aragoth",
+"1740": "Aragoth",
+"1745": "Aragoth",
+"1750": "Aragoth",
+"1755": "Aragoth",
+"1910": "Capella",
+"1915": "Capella",
+"1920": "Capella",
+"1925": "Capella",
+"1935": "Capella",
+"2005": "Castor",
+"2010": "Castor",
+"2105": "Deneb",
+"2210": "Gallina",
+"2215": "Gallina",
+"2505": "Mondara Maelstrom",
+"3515": "Vega",
+"3530": "Vega",
+"3605": "Smugglers Run",
+"3610": "Smugglers Run",
+"3705": "Aquitaine",
+"4015": "Tau Ceti",
+"4025": "Tau Ceti",
+"4030": "Tau Ceti",
+"4115": "Sirius",
+"4120": "Sirius",
+"4205": "Mazzaroth Maelstrom",
+"4505": "Beta Hydri",
+"4510": "Beta Hydri",
+"4515": "Beta Hydri",
+"4520": "Beta Hydri",
+"4525": "Beta Hydri",
+"4530": "Beta Hydri",
+"4535": "Beta Hydri"
+},
+"sid2name": {
+"1005": "Mercury",
+"1010": "Venus",
+"1015": "Luna",
+"1020": "High Earth",
+"1025": "Equatorial Earth",
+"1030": "Mars Beta",
+"1036": "Mars Alpha",
+"1037": "Mars Gamma",
+"1040": "Ganymede",
+"1052": "Io",
+"1055": "Europa",
+"1060": "Earth",
+"1065": "Mars",
+"1069": "Nebulous",
+"1070": "Jupiter",
+"1071": "Saturn",
+"1072": "Uranus",
+"1073": "Neptune",
+"1074": "Pluto and Charon",
+"1075": "Akerons Gate",
+"1076": "Asteroid Belt Alpha",
+"1077": "Asteroid Belt Beta",
+"1078": "Ceres/Thule",
+"1079": "Asteroid Belt Gamma",
+"1105": "Ogun",
+"1110": "Zuri Maji",
+"1115": "Aganju",
+"1120": "Thelugi Rift",
+"1125": "Eshu",
+"1130": "Bayanni",
+"1150": "Menog Swarm",
+"1155": "Oya",
+"1160": "Moto",
+"1165": "Oricha Nla",
+"1170": "Yemaha",
+"1205": "Margesi",
+"1215": "Adriel Prime",
+"1290": "Loch Mar",
+"1305": "Nostrand Vor",
+"1309": "Nostrand Vor Planet",
+"1310": "Altair III",
+"1425": "Zweihander",
+"1430": "Witberg",
+"1440": "der Todesengel",
+"1493": "Jagerstadt",
+"1505": "Antares Frontier",
+"1510": "Charis Duo",
+"1515": "Kasdreya's Weil",
+"1520": "Kor Scorpius",
+"1550": "Volundar Gap",
+"1580": "Kor Vanaan",
+"1590": "Kor Vanaan Planet",
+"1591": "Kokoyuko Moon",
+"1705": "Valkyrie Twins",
+"1710": "Aragoth Prime",
+"1715": "Varens Girdle",
+"1720": "Odins Belt",
+"1725": "Muspelheim",
+"1730": "Fenris",
+"1735": "Odin Rex",
+"1740": "Jotunheim",
+"1745": "Ragnarok",
+"1750": "Freya",
+"1755": "Nifleheim Cloud",
+"1910": "Kailaasa",
+"1915": "Kitara's Veil",
+"1920": "Yokan",
+"1925": "Dahin",
+"1930": "Dahin Mining Interest",
+"1935": "Vishao's Cove",
+"2005": "Ishuan",
+"2008": "Ishuan Gas Giant",
+"2009": "Sandcastle",
+"2010": "Menorb",
+"2014": "Menorb Planet",
+"2015": "Nebiros",
+"2019": "Nebiros Planet",
+"2105": "Roc",
+"2130": "Roc 1",
+"2210": "Endriago",
+"2215": "Lagarto",
+"2290": "GETCo Ruins",
+"2295": "Porvenir Mons Area",
+"2305": "Cassiopeia's Belt",
+"2310": "Chandilar",
+"2315": "Achenar",
+"2319": "Chandilar Planet",
+"2405": "Sulani Highport",
+"2409": "Gamma Sulani Planet",
+"2410": "Ashlan's Veil",
+"2505": "Mondara Maelstrom",
+"2530": "Skaara (Inside Marcos Head)",
+"2605": "Mordane's Wake",
+"3515": "Primus",
+"3530": "Tarsis",
+"3595": "Praetorium Mons Area (Planet Primus)",
+"3605": "Blackbeards Wake",
+"3606": "Test Sector",
+"3610": "Paramis",
+"3615": "Sho''da''kan Nebula",
+"3619": "Sho'da'kan Planet",
+"3650": "Unknown Location",
+"3670": "Canopus",
+"3675": "Canopus II",
+"3679": "Canopus II Planet",
+"3705": "Ardus",
+"4015": "New Edinburgh",
+"4025": "Inverness",
+"4030": "Arduinne",
+"4093": "Planet Inverness",
+"4095": "Arduinne Gas Cloud",
+"4115": "Xipe Totec",
+"4120": "Swooping Eagle",
+"4195": "Yasuragi Area",
+"4205": "Mazzaroth Maelstrom",
+"4505": "Glorys Orbit",
+"4510": "Slayton",
+"4515": "Glenn",
+"4520": "Carpenter",
+"4525": "Shepard",
+"4530": "Grissom",
+"4535": "Cooper",
+"4540": "Sword",
+"4545": "Shield",
+"4550": "Spear",
+"4595": "Grissom Meteorological Site",
+"4605": "Unknown Galaxy",
+"973": "Earth Basic Training Yard",
+"974": "Mars Basic Training Yard",
+"978": "Callisto Basic Training Yard"
+},
+"system_entry": {
+"61 Cygni>Altair": 1310,
+"61 Cygni>Tau Ceti": 4025,
+"Alpha Centauri>Aquitaine": 3705,
+"Alpha Centauri>Aragoth": 1750,
+"Altair>61 Cygni": 1160,
+"Altair>Gallina": 2210,
+"Antares>Capella": 1935,
+"Aragoth>Alpha Centauri": 1430,
+"Aragoth>Gallina": 2215,
+"Aragoth>Proxima Centauri": 1215,
+"Aragoth>Smugglers Run": [
+3605,
+3610
+],
+"Aragoth>Sol": 1075,
+"Beta Hydri>Sirius": 4120,
+"Beta Hydri>Smugglers Run": 3605,
+"Beta Hydri>Sol": 1071,
+"Beta Hydri>Tau Ceti": 4015,
+"Capella>Antares": 1505,
+"Capella>Castor": 2005,
+"Capella>Sirius": 4120,
+"Castor>Capella": 1920,
+"Gallina>Altair": 1310,
+"Gallina>Aragoth": 1720,
+"Gallina>Vega": 3515,
+"Proxima Centauri>Aragoth": 1750,
+"Sirius>Beta Hydri": 4515,
+"Sirius>Capella": 1920,
+"Sirius>Smugglers Run": 3605,
+"Smugglers Run>Aragoth": [
+1725,
+1735
+],
+"Smugglers Run>Beta Hydri": 4530,
+"Smugglers Run>Sirius": 4115,
+"Smugglers Run>Tau Ceti": 4025,
+"Sol>Alpha Centauri": 1425,
+"Sol>Aragoth": 1750,
+"Sol>Beta Hydri": 4515,
+"Sol>Capella": 1910,
+"Sol>Castor": 2005,
+"Sol>Gallina": 2215,
+"Sol>Proxima Centauri": 1205,
+"Sol>Sirius": 4120,
+"Sol>Vega": 3530,
+"Tau Ceti>61 Cygni": 1115,
+"Tau Ceti>Beta Hydri": 4520,
+"Tau Ceti>Smugglers Run": 3605,
+"Vega>Gallina": 2210
+},
+"system_gate": {
+"akeronsgatetosolsystem": "Sol",
+"ancientgatetoalphacentauri": "Alpha Centauri",
+"gaterifttobetahydri": "Beta Hydri",
+"gatetoalphacentauri": "Alpha Centauri",
+"gatetoaltair": "Altair",
+"gatetoaltairsystem": "Altair",
+"gatetoaragothsystem": "Aragoth",
+"gatetobetahydrisystem": "Beta Hydri",
+"gatetocapellasystem": "Capella",
+"gatetocastorsystem": "Castor",
+"gatetogallina": "Gallina",
+"gatetogallinasystem": "Gallina",
+"gatetosiriussystem": "Sirius",
+"gatetosol": "Sol",
+"gatetosolsystem": "Sol",
+"gatetotaucetisystem": "Tau Ceti",
+"gatetovegasystem": "Vega",
+"pirategatetosmugglersrun": "Smugglers Run",
+"sectorgateto61cygnisystem": "61 Cygni",
+"sectorgatetoaragothsystem": "Aragoth",
+"sectorgatetocapella": "Capella",
+"systemgateto61cygni": "61 Cygni",
+"systemgatetoalphacentauri": "Alpha Centauri",
+"systemgatetoaltair": "Altair",
+"systemgatetoaragoth": "Aragoth",
+"systemgatetocastor": "Castor",
+"systemgatetogallina": "Gallina",
+"systemgatetoproximacentauri": "Proxima Centauri",
+"systemgatetosiriussystem": "Sirius",
+"systemgatetosol": "Sol",
+"systemgatetovegasystem": "Vega"
+},
+"systems": {
+"61 Cygni": [
+1115,
+1160
+],
+"Alpha Centauri": [
+1425,
+1430,
+1440
+],
+"Altair": [
+1305,
+1310
+],
+"Antares": [
+1505
+],
+"Aquitaine": [
+3705
+],
+"Aragoth": [
+1705,
+1710,
+1715,
+1720,
+1725,
+1730,
+1735,
+1740,
+1745,
+1750,
+1755
+],
+"Beta Hydri": [
+4505,
+4510,
+4515,
+4520,
+4525,
+4530,
+4535
+],
+"Capella": [
+1910,
+1915,
+1920,
+1925,
+1935
+],
+"Castor": [
+2005,
+2010
+],
+"Deneb": [
+2105
+],
+"Gallina": [
+2210,
+2215
+],
+"Mazzaroth Maelstrom": [
+4205
+],
+"Mondara Maelstrom": [
+2505
+],
+"Proxima Centauri": [
+1205,
+1215
+],
+"Sirius": [
+4115,
+4120
+],
+"Smugglers Run": [
+3605,
+3610
+],
+"Sol": [
+1005,
+1010,
+1060,
+1065,
+1070,
+1071,
+1072,
+1073,
+1074,
+1075,
+1076,
+1077,
+1078,
+1079
+],
+"Tau Ceti": [
+4015,
+4025,
+4030
+],
+"Vega": [
+3515,
+3530
+]
+},
+"wormhole_pairs": [
+[
+1505,
+1935
+],
+[
+3670,
+3675
+]
+]
+}

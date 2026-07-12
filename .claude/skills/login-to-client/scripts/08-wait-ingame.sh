@@ -18,6 +18,13 @@ CDIR="$(client_dir)" || { err "STUCK=ingame: cannot resolve client dir"; exit 1;
 CMD="$CDIR/enbmod.cmd"; LOG="$CDIR/enbmod.log"
 [ -f "$LOG" ] || { err "STUCK=ingame: no enbmod.log at $LOG (mods not loaded?)"; exit 1; }
 
+# How long to wait for in-game, and how many times each channel probe polls the log.
+# Defaults suit "wait through a real load screen". A fast no-op precheck (is a client
+# already up right now?) overrides both to fail in a few seconds when the channel is
+# dead: ENB_INGAME_WAIT=1 ENB_LUA_PROBE_TRIES=12 -> one ~3.6s probe, no 120s stall.
+WAIT_SECS="${ENB_INGAME_WAIT:-120}"
+PROBE_TRIES="${ENB_LUA_PROBE_TRIES:-25}"
+
 # Run a Lua expression through the cmd channel; echo the first [run] result line.
 # enbmod.log is written by the Win32 DLL under WINE, so its lines end CRLF -- we
 # strip the \r (tr -d '\r') or string comparisons against the value silently fail.
@@ -25,7 +32,7 @@ lua_run() {
     local expr="$1" start new
     start=$(wc -l < "$LOG" 2>/dev/null || echo 0)
     printf '%s\n' "$expr" >> "$CMD"
-    for _ in $(seq 1 25); do
+    for _ in $(seq 1 "$PROBE_TRIES"); do
         new="$(tail -n +$((start + 1)) "$LOG" 2>/dev/null | tr -d '\r' | grep -m1 '^\[run\]')"
         [ -n "$new" ] && { echo "${new#\[run\] }"; return 0; }
         sleep 0.3
@@ -36,8 +43,8 @@ lua_run() {
 is_ingame() { [ "$(lua_run 'return type(enb.self())')" = "table" ]; }
 
 log "waiting for character to load into the world (Lua: type(enb.self())==table) ..."
-if ! wait_until 120 3 is_ingame; then
-    err "STUCK=ingame: enb.self() never became a table in 120s (load hang?)"
+if ! wait_until "$WAIT_SECS" 3 is_ingame; then
+    err "STUCK=ingame: enb.self() never became a table in ${WAIT_SECS}s (load hang?)"
     exit 1
 fi
 

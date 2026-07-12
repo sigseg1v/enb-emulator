@@ -8,19 +8,20 @@
 # again depends on remembering a long inline env string or re-exporting vars by
 # hand: the config lives in a gitignored `.env` next to SKILL.md, this script
 # loads it, fills in the live-mode invariants, PREFLIGHTS every precondition that
-# has silently broken a run before, and only then hands off to survey.sh.
+# has silently broken a run before, and only then hands off to drive_lua.py.
 #
-# It assumes YOU launched the client + proxy under WINE and left the client at
-# the character-select screen. It does NOT start our docker stack, never launches
-# or kills the client itself (beyond the opt-in no-progress deadman), and reads
-# the screen only. survey.sh's first step enters the character from char-select.
+# The survey drives the client entirely through the injected enbmod Lua command
+# channel (drive_lua.py) -- no screenshots, no OCR. So the one precondition beyond
+# a running client + proxy is that the character is already IN-GAME (the channel
+# only answers once enb.self() is a table). It does NOT start our docker stack and
+# never launches or kills the client itself.
 #
 #   bash scripts/explore-live.sh            # load .env, preflight, survey
-#   bash scripts/explore-live.sh <Sector>   # same, with a first-sector label hint
-#   any extra args pass straight through to survey.sh -> run-sector.sh -> drive.py
+#   bash scripts/explore-live.sh <Sector>   # same (extra args pass through to drive_lua.py)
 #
 # Exit codes: 2 = a preflight precondition failed (nothing was driven); otherwise
-# whatever survey.sh returns (0 done, 3 gravity well, 43 stuck, 44 deadman, ...).
+# whatever drive_lua.py returns (0 done, 3 gravity well, 42 client hang in
+# manual-client mode, ...).
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -62,6 +63,11 @@ export DISPLAY="${DISPLAY:-:0}"
 [ -n "${ENB_EXPLORE_WORKDIR:-}" ] || \
     die "ENB_EXPLORE_WORKDIR is not set in $ENV_FILE -- set a persistent path outside the repo."
 export ENB_EXPLORE_WORKDIR ENB_EXPLORE_CHARACTER_NAME
+# The survey character is also the one a (local-mode) relogin re-enters, so feed
+# it to the login skill's ENB_LOGIN_CHAR unless that was set explicitly. In
+# manual/live mode we halt rather than relogin, so this is only load-bearing on a
+# local stack -- but it keeps the required name from being a var nothing consumes.
+export ENB_LOGIN_CHAR="${ENB_LOGIN_CHAR:-$ENB_EXPLORE_CHARACTER_NAME}"
 
 # Workdir must be creatable + writable (ledgers/captures land here).
 mkdir -p "$ENB_EXPLORE_WORKDIR/captures" 2>/dev/null || \
@@ -74,9 +80,10 @@ xdotool getdisplaygeometry >/dev/null 2>&1 || \
     die "cannot reach X on DISPLAY=$DISPLAY. Is the desktop session up?"
 
 # The live client must already be running. We do NOT launch it -- that is the
-# operator's job in live mode. Reuse the skill's own window finder.
+# operator's job in live mode. Reuse the login-to-client skill's window finder
+# (client_win); the OCR-era explore-sector lib.sh is gone with the screen driver.
 # shellcheck source=/dev/null
-. "$SCRIPT_DIR/lib.sh"
+. "$SCRIPT_DIR/../../login-to-client/scripts/lib.sh"
 if ! CLIENT_WIN="$(client_win)"; then
     die "no client.exe window found. Launch your live client (and Net7Proxy.exe)
        under WINE and leave it at the character-select screen, then re-run."
@@ -115,8 +122,20 @@ if [ "$ENB_PCAP" = 1 ]; then
     note "capture worker ready -> $OUTDIR"
 fi
 
+# The Lua driver needs the character IN-GAME -- the enbmod channel only answers
+# once enb.self() is a table. Confirm it now (08 returns at once if already
+# in-game) rather than letting drive_lua.py exit on a silent channel. We do NOT
+# log the character in here: that is the login-to-client skill's job (and in live
+# mode we do not own the client to relaunch it).
+LOGIN_DIR="$SCRIPT_DIR/../../login-to-client/scripts"
+if ! bash "$LOGIN_DIR/08-wait-ingame.sh" >&2; then
+    die "client is not in-game (enb.self() is not a table). Log the character into
+       the world first (run the login-to-client skill, or enter your character on
+       the live client), then re-run explore-live.sh."
+fi
+
 # ---- 4. hand off to the survey -------------------------------------------
 note "config OK. character=$ENB_EXPLORE_CHARACTER_NAME workdir=$ENB_EXPLORE_WORKDIR" \
-     "pcap=$ENB_PCAP deadman=${ENB_EXPLORE_KILL_NO_PROGRESS:-off}"
-note "starting survey (manual-client, screen-read only) -- entering from char-select ..."
-exec bash "$SCRIPT_DIR/survey.sh" "$@"
+     "pcap=$ENB_PCAP"
+note "starting survey (Lua command channel, no OCR) ..."
+exec python3 "$SCRIPT_DIR/drive_lua.py" "$@"

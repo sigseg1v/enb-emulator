@@ -20,7 +20,7 @@
 # same k-units the target panel and docs/sectors/json data use. radius_k is the
 # object's radar_range / 1000 (the well's effective size).
 #
-# Keyed by the docs/sectors/json sector name (the name drive.py is launched with).
+# Keyed by the docs/sectors/json sector name (the name drive_lua.py resolves to).
 # Sectors that carry a gravity well but have NO nav-data file -- so we never
 # explore them anyway -- are listed in _UNMAPPED below for completeness.
 

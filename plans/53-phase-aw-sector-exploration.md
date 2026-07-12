@@ -1,5 +1,268 @@
 # Phase AW -- Sector exploration skill (agent-driven nav survey)
 
+- **2026-07-10 AUTO-SURVEY HAS REACHED ITS PRACTICAL LIMIT; DEATH-LOOP ROOT-CAUSED;
+  SHIP RECOVERED + PARKED; NOT RESTARTED.** The live walker was found death-looping
+  the Capella cluster (Ishuan/Yokan/Ganymede) and had again wandered into Freya
+  (survey path: 338 `Freya` action lines 03:00-03:15, `Freya.json` status
+  `in-progress`, 4 navs visited, 2 `incap-recover` total). It exited "graph
+  exhausted" leaving the LV122 ship incapacitated in Ishuan (sid 2005, hull 0.0,
+  inspace). I ran the distress->tow recovery ONLY (no undock) and **parked the char
+  docked at a station**; the survey driver is dead and NOT restarted (verified: no
+  drive_lua.py / wrapper process; a `ugrep ... drive_lua` monitor false-matches the
+  /proc scan -- ignore it).
+
+  **Why it death-loops (root cause):** `drive_lua.py` has NO learned/failed-gate
+  memory. The OCR-era driver did (the orphaned `gate_edges.json` in the workdir,
+  which records e.g. `Ishuan|gatetosol -> __locked__`, `Kailaasa|gatetosolsystem ->
+  __locked__`, `Yokan|systemgatetosiriussystem -> __locked__`, `Ishuan|gatetocapella
+  system -> Yokan`, `Yokan|gatetocastorsystem -> Ishuan`); the Lua-channel rewrite
+  never ported it (`grep gate_edges drive_lua.py` = nothing). Consequences: every
+  inter-system gate name ("Gate to Sol", "Gate to Castor System", "System Gate to
+  Castor", ...) resolves to `dest_sid=None`, which (a) ranks it tier-0 "frontier" in
+  `choose_gate` and (b) makes its SOURCE sector a phantom frontier in `_gate_graph`
+  -- so nearly every hub sector sits at `hops_to_frontier=0`, the BFS gradient is
+  flat, and the walker cannot plan a path. It retries the same LOCKED inter-cluster
+  gates every cycle (the 6-second back-to-back `enter-gate` pairs = `cross_gate`
+  returning None), bounces Ishuan<->Yokan, dies, is towed back, repeats. Secondary
+  bug: `GATES_SEEN` is only cleared in the survey branch, never on transit sectors,
+  so gates observed in one hub leak into the candidate list of the next (the log
+  shows "Ishuan" entering Ganymede/Kailaasa gates it does not own -> instant
+  request_target fail).
+
+  **Freya re-entry:** the guards are CORRECT in the on-disk code
+  (`gate_forbidden("Akeron's Gate to Aragoth System")=True`, `SID_MAP['1750']=Freya`,
+  `NEVER_EXPLORE={Freya}`). The 02:54 crossing came from a running process that
+  PREDATED the 2026-07-09 `GATE_DEST_OVERRIDES` commit -- a restart with current code
+  will not repeat that specific crossing. But the deeper hole (no locked-gate memory)
+  remains: without it the walker keeps re-selecting forbidden/locked gates.
+
+  **What is actually left (none of it auto-reachable by a screen-only single ship --
+  it is the owner's reserved MANUAL/SUPERVISED pass):**
+  - CONFIRMED unreachable/lethal: Earth (`skip Incapacitated Earthcorps Patrol`;
+    HighEarth `skip ... scanner dead-zone`), Slayton/Shepard (Carpenter
+    `wreck-detected destroyed near Sector Gate to Slayton` + `death zone`),
+    XipeTotec/Tlaloc (SwoopingEagle `warp-stall ... unreachable, stuck at 206.12k`),
+    the Freya cluster (never-explore), and the type-41 gravity wells.
+  - REACHED-but-never-cross-ATTEMPTED (the only maybe-surveyable remainder, 3):
+    Europa + Io (Jupiter ledger marks both gates `visited=True`, d<3k, but there is
+    NO `enter-gate` for either anywhere in actions.log) and KitarasVeil (Dahin
+    `visit Sector Gate to Kitara's Veil @1.02k`, no cross attempt). The walker
+    touched these gates and moved on without trying the transit.
+
+  **Recommendation (owner decision -- cost vs. live-char risk):** do NOT restart the
+  current walker; it will resume the death-loop and re-accrue xp debt on the real
+  char for zero reachable gain. Either (A) port failed/locked-gate memory into
+  `drive_lua.py` (record `(src_sid, gate) -> dest|__locked__` on each transit/fail;
+  consult it in `gate_dest_sid`/`_gate_graph`/`choose_gate`) so a clean run TERMINATES
+  at "everything reachable is done" instead of death-looping, and on that run make
+  `choose_gate` actually attempt the 3 reached-but-uncrossed gates (Europa/Io/
+  KitarasVeil); or (B) declare the 27-sector auto-survey complete and roll the entire
+  remainder into the manual pass. 27 sectors are surveyed; the auto method has no
+  reachable frontier left.
+
+- **2026-07-09 INCAP AUTO-RECOVERY WAS DEAD-ON-ARRIVAL (falsy-zero bug) -- FIXED
+  + VALIDATED LIVE.** The distress->tow recovery added in the entry below NEVER
+  FIRED for the exact case it exists for. `check_incapacitated`'s debounce re-read
+  was `if not enb.inspace() or (hull_frac() or 1.0) > 0.0: return` -- but an
+  incapacitated hull reads exactly `0.0`, and in Python `0.0 or 1.0 == 1.0` (0.0 is
+  falsy), so a genuine incap was coerced to 1.0 and the guard bailed every time.
+  Observed live: the LV122 ship sat incapacitated (hull 0/18000, "COMPUTER: you
+  cannot do this while incapacitated") in Ishuan (sid 2005) while the driver tried
+  every onward gate -- all refused by the server because incap refuses ALL actions
+  -- then declared "reachable gate graph exhausted; done" and exited: a FALSE
+  completion caused entirely by the unrecovered incap. Two fixes in `drive_lua.py`:
+  (1) capture the hull into `h2` and test `h2 is None or h2 > 0.0` explicitly so a
+  real `0.0` proceeds to recovery; (2) `tried_edges.clear()` in the `ShipRecovered`
+  handler -- gates marked "tried" during incap are FALSE failures (the server
+  refused everything, not that gate), and since the tow lands at the same sector's
+  station and undocks back into it, without the clear it re-hits "graph exhausted"
+  on its own already-tried gates. VALIDATED LIVE 2026-07-09: relaunched against the
+  live incap ship; `incap-recover` -> tow (retry #1 missed a click, #2 landed) ->
+  `incap-recovered` at Ishuan Station -> undock -> `enter-gate Gate to Capella
+  System` (crossed OUT, hull restored, tried_edges cleared). Recovery is now
+  genuinely automated end-to-end, not just when a human drives the clicks.
+
+- **2026-07-09 FREYA NEVER-EXPLORE + AUTOMATED INCAP DISTRESS->TOW RECOVERY
+  (owner-directed).** The frontier walker routed the survey ship THROUGH
+  `Akerons Gate`'s "Gate to Aragoth System" into **Freya (sid 1750)** and the
+  Freya pirates destroyed the LV122 ship (hull 0, stuck spinning warp-fails).
+  Freya is a huge gravity well WITH pirate density so lethal the owner says even
+  Brisings is unsafe within seconds -- "only pass thru, never explore". Two fixes:
+  - **Never route INTO Freya, and defer the cluster behind it.** Freya has NO
+    type-41 OT_GWELL object, so it does NOT belong in `gravity_wells.py` (whose
+    provenance is strictly type-41 rows). Added a distinct `NEVER_EXPLORE_SECTORS
+    = {"Freya"}` in `drive_lua.py`. The routing hole was that "Gate to Aragoth
+    System" (Freya's SYSTEM name) resolved to no sid, so `_gate_graph` read it as
+    unexplored frontier and routed straight in; `GATE_DEST_OVERRIDES = {"Aragoth
+    System": 1750}` pins it. `gate_into_well` -> `gate_forbidden` (+ `_sector_
+    forbidden` helper) now refuses gates into a well OR a NEVER_EXPLORE sector, and
+    the `_gate_graph` frontier set excludes both. `choose_gate`/`settle_well_gates`
+    take `leaving_defer` so that if the ship is ever INSIDE a deferred sector it
+    exits only toward a KNOWN, non-forbidden sector (never deeper into the lethal
+    Jotunheim/Ragnarok/Nifleheim/Centauri cluster, which is thereby deferred to a
+    manual pass -- it is reachable only through Freya). VERIFIED OFFLINE: "Gate to
+    Aragoth System" and "Gate to Freya" both -> dest 1750, forbidden=True.
+  - **Auto-recover an incapacitated ship instead of halting.** `check_
+    incapacitated` (called at the top of the survey loop and each hop) now, on a
+    debounced in-space hull-0 read, runs the owner-taught distress->tow flow:
+    `enb.freya_ui_on = false` to reveal the native distress orb our hide-ui mod
+    hides (setting the flag directly is enough -- no Ctrl+U handler needed, the
+    earlier failure was purely a wrong click coord on the "000" readout, not the
+    orb), click the orb (win 633,858) to open the Station Mechanic comm dialog,
+    click "I need a tow" MID button-bar (win 400,617 -- the left text-edge click
+    did NOT register live), poll `enb.state()=="station"` for the tow, restore the
+    Freya HUD, and `ensure_in_space()` to undock and resume. Raises `ShipRecovered`
+    so `main()` re-detects the (now different) sector, no hop consumed. Retries the
+    two clicks 3x; HALTS only if the tow never lands or the station did not repair
+    the hull (avoids a tow loop). VALIDATED LIVE 2026-07-09: recovered the dead
+    Starstrukk from Freya -> towed to Ishuan Station (Castor). Survey tooling only;
+    no server/proxy/client change. Future option (owner hint): mine decomp for a
+    distress action to add an enbmod primitive and drop the click path entirely.
+
+- **2026-07-09 FRONTIER-DIRECTED GATE ROUTING -- stop dead-end wandering
+  (commit `ec9216dc`, supersedes the `64786eb9` tier walk).** The graph traversal
+  from `64786eb9` reached sectors behind completed ones but ranked gates with only
+  a ONE-HOP `tier()` lookahead (fresh=0, done-not-visited-this-run=1, visited=2).
+  With one hop of foresight it could not distinguish a done sector that transits
+  TOWARD the frontier from a done dead-end. From the Sol cluster it walked
+  `Mercury -> Venus -> Ceres` and thrashed the Venus/Ceres/Mercury triangle
+  (`Ceres` only gates back to `Venus`; live actions.log showed
+  Ceres->Mercury->Ceres->Venus bouncing) before backtracking to the real frontier.
+  Owner flagged it: "if left mercury, went to venus, and is now flying to ceres,
+  why?". Replaced `tier()` with frontier-directed BFS:
+  - `_gate_graph()` builds an undirected sector graph over EVERY ledger's routable,
+    non-well gates, plus the FRONTIER set (a dest that still needs surveying). A
+    COMPLETED sector whose onward gate name resolves to no known sid is itself a
+    dist-0 frontier source -- standing there you are one gate from undiscovered
+    space (`Akerons Gate -> Aragoth`, `Saturn -> Asteroid Belt Alpha` resolve this
+    way, so those onward gates were previously invisible to routing).
+  - `_frontier_hops()` = multi-source BFS, min hops from each sector to any frontier.
+  - `rank()`: a fresh/unresolved dest still sorts first; a transit through a DONE
+    sector now sorts by how few hops the nearest frontier lies BEYOND it, then a
+    revisit flag, then physical distance. A done dead-end (no reachable frontier)
+    sorts last.
+  VERIFIED OFFLINE against the live ledgers: from `Venus` it now picks `Mercury`
+  (fhops=2) over `Ceres` (fhops=4); from `Mercury` it picks `Pluto` (fhops=1)
+  toward `Akerons Gate`, escaping the Sol dead-end instead of bouncing in it.
+  Relaunched live against the running client. Survey tooling only.
+
+- **2026-07-09 REACTOR-DRAIN-ZONE UNWARPABLE SKIP (commit `5918f194`).** A nav
+  named "reactor drain zone" cancels every warp ~1s after engage (the zone kills
+  drive), so the picker retargeted it forever, cancelling each warp -- the ship
+  never went anywhere. Fix: `UNWARPABLE_NAME_SUBSTRINGS` + `is_unwarpable()`, and
+  `resolve_unwarpable_navs()` (run each loop, like `resolve_body_navs`) takes such
+  navs OUT of `remaining` with a `skip` ("warp cancels ~1s after engage, cannot
+  reach; flying elsewhere"), so the survey flies to a real nav instead. `pick_target`
+  and the seen-tier / relocate lists all exclude it as a backstop. Survey tooling only.
+
+- **2026-07-09 PLANET-BODY WARP-SPAM FIX (commit `6f3243af`).** The Ceres survey
+  wedged ping-ponging warp between `Ceres` (d=292k) and `Thule` (d=15k): both are
+  the planet BODIES, the client refuses to warp into a body (`target too close`)
+  and holds the ship at the body radius, so the farthest-first picker re-selected
+  them every loop and never marked either -> infinite warp spam. The existing
+  body-class standoff (`arrive_slop`) keyed off the LEDGER type, but these nodes
+  are typed generic `object` there, not `planet`; only the LIVE nav class from
+  `enb.navs()` reports `Planet`. Fix keys off the live class: `BODY_CLASSES` +
+  `is_body_class()`, and `resolve_body_navs()` (run each loop before `pick_target`)
+  takes body navs OUT of `remaining` -- visits one already inside `BODY_SLOP`
+  (as close as the game allows), skips a far one (cannot approach). `pick_target`
+  also excludes body-class navs as a backstop. The real waypoints around a body
+  (`Ceres 1..6`, ...) are separate nav-point nodes the survey still visits normally.
+  VERIFIED LIVE: Ceres survey unstuck from 2/16 -- `Ceres` skipped, `Thule` visited,
+  survey advanced onto the nav-points. Survey tooling only.
+
+- **2026-07-09 NAV-DUMP PAGING + non-transit-gate exclusion + well-gate settle
+  (commit `e07797eb`).** Three linked fixes surfaced by the ship getting stuck in
+  the Asteroid Belt Beta (ABB, sid 1077) gravity-well sector, unable to route out.
+  (1) **`get_navs` now PAGES the `enb.navs()` dump.** The enbmod cmd/log channel
+  truncates each reply line at **2048 bytes**; a busy belt sector dumps ~3KB / 77
+  records in one string, so everything past record ~53 was silently lost -- and the
+  lost tail is the DISTANT navs, i.e. exactly the onward/exit gates `choose_gate`
+  needs. Page 0 snapshots `enb.navs()` into a Lua global (globals persist across
+  channel commands, verified) and each page reads a <2KB slice of that consistent
+  view. ABB went from 53 navs seen (2 accelerator spheres only) to the full 77 (all
+  4 real sector gates). This silently starved EVERY normal survey sector with >~53
+  navs of its farthest nodes too. (2) **`routable_gate()`** restricts routing to
+  names that actually cross a sector (`Gate to X` / `Sector Gate to X` / a
+  `Wormhole`): `is_gate()` matches an Accelerator Sphere because its object class is
+  `Stargate`, but warping to one never flips the sector -- it just wastes a warp
+  and, in a well sector, sends the ship toward the well. `choose_gate` filters
+  candidates through it. (3) **`settle_well_gates()`** lets a well sector's distant
+  exit gates finish rendering (belt sectors render in bursts, past `settle_navs`'s
+  2-stable-read cutoff) before `choose_gate` runs; clears the prior sector's
+  `GATES_SEEN` first, early-exits once a routable non-well gate is in range.
+  VERIFIED LIVE: ABB now well-skips and gates out via `Sector Gate to Venus`
+  (nearest tier-0 fresh sector) -> hop 1 Venus [survey], instead of thrashing the
+  two accelerator spheres then false-conceding "no gate out". Survey tooling only.
+
+- **2026-07-09 GRAPH TRAVERSAL: survey now reaches sectors BEHIND completed ones
+  (commit `64786eb9`).** `drive_lua.py` was a linear gate-walker: `choose_gate`
+  picked only gates to a FRESH destination and `main()` hard-stopped the entire
+  run the first time a crossing looped back into an already-surveyed/complete
+  sector ("gated into already-surveyed sector NNNN -- stopping"). From a spawn
+  boxed in by done sectors (Ishuan/Yokan) it took two internal gates, looped, and
+  quit after 2 hops -- while the frontier gates (Gate to Sol, Gate to Sirius
+  System) that lead to unexplored space sat untried. Replaced with a bounded graph
+  traversal: `choose_gate(sector, navs, visited_sids, tried_edges, sid)` RANKS
+  every reachable gate (tier 0 = fresh/unresolved dest, tier 1 = done-but-not-yet-
+  entered-this-run = transit THROUGH it to reach the frontier beyond, tier 2 =
+  loop-back last resort), excluding each `(sid, gid)` edge once crossed
+  (`tried_edges`) so it is finite; `main()` separates SURVEY (only for a not-done,
+  not-yet-surveyed sector) from TRANSIT (cross a done sector without re-surveying),
+  drops the loop-back hard-stop, and retries a different gate when one fails to
+  transit instead of killing the run. VERIFIED LIVE: relaunched against the live
+  client, resumed Ganymede (1040) from its ledger at 11/34 with the new `[survey]`
+  tag; earlier old-code run had already reached Ganymede via the frontier
+  `Gate to Sol` from Ishuan, so the frontier-crossing path is exercised. Survey
+  tooling only -- no wire/server behaviour touched.
+
+- **2026-07-09 NEW `explore-live` skill: attach-aware live survey + crash recovery
+  (commit `ed23dd8c`).** A second entry skill (`.claude/skills/explore-live/`,
+  Freya/MIT) for surveying against a LIVE client the OWNER attached enbmod into
+  (native `client.exe` + `Net7Proxy.exe`, NO Freya docker stack). It reuses the
+  `drive_lua.py` survey engine unchanged and adds only the two attach-case pieces:
+  (1) **path resolution for a client we did not launch** -- `client_dir()` now
+  resolves the enbmod store from the RUNNING `client.exe`'s `/proc/<pid>/cwd` (via
+  its X window), ahead of `settings.json` (which names OUR launcher's last prefix,
+  wrong for an attached client / mbox slot); order is `ENB_CLIENT_DIR` -> /proc cwd
+  -> settings.json. (2) **unattended crash recovery** -- `drive_lua` gained
+  `ENB_RECOVER_CMD`: on a wedge it runs that command instead of manual-halt (exit 0
+  == in-game). `explore-live` wires it to `recover.sh`, which relaunches the real
+  Net-7 launcher (`LaunchNet7.exe`) -> clicks Play -> re-injects enbmod
+  (`inject.exe --proc client.exe`) -> enbmod autologin (creds from the client
+  PROCESS env, no OCR) returns to in-game -> survey resumes from the ledger.
+  Credentials live in a gitignored `.env` (`ENB_ACC_NAME/ACC_PASS/CHARACTER/EULA`)
+  and propagate via the `LaunchNet7` process environment; WINE prefix + launcher
+  path auto-resolve with a screenshot-and-ask fallback for the one non-discoverable
+  coordinate, the launcher Play button (`ENB_LAUNCHNET7_PLAY_XY`). VERIFIED LIVE:
+  path resolution, prefix/launcher/`inject.exe` discovery, creds plumbing, the
+  enbmod channel (in-game in `space`, `[run] 2`). UNVERIFIED end-to-end: the
+  LaunchNet7 -> Play -> inject -> autologin recovery chain (no launcher GUI was up
+  to pin Play coords; this box is a local-docker config) -- flagged in `recover.sh`
+  + SKILL.md, needs a real crash + launcher GUI to validate.
+
+- **2026-07-09 CONVERTED OFF OCR to the enbmod Lua command channel.** The whole
+  survey now drives the client through the injected enbmod `enb.*` API instead of
+  screenshots/OCR/XTEST -- the same channel `login-to-client` was converted to.
+  `drive_lua.py` (already the multi-hop driver) gained the last pieces the OCR
+  wrapper scripts owned: (1) hang-recovery/relogin ported from `run-sector.sh` --
+  the Lua channel IS the liveness signal (enbmod's poll is pump-clocked, so a
+  wedge stops answering `enbmod.cmd`); `lua()` raises `ClientHang` after the
+  channel is silent past `ENB_LUA_HANG_SECS` (150s, above a gate-load screen) AND
+  a `return 1+1` probe fails, and `main()` relogins (local stack) or HALTS (manual/
+  live, exit 42) then resumes the SAME hop from the persisted ledger; (2)
+  per-sector `pcap.sh ensure`/`stop`; (3) gravity-well refusal (`gravity_wells.py`,
+  exit 3). `explore-live.sh` repointed at `drive_lua.py` with an in-game
+  precondition (`08-wait-ingame.sh`) and now sources the login skill's `lib.sh`
+  for `client_win`. **Deleted 24 OCR scripts** (drive.py, survey.sh, run-sector.sh,
+  enum_fast.py, all read-*/map/warp/shield/gate/rescue/undock helpers, the old
+  lib.sh) + `navdata.cmd_predict` (map-pixel projection) -- net -5.5k LOC. SKILL.md
+  + .env.example rewritten for the Lua path. Verified: hang-detection offline
+  harness (raise-on-wedge + recover), and a LIVE end-to-end run (client in ABG
+  1079 -> sector detected via enb.sector(), 26 navs settled, correctly refused as
+  a gravity well, pcap stopped, exit 3). Warp/nav/gate path already proven live
+  (Luna 21/24 -> Earth hop). This closes the "convert explore-sector off OCR" task.
+
 - **2026-06-24 map-reposition planet-filter fix.** Live on HighEarth the map-click
   SEVERE-stuck fallback kept warping toward the "Earth" PLANET marker (parked 37k out,
   warp never closes). The direct-marker branch already self-skips a planet target after
@@ -1366,3 +1629,53 @@ Continuing the Ishuan->Glenn survey. Three things happened:
     (Sector Gate to Slayton, Yamuna`s Weft) and it wrecked the ship at 6/23. Re-grinding
     it just re-wrecks; once recovered, the better route is to gate OUT to a safer sector
     rather than keep surveying Carpenter with this hull.
+
+## AW-8 -- port persistent locked-gate memory into drive_lua.py (2026-07-10)
+
+The OCR-era driver (`drive.py` / `gate_route.py` / `survey.sh`, all deleted in the
+Lua rewrite) had PERSISTENT locked-gate memory: a crossing that would not transit
+was recorded `__locked__` in the workdir `gate_edges.json`, ranked last, and NOT
+counted as frontier (AW-3 item 4, AW-4 reachability boundary). The Lua rewrite
+(`drive_lua.py`) reimplemented gate routing as `choose_gate` + `_gate_graph` but
+never ported that memory, so the file sat orphaned and three bugs regressed:
+
+1. **Phantom-frontier poison.** A locked gate whose destination name does not
+   resolve (`gate_dest_sid` -> None: `Gate to Sirius System`, `Gate to Sol`, the
+   wormhole wefts) was read by `_gate_graph` as "one gate from the unknown" and
+   marked its sector a BFS frontier source, and by `choose_gate.rank` as the
+   best (0,0,0) tier -- so the walker fixated on the same impassable gate every
+   run and `_frontier_hops` kept routing toward a sector with nothing reachable.
+2. **No cross-run lock.** `tried_edges` is per-run (and cleared on ShipRecovered),
+   so a genuinely locked gate was re-tried first on every fresh run -- Groundhog
+   Day, wasting the first pick + a warp-to-gate every launch.
+3. **GATES_SEEN cross-sector leak.** `get_navs` accumulates observed gates into the
+   module-global `GATES_SEEN`; it was cleared only on the SURVEY path, so a pure
+   TRANSIT hop (done/visited sector) carried the PRIOR sector's gate gids into
+   `choose_gate`, which could fire `request_target` on a stale gid.
+
+Fix (`drive_lua.py`, client-only):
+- `GATE_EDGES` loaded from the workdir `gate_edges.json` at startup;
+  `gate_is_locked(sector_key, gate_name)` (keyed by NAME -- the gid is
+  session-scoped), `record_gate_lock`, `clear_gate_lock` (atomic tmp+replace).
+- `_gate_graph` skips a locked gate entirely -- not an edge, not a frontier.
+- `choose_gate` defers locked gates behind fresh ones, but NEVER hard-excludes:
+  if every fresh gate is exhausted it retries a locked one (stale-lock escape) so
+  a wrong persistent lock can never falsely concede "graph exhausted" and strand
+  the run.
+- Main loop records a lock when `cross_gate` returns None, but ONLY at healthy
+  hull (a non-crossing at hull <=0.25 is the incapacitated false-failure that
+  ShipRecovered handles -- poisoning the cache there would blacklist a good gate).
+  A successful crossing calls `clear_gate_lock`, self-healing a stale/false lock
+  or a gate that has since become passable.
+- `GATES_SEEN.clear()` moved to the TOP of each hop (before `settle_navs`
+  repopulates it for the current sector), fixing the transit-hop leak; the
+  redundant survey-path clear removed.
+
+Single-failure locking (vs the OCR era's FAIL_LIMIT=2) is safe here because
+`cross_gate` already retries the transit 3x from close range internally, and the
+escape + unlock net removes any stranding risk. Validated offline against the real
+module + workdir: locked gate no longer enters the frontier set (was True unlocked
+-> False locked), a fresh gate is preferred over a locked one, an only-locked gate
+is still returned (escape, not None), and record/clear round-trips atomically
+without clobbering existing entries. Client-only -> no server/proxy wire change,
+no plans/29 CV entry.
