@@ -3840,3 +3840,37 @@ moot; the SOLVED block above is the truth):**
   must appear and dismiss normally on arrival. Regression would be: no fly-in
   camera on a normal gate transit.
 - **Setup**: `just rebuild server`. No DB reseed.
+
+## [ ] CV-PB73 -- bank/inventory items shown in the target Loot window
+
+- **What changed (client-only, enbmod, 2026-07-12)**: the freya-hud loot panel
+  was latching onto the WRONG cargo container. The `hk_CargoTemplateID` hook
+  (`hooks.cpp notify_loot_container`) previously used a denylist (latch any
+  container whose name did NOT start with "Inventory"), which let the bank
+  container ("Vault") and other station grids through. Rewrote it as an
+  allowlist: latch ONLY a hulk cargo ("Cargo" not followed by a letter, so
+  "CargoSpace" the capacity stat is rejected) or a prospected resource
+  ("Harvest" prefix). Mirrored the same allowlist in the Lua panel
+  (`loot_frame.lua` src filter) as defense in depth, and added a hard
+  `enb.state() == "space"` gate at the top of `draw_loot()` so the native cargo
+  accessors are NEVER replayed while docked or mid-zone (a station->space
+  transition tears down the station UI incl. the Vault grid; reading through it
+  mid-teardown is a use-after-free risk). NO server/proxy/wire change -- this is
+  purely which container the client-side HUD reads.
+- **Why**: player reported the Loot window intermittently showing all BANKED /
+  inventory items when zoning out of a station or gate, or when targeting a
+  nearby planet or node. Root cause: the loot latch grabbed the first cargo grid
+  it saw, and on a station zone-out that was the bank ("Vault") or the player
+  inventory, not a hulk. The allowlist + space-state gate confine the panel to
+  genuine in-space loot containers.
+- **What to look for (real client)**:
+  1. Zone out of a station, gate, or target a nearby planet / asteroid node with
+     items in your bank and inventory. The Loot window must NOT appear and must
+     NOT list any banked or inventory items.
+  2. A REAL loot source must still work: prospect a resource node, or target a
+     wreck/hulk with cargo -- the Loot window must show that container's contents
+     and remain lootable (loot-all / per-item take still function).
+- **Setup**: `just build-enbmod` (rebuilds bin/enbmod.dll -- the latch fix is in
+  the DLL). The loot_frame.lua panel change ships as a script mod (no DLL rebuild
+  needed for that half, but the DLL half does). Redeploy the mod store / relaunch
+  the client so the new DLL + script load.

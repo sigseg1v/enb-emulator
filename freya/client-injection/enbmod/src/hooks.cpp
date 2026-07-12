@@ -540,43 +540,42 @@ extern "C" __attribute__((naked)) void hk_WorldMgrInit() {
 // single global latch is therefore dominated by the player inventory and never
 // settles on a targeted hulk/harvestable loot container (measured live: with a
 // resource selected the latch sat on "Inventory.Equipped" 10/10). So we filter at
-// the latch: a container whose inventory-name (container + cargo::inv_name_ptr)
-// begins "Inventory" is the player's own hold and is NOT allowed to take the latch,
-// mirroring the Freya loot panel's own src filter (loot_frame.lua). Real loot
-// containers ("Cargo" hulk, "Harvestable..." resource) still latch, so once the
-// harvestable grid paints even once the latch sticks to the rock instead of being
-// clobbered by the next inventory repaint.
+// the latch with an ALLOWLIST: only a genuine loot container -- a hulk/husk cargo
+// grid (inventory-name "Cargo") or a prospected resource node ("Harvest...") -- may
+// take the latch. Every OTHER grid is rejected: the player's own "Inventory.*"
+// holds, the station "Vault"/bank, the "CargoSpace" capacity stat, and any
+// unreadable/unnamed container. This replaces the old "reject Inventory*" denylist,
+// which let the bank through -- the Vault grid repaints when you zone out of a
+// station, took the latch fresh, and rendered as "Loot" (Veret 2026-07-12, PB-73).
 static volatile unsigned g_loot_container = 0;           // ECX of the last cargo accessor call
 static volatile unsigned long g_loot_container_tick = 0; // GetTickCount of that latch (0 = never)
 extern "C" {
 void* real_CargoTemplateID_tramp = nullptr;
 void notify_loot_container(unsigned c) {
-    // Skip the player's own "Inventory.*" holds so they can never steal the loot
-    // latch from a targeted hulk/resource. A container whose name we cannot read is
-    // latched as before (no worse than the prior unconditional behaviour); only a
-    // confirmed "Inventory" prefix is rejected. Direct byte compare (no mem::cstr) to
-    // avoid the setjmp fault-guard on this per-frame render-thread hot path -- the
-    // mem::readable check bounds the 9-byte read.
+    // Only a genuine loot container may take the latch (allowlist -- see the block
+    // comment above). A container whose name we cannot read is rejected (safer than
+    // the old default-latch: an unreadable name is never a confirmed loot source).
+    // Direct byte compare (no mem::cstr) to avoid the setjmp fault-guard on this
+    // per-frame render-thread hot path -- the mem::readable check bounds the read.
     uintptr_t cc = (uintptr_t)c;
-    if (cc && mem::readable((void*)(cc + game::cargo::inv_name_ptr), 4)) {
-        uintptr_t namep = mem::ptr(cc + game::cargo::inv_name_ptr);
-        if (namep && mem::readable((void*)namep, 9)) {
-            static const char inv[9] = {'i', 'n', 'v', 'e', 'n', 't', 'o', 'r', 'y'};
-            const char* nm = (const char*)namep;
-            bool is_inv = true;
-            for (int i = 0; i < 9; ++i) {
-                char ch = nm[i];
-                if (ch >= 'A' && ch <= 'Z')
-                    ch = (char)(ch + 32);
-                if (ch != inv[i]) {
-                    is_inv = false;
-                    break;
-                }
-            }
-            if (is_inv)
-                return; // player's own hold -- do not take the loot latch
-        }
+    if (!cc || !mem::readable((void*)(cc + game::cargo::inv_name_ptr), 4))
+        return;
+    uintptr_t namep = mem::ptr(cc + game::cargo::inv_name_ptr);
+    if (!namep || !mem::readable((void*)namep, 8))
+        return;
+    const char* nm = (const char*)namep;
+    // "Harvest" prefix -> harvestable resource (mining) loot.
+    bool ok = (nm[0] == 'H' && nm[1] == 'a' && nm[2] == 'r' && nm[3] == 'v' &&
+               nm[4] == 'e' && nm[5] == 's' && nm[6] == 't');
+    // "Cargo" (hulk) but NOT "CargoSpace" (a capacity stat): the char right after
+    // "Cargo" must be a non-letter (NUL, '.', digit, space) for it to be a hulk.
+    if (!ok && nm[0] == 'C' && nm[1] == 'a' && nm[2] == 'r' && nm[3] == 'g' &&
+        nm[4] == 'o') {
+        char c5 = nm[5];
+        ok = !((c5 >= 'A' && c5 <= 'Z') || (c5 >= 'a' && c5 <= 'z'));
     }
+    if (!ok)
+        return; // not a loot container -- do not take the loot latch
     g_loot_container = c;
     g_loot_container_tick = GetTickCount();
 }

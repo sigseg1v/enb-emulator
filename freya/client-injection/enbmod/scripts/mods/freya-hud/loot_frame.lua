@@ -128,6 +128,13 @@ local panel_rect = nil  -- last drawn panel bounds, for the click-swallow hit te
 local function draw_loot()
     panel_rect = nil
     if not enb.loot then return end
+    -- A loot window (hulk cargo / prospected resource) only exists in space. Gate
+    -- hard on state so the native cargo accessors are NEVER replayed while docked or
+    -- mid-zone: a station->space transition tears down the station UI (incl. the
+    -- Vault grid), and reading a container through it mid-teardown is a use-after-free
+    -- crash risk. Same station-zone trigger as the PB-73 bank-in-loot bug (and a
+    -- candidate for the "loading screen freeze from station").
+    if H.state and H.state() ~= "space" then return end
     -- freshness gate: an open loot grid repaints continuously, re-latching the
     -- container; a closed one goes stale. Never read a stale (possibly freed)
     -- container.
@@ -143,12 +150,20 @@ local function draw_loot()
     local rows = enb.loot()
     if type(rows) ~= "table" or #rows == 0 then return end
 
-    -- only a lootable container: prospected resources + corpse/hulk cargo. Exclude
-    -- the player's own holds (self and other players), whose inventory-name begins
-    -- "Inventory" (e.g. "InventoryEquipped"); a real loot reads e.g.
-    -- "HarvestableResources". A nameless container is not a trustworthy loot source.
+    -- ALLOWLIST the loot source: only a genuine loot container may render as "Loot"
+    -- -- a hulk/husk cargo grid (inventory-name "Cargo", not "CargoSpace") or a
+    -- prospected resource node ("Harvest..."). ANY other container is rejected: the
+    -- player's own "Inventory.*" holds, the station "Vault"/bank, a nameless grid.
+    -- The old "reject Inventory*" denylist let the bank through -- its name is
+    -- "Vault", so zoning out of a station repainted the Vault grid, latched it
+    -- fresh, and it rendered every banked item as loot (Veret 2026-07-12, PB-73).
     local src = (type(rows.src) == "string") and rows.src or ""
-    if src == "" or src:sub(1, 9):lower() == "inventory" then return end
+    local is_loot = src:sub(1, 7) == "Harvest"
+    if not is_loot and src:sub(1, 5) == "Cargo" then
+        local after = src:sub(6, 6)      -- char after "Cargo" ("" when src=="Cargo")
+        is_loot = not after:match("%a")  -- reject "CargoSpace" (letter follows)
+    end
+    if not is_loot then return end
 
     local sw, sh = enb.screen()
     if not sw or sw == 0 then sw, sh = 1280, 960 end
