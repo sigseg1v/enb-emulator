@@ -113,6 +113,14 @@ POLL_SLEEP = float(os.environ.get("ENB_POLL_SLEEP", "2"))   # in-flight poll cad
 WARP_COOLDOWN = float(os.environ.get("ENB_WARP_COOLDOWN", "5"))  # >=5s between warps
 NAV_SETTLE_S = float(os.environ.get("ENB_NAV_SETTLE", "20"))    # wait for scene to populate
 RELOC_MAX = int(os.environ.get("ENB_RELOC_MAX", "4"))       # relocations before conceding
+# Cross-system transit: an onward inter-system gate sits at the far sector edge
+# (69k-194k units out in a Cygni->Sol run), far beyond scanner range (~22k), so it
+# NEVER renders by waiting at the entry point -- the ship must fly toward it to drag
+# it into range. REPO_MAX bounds how many reposition hops we take to reveal it;
+# REPO_CAP rejects a pathological far anchor (a 398k edge dock) so a reposition
+# always lands somewhere useful.
+REPO_MAX = int(os.environ.get("ENB_REPO_MAX", "7"))         # reposition hops to reveal a far gate
+REPO_CAP = float(os.environ.get("ENB_REPO_CAP", "150000"))  # never reposition past this distance
 GATE_TIMEOUT = float(os.environ.get("ENB_GATE_TIMEOUT", "30"))  # s to wait for sector flip
 MAX_SECTORS = int(os.environ.get("ENB_MAX_SECTORS", "40"))  # stop after this many sectors
 LUA_TIMEOUT = float(os.environ.get("ENB_LUA_TIMEOUT", "6"))  # per-command reply wait
@@ -442,7 +450,34 @@ def settle_navs():
     return navs
 
 
-def settle_well_gates(sector, visited_sids, tried_edges, sid, leaving_defer=False):
+def reposition_to_reveal(sector, used):
+    """Drag a fresh slice of the sector into scanner range by warping to the FARTHEST
+    warpable non-gate, non-body nav within REPO_CAP that we have not already used as
+    an anchor. This is how a far cross-system exit gate (69k-194k out, past scanner
+    range) is REVEALED: waiting never renders it, only flying toward it does. Returns
+    True if it repositioned, False if no fresh anchor is left. `used` accumulates the
+    anchors we have burned so a reposition never ping-pongs back to the same nav."""
+    navs = get_navs()
+    far = [n for n in navs
+           if n["dist"] is not None and VISIT_K < n["dist"] < REPO_CAP
+           and navdata.norm(n["name"]) not in used
+           and not is_body_class(n["cls"])
+           and not is_unwarpable(n["name"])
+           and not is_gate(n["name"], n["cls"])]
+    if not far:
+        return False
+    far.sort(key=lambda n: n["dist"], reverse=True)
+    anchor = far[0]
+    used.add(navdata.norm(anchor["name"]))
+    print(f"[drive_lua] {sector}: reposition -> {anchor['name']!r} "
+          f"(d={anchor['dist']:.0f}) to reveal a far gate")
+    warp_to_gate(anchor)          # closes to <VISIT_K of a plain nav (no transit)
+    time.sleep(WARP_COOLDOWN)
+    return True
+
+
+def settle_well_gates(sector, visited_sids, tried_edges, sid, leaving_defer=False,
+                      reveal=False):
     """A well sector is not surveyed, so choose_gate gets only what one nav read
     happened to catch -- and a big belt sector renders in bursts (53 -> 77 navs),
     so the distant EXIT gates (98k-205k units out) populate AFTER settle_navs's
@@ -452,16 +487,40 @@ def settle_well_gates(sector, visited_sids, tried_edges, sid, leaving_defer=Fals
     Poll for the full render window, accumulating gates into GATES_SEEN (a side
     effect of get_navs), so choose_gate sees the far exit gate too. Early-exit the
     instant a routable non-well onward gate is in range. GATES_SEEN is cleared
-    first: this is a new sector and the prior sector's gate memory must not leak in."""
+    first: this is a new sector and the prior sector's gate memory must not leak in.
+
+    When `reveal` is set (plain transit through a done sector, NOT a well/never-
+    explore exit), a passive wait alone cannot pull in an onward gate that sits at
+    the far sector edge -- so once the render window closes with no gate in range we
+    REPOSITION toward the far edge (reposition_to_reveal) and re-poll, up to REPO_MAX
+    hops. This is what makes cross-system transit work: the inter-system gate lives
+    69k-194k out and only comes into scanner range after we fly toward it."""
     GATES_SEEN.clear()
-    navs, waited = [], 0.0
-    while waited < NAV_SETTLE_S + 30:
-        navs = get_navs()
-        if choose_gate(sector, navs, visited_sids, tried_edges, sid,
-                       leaving_defer=leaving_defer) is not None:
+
+    def _poll(budget):
+        nonlocal navs
+        waited = 0.0
+        while waited < budget:
+            navs = get_navs()
+            if choose_gate(sector, navs, visited_sids, tried_edges, sid,
+                           leaving_defer=leaving_defer) is not None:
+                return True
+            time.sleep(POLL_SLEEP)
+            waited += POLL_SLEEP
+        return False
+
+    navs = []
+    if _poll(NAV_SETTLE_S + 30):
+        return navs
+    if not reveal:
+        return navs
+    # Far onward gate not in range: fly toward the sector edge to reveal it.
+    used = set()
+    for _ in range(REPO_MAX):
+        if not reposition_to_reveal(sector, used):
             break
-        time.sleep(POLL_SLEEP)
-        waited += POLL_SLEEP
+        if _poll(NAV_SETTLE_S):
+            return navs
     return navs
 
 
@@ -1191,6 +1250,53 @@ GATE_DEST_OVERRIDES = {
 # to Aganju itself, so must NOT be overridden to Moto).
 NEVER_EXPLORE_SECTORS = frozenset({"Freya", "Cooper", "BlackbeardsWake", "Moto", "XipeTotec"})
 
+# Class-only gate destinations -- the nine race "class planets", each reachable ONLY
+# through a gate the server locks to a single character class (sector_objects_stargates
+# .classSpecific=1, faction_id = the one class allowed; enforced in the server's
+# StaticMap::OnTargeted). A gate whose class does not match the survey character is
+# silently refused the transit verb, so enb.gate() fires and NOTHING happens -- the
+# router looks "stuck". EVERY gate into these sectors is class-locked (no unrestricted
+# way in), so we forbid the destinations outright: the auto survey never routes into
+# them (owner: "do not go through class only gates anymore"). Any that need surveying
+# are a manual flight on a matching-class character.
+#   1036 Mars Alpha (PW)   1030 Mars Beta (PE)   1037 Mars Gamma (PT)
+#   1015 Luna (TW)         1020 High Earth (TT)  1025 Equatorial Earth (TE)
+#   1052 Io (JE)           1055 Europa (JW)      1040 Ganymede (JT)
+CLASS_ONLY_GATE_DEST_SIDS = frozenset({1036, 1030, 1037, 1015, 1020, 1025, 1052, 1055, 1040})
+
+# Several class-only gates are named generically ("System Gate to Sol", "Gate to
+# Sol System", "Gate to Sol") and galaxy.json carries NO edge for them, so
+# gate_dest_sid returns None -- which the router reads as an unresolved frontier
+# gate and would cross BLIND, straight into a class lock that stalls the run. The
+# destination-sid guard above cannot catch a None dest, so these are pinned by
+# their exact (source sector sid, gate name) instead, from sector_objects_stargates.
+# Each pair is one class-locked gate object; the name is normalized to match the
+# live wire nav name. (Callisto Training Yard, 978, is a newbie instance the survey
+# never enters, but is listed for completeness.)
+CLASS_GATE_EDGES = frozenset(
+    (sid, navdata.norm(nm)) for sid, nm in (
+        (1065, "Gate to Mars Alpha"),      (3530, "System Gate to Sol"),        # Mars Alpha PW
+        (1065, "Gate to Mars Beta"),       (2215, "System Gate to Sol"),        # Mars Beta  PE
+        (1065, "Gate to Mars Gamma"),      (1310, "System Gate to Mars Gamma"), # Mars Gamma PT
+        (1060, "Sector Gate to Luna"),     (1425, "Gate to Sol System"),        # Luna       TW
+        (1060, "Sector Gate to High Earth"), (4015, "Gate to High Earth"),      # High Earth TT
+        (1060, "Accelerator to Equatorial Earth"), (1205, "System Gate to Sol"),# Equatorial TE
+        (1070, "Sector Gate to Io"),       (1910, "Gate to Sol System"),        # Io         JE
+        (978,  "Accelerator to Io"),
+        (1070, "Sector Gate to Europa"),   (4120, "Gate to Sol System"),        # Europa     JW
+        (978,  "Accellrtator to Europa"),
+        (1070, "Sector Gate to Ganymede"), (2005, "Gate to Sol"),               # Ganymede   JT
+        (978,  "Accellerator to Ganymede"),
+    )
+)
+
+
+def is_class_gate(name, src_sid):
+    """True when this exact (source sector, gate) is one of the class-only gates
+    (server-verified from sector_objects_stargates.classSpecific), whether or not
+    its destination resolves in galaxy.json."""
+    return src_sid is not None and (src_sid, navdata.norm(name)) in CLASS_GATE_EDGES
+
 
 def gate_dest_sid(name, src_sid=None):
     """Destination sid a gate nav leads to, or None when it cannot be resolved
@@ -1276,9 +1382,21 @@ def gate_forbidden(name, src_sid=None):
     possible. With src_sid the galaxy map resolves 'Gate to <System>' inter-system
     gates too, so a lethal system entry (any system whose landing sector is
     NEVER_EXPLORE, e.g. Aragoth System -> Freya) is guarded generally, not just via
-    the one pinned suffix override."""
+    the one pinned suffix override.
+
+    A class-only gate (dest in CLASS_ONLY_GATE_DEST_SIDS) is also forbidden: the
+    server refuses its transit verb to any character not of the gate's class, so
+    firing it just stalls the run. All gates into those nine sectors are class-
+    locked, so forbidding the destination blocks every one of them. The generically
+    -named class gates whose dest does not resolve are caught by is_class_gate."""
+    if is_class_gate(name, src_sid):
+        return True
     dest = gate_dest_sid(name, src_sid)
-    return dest is not None and _sector_forbidden(SID_MAP.get(str(dest)))
+    if dest is None:
+        return False
+    if dest in CLASS_ONLY_GATE_DEST_SIDS:
+        return True
+    return _sector_forbidden(SID_MAP.get(str(dest)))
 
 
 def _sector_status(key):
@@ -1894,9 +2012,12 @@ def main():
                 # false-concedes "gate graph exhausted" while the exit is still
                 # rendering. Let the distant gates settle first, same as the deferred
                 # path but without the safe-only exit restriction (we are just passing
-                # through, any untried onward gate is fair game).
+                # through, any untried onward gate is fair game). REVEAL is on here:
+                # a cross-system exit gate sits at the far sector edge, past scanner
+                # range, so we reposition toward it to bring it into range instead of
+                # false-conceding "gate graph exhausted" from the entry point.
                 navs = settle_well_gates(sector, visited_sids, tried_edges, sid,
-                                         leaving_defer=False)
+                                         leaving_defer=False, reveal=True)
 
             gate = choose_gate(sector, navs, visited_sids, tried_edges, sid,
                                leaving_defer=defer)
@@ -1911,9 +2032,24 @@ def main():
                           f"Fly out and re-run.", file=sys.stderr)
                     pcap_stop()
                     sys.exit(EXIT_WELL)
-                print(f"[drive_lua] {sector}: no untried onward gate -- reachable gate "
-                      f"graph exhausted; done.")
-                break
+                # Non-deferred (a sector we just surveyed): the onward gate may be a
+                # far edge gate the survey never flew near, so it is not in range and
+                # not in GATES_SEEN. Before conceding, reposition toward the sector
+                # edge to reveal it -- the same move that makes cross-system transit
+                # work, applied to the leave-after-survey case.
+                used = set()
+                for _ in range(REPO_MAX):
+                    if not reposition_to_reveal(sector, used):
+                        break
+                    navs = get_navs()
+                    gate = choose_gate(sector, navs, visited_sids, tried_edges, sid,
+                                       leaving_defer=defer)
+                    if gate:
+                        break
+                if not gate:
+                    print(f"[drive_lua] {sector}: no untried onward gate -- reachable "
+                          f"gate graph exhausted; done.")
+                    break
             print(f"[drive_lua] {sector}: gating via {gate['name']} (gid {gate['gid']})")
             logaction(sector, "enter-gate", gate["name"])
             tried_edges.add((sid, gate["gid"]))   # mark BEFORE crossing so a failed transit is not retried
