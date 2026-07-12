@@ -202,6 +202,49 @@ optional mod):
 Regenerate it with `import.sh` (it runs `gen_turrets.py` after `gen_sql.py`), or
 directly: `python3 .claude/skills/import-captures/scripts/gen_turrets.py`.
 
+## Capture-mob loot (`gen_loot.py` -> `seed_capture_loot.sql`)
+
+The import synthesizes a `mob_base` template (`mob_id >= 900000`) for every
+captured mob whose exact name is not already in `mob_base`. Those clones get the
+right model + stats but **no `mob_items`** -- nothing copies loot onto them, so
+they would drop nothing when killed. `gen_loot.py` fills that gap as an
+**additive** layer on top of the import (it does NOT regenerate the import, and
+it NEVER touches base loot -- only the synth range). Two tiers, most-authoritative
+first:
+
+- **(b) Reconstruct-by-name.** If the synth mob's name matches a mob in the
+  reconstruct dataset (`ENB_RECONSTRUCT_DIR/db/mobs/mobs.jsonl`) that lists drop
+  items, and those item names resolve to `item_base` rows, emit those items.
+  Reconstruct rarely carries real per-item rates, so the items get an EVEN split
+  summing to exactly 100 (the server throttles over-tier/over-priced drops
+  itself, so an even table is safe; exactly 100 avoids the server's ">100%" loot
+  warning). `usage_chance`/`type` are inert in the drop roll -> 0/0, `qty` 1.
+- **(a) Sibling inheritance (fallback).** No name match -> copy the loot of the
+  nearest-level same-model (`base_asset_id`) BASE mob that actually has loot,
+  mirroring how `gen_sql.py` picks the clone source. A copied table that sums
+  >100 (a base-data quirk) is proportionally rescaled to exactly 100 so it does
+  not trip the server warning (drop behaviour is identical -- the server would
+  scale it by 100/total anyway). A synth mob whose model has no loot-bearing
+  sibling gets no loot (correct -- e.g. a pure turret).
+
+- **`item_base.id` is the loot key** (`mob_items.item_base_id` -> `item_base.id`,
+  NOT the empty `item_base.item_base_id` column). Every emitted id is validated
+  to exist.
+- Synth templates come from the running net7 DB (`mob_id >= 900000`); if the DB
+  has none (generating against a pristine base DB before the import is applied),
+  the committed `_mob_templates.sql` is parsed instead -- so `gen_loot.py` does
+  not depend on whether the import has been applied yet.
+- `seed_capture_loot.sql` deletes its own synth-range `mob_items` first
+  (`mob_id >= 900000`), so re-applying is a clean replace.
+- `schema-init` applies it after `seed_captures.sql`, **gated on the SAME
+  `ENB_SKIP_CAPTURE_SEED`** (the synth templates it references do not exist in a
+  pristine base DB); otherwise applied on every boot.
+
+Set `ENB_RECONSTRUCT_DIR` in `.env` to enable tier (b); without it every synth
+mob falls back to tier (a). Regenerate with `import.sh` (runs `gen_loot.py` after
+`gen_turrets.py`), or directly:
+`ENB_RECONSTRUCT_DIR=... python3 .claude/skills/import-captures/scripts/gen_loot.py`.
+
 ## Rules baked in
 
 - Captured data takes priority over current data; that is the whole point.
