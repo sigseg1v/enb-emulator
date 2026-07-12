@@ -116,6 +116,11 @@ void Usage()
 // SIGKILL grace period. _exit skips C++ static dtors but the work that
 // matters (SaveManager flushes every 10 ms; postgres is durable) has
 // already crossed the network.
+// Installs the fatal-signal (SIGSEGV/SIGABRT/SIGBUS/SIGFPE/SIGILL) backtrace
+// handler. Defined in FreyaCrashHandler.cpp; dumps a symbolized stack to
+// stderr (captured by docker logs) before re-raising to die.
+void FreyaInstallCrashHandler();
+
 static const int kShutdownGraceSeconds = 8;
 extern "C" void Net7HandleShutdownSignal(int signo)
 {
@@ -157,6 +162,10 @@ int main(int argc, char* argv[])
         sp.sa_handler = SIG_IGN;
         sigemptyset(&sp.sa_mask);
         sigaction(SIGPIPE, &sp, nullptr);
+
+        // Fatal-signal backtrace handler: a crash now leaves a symbolized
+        // stack in the container log instead of a contextless kernel line.
+        FreyaInstallCrashHandler();
     }
 #endif
 

@@ -178,7 +178,19 @@ target_compile_options(net7 PRIVATE
     # rejects under strict ISO rules. We accept the laxity during Phase
     # B and tighten it in Phase F.
     -fpermissive
+    # -g: keep line-number info so the FreyaInstallCrashHandler backtrace
+    # (and any addr2line against the shipped binary) resolves to file:line.
+    # Debug info lands in .debug_* sections; it does not slow the code and
+    # is stripped from the wire, only fattening the on-disk binary.
+    -g
 )
+
+# -rdynamic: export our own function names into the dynamic symbol table so
+# the fatal-signal backtrace (backtrace_symbols_fd in FreyaCrashHandler.cpp)
+# prints readable frames instead of bare `net7(+0xOFFSET)`. Without it a crash
+# stack is still addr2line-able against the unstripped build, but not
+# self-describing in the log.
+target_link_options(net7 PRIVATE -rdynamic)
 
 target_link_libraries(net7 PRIVATE
     Threads::Threads
