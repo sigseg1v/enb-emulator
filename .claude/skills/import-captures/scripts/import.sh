@@ -28,6 +28,16 @@ echo "== generate baseline turrets =="
 # Reads gate/starbase positions from the running net7 DB and writes the
 # committed db/postgres/seed_turrets.sql (independent of the capture import).
 python3 "$SKILL_DIR/scripts/gen_turrets.py"
+echo
+echo "== generate capture-mob loot =="
+# Reads the synth mob templates (mob_id >= 900000) + base loot + item_base from
+# the running net7 DB and writes committed db/postgres/seed_capture_loot.sql:
+# loot for the synthesized capture mobs (reconstruct-by-name, else same-model
+# sibling loot). Set ENB_RECONSTRUCT_DIR (in .env) to enable the by-name tier;
+# without it every synth mob falls back to sibling loot. The synth templates
+# must be present in the DB -- run against the running dev stack (captures
+# applied), or after `import.sh --apply` has applied the templates.
+python3 "$SKILL_DIR/scripts/gen_loot.py"
 
 if [ "$APPLY" = 1 ]; then
     echo
@@ -55,6 +65,12 @@ if [ "$APPLY" = 1 ]; then
     #    Omitting this leaves the dev DB turret-less, a state a real boot never has.
     TURRETS="$REPO_ROOT/db/postgres/seed_turrets.sql"
     [ -f "$TURRETS" ] && { apply_one "$TURRETS"; n=$((n+1)); }
+    # 4) loot for the synth capture-mob templates LAST -- it references the
+    #    mob_base clones applied in step 2, mirroring schema-init's boot order
+    #    (seed_captures -> seed_capture_loot). Self-purges its own synth-range
+    #    mob_items (mob_id >= 900000), so a re-apply is a clean replace.
+    LOOT="$REPO_ROOT/db/postgres/seed_capture_loot.sql"
+    [ -f "$LOOT" ] && { apply_one "$LOOT"; n=$((n+1)); }
     [ "$n" -gt 0 ] || die "no generated SQL to apply in $SQL_OUT_DIR"
     echo "applied $n file(s)."
 fi

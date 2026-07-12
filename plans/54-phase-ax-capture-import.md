@@ -347,6 +347,36 @@ per-sector file directly into psql.
     navs insert-if-absent so only 27 are net-new over the base seeds. 20 per-sector
     files touched (16 modified, 3 deleted, 1 new) + wrapper. DB content + skill
     tooling only -- no wire/server/proxy change, no `plans/29` CV entry.
+- [x] **AX-21** loot for the synthesized capture mobs (owner ask: the imported
+  mobs need correct loot tables -- "do the two-tier loot assignment ... add
+  additional sql files after that you dont ever regen that adds more correct data
+  on top"). The synth `mob_base` clones (mob_id >= 900000) carried NO `mob_items`,
+  so the ~223 spawns of those 48 distinct templates dropped nothing. New
+  `gen_loot.py` -> committed `db/postgres/seed_capture_loot.sql`: an ADDITIVE,
+  idempotent layer (NOT a regen) that assigns loot only in the synth range.
+  - **Tier (b) reconstruct-by-name (21/48).** Synth name matched against the
+    reconstruct dataset `db/mobs/mobs.jsonl` `drops[].item`; item names resolve to
+    `item_base.id` (57/57 resolved). No real per-item rates in the source, so items
+    get an EVEN split summing to exactly 100 (`item_base.id` is the loot key, NOT
+    the empty `item_base.item_base_id` column). Reconstruct dir via
+    `ENB_RECONSTRUCT_DIR` (external, gitignored, neutral `.env.example` default);
+    unset -> tier (a) only.
+  - **Tier (a) same-model sibling loot (27/48).** No name match -> copy the
+    nearest-level same-`base_asset_id` BASE mob that has loot (mirrors gen_sql's
+    clone-source pick). A sibling table summing >100 (a base-data quirk that trips
+    the server's "Loot % above 100%" `ErrorBroadcast` on every kill) is rescaled to
+    exactly 100 -- identical drop behaviour (server scales by 100/total anyway),
+    zero warning. 0 templates left loot-less.
+  - Server verified: HuskClass drop roll ignores `usage_chance`/`type`, casts
+    `drop_chance` to `unsigned char`, trashes a bad `item_base_id` (no crash), and
+    auto-throttles over-tier/over-priced drops -- so even/rescaled integer tables
+    are safe. Applied to live DB (237 rows, 48 mobs, 0 orphans, 0 missing
+    item_base, base loot untouched); server boots clean loading 11402 mob_items (no
+    loot warning). Wired: `schema-init` applies `seed_capture_loot.sql` after
+    `seed_captures.sql`, gated on the SAME `ENB_SKIP_CAPTURE_SEED` (needs the synth
+    templates); `import.sh` runs `gen_loot.py` after `gen_turrets.py` and applies
+    the file last under `--apply`. DB content + skill tooling only -- no
+    wire/server/proxy change, no `plans/29` CV entry.
 
 ## Notes
 
