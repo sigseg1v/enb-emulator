@@ -1291,7 +1291,14 @@ GATE_DEST_OVERRIDES = {
 # both of which resolve to 1160, so NEVER_EXPLORE membership alone catches it (no
 # GATE_DEST_OVERRIDES entry needed -- 61 Cygni's "System Gate" name would ambiguate
 # to Aganju itself, so must NOT be overridden to Moto).
-NEVER_EXPLORE_SECTORS = frozenset({"Freya", "Cooper", "BlackbeardsWake", "Moto", "XipeTotec"})
+# Paramis (owner 2026-07-12): the other half of the Smugglers Run system (3605
+# BlackbeardsWake + 3610 Paramis). "Sector Gate to Smuggler's Run" is a Red Dragon
+# factioned-gate ("do NOT go to smugglers run thats a faction gate") -- the transit
+# verb is refused off-faction, so the router would look stuck, and it dumps into
+# pirate-lethal space if it did transit. The OdinRex gate resolves to 3605
+# (BlackbeardsWake, already forbidden); this forbids 3610 as well so the WHOLE
+# Smugglers Run system is excluded no matter which gate/sid a route resolves to.
+NEVER_EXPLORE_SECTORS = frozenset({"Freya", "Cooper", "BlackbeardsWake", "Moto", "XipeTotec", "Paramis"})
 
 # Class-only gate destinations -- the nine race "class planets", each reachable ONLY
 # through a gate the server locks to a single character class (sector_objects_stargates
