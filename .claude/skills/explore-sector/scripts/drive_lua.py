@@ -494,32 +494,75 @@ def settle_well_gates(sector, visited_sids, tried_edges, sid, leaving_defer=Fals
     the far sector edge -- so once the render window closes with no gate in range we
     REPOSITION toward the far edge (reposition_to_reveal) and re-poll, up to REPO_MAX
     hops. This is what makes cross-system transit work: the inter-system gate lives
-    69k-194k out and only comes into scanner range after we fly toward it."""
+    69k-194k out and only comes into scanner range after we fly toward it.
+
+    PREFER-FRESH in reveal mode: a done transit sector often has BOTH a nearby
+    done-hub gate (in range at the entry point) AND a gate to a directly-adjacent
+    UNSURVEYED sector (at the far edge, out of range). choose_gate ranks the fresh
+    gate first, but it can only pick from what is REVEALED -- so if we stop the
+    instant the nearby done-hub gate appears, the fresh gate never renders and the
+    walker takes the done-hub transit, thrashing among completed sectors
+    (Saturn->Akerons->Pluto->Akerons...). So when this sector's ledger-known gate
+    graph shows it BORDERS the frontier directly, we hold out through the whole
+    reveal budget for a FRESH-destination gate, repositioning to surface it, and
+    only fall back to a done-transit if the fresh gate never comes into range. When
+    the sector does NOT border a fresh neighbour, the done-transit toward a frontier
+    that lies further out genuinely IS the best move -- take the first gate revealed."""
     GATES_SEEN.clear()
 
-    def _poll(budget):
+    def _pick():
+        return choose_gate(sector, navs, visited_sids, tried_edges, sid,
+                           leaving_defer=leaving_defer)
+
+    def _is_fresh(g):
+        """True when g leads to a sector still needing survey (or an undiscovered
+        one) -- exactly choose_gate's top-priority (0,0,0) rank tier."""
+        if g is None:
+            return False
+        dest = gate_dest_sid(g["name"], sid)
+        if dest is None:
+            return True                       # undiscovered dest -> frontier gate
+        return (not _sector_done(dest)) and (dest not in visited_sids)
+
+    def _poll(budget, want_fresh):
         nonlocal navs
         waited = 0.0
         while waited < budget:
             navs = get_navs()
-            if choose_gate(sector, navs, visited_sids, tried_edges, sid,
-                           leaving_defer=leaving_defer) is not None:
+            g = _pick()
+            if g is not None and (not want_fresh or _is_fresh(g)):
                 return True
             time.sleep(POLL_SLEEP)
             waited += POLL_SLEEP
         return False
 
     navs = []
-    if _poll(NAV_SETTLE_S + 30):
-        return navs
     if not reveal:
+        _poll(NAV_SETTLE_S + 30, want_fresh=False)
         return navs
-    # Far onward gate not in range: fly toward the sector edge to reveal it.
+
+    # Does this sector border the frontier directly (a fresh neighbour reachable in
+    # ONE gate)? The gate graph is built from every ledger, so a completed transit
+    # sector's own ledger already lists all its gates -- we know Saturn borders the
+    # unsurveyed belts even before those far gates render. If so, hold out for the
+    # fresh gate; otherwise the best move is a done-transit toward a further frontier.
+    adj, frontier = _gate_graph()
+    key = SID_MAP.get(str(sid))
+    want_fresh = key is not None and (
+        key in frontier or any(nb in frontier for nb in adj.get(key, ())))
+
+    if _poll(NAV_SETTLE_S + 30, want_fresh=want_fresh):
+        return navs
+    # Onward gate not in range yet: fly toward the sector edge to reveal it, holding
+    # the same fresh preference. If want_fresh and the reveal budget is spent without
+    # a fresh gate surfacing, return navs anyway -- choose_gate then takes the best
+    # done-transit now in range (a legitimate fallback: this sector's adjacent-fresh
+    # gate is a scanner dead-zone, so route onward toward the frontier instead).
     used = set()
     for _ in range(REPO_MAX):
         if not reposition_to_reveal(sector, used):
             break
-        if _poll(NAV_SETTLE_S):
+        if _poll(NAV_SETTLE_S, want_fresh=want_fresh):
             return navs
     return navs
 
@@ -1519,12 +1562,16 @@ def _gate_graph():
             if dsid is None:
                 # destination name resolves to no known sid -> almost certainly an
                 # UNDISCOVERED sector. Standing in `key` you are one gate from the
-                # unknown, so `key` itself borders the frontier (a BFS dist-0 source).
-                frontier.add(key)
+                # unknown, so `key` itself borders the frontier (a BFS dist-0 source)
+                # -- UNLESS `key` is itself a forbidden sector we never route into
+                # (a well / never-explore), which must not seed the frontier.
+                if not _sector_forbidden(key):
+                    frontier.add(key)
                 continue
             dkey = SID_MAP.get(str(dsid))
             if dkey is None:
-                frontier.add(key)
+                if not _sector_forbidden(key):
+                    frontier.add(key)
                 continue
             adj.setdefault(key, set()).add(dkey)
             adj.setdefault(dkey, set()).add(key)
@@ -1536,7 +1583,16 @@ def _gate_graph():
 def _frontier_hops(adj, frontier):
     """Multi-source BFS: min hop count from every sector key to the nearest frontier
     sector over the undirected gate graph. A key absent from the result cannot reach
-    any frontier (a completed dead-end) and is treated as infinitely far."""
+    any frontier (a completed dead-end) and is treated as infinitely far.
+
+    A FORBIDDEN sector (gravity well / never-explore) can be a frontier TARGET but is
+    never a transit WAYPOINT: the auto survey enters it only to defer, never to fly
+    onward, so we must not expand the BFS THROUGH it. Without this guard the frontier
+    behind never-explore Freya (Jotunheim/Nifleheim/Ragnarok/OdinsBelt) looks reachable
+    via ...->Akerons->Freya->Jotunheim, so the walker heads for Akerons, cannot cross
+    into Freya, retreats, and oscillates among the completed Sol hubs. Skipping
+    expansion from a forbidden node makes such a walled-off frontier correctly
+    unreachable, so the walker concedes cleanly instead of thrashing."""
     from collections import deque
     dist, dq = {}, deque()
     for k in frontier:
@@ -1544,6 +1600,8 @@ def _frontier_hops(adj, frontier):
         dq.append(k)
     while dq:
         u = dq.popleft()
+        if _sector_forbidden(u):
+            continue
         for v in adj.get(u, ()):
             if v not in dist:
                 dist[v] = dist[u] + 1
@@ -1630,7 +1688,20 @@ def choose_gate(sector, navs, visited_sids, tried_edges, sid, leaving_defer=Fals
         return (1, hops, revisit, *phys)
 
     gates.sort(key=rank)
-    return gates[0]
+    best = gates[0]
+    # Concede when the best candidate is a DEAD transit: a done sector whose frontier
+    # lies infinitely far (rank tier 1 with hops==INF), i.e. no unexplored sector is
+    # reachable from here at all -- the remaining frontier is walled off behind a
+    # never-explore/well sector we refuse to auto-cross. Returning the gate anyway
+    # just wanders among completed sectors forever (the Sol<->Akerons<->Pluto
+    # oscillation). None makes the main loop report "gate graph exhausted" and stop
+    # cleanly. leaving_defer is exempt: escaping a well toward ANY safe done sector is
+    # still the right move even when no frontier lies beyond it.
+    if not leaving_defer:
+        r = rank(best)
+        if r[0] == 1 and r[1] == INF:
+            return None
+    return best
 
 
 def cross_gate(gate):
