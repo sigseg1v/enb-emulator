@@ -438,6 +438,22 @@ def main():
     if not files:
         sys.exit(f"aggregate: no decoder JSON in {WORK}/objjson -- run decode.sh first")
 
+    # Sectors the driver was PHYSICALLY in: every sector named by a wall-clock
+    # boundary (a real map-title read) plus every sector that is the resolved
+    # subject of a capture's own filename. A mob/resource placed by the MARKER
+    # FALLBACK (Pass 3a) may only land in one of these -- the in-stream 0x003A
+    # marker also carries a gate's DESTINATION sector, so a capture taken while
+    # parked AT a gate ("Sector Gate to <X>", no wall-clock window) would other-
+    # wise tag gate-adjacent objects with a sector we never entered (observed:
+    # 2 objects mis-placed into Menorb from a "Sector Gate to Menorb" park).
+    # Wall-clock and nav placements are already authoritative and are not gated.
+    physical_sectors = {sid for seq in bounds_by_tok.values() for _, sid in seq}
+    for path in files:
+        tok = os.path.basename(path).split("__")[0]
+        sid = norm2id.get(norm(tok))
+        if sid is not None:
+            physical_sectors.add(sid)
+
     merged = {}          # global gkey -> kept record (with ._cat, .sector, ._conf)
     excl = collections.Counter()
     relabels = []        # (capture, marker_sec, true_sec, votes) for the report
@@ -592,6 +608,12 @@ def main():
                 wc_placed[sec] += 1
             elif mseg is not None:               # marker/nav-vote fallback
                 sec, conf = seg_true[mseg]
+                if sec not in physical_sectors:
+                    # Marker names a sector the driver was never physically in
+                    # (gate-destination adjacency noise) -- placing it here would
+                    # be inventing a location. Drop it.
+                    excl["marker_sector_never_visited"] += 1
+                    continue
                 used_marker = True
             else:
                 # No wall-clock and no marker segment -- placing this mob/resource

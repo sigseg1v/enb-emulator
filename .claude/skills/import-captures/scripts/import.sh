@@ -48,6 +48,13 @@ if [ "$APPLY" = 1 ]; then
     for f in "$SQL_OUT_DIR"/[0-9]*.sql; do
         apply_one "$f"; n=$((n+1))
     done
+    # 3) baseline guardian turrets LAST -- _purge.sql above deletes the whole synth
+    #    range (sector_object_id >= 1000000), which includes the turret range
+    #    (>= 2000000), so the turrets must be re-applied after the capture seed to
+    #    mirror schema-init's boot order (base -> seed_captures -> seed_turrets).
+    #    Omitting this leaves the dev DB turret-less, a state a real boot never has.
+    TURRETS="$REPO_ROOT/db/postgres/seed_turrets.sql"
+    [ -f "$TURRETS" ] && { apply_one "$TURRETS"; n=$((n+1)); }
     [ "$n" -gt 0 ] || die "no generated SQL to apply in $SQL_OUT_DIR"
     echo "applied $n file(s)."
 fi
