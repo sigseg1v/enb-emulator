@@ -565,12 +565,11 @@ void notify_loot_container(unsigned c) {
         return;
     const char* nm = (const char*)namep;
     // "Harvest" prefix -> harvestable resource (mining) loot.
-    bool ok = (nm[0] == 'H' && nm[1] == 'a' && nm[2] == 'r' && nm[3] == 'v' &&
-               nm[4] == 'e' && nm[5] == 's' && nm[6] == 't');
+    bool ok = (nm[0] == 'H' && nm[1] == 'a' && nm[2] == 'r' && nm[3] == 'v' && nm[4] == 'e' &&
+               nm[5] == 's' && nm[6] == 't');
     // "Cargo" (hulk) but NOT "CargoSpace" (a capacity stat): the char right after
     // "Cargo" must be a non-letter (NUL, '.', digit, space) for it to be a hulk.
-    if (!ok && nm[0] == 'C' && nm[1] == 'a' && nm[2] == 'r' && nm[3] == 'g' &&
-        nm[4] == 'o') {
+    if (!ok && nm[0] == 'C' && nm[1] == 'a' && nm[2] == 'r' && nm[3] == 'g' && nm[4] == 'o') {
         char c5 = nm[5];
         ok = !((c5 >= 'A' && c5 <= 'Z') || (c5 >= 'a' && c5 <= 'z'));
     }
