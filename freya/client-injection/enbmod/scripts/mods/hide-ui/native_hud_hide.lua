@@ -451,16 +451,51 @@ local function dump()
     return table.concat(out, "\n")
 end
 
+-- Diagnostic: dump every leaf of the DOCKED station scene -- vtable class, UI name,
+-- and flags. Unlike dump() (the in-space HUD scene) this walks station_scene(), so it
+-- is the tool for identifying leftover native chrome on a COLD login into a station
+-- (PB-78): the native chat frame at top-middle and the combat/explore/trade class card
+-- that the in-space ELEMENT hide never touches when you never visited space. Run it
+-- on-demand (`/run print(enb.hud.dump_station())`) while docked; it is NOT per-tick.
+-- Cross-reference the reported leaves against CHAT_TEXT_VT / CHROME_VT / HUD_SCENE_VT
+-- and the SLIDER/TSInnX names to decide which leaves apply_station should also clear.
+local function dump_station()
+    local scene = station_scene()
+    if scene == 0 then return "not docked / no station scene" end
+    local sentinel = scene + LIST_END
+    local node = mem.u32(scene + LIST_BEGIN)
+    local out = {}
+    for i = 1, MAX_NODES do
+        if node == sentinel or node == 0 or not mem.readable(node) then break end
+        local cp = mem.u32(node + NODE_CHILD)
+        if cp ~= 0 and mem.readable(cp) then
+            local leaf = cp - CHILD_ADJ
+            if mem.readable(leaf) then
+                local vt = mem.u32(leaf)
+                local fl = mem.readable(leaf + LEAF_FLAGS) and mem.u32(leaf + LEAF_FLAGS) or 0
+                local cls = (vt == CHAT_TEXT_VT and "CHAT_TEXT") or (vt == CHROME_VT and "CHROME")
+                    or (vt == HUD_SCENE_VT and "HUD_SCENE") or "?"
+                out[#out + 1] = string.format("%2d leaf=%08x vt=%08x %-9s fl=%08x name=%q",
+                    #out, leaf, vt, cls, fl, leaf_name(leaf))
+            end
+        end
+        node = mem.u32(node + NODE_NEXT)
+    end
+    out[#out + 1] = string.format("station scene=%08x leaves=%d", scene, #out)
+    return table.concat(out, "\n")
+end
+
 enb.hud = {
-    hide     = hide,
-    show     = show,
-    toggle   = toggle,
-    set      = set,
-    hide_all = hide_all,
-    show_all = show_all,
-    list     = list,
-    names    = names,
-    dump     = dump,
+    hide         = hide,
+    show         = show,
+    toggle       = toggle,
+    set          = set,
+    hide_all     = hide_all,
+    show_all     = show_all,
+    list         = list,
+    names        = names,
+    dump         = dump,
+    dump_station = dump_station,
 }
 
 enb.on_tick(apply)

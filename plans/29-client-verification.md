@@ -3874,3 +3874,37 @@ moot; the SOLVED block above is the truth):**
   the DLL). The loot_frame.lua panel change ships as a script mod (no DLL rebuild
   needed for that half, but the DLL half does). Redeploy the mod store / relaunch
   the client so the new DLL + script load.
+
+## [ ] CV-PB78 -- cold login into a station leaves native combat/explore/trade card + top chat frame
+
+- **Bug (client-only, enbmod, reported 2026-07-13 by Veret, [Minor])**: an
+  initial login that lands the character IN A STATION (not space) leaves the
+  stock native combat/explore/trade class card visible under the Freya
+  bottom-left chat window, AND the native chat frame at the top-middle. It does
+  NOT happen if you go to space and dock again -- only on a cold station login.
+- **Diagnosis (static, unverified)**: the in-space chrome ELEMENTs
+  (`NavButtonBar`, `ChatFrameBackgroundAndScroll`, `ChatSplitControl` in
+  `native_hud_hide.lua`) are hidden ONLY through `hud_scene()` ->
+  `enb.cockpit_ctrl()`, which is captured while IN SPACE. A cold station login
+  never captures the cockpit controller, so those leaves' `ENABLE_BIT` is never
+  cleared; after one space visit the bits stay cleared across a re-dock, which is
+  why space->dock "fixes" it. `apply_station()` runs every tick regardless of
+  entry path but today only clears `CHAT_TEXT_VT` + `SLIDER`-named CHROME leaves,
+  so it does not cover the leftover chat frame / class card.
+- **Diagnostic to run FIRST (owner, on the live client)**: cold-login into a
+  station, then `/run print(enb.hud.dump_station())`. That dumps every
+  station-scene leaf (vtable class + UI name + flags). Identify which leaves the
+  leftover chat frame and the C/E/T card actually are (name + vtable).
+- **Fix (after the dump names them)**: extend `apply_station()` (or its hidden
+  set) to also clear those leaves BY STABLE UI NAME -- never by list position,
+  and never blind-hide whole station panels: clearing the 0x700 gate also removes
+  the panel from hit-testing, so hiding the wrong station leaf can break station
+  click-to-select. Also confirm the native class-UI `patch_ret` (freya_ui.lua
+  init HIDE block) is installed at load regardless of entry state.
+- **What to look for (real client)**: a fresh login that lands in a station (no
+  prior space frame) shows ONLY the Freya UI -- no native class card under the
+  chat, no native chat frame at top-middle -- and the station interface
+  (menu bar, inventory, map, click-to-select) still works.
+- **Setup**: `just build-enbmod` if the fix touches the DLL; the
+  `native_hud_hide.lua` / `freya_ui.lua` changes ship as script mods (redeploy
+  the mod store / relaunch so they load).
