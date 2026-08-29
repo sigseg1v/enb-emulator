@@ -1,3 +1,8 @@
+---
+name: import-captures
+description: Decode and aggregate Earth & Beyond packet captures into deduplicated per-sector SQL imports. Use when importing captured nav, mob, resource, or sector object data; do not use for live server or client changes.
+---
+
 # Import captured object data into the sector DB
 
 Read accurate packet captures, work out which objects are where in each sector,
